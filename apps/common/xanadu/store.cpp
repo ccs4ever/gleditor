@@ -559,7 +559,7 @@ Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
   const auto version =
       setLink(minted, tail, dimsDimension_, zigzag::DimVector::POS, ref, known);
   zigzag::DimensionRegistry::instance().registerDim(*this, name, ref);
-  return MintedDimension{version, ref};
+  return MintedDimension{.version = version, .dim = ref};
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,
@@ -657,7 +657,7 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
         continue;
       }
       for (std::uint64_t i = 0; i < piece.length; ++i) {
-        const GlobalAddr ga{piece.scroll, piece.start + i};
+        const GlobalAddr ga{.scroll = piece.scroll, .address = piece.start + i};
         vd.charAddresses.emplace_back(piece.scroll, piece.start + i);
 
         auto &vec = addressPresence[ga];
@@ -695,7 +695,8 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
 
     for (std::size_t c = 0; c < nChars; ++c) {
       const auto &[scroll, addr] = vd.charAddresses[c];
-      const auto it = addressPresence.find(GlobalAddr{scroll, addr});
+      const auto it =
+          addressPresence.find(GlobalAddr{.scroll = scroll, .address = addr});
       const std::size_t shareCount =
           (it != addressPresence.end()) ? it->second.size() : 1;
       charSharings[c] = shareCount;
@@ -992,7 +993,8 @@ MicroversionId Store::transcludeExternal(const MicroversionId &parent,
   // No source version: the content is named directly by a content address, so
   // there is no other document to resolve it through. This is the case Xanadu
   // wants and the local spool cannot express.
-  op.span = PrimediaSpan{addScroll(from), scrollOffset, length};
+  op.span = PrimediaSpan{
+      .scroll = addScroll(from), .start = scrollOffset, .length = length};
   return apply(parent, op);
 }
 
@@ -1047,9 +1049,7 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
       // Newly typed primedia is strictly append-only on the author's scroll;
       // if the op's span.start is before bufferEnd or was unassigned, anchor to
       // bufferEnd.
-      if (localOp.span.start < bufferEnd) {
-        localOp.span.start = bufferEnd;
-      }
+      localOp.span.start = std::max(localOp.span.start, bufferEnd);
       if (localOp.span.length == 0) {
         localOp.span.length = static_cast<std::uint64_t>(primediaText.size());
       }
@@ -1113,7 +1113,7 @@ Store::InsertedMedia Store::insertMedia(const MicroversionId &parent,
       .length   = op.span.length,
       .mimeType = std::move(mimeType),
   });
-  return InsertedMedia{apply(parent, op), op.span};
+  return InsertedMedia{.version = apply(parent, op), .span = op.span};
 }
 
 MicroversionId Store::insertSpan(const MicroversionId &parent,
@@ -1325,9 +1325,10 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
     if (nullptr == node) {
       continue;
     }
-    records.push_back(OpRecord{opsSpool.idOf(idx),
-                               node->toOp(opsSpool.idOf(node->parentIndex),
-                                          opsSpool.idOf(node->sourceOpIndex))});
+    records.push_back(
+        OpRecord{.produces = opsSpool.idOf(idx),
+                 .op       = node->toOp(opsSpool.idOf(node->parentIndex),
+                                        opsSpool.idOf(node->sourceOpIndex))});
   }
   std::sort(records.begin(), records.end(),
             [](const OpRecord &lhs, const OpRecord &rhs) {

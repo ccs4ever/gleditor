@@ -63,12 +63,36 @@ render::VertexLayout imageLayout() {
   render::VertexLayout out;
   out.stride     = sizeof(ImageRow);
   out.attributes = {
-      {"imgPos", 0, AttributeType::Float, 2, offsetof(ImageRow, pos)},
-      {"imgSize", 1, AttributeType::Float, 2, offsetof(ImageRow, size)},
-      {"imgUv", 2, AttributeType::Float, 4, offsetof(ImageRow, uv)},
-      {"imgLayer", 3, AttributeType::UnsignedInt, 1, offsetof(ImageRow, layer)},
-      {"imgTint", 4, AttributeType::UnsignedInt, 1, offsetof(ImageRow, tint)},
-      {"imgIndex", 5, AttributeType::UnsignedInt, 1, offsetof(ImageRow, index)},
+      {.name       = "imgPos",
+       .location   = 0,
+       .type       = AttributeType::Float,
+       .components = 2,
+       .offset     = offsetof(ImageRow, pos)},
+      {.name       = "imgSize",
+       .location   = 1,
+       .type       = AttributeType::Float,
+       .components = 2,
+       .offset     = offsetof(ImageRow, size)},
+      {.name       = "imgUv",
+       .location   = 2,
+       .type       = AttributeType::Float,
+       .components = 4,
+       .offset     = offsetof(ImageRow, uv)},
+      {.name       = "imgLayer",
+       .location   = 3,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(ImageRow, layer)},
+      {.name       = "imgTint",
+       .location   = 4,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(ImageRow, tint)},
+      {.name       = "imgIndex",
+       .location   = 5,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(ImageRow, index)},
   };
   return out;
 }
@@ -82,7 +106,7 @@ Canvas::Canvas(render::RenderDevice *const aDevice, std::string aFontName,
     : device(aDevice), fontName(std::move(aFontName)),
       pool(std::make_unique<BufferPool>(aDevice, sizeof(Doc::VBORow),
                                         initialRows)),
-      tagKind(render::tagKindOverlay),
+
       imagePool(std::make_unique<BufferPool>(aDevice, sizeof(ImageRow),
                                              initialRows / 16)) {}
 
@@ -140,13 +164,13 @@ void Canvas::pushQuad(const float centreX, const float centreY,
   };
 
   const Doc::VBORow row{
-      {centreX, centreY},
-      Doc::VBORow::ink(foreground, Doc::VBORow::onPaper, solid),
-      Doc::VBORow::atlasAt(static_cast<unsigned int>(texX),
-                           static_cast<unsigned int>(texY)),
-      Doc::VBORow::box(static_cast<unsigned char>(layer), clamp(width),
-                       clamp(height), tagKind),
-      Doc::VBORow::paperAt(background, tagIndex)};
+      .pos        = {centreX, centreY},
+      .foreground = Doc::VBORow::ink(foreground, Doc::VBORow::onPaper, solid),
+      .atlas      = Doc::VBORow::atlasAt(static_cast<unsigned int>(texX),
+                                         static_cast<unsigned int>(texY)),
+      .quad  = Doc::VBORow::box(static_cast<unsigned char>(layer), clamp(width),
+                                clamp(height), tagKind),
+      .paper = Doc::VBORow::paperAt(background, tagIndex)};
 
   const auto *const bytes = reinterpret_cast<const std::byte *>(&row);
   rows.insert(rows.end(), bytes, bytes + sizeof(row));
@@ -214,12 +238,12 @@ void Canvas::pushImageRow(const float left, const float bottom,
                           const int layer, const float u0, const float v0,
                           const float u1, const float v1,
                           const std::uint32_t tint) {
-  const ImageRow row{{left + (width / 2.0F), bottom + (height / 2.0F)},
-                     {width, height},
-                     {u0, v0, u1, v1},
-                     static_cast<std::uint32_t>(layer),
-                     tint,
-                     tagIndex};
+  const ImageRow row{.pos   = {left + (width / 2.0F), bottom + (height / 2.0F)},
+                     .size  = {width, height},
+                     .uv    = {u0, v0, u1, v1},
+                     .layer = static_cast<std::uint32_t>(layer),
+                     .tint  = tint,
+                     .index = tagIndex};
 
   const auto *const bytes = reinterpret_cast<const std::byte *>(&row);
   imageRows.insert(imageRows.end(), bytes, bytes + sizeof(row));
@@ -247,8 +271,8 @@ TextMetrics Canvas::measureText(const std::string_view utf8) const {
       .ellipsize       = textWidthLimit > 0,
   };
   auto shaping = text::TextLayout::layoutSingleLine(utf8, font, opts);
-  return {static_cast<float>(shaping.textWidthPx),
-          static_cast<float>(shaping.textHeightPx)};
+  return {.width  = static_cast<float>(shaping.textWidthPx),
+          .height = static_cast<float>(shaping.textHeightPx)};
 }
 
 TextMetrics
@@ -293,8 +317,8 @@ Canvas::addText(RenderState &state, const float left, const float top,
              glyph.texCoords.topLeft.y, false);
   }
 
-  return {static_cast<float>(shaping.textWidthPx),
-          static_cast<float>(shaping.textHeightPx)};
+  return {.width  = static_cast<float>(shaping.textWidthPx),
+          .height = static_cast<float>(shaping.textHeightPx)};
 }
 
 void Canvas::commit() {
@@ -324,7 +348,8 @@ void Canvas::draw(RenderState &state, const glm::mat4 &transform,
   if (0 != committedInstances && pipeline.valid()) {
     state.device->bindPipeline(pipeline);
     state.device->bindAtlasTexture(state.glyphCache.textureHandle());
-    const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
+    const render::DrawUniforms uniforms{
+        .mvp = toArray(transform), .opacity = opacity, .identity = identity};
     state.device->drawGlyphs(uniforms, pool->buffer(),
                              pool->byteOffset(backing), committedInstances);
   }
@@ -333,7 +358,8 @@ void Canvas::draw(RenderState &state, const glm::mat4 &transform,
       imageAtlas.valid()) {
     state.device->bindPipeline(imagePipeline);
     state.device->bindAtlasTexture(imageAtlas);
-    const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
+    const render::DrawUniforms uniforms{
+        .mvp = toArray(transform), .opacity = opacity, .identity = identity};
     state.device->drawGlyphs(uniforms, imagePool->buffer(),
                              imagePool->byteOffset(imageBacking),
                              committedImageInstances);

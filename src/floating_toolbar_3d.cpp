@@ -84,37 +84,109 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
 
   const std::vector<ButtonDef> definitions = {
       // Operational
-      {ButtonId::NewDoc, "+ New", "New Document (Ctrl+N)", false, false},
-      {ButtonId::OpenFile, "Open", "Open File (Ctrl+O)", false, false},
-      {ButtonId::SaveDoc, "Save", "Save Document (Ctrl+S)", false, false},
-      {ButtonId::CloseDoc, "Close", "Close Document (Ctrl+W)", false, false},
-      {ButtonId::OverviewTray, "3D View", "Toggle 3D Carousel (F10)", false,
-       true},
+      {.id             = ButtonId::NewDoc,
+       .label          = "+ New",
+       .tooltip        = "New Document (Ctrl+N)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::OpenFile,
+       .label          = "Open",
+       .tooltip        = "Open File (Ctrl+O)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::SaveDoc,
+       .label          = "Save",
+       .tooltip        = "Save Document (Ctrl+S)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::CloseDoc,
+       .label          = "Close",
+       .tooltip        = "Close Document (Ctrl+W)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::OverviewTray,
+       .label          = "3D View",
+       .tooltip        = "Toggle 3D Carousel (F10)",
+       .active         = false,
+       .separatorAfter = true},
 
       // Formatting
-      {ButtonId::Bold, "B", "Bold (Ctrl+B)", isBold, false},
-      {ButtonId::Italic, "I", "Italic (Ctrl+I)", isItalic, false},
-      {ButtonId::Underline, "U", "Underline (Ctrl+U)", isUnderline, false},
-      {ButtonId::Strikethrough, "S", "Strikethrough (Ctrl+Shift+X)", isStrike,
-       true},
+      {.id             = ButtonId::Bold,
+       .label          = "B",
+       .tooltip        = "Bold (Ctrl+B)",
+       .active         = isBold,
+       .separatorAfter = false},
+      {.id             = ButtonId::Italic,
+       .label          = "I",
+       .tooltip        = "Italic (Ctrl+I)",
+       .active         = isItalic,
+       .separatorAfter = false},
+      {.id             = ButtonId::Underline,
+       .label          = "U",
+       .tooltip        = "Underline (Ctrl+U)",
+       .active         = isUnderline,
+       .separatorAfter = false},
+      {.id             = ButtonId::Strikethrough,
+       .label          = "S",
+       .tooltip        = "Strikethrough (Ctrl+Shift+X)",
+       .active         = isStrike,
+       .separatorAfter = true},
 
       // Headings & Scale
-      {ButtonId::Heading1, "H1", "Heading 1", headingLevel == 1, false},
-      {ButtonId::Heading2, "H2", "Heading 2", headingLevel == 2, false},
-      {ButtonId::FontDec, "A-", "Decrease Font Size (Ctrl+-)", false, false},
-      {ButtonId::FontInc, "A+", "Increase Font Size (Ctrl+=)", false, true},
+      {.id             = ButtonId::Heading1,
+       .label          = "H1",
+       .tooltip        = "Heading 1",
+       .active         = headingLevel == 1,
+       .separatorAfter = false},
+      {.id             = ButtonId::Heading2,
+       .label          = "H2",
+       .tooltip        = "Heading 2",
+       .active         = headingLevel == 2,
+       .separatorAfter = false},
+      {.id             = ButtonId::FontDec,
+       .label          = "A-",
+       .tooltip        = "Decrease Font Size (Ctrl+-)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::FontInc,
+       .label          = "A+",
+       .tooltip        = "Increase Font Size (Ctrl+=)",
+       .active         = false,
+       .separatorAfter = true},
 
       // Alignment
-      {ButtonId::AlignLeft, "Left", "Align Left (Ctrl+L)", false, false},
-      {ButtonId::AlignCenter, "Center", "Align Center (Ctrl+E)", false, false},
-      {ButtonId::AlignRight, "Right", "Align Right (Ctrl+R)", false, true},
+      {.id             = ButtonId::AlignLeft,
+       .label          = "Left",
+       .tooltip        = "Align Left (Ctrl+L)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::AlignCenter,
+       .label          = "Center",
+       .tooltip        = "Align Center (Ctrl+E)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::AlignRight,
+       .label          = "Right",
+       .tooltip        = "Align Right (Ctrl+R)",
+       .active         = false,
+       .separatorAfter = true},
 
       // Structured Blocks
-      {ButtonId::ListBullet, "* List", "Bullet List (Ctrl+Shift+8)", false,
-       false},
-      {ButtonId::ListNumbered, "1. List", "Numbered List (Ctrl+Shift+7)", false,
-       false},
-      {ButtonId::CodeBlock, "</>", "Code Block (Ctrl+Alt+C)", false, false},
+      {.id             = ButtonId::ListBullet,
+       .label          = "* List",
+       .tooltip        = "Bullet List (Ctrl+Shift+8)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::ListNumbered,
+       .label          = "1. List",
+       .tooltip        = "Numbered List (Ctrl+Shift+7)",
+       .active         = false,
+       .separatorAfter = false},
+      {.id             = ButtonId::CodeBlock,
+       .label          = "</>",
+       .tooltip        = "Code Block (Ctrl+Alt+C)",
+       .active         = false,
+       .separatorAfter = false},
   };
 
   // Measure total width
@@ -198,7 +270,7 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
 }
 
 bool FloatingToolbar3D::picked(const render::PickingResult &pick,
-                               RenderState &) {
+                               RenderState & /*state*/) {
   if (pick.tag.kind == render::tagKindOverlay && pick.tag.clusterIndex >= 100) {
     const auto btnId = static_cast<ButtonId>(pick.tag.clusterIndex);
     if (actionHandler) {
@@ -231,7 +303,7 @@ void FloatingToolbar3D::describe(a11y::Builder &into) {
 
 bool FloatingToolbar3D::performAction(const std::uint64_t nodeId,
                                       const a11y::Action action,
-                                      const std::string_view) {
+                                      const std::string_view /*value*/) {
   if (action == a11y::Action::Click || action == a11y::Action::Focus) {
     if (nodeId >= 0x5000) {
       const auto btnId = static_cast<ButtonId>(nodeId - 0x5000);

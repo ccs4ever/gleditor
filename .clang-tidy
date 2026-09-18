@@ -82,6 +82,18 @@
 #   bugprone-macro-parentheses: cannot tell a macro parameter used as a type
 #   name (GLEDITOR_NON_COPYABLE(Type) in sdl_wrap.hpp) from one used as a
 #   value, and wraps the type in parentheses, breaking every expansion.
+#   cppcoreguidelines-prefer-member-initializer: moves a member's assignment
+#   into the constructor initializer list without checking whether the moved
+#   expression depends on another member that is only computed later in the
+#   constructor *body* -- initializer-list order follows declaration order,
+#   not source order, so the moved expression can silently read a
+#   not-yet-initialized value. Two real bugs: VPLEngine and
+#   MultiStoreCoordinator's owned-pointer-plus-raw-alias pattern (core_ set
+#   from ownedCore_.get() before ownedCore_ was assigned in the body, leaving
+#   core_ permanently null -- a real segfault caught by
+#   VQLMultiStoreTest.CoordinatorGenesis), and Page::Page's originX/originY
+#   moved ahead of the pageWidth/pageHeight the body computes from
+#   pageBoxFor() -- silently wrong page origins, uncaught by any test.
 Checks: >
   -*,
   modernize-*,

@@ -212,7 +212,7 @@ private:
   BufferPool::Allocation backing{};
   std::uint32_t committedInstances{};
   int textWidthLimit{};
-  std::uint32_t tagKind;
+  std::uint32_t tagKind{render::tagKindOverlay};
   std::uint32_t tagIndex{};
   /// Document and page, with no kind: the base every primitive's identity is
   /// built on, handed to the draw rather than to each instance.

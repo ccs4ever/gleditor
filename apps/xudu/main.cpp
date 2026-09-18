@@ -162,7 +162,7 @@ int checkAuthorship(const std::string &where) {
     return std::string{std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>()};
   };
-  xudu::SignedProvenance sealed{slurp(record), slurp(sig)};
+  xudu::SignedProvenance sealed{.yaml = slurp(record), .signature = slurp(sig)};
   if (sealed.yaml.empty()) {
     std::cerr << "no authorship record at " << record << "\n";
     return 1;
@@ -327,8 +327,9 @@ public:
         // 0 and containerLength equals the span's own length, so this is the
         // same span read()'s always been given).
         const auto bytes = st.read(xudu::PrimediaSpan{
-            mSpan.span.scroll, mSpan.span.start - mSpan.containerOffset,
-            mSpan.containerLength});
+            .scroll = mSpan.span.scroll,
+            .start  = mSpan.span.start - mSpan.containerOffset,
+            .length = mSpan.containerLength});
         if (mSpan.isImage) {
           // A picture has no play, pause or seek: it goes to the image
           // overlay's shared pipeline rather than a MediaWidget, whose whole
@@ -363,7 +364,8 @@ public:
         // a setTimeRange() call until playback reports a real duration.
         widget->loadFragment(
             gleditor::MediaResource::fromStream(stream, mSpan.label),
-            gleditor::ByteRange{mSpan.containerOffset, mSpan.span.length},
+            gleditor::ByteRange{.start  = mSpan.containerOffset,
+                                .length = mSpan.span.length},
             mSpan.containerLength);
         widget->setTitle(mSpan.label);
         widget->attachToDocument(rState.docs[dIdx], mSpan.docOffset);
@@ -434,8 +436,10 @@ public:
         return;
       }
       session.flushUncommitted(caret->documentIndex());
-      Where where{caret->documentIndex(), caret->byteOffset(),
-                  caret->byteOffset(), caret->hasSelection()};
+      Where where{.doc      = caret->documentIndex(),
+                  .start    = caret->byteOffset(),
+                  .end      = caret->byteOffset(),
+                  .hasRange = caret->hasSelection()};
       if (where.hasRange) {
         where.start = caret->selectionStart();
         where.end   = caret->selectionEnd();
@@ -677,7 +681,10 @@ public:
           where.start, where.end - where.start);
 
       if (!pending) {
-        pending = Pending{where.doc, where.start, where.end, std::move(spans)};
+        pending = Pending{.doc   = where.doc,
+                          .start = where.start,
+                          .end   = where.end,
+                          .spans = std::move(spans)};
         std::cout << "xudu: xanalink from doc " << where.doc << " ["
                   << where.start << "," << where.end
                   << ") -- select the other end and press ctrl-l again\n";
@@ -733,11 +740,11 @@ public:
       using Field = gleditor::Form::Field;
       using Kind  = gleditor::Form::Kind;
 
-      Field keys{"Signing key",
-                 {},
-                 "no signing key in the keyring",
-                 false,
-                 Kind::Choice};
+      Field keys{.label    = "Signing key",
+                 .value    = {},
+                 .hint     = "no signing key in the keyring",
+                 .required = false,
+                 .kind     = Kind::Choice};
       for (const auto &key : signingKeys(session.settings().signing())) {
         keys.options.push_back(key.describe());
         keys.optionValues.push_back(key.fingerprint);
@@ -761,26 +768,47 @@ public:
       }
 
       std::vector<Field> asked{
-          Field{"Name", salt.empty() ? std::string{"document"} : salt,
-                "one word; publishing again under it is a further state of "
-                "this document",
-                true},
-          Field{"Title", {}, "what this document is called", true},
-          Field{"Author", who.name, "who is publishing this", true},
-          Field{"Email", who.email, "how to reach them", true},
+          Field{.label = "Name",
+                .value = salt.empty() ? std::string{"document"} : salt,
+                .hint =
+                    "one word; publishing again under it is a further state of "
+                    "this document",
+                .required = true},
+          Field{.label    = "Title",
+                .value    = {},
+                .hint     = "what this document is called",
+                .required = true},
+          Field{.label    = "Author",
+                .value    = who.name,
+                .hint     = "who is publishing this",
+                .required = true},
+          Field{.label    = "Email",
+                .value    = who.email,
+                .hint     = "how to reach them",
+                .required = true},
           std::move(keys),
-          Field{"Passphrase",
-                {},
-                "only if the agent is not holding it",
-                false,
-                Kind::Secret},
+          Field{.label    = "Passphrase",
+                .value    = {},
+                .hint     = "only if the agent is not holding it",
+                .required = false,
+                .kind     = Kind::Secret},
           [] {
-            Field toggle{"", {}, {}, false, Kind::Toggle};
+            Field toggle{.label    = "",
+                         .value    = {},
+                         .hint     = {},
+                         .required = false,
+                         .kind     = Kind::Toggle};
             toggle.revealsSecrets = true;
             return toggle;
           }(),
-          Field{"Rights", {}, "how others may use this; optional", false},
-          Field{"Note", {}, "anything else worth recording; optional", false},
+          Field{.label    = "Rights",
+                .value    = {},
+                .hint     = "how others may use this; optional",
+                .required = false},
+          Field{.label    = "Note",
+                .value    = {},
+                .hint     = "anything else worth recording; optional",
+                .required = false},
       };
       asked[1].value = asked[0].value;
 
@@ -849,9 +877,14 @@ public:
         std::string defName = "doc_" + std::to_string(storeIdx) + ".xanadoc";
 
         std::vector<Field> fields{
-            Field{"Folder", curDir,
-                  "directory where the xanadoc folder will live", true},
-            Field{"Name", defName, "name of the xanadoc folder", true},
+            Field{.label    = "Folder",
+                  .value    = curDir,
+                  .hint     = "directory where the xanadoc folder will live",
+                  .required = true},
+            Field{.label    = "Name",
+                  .value    = defName,
+                  .hint     = "name of the xanadoc folder",
+                  .required = true},
         };
 
         form.open(
@@ -1207,7 +1240,7 @@ public:
     if (!ec) {
       for (const auto &dirEntry : fs::directory_iterator(curPath, ec)) {
         if (dirEntry.is_directory()) {
-          const auto p = dirEntry.path();
+          const auto &p = dirEntry.path();
           if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
               p.extension() == ".xanadoc") {
             const auto dirName = p.filename().string();
@@ -1218,8 +1251,8 @@ public:
       }
     }
 
-    choiceField.options.push_back("Custom path or file...");
-    choiceField.optionValues.push_back("__custom__");
+    choiceField.options.emplace_back("Custom path or file...");
+    choiceField.optionValues.emplace_back("__custom__");
 
     Field customPathField;
     customPathField.label = "Custom path";
@@ -1425,7 +1458,7 @@ public:
         continue;
       }
       const auto k              = (i - active + total) % total;
-      const float kF            = static_cast<float>(k);
+      const auto kF             = static_cast<float>(k);
       const glm::vec3 targetPos = kF * onionSkinPolicy.offsetPerVersion;
       const float targetOpacity =
           (k == 0) ? 1.0F
@@ -1575,8 +1608,8 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   start = caret->byteOffset();
                 }
               }
-              float mx = static_cast<float>(state->mouseX);
-              float my = static_cast<float>(state->mouseY);
+              auto mx = static_cast<float>(state->mouseX);
+              auto my = static_cast<float>(state->mouseY);
               if (mx <= 0.0F && my <= 0.0F && state->clickX >= 0) {
                 mx = static_cast<float>(state->clickX);
                 my = static_cast<float>(state->clickY);
@@ -2153,7 +2186,7 @@ int main(const int argc, char **argv) {
       return batchRes.exitCode;
     }
     opening      = batchRes.opening;
-    extraImports = std::move(batchRes.extraImports);
+    extraImports = batchRes.extraImports;
 
     backend = gleditor::applyCommonArguments(parser, state, argc, argv);
     if (parser["--headless"] == true && !state->script.empty()) {
@@ -2294,11 +2327,12 @@ int main(const int argc, char **argv) {
         email           = parser.get<std::string>("--author-email"),
         key             = parser.get<std::string>("--gpg-key");
         !name.empty() || !email.empty() || !key.empty()) {
-      xudu::Author who{name, email, key};
+      xudu::Author who{.name = name, .email = email, .gpgKey = key};
       if (!who.named() && parser["--author-here"] != true) {
         const auto existing = xudu::loadConfig();
-        if (!Author{name.empty() ? existing.author.name : name,
-                    email.empty() ? existing.author.email : email, key}
+        if (!Author{.name   = name.empty() ? existing.author.name : name,
+                    .email  = email.empty() ? existing.author.email : email,
+                    .gpgKey = key}
                  .named()) {
           throw std::runtime_error(
               "--author-name and --author-email go together: an authorship "
@@ -2355,9 +2389,14 @@ int main(const int argc, char **argv) {
     alongside = parser.get<std::string>("--alongside");
     publishAs = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
-      const auto manifest = session->publishDocument(
-          opening, Session::PublishRequest{publishAs, publishAs, {}, {}, {}},
-          0);
+      const auto manifest =
+          session->publishDocument(opening,
+                                   Session::PublishRequest{.salt   = publishAs,
+                                                           .title  = publishAs,
+                                                           .author = {},
+                                                           .extra  = {},
+                                                           .passphrase = {}},
+                                   0);
       quiet || std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }
@@ -2736,8 +2775,8 @@ int main(const int argc, char **argv) {
                     text.substr(selStart, std::min(selEnd - selStart, 40U));
               }
 
-              const float screenX = static_cast<float>(mx);
-              const float screenY =
+              const auto screenX = static_cast<float>(mx);
+              const auto screenY =
                   static_cast<float>(state->view.screenHeight - my);
 
               TetherPayload payload{
@@ -2763,8 +2802,8 @@ int main(const int argc, char **argv) {
 
 #ifdef XUZZ_BUILD
         if (altHeld && zigzagPresentation) {
-          const float screenX = static_cast<float>(mx);
-          const float screenY =
+          const auto screenX = static_cast<float>(mx);
+          const auto screenY =
               static_cast<float>(state->view.screenHeight - my);
           std::optional<zigzag::CellRef> cellTarget;
           if (renderer->lastPick && renderer->lastPick->semanticTarget &&
@@ -2813,8 +2852,8 @@ int main(const int argc, char **argv) {
     state->mouseMotionHandler = [&kineticTetherEngine, &pouchDrawer, state](
                                     const int mx, const int my,
                                     const std::uint32_t /*buttons*/) -> bool {
-      const float screenX = static_cast<float>(mx);
-      const float screenY = static_cast<float>(state->view.screenHeight - my);
+      const auto screenX = static_cast<float>(mx);
+      const auto screenY = static_cast<float>(state->view.screenHeight - my);
 
       if (kineticTetherEngine.isDragging()) {
         kineticTetherEngine.updateDrag(screenX, screenY);
@@ -2836,8 +2875,8 @@ int main(const int argc, char **argv) {
       if (button != 1) { // 1 = SDL_BUTTON_LEFT
         return false;
       }
-      const float screenX = static_cast<float>(mx);
-      const float screenY = static_cast<float>(state->view.screenHeight - my);
+      const auto screenX = static_cast<float>(mx);
+      const auto screenY = static_cast<float>(state->view.screenHeight - my);
       pouchDrawer.forge().setDragGuide(0.0F, 0.0F, 0.0F, 0.0F, false);
 
       // 1. If kinetic tether is currently dragging:
@@ -2922,8 +2961,8 @@ int main(const int argc, char **argv) {
 #else
       const auto allVers = primaryStore.allVersions();
       if (allVers.size() > 1) {
-        for (std::size_t vIdx = 0; vIdx < allVers.size(); ++vIdx) {
-          views.showAlongside(allVers[vIdx], 0.0F, 0);
+        for (const auto &allVer : allVers) {
+          views.showAlongside(allVer, 0.0F, 0);
         }
       } else {
         views.showAlongside(opening, 0.0F, 0);

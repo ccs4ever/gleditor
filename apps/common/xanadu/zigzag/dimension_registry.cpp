@@ -20,7 +20,7 @@ InternedDimName DimensionRegistry::intern(const std::string_view name) {
   if (name.empty()) {
     return InternedDimName{0, ""};
   }
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   if (const auto it = nameToId_.find(name); it != nameToId_.end()) {
     const auto id = it->second;
     return InternedDimName{id, internPool_[id - 1]};
@@ -38,7 +38,7 @@ DimensionRegistry::findInterned(const std::string_view name) const {
   if (name.empty()) {
     return InternedDimName{0, ""};
   }
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   if (const auto it = nameToId_.find(name); it != nameToId_.end()) {
     const auto id = it->second;
     return InternedDimName{id, internPool_[id - 1]};
@@ -51,7 +51,7 @@ DimRef DimensionRegistry::get(const xanadu::Store &store,
   if (dimName.empty()) {
     return noCell;
   }
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   const auto storeIt = storeDims_.find(&store);
   if (storeIt == storeDims_.end()) {
     return noCell;
@@ -106,7 +106,7 @@ void DimensionRegistry::registerDim(const xanadu::Store &store,
   if (dimName.empty() || noCell == cell) {
     return;
   }
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   storeDims_[&store][dimName.id()] = cell;
 }
 
@@ -121,12 +121,12 @@ void DimensionRegistry::unregisterStore(
   if (nullptr == store) {
     return;
   }
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   storeDims_.erase(store);
 }
 
 void DimensionRegistry::clear() noexcept {
-  std::lock_guard lock(mutex_);
+  std::scoped_lock lock(mutex_);
   storeDims_.clear();
   nameToId_.clear();
   internPool_.clear();

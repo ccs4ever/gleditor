@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <unistd.h>
@@ -92,7 +93,7 @@ std::vector<std::string> parseDimensionNames(std::string_view input) {
 std::vector<std::string> reorderArgs(int argc, char *argv[]) {
   std::vector<std::string> options;
   std::vector<std::string> positionals;
-  options.push_back(argv[0]);
+  options.emplace_back(argv[0]);
 
   const std::vector<std::string> valueOptions = {
       "-e",       "--eval",   "-f",
@@ -121,7 +122,7 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
     if (isValueOpt) {
       options.push_back(arg);
       if (i + 1 < argc) {
-        options.push_back(argv[++i]);
+        options.emplace_back(argv[++i]);
       }
     } else if (arg.starts_with("-")) {
       options.push_back(arg);
@@ -232,7 +233,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Determine output format
-  std::string format = program.get<std::string>("--format");
+  auto format = program.get<std::string>("--format");
   if (program.get<bool>("--ascii")) {
     format = "ascii";
   } else if (program.get<bool>("--view") || program.get<bool>("--grid")) {
@@ -243,12 +244,12 @@ int main(int argc, char *argv[]) {
     format = "cells";
   }
 
-  std::string dimsOpt                   = program.get<std::string>("--dims");
+  auto dimsOpt                          = program.get<std::string>("--dims");
   std::vector<std::string> viewDimNames = parseDimensionNames(dimsOpt);
 
-  std::string engineMode = program.get<std::string>("--engine");
-  bool dumpAst           = program.get<bool>("--dump-ast");
-  bool dumpAsm           = program.get<bool>("--dump-asm");
+  auto engineMode = program.get<std::string>("--engine");
+  bool dumpAst    = program.get<bool>("--dump-ast");
+  bool dumpAsm    = program.get<bool>("--dump-asm");
 
   std::vector<std::string> storePaths;
   if (program.present<std::vector<std::string>>("stores")) {
@@ -256,7 +257,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Setup permascroll and MultiStoreCoordinator
-  std::string permaDir = program.get<std::string>("--permascroll");
+  auto permaDir = program.get<std::string>("--permascroll");
   xanadu::UserPermascroll::Config permaConfig;
   if (!permaDir.empty()) {
     permaConfig.storageDir = permaDir;
@@ -295,8 +296,8 @@ int main(int argc, char *argv[]) {
   }
 
   // Obtain query text
-  std::string queryText = program.get<std::string>("--eval");
-  std::string queryFile = program.get<std::string>("--file");
+  auto queryText = program.get<std::string>("--eval");
+  auto queryFile = program.get<std::string>("--file");
 
   if (queryText.empty() && !queryFile.empty()) {
     std::ifstream ifs(queryFile);
@@ -358,11 +359,11 @@ int main(int argc, char *argv[]) {
 
       // Collect outputs along cursor or results
       zigzag::CellRef haltOp = zigzag::noCell;
-      for (auto it = compRes.generatedOpcodes.rbegin();
-           it != compRes.generatedOpcodes.rend(); ++it) {
-        auto k = vm.getOpcodeKind(*it);
+      for (unsigned int &generatedOpcode :
+           std::views::reverse(compRes.generatedOpcodes)) {
+        auto k = vm.getOpcodeKind(generatedOpcode);
         if (k && *k == zigzag::vortex::OpcodeKind::Halt) {
-          haltOp = *it;
+          haltOp = generatedOpcode;
           break;
         }
       }
@@ -385,7 +386,8 @@ int main(int argc, char *argv[]) {
     } else if (format == "view" || format == "grid") {
       std::vector<xanadu::vql::ViewDimension> vdims;
       for (const auto &dname : viewDimNames) {
-        vdims.push_back({dname, coordinator.resolveDimension(dname)});
+        vdims.push_back(
+            {.name = dname, .dim = coordinator.resolveDimension(dname)});
       }
       std::cout << xanadu::vql::AsciiVisualizer::renderCellConnections(
                        coordinator.arena(), results, vdims)
@@ -423,7 +425,7 @@ int main(int argc, char *argv[]) {
 
     // Handle in-place mutation
     if (program.get<bool>("--in-place") && !primaryPath.empty()) {
-      auto primStore = coordinator.primaryStore();
+      const auto *primStore = coordinator.primaryStore();
       if (primStore && primStore->store) {
         primStore->store->save(primaryPath);
         std::cout << "Saved in-place changes to primary store: " << primaryPath
@@ -432,7 +434,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Handle output store
-    std::string outPath = program.get<std::string>("--output-store");
+    auto outPath = program.get<std::string>("--output-store");
     if (!outPath.empty()) {
       std::filesystem::create_directories(outPath);
       xanadu::Store outStore(permascroll);
@@ -465,7 +467,8 @@ int main(int argc, char *argv[]) {
 
     if (line == ":quit" || line == ":exit") {
       break;
-    } else if (line == ":help") {
+    }
+    if (line == ":help") {
       printHelpREPL();
     } else if (line == ":ascii") {
       format = (format == "ascii") ? "text" : "ascii";

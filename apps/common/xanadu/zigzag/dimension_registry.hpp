@@ -61,7 +61,7 @@ public:
 
 private:
   std::uint32_t id_{0};
-  std::string_view name_{};
+  std::string_view name_;
 };
 
 /**

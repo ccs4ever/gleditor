@@ -255,7 +255,7 @@ private:
   /// and capture before the video had genuinely started, which is what this
   /// flag closes.
   bool awaitingPlaybackStart_{false};
-  std::chrono::steady_clock::time_point lastDrawTime_{};
+  std::chrono::steady_clock::time_point lastDrawTime_;
 
   /// Set in deviceReady(), which is also where canvas_ is built; kept so the
   /// video texture can be (re)created and updated later, in drawFrame(),

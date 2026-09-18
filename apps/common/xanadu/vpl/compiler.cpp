@@ -1346,7 +1346,7 @@ VPLCompiler::exportToStore(xanadu::Store &store,
   // 2. Mint cells
   for (CellRef c = 1; c <= arena.cellCount(); ++c) {
     if (!arena.contains(c)) continue;
-    if (cellMap.count(c)) continue;
+    if (cellMap.contains(c)) continue;
 
     if (auto dVal = arena.asDouble(c)) {
       ver = store.makeScalarCell(ver, *dVal);
@@ -1363,12 +1363,12 @@ VPLCompiler::exportToStore(xanadu::Store &store,
 
   // 3. Link edges (posward links only)
   for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c) || !cellMap.count(c)) continue;
+    if (!arena.contains(c) || !cellMap.contains(c)) continue;
     CellRef from = cellMap.at(c);
 
     for (const auto &[dimRef, mappedDim] : dimMap) {
       CellRef target = arena.linked(c, dimRef, DimVector::POS);
-      if (target != zigzag::noCell && cellMap.count(target)) {
+      if (target != zigzag::noCell && cellMap.contains(target)) {
         CellRef to = cellMap.at(target);
         ver =
             store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);

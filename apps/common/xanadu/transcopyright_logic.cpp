@@ -84,13 +84,13 @@ TranscopyrightLogic::testKeyId(const std::string_view seed) noexcept {
 
 void TranscopyrightLogic::registerTestCek(
     const std::array<std::uint8_t, 32> &keyId, const crypto::Key32 &cek) {
-  std::lock_guard<std::mutex> lock(s_keyVaultMutex);
+  std::scoped_lock lock(s_keyVaultMutex);
   s_keyVault[keyId] = cek;
 }
 
 std::optional<crypto::Key32>
 TranscopyrightLogic::lookupTestCek(const std::array<std::uint8_t, 32> &keyId) {
-  std::lock_guard<std::mutex> lock(s_keyVaultMutex);
+  std::scoped_lock lock(s_keyVaultMutex);
   const auto it = s_keyVault.find(keyId);
   if (it != s_keyVault.end()) {
     return it->second;
@@ -137,7 +137,9 @@ TranscopyrightLogic::inspectHoles(const Store &st, const Version &version,
         continue;
       }
       const auto holeLen = holeEndInScroll - holeStartInScroll;
-      const PrimediaSpan holeSpan{piece.scroll, holeStartInScroll, holeLen};
+      const PrimediaSpan holeSpan{.scroll = piece.scroll,
+                                  .start  = holeStartInScroll,
+                                  .length = holeLen};
 
       const auto res = st.resolve(holeSpan);
       if (res.status != ResolutionStatus::WithheldRedacted &&

@@ -88,7 +88,7 @@ void PouchDrawer::layout(const float screenWidth, const float screenHeight) {
   }
 
   float curY = zonesTop;
-  for (auto &zone : pouchManager_.zones()) {
+  for (const auto &zone : pouchManager_.zones()) {
     const float zoneH =
         std::max(36.0F, availH * (zone->heightWeight() / totalWeight) - 6.0F);
     curY -= (zoneH + 6.0F);
@@ -338,7 +338,8 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, ortho);
 }
 
-bool PouchDrawer::picked(const render::PickingResult &pick, RenderState &) {
+bool PouchDrawer::picked(const render::PickingResult &pick,
+                         RenderState & /*state*/) {
   if (!isOpen_ || currentSlideWidth_ < 1.0F ||
       pick.tag.kind != render::tagKindOverlay) {
     return false;

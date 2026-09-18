@@ -34,7 +34,8 @@ bool KineticTetherOverlay::busy() const {
   return engine_.state() == TetherState::SnappingBack;
 }
 
-void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas, RenderState &,
+void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas,
+                                      RenderState & /*unused*/,
                                       const glm::vec2 &p0, const glm::vec2 &p1,
                                       const bool detached) {
   const float dist    = glm::length(p1 - p0);

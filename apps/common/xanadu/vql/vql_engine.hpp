@@ -113,7 +113,7 @@ private:
   MultiStoreCoordinator &coordinator_;
   zigzag::vortex::VortexCore *core_{nullptr};
 
-  std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_{};
+  std::unordered_map<std::string, std::vector<zigzag::CellRef>> env_;
 };
 
 } // namespace xanadu::vql

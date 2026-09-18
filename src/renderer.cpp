@@ -380,8 +380,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // over them, and before the notifications, which must be over everything.
   if (!frameContributors.empty()) {
     state.beginPickScene();
-    gleditor::FrameContext ctx{state, viewProjection, screenWidth, screenHeight,
-                               timeline};
+    gleditor::FrameContext ctx{.state          = state,
+                               .viewProjection = viewProjection,
+                               .screenWidth    = screenWidth,
+                               .screenHeight   = screenHeight,
+                               .timeline       = timeline};
     for (auto *const contributor : frameContributors) {
       contributor->drawFrame(ctx);
     }

@@ -336,7 +336,10 @@ void PouchManager::loadManifest() {
       continue;
     }
     std::istringstream entryStream(zoneEntry);
-    std::string id, label, auraStr, weightStr;
+    std::string id;
+    std::string label;
+    std::string auraStr;
+    std::string weightStr;
     if (std::getline(entryStream, id, '|') &&
         std::getline(entryStream, label, '|') &&
         std::getline(entryStream, auraStr, '|') &&

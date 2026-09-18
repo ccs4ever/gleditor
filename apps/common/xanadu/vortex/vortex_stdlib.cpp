@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <numeric>
+#include <ranges>
 #include <sstream>
 #include <unordered_set>
 
@@ -241,7 +242,7 @@ bool evalArithmetic(const VortexStdLib &stdlib, const VortexCore &core,
       (std::isdigit(txt[0]) ||
        (txt.size() > 1 && txt[0] == '-' && std::isdigit(txt[1])))) {
     try {
-      if (txt.find('.') != std::string::npos) {
+      if (txt.contains('.')) {
         outVal   = std::stod(txt);
         outIsInt = false;
       } else {
@@ -277,7 +278,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     LogicSolution sol;
     for (CellRef v : queryVars) {
       CellRef val = stdlib.deref(v);
-      sol.bindings.push_back({v, val});
+      sol.bindings.emplace_back(v, val);
       sol.varMap[v] = val;
       std::string varName;
       CellRef nameCell =
@@ -924,7 +925,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         idNum = static_cast<std::int64_t>(dId);
       }
       if (idNum >= 0 && core.arena().contains(static_cast<CellRef>(idNum))) {
-        CellRef target  = static_cast<CellRef>(idNum);
+        auto target     = static_cast<CellRef>(idNum);
         auto mark       = core.arena().mark();
         CellRef valCell = noCell;
         if (auto d = core.arena().asDouble(target); d.has_value()) {
@@ -1021,7 +1022,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       }
       if (fromNum >= 0 &&
           core.arena().contains(static_cast<CellRef>(fromNum))) {
-        CellRef fromCell = static_cast<CellRef>(fromNum);
+        auto fromCell = static_cast<CellRef>(fromNum);
         for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
           std::string dimName = core.arena().textOf(dl.dim);
           if (dimName.empty()) {
@@ -1326,7 +1327,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     if (cutToFrame == frameId) {
       cutToFrame = 0;
       break;
-    } else if (cutToFrame > 0 && cutToFrame < frameId) {
+    }
+    if (cutToFrame > 0 && cutToFrame < frameId) {
       break;
     }
   }
@@ -1434,7 +1436,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(reqNonNeg, zero);
     core_.attachPostcondition(op, reqNonNeg);
 
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "abs", op);
   }
 
@@ -1447,7 +1449,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "min", op);
   }
 
@@ -1460,7 +1462,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "max", op);
   }
 
@@ -1490,7 +1492,8 @@ void VortexStdLib::buildMathModule(CellRef mod) {
 
     core_.arena().link(opMax, core_.dims().spin, false, opMin);
 
-    routineBindings_[opMax] = {{in, lo, hi}, {out}};
+    routineBindings_[opMax] = {.inputParams  = {in, lo, hi},
+                               .outputParams = {out}};
     exportSymbol(mod, "clamp", opMax);
   }
 
@@ -1503,7 +1506,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "add", op);
   }
 
@@ -1516,7 +1519,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "sub", op);
   }
 
@@ -1529,7 +1532,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "mul", op);
   }
 
@@ -1549,7 +1552,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(reqDiff, zero);
     core_.attachPrecondition(op, reqDiff);
 
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "div", op);
   }
 
@@ -1569,7 +1572,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(reqDiff, zero);
     core_.attachPrecondition(op, reqDiff);
 
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "mod", op);
   }
 
@@ -1580,7 +1583,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::Neg, "#MATH_NEG");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "neg", op);
   }
 }
@@ -1593,7 +1596,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::ToLower, "#STR_TO_LOWER");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "to_lower", op);
   }
 
@@ -1604,7 +1607,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::ToUpper, "#STR_TO_UPPER");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "to_upper", op);
   }
 
@@ -1615,7 +1618,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::Trim, "#STR_TRIM");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "trim", op);
   }
 
@@ -1635,7 +1638,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
 
     core_.arena().link(opTrim, core_.dims().spin, false, opLower);
 
-    routineBindings_[opTrim] = {{in}, {out}};
+    routineBindings_[opTrim] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "clean", opTrim);
   }
 }
@@ -1664,7 +1667,8 @@ void VortexStdLib::buildMemoizeModule(CellRef mod) {
     core_.bindInput(op, targetOp);
     core_.bindInput(op, cacheKey);
     core_.bindInput(op, capacity);
-    routineBindings_[op] = {{targetOp, cacheKey, capacity}, {}};
+    routineBindings_[op] = {.inputParams  = {targetOp, cacheKey, capacity},
+                            .outputParams = {}};
     exportSymbol(mod, "memoize", op);
   }
 
@@ -1675,7 +1679,8 @@ void VortexStdLib::buildMemoizeModule(CellRef mod) {
     CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_FLUSH");
     core_.bindInput(op, cacheKey);
     core_.bindOutput(op, status);
-    routineBindings_[op] = {{cacheKey}, {status}};
+    routineBindings_[op] = {.inputParams  = {cacheKey},
+                            .outputParams = {status}};
     exportSymbol(mod, "flush", op);
   }
 
@@ -1686,7 +1691,8 @@ void VortexStdLib::buildMemoizeModule(CellRef mod) {
     CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_RETIRE");
     core_.bindInput(op, cacheKey);
     core_.bindOutput(op, status);
-    routineBindings_[op] = {{cacheKey}, {status}};
+    routineBindings_[op] = {.inputParams  = {cacheKey},
+                            .outputParams = {status}};
     exportSymbol(mod, "retire", op);
   }
 }
@@ -1705,7 +1711,8 @@ void VortexStdLib::buildFunctionalModule(CellRef mod) {
     core_.bindInput(op, outDim);
     core_.bindInput(op, fnOp);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inHead, inDim, outDim, fnOp}, {out}};
+    routineBindings_[op] = {.inputParams  = {inHead, inDim, outDim, fnOp},
+                            .outputParams = {out}};
     exportSymbol(mod, "map", op);
   }
 
@@ -1722,7 +1729,8 @@ void VortexStdLib::buildFunctionalModule(CellRef mod) {
     core_.bindInput(op, outDim);
     core_.bindInput(op, predOp);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inHead, inDim, outDim, predOp}, {out}};
+    routineBindings_[op] = {.inputParams  = {inHead, inDim, outDim, predOp},
+                            .outputParams = {out}};
     exportSymbol(mod, "filter", op);
   }
 
@@ -1739,7 +1747,8 @@ void VortexStdLib::buildFunctionalModule(CellRef mod) {
     core_.bindInput(op, initial);
     core_.bindInput(op, fnOp);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inHead, inDim, initial, fnOp}, {out}};
+    routineBindings_[op] = {.inputParams  = {inHead, inDim, initial, fnOp},
+                            .outputParams = {out}};
     exportSymbol(mod, "fold", op);
   }
 
@@ -1758,7 +1767,8 @@ void VortexStdLib::buildFunctionalModule(CellRef mod) {
     core_.bindInput(op, dimB);
     core_.bindInput(op, outDim);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{headA, headB, dimA, dimB, outDim}, {out}};
+    routineBindings_[op] = {.inputParams  = {headA, headB, dimA, dimB, outDim},
+                            .outputParams = {out}};
     exportSymbol(mod, "zip", op);
   }
 }
@@ -1773,7 +1783,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     core_.bindInput(op, inItems);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inItems, inDim}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inItems, inDim},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "list", op);
   }
 
@@ -1784,7 +1795,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     CellRef op        = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_MAP");
     core_.bindInput(op, inEntries);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inEntries}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inEntries},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "map", op);
   }
 
@@ -1797,7 +1809,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     core_.bindInput(op, inRows);
     core_.bindInput(op, inCols);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inRows, inCols}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inRows, inCols},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "grid", op);
   }
 
@@ -1810,7 +1823,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     core_.bindInput(op, inHead);
     core_.bindInput(op, inVal);
     core_.bindInput(op, inDim);
-    routineBindings_[op] = {{inHead, inVal, inDim}, {}};
+    routineBindings_[op] = {.inputParams  = {inHead, inVal, inDim},
+                            .outputParams = {}};
     exportSymbol(mod, "push_back", op);
   }
 
@@ -1825,7 +1839,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     core_.bindInput(op, inVal);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inHead, inVal, inDim}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inHead, inVal, inDim},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "push_front", op);
   }
 
@@ -1838,7 +1853,8 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
     core_.bindInput(op, inHead);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outVal);
-    routineBindings_[op] = {{inHead, inDim}, {outVal}};
+    routineBindings_[op] = {.inputParams  = {inHead, inDim},
+                            .outputParams = {outVal}};
     exportSymbol(mod, "pop_back", op);
   }
 }
@@ -2676,7 +2692,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     core_.bindInput(op, in0);
     core_.bindInput(op, in1);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in0, in1}, {out}};
+    routineBindings_[op] = {.inputParams = {in0, in1}, .outputParams = {out}};
     exportSymbol(mod, "unify", op);
   }
 
@@ -2685,7 +2701,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::MakeVar, "#LOGIC_MAKE_VAR");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "var", op);
   }
 
@@ -2696,7 +2712,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::IsVar, "#LOGIC_IS_VAR");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "is_var", op);
   }
 
@@ -2707,7 +2723,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::MakeTerm, "#LOGIC_MAKE_TERM");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "term", op);
   }
 
@@ -2718,7 +2734,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::Deref, "#LOGIC_DEREF");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "deref", op);
   }
 
@@ -2729,14 +2745,14 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::Choice, "#LOGIC_CHOICE");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "choice", op);
   }
 
   // fail: #FAIL
   {
     CellRef op           = vm_.mintOpcode(OpcodeKind::Fail, "#LOGIC_FAIL");
-    routineBindings_[op] = {{}, {}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {}};
     exportSymbol(mod, "fail", op);
   }
 
@@ -2747,7 +2763,7 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     CellRef op  = vm_.mintOpcode(OpcodeKind::Cut, "#LOGIC_CUT");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{in}, {out}};
+    routineBindings_[op] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "cut", op);
   }
 
@@ -2880,7 +2896,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inN);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inN, inDim}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inN, inDim},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "iota", op);
   }
 
@@ -2893,7 +2910,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inOrigin);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outShape);
-    routineBindings_[op] = {{inOrigin, inDim}, {outShape}};
+    routineBindings_[op] = {.inputParams  = {inOrigin, inDim},
+                            .outputParams = {outShape}};
     exportSymbol(mod, "shape", op);
   }
 
@@ -2908,7 +2926,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inDim);
     core_.bindInput(op, inCount);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inOrigin, inDim, inCount}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inOrigin, inDim, inCount},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "take", op);
   }
 
@@ -2923,7 +2942,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inDim);
     core_.bindInput(op, inCount);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inOrigin, inDim, inCount}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inOrigin, inDim, inCount},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "drop", op);
   }
 
@@ -2936,7 +2956,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inOrigin);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outHead);
-    routineBindings_[op] = {{inOrigin, inDim}, {outHead}};
+    routineBindings_[op] = {.inputParams  = {inOrigin, inDim},
+                            .outputParams = {outHead}};
     exportSymbol(mod, "reverse", op);
   }
 
@@ -2949,7 +2970,8 @@ void VortexStdLib::buildArrayModule(CellRef mod) {
     core_.bindInput(op, inOrigin);
     core_.bindInput(op, inDim);
     core_.bindOutput(op, outCount);
-    routineBindings_[op] = {{inOrigin, inDim}, {outCount}};
+    routineBindings_[op] = {.inputParams  = {inOrigin, inDim},
+                            .outputParams = {outCount}};
     exportSymbol(mod, "tally", op);
   }
 }
@@ -2998,8 +3020,8 @@ CellRef VortexStdLib::makeList(std::initializer_list<CellRef> elements) {
 
 CellRef VortexStdLib::makeList(std::span<const CellRef> elements) {
   CellRef tail = core_.arena().makeCell("[]");
-  for (auto it = elements.rbegin(); it != elements.rend(); ++it) {
-    tail = makeCons(*it, tail);
+  for (unsigned int element : std::views::reverse(elements)) {
+    tail = makeCons(element, tail);
   }
   return tail;
 }
@@ -3409,7 +3431,8 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     core_.bindInput(op, dim);
     core_.bindInput(op, dir);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cursor, dim, dir}, {out}};
+    routineBindings_[op] = {.inputParams  = {cursor, dim, dir},
+                            .outputParams = {out}};
     exportSymbol(mod, "step", op);
   }
 
@@ -3426,7 +3449,8 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     core_.bindInput(op, dir);
     core_.bindInput(op, text);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cursor, dim, dir, text}, {out}};
+    routineBindings_[op] = {.inputParams  = {cursor, dim, dir, text},
+                            .outputParams = {out}};
     exportSymbol(mod, "insert", op);
   }
 
@@ -3441,7 +3465,8 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     core_.bindInput(op, dim);
     core_.bindInput(op, dir);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cursor, dim, dir}, {out}};
+    routineBindings_[op] = {.inputParams  = {cursor, dim, dir},
+                            .outputParams = {out}};
     exportSymbol(mod, "unlink", op);
   }
 
@@ -3458,7 +3483,8 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     core_.bindInput(op, dim);
     core_.bindInput(op, dir);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cellA, cellB, dim, dir}, {out}};
+    routineBindings_[op] = {.inputParams  = {cellA, cellB, dim, dir},
+                            .outputParams = {out}};
     exportSymbol(mod, "link", op);
   }
 
@@ -3469,7 +3495,7 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_DELETE");
     core_.bindInput(op, cell);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cell}, {out}};
+    routineBindings_[op] = {.inputParams = {cell}, .outputParams = {out}};
     exportSymbol(mod, "delete", op);
   }
 
@@ -3482,7 +3508,7 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     core_.bindInput(op, sym);
     core_.bindInput(op, tgt);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{sym, tgt}, {out}};
+    routineBindings_[op] = {.inputParams = {sym, tgt}, .outputParams = {out}};
     exportSymbol(mod, "clone_to_chain", op);
   }
 
@@ -3493,7 +3519,7 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_DUPLICATE");
     core_.bindInput(op, cell);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cell}, {out}};
+    routineBindings_[op] = {.inputParams = {cell}, .outputParams = {out}};
     exportSymbol(mod, "duplicate", op);
   }
 
@@ -3516,7 +3542,7 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, name, op);
   }
 }
@@ -3527,7 +3553,7 @@ void VortexStdLib::buildGCModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#GC_SWEEP");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "sweep", op);
   }
 }
@@ -3544,7 +3570,8 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     core_.bindInput(op, dimY);
     core_.bindInput(op, dimZ);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{dimX, dimY, dimZ}, {out}};
+    routineBindings_[op] = {.inputParams  = {dimX, dimY, dimZ},
+                            .outputParams = {out}};
     exportSymbol(mod, "view", op);
   }
 
@@ -3553,7 +3580,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_SWAP_AXES");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "swap_axes", op);
   }
 
@@ -3562,7 +3589,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_CYCLE_DIMS_FORWARD");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "cycle_dims_forward", op);
   }
 
@@ -3571,7 +3598,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_CYCLE_DIMS_BACKWARD");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "cycle_dims_backward", op);
   }
 
@@ -3580,7 +3607,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_EXECUTION");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "bundle_execution", op);
   }
 
@@ -3589,7 +3616,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_SCOPE");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "bundle_scope", op);
   }
 
@@ -3598,7 +3625,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_CONTRACT");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "bundle_contract", op);
   }
 
@@ -3607,7 +3634,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_LOGIC");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "bundle_logic", op);
   }
 
@@ -3616,7 +3643,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_STDLIB");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "bundle_stdlib", op);
   }
 
@@ -3655,7 +3682,7 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, name, op);
   }
 }
@@ -3670,7 +3697,8 @@ void VortexStdLib::buildNavModule(CellRef mod) {
     core_.bindInput(op, cursor);
     core_.bindInput(op, dim);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cursor, dim}, {out}};
+    routineBindings_[op] = {.inputParams  = {cursor, dim},
+                            .outputParams = {out}};
     exportSymbol(mod, "hop_head", op);
   }
 
@@ -3683,7 +3711,8 @@ void VortexStdLib::buildNavModule(CellRef mod) {
     core_.bindInput(op, cursor);
     core_.bindInput(op, dim);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{cursor, dim}, {out}};
+    routineBindings_[op] = {.inputParams  = {cursor, dim},
+                            .outputParams = {out}};
     exportSymbol(mod, "hop_tail", op);
   }
 
@@ -3692,7 +3721,7 @@ void VortexStdLib::buildNavModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#NAV_JUMP_HOME");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "jump_home", op);
   }
 
@@ -3717,7 +3746,7 @@ void VortexStdLib::buildNavModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, name, op);
   }
 }
@@ -3728,7 +3757,7 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_DOC_TEXT");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "doc_text", op);
   }
 
@@ -3737,7 +3766,7 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_STORE_VERSION");
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, "store_version", op);
   }
 
@@ -3750,7 +3779,8 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     core_.bindInput(op, inCell);
     core_.bindInput(op, inOff);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inCell, inOff}, {out}};
+    routineBindings_[op] = {.inputParams  = {inCell, inOff},
+                            .outputParams = {out}};
     exportSymbol(mod, "cell_to_doc", op);
   }
 
@@ -3763,7 +3793,8 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     core_.bindInput(op, inOff);
     core_.bindInput(op, inLen);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inOff, inLen}, {out}};
+    routineBindings_[op] = {.inputParams  = {inOff, inLen},
+                            .outputParams = {out}};
     exportSymbol(mod, "doc_to_cell", op);
   }
 
@@ -3774,7 +3805,7 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_CELL_ROYALTY");
     core_.bindInput(op, inCell);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inCell}, {out}};
+    routineBindings_[op] = {.inputParams = {inCell}, .outputParams = {out}};
     exportSymbol(mod, "cell_royalty", op);
   }
 
@@ -3785,7 +3816,7 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_CELL_UNLOCK");
     core_.bindInput(op, inCell);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{inCell}, {out}};
+    routineBindings_[op] = {.inputParams = {inCell}, .outputParams = {out}};
     exportSymbol(mod, "cell_unlock", op);
   }
 }
@@ -4033,7 +4064,7 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
   CellRef firstModuleCell = noCell;
   for (const auto &[srcRef, dstRef] : cellMapping) {
     std::string text = core_.arena().textOf(dstRef);
-    if (text.starts_with("std:") && text.find('/') == std::string::npos) {
+    if (text.starts_with("std:") && !text.contains('/')) {
       if (firstModuleCell == noCell) {
         firstModuleCell = dstRef;
       }
@@ -4155,7 +4186,7 @@ void VortexStdLib::buildXuduModule(CellRef mod) {
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
     core_.bindOutput(op, out);
-    routineBindings_[op] = {{}, {out}};
+    routineBindings_[op] = {.inputParams = {}, .outputParams = {out}};
     exportSymbol(mod, name, op);
   }
 }

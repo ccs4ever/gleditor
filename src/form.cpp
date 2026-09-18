@@ -728,14 +728,15 @@ void Form::drawFrame(FrameContext &ctx) {
         // rather than the bottom, which is what the canvas draws in. Only for
         // fields that take text -- a button raises no keyboard.
         const std::scoped_lock locker(guard);
-        typingAt =
-            Kind::Text == one.kind || Kind::Secret == one.kind
-                ? std::optional<InputArea>{InputArea{
-                      static_cast<int>(boxLeft),
-                      static_cast<int>(static_cast<float>(ctx.screenHeight) -
-                                       (top + lineGap)),
-                      static_cast<int>(boxWidth), static_cast<int>(boxHeight)}}
-                : std::nullopt;
+        typingAt = Kind::Text == one.kind || Kind::Secret == one.kind
+                       ? std::optional<InputArea>{InputArea{
+                             .x = static_cast<int>(boxLeft),
+                             .y = static_cast<int>(
+                                 static_cast<float>(ctx.screenHeight) -
+                                 (top + lineGap)),
+                             .width  = static_cast<int>(boxWidth),
+                             .height = static_cast<int>(boxHeight)}}
+                       : std::nullopt;
       }
 
       if (focused && (Kind::Text == one.kind || Kind::Secret == one.kind)) {

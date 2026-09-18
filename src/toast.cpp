@@ -116,14 +116,14 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   const auto text  = Doc::VBORow::color(236);
 
   std::vector<Doc::VBORow> rows;
-  rows.push_back(
-      Doc::VBORow{{panelWidth / 2.0F, panelHeight / 2.0F},
-                  Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
-                  0,
-                  Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
-                                   static_cast<unsigned int>(panelHeight),
-                                   render::tagKindOverlay),
-                  Doc::VBORow::paperAt(panel, 0)});
+  rows.push_back(Doc::VBORow{
+      .pos        = {panelWidth / 2.0F, panelHeight / 2.0F},
+      .foreground = Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
+      .atlas      = 0,
+      .quad       = Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
+                                     static_cast<unsigned int>(panelHeight),
+                                     render::tagKindOverlay),
+      .paper      = Doc::VBORow::paperAt(panel, 0)});
 
   rows.reserve(shaping.glyphs.size() + 1);
   for (const auto &g : shaping.glyphs) {
@@ -137,17 +137,17 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
     const auto left = padding + g.clusterLeft;
     const auto top  = padding + static_cast<float>(textHeight) - g.clusterTop;
 
-    rows.push_back(
-        Doc::VBORow{{left + (width / 2.0F), top - (height / 2.0F)},
-                    Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
-                    Doc::VBORow::atlasAt(
-                        static_cast<unsigned int>(glyph.texCoords.topLeft.x),
-                        static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
-                    Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
-                                     static_cast<unsigned int>(width),
-                                     static_cast<unsigned int>(height),
-                                     render::tagKindOverlay),
-                    Doc::VBORow::paperAt(panel, 0)});
+    rows.push_back(Doc::VBORow{
+        .pos        = {left + (width / 2.0F), top - (height / 2.0F)},
+        .foreground = Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
+        .atlas      = Doc::VBORow::atlasAt(
+            static_cast<unsigned int>(glyph.texCoords.topLeft.x),
+            static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
+        .quad  = Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
+                                  static_cast<unsigned int>(width),
+                                  static_cast<unsigned int>(height),
+                                  render::tagKindOverlay),
+        .paper = Doc::VBORow::paperAt(panel, 0)});
   }
 
   while (toasts.size() >= maxVisible) {
@@ -271,8 +271,8 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
     const glm::mat4 model =
         glm::translate(glm::mat4(1.0F), glm::vec3(marginX, penY, 0.0F));
     const render::DrawUniforms uniforms{
-        toArray(projection * model),
-        fadeFactor(toast.postedAt, toast.expiresAt, now)};
+        .mvp     = toArray(projection * model),
+        .opacity = fadeFactor(toast.postedAt, toast.expiresAt, now)};
     state.device->drawGlyphs(uniforms, pool->buffer(),
                              pool->byteOffset(toast.backing),
                              toast.instanceCount);

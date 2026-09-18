@@ -110,7 +110,7 @@ inline SpanWid SpanDsp::act(const SpanWid &w) const noexcept {
                           : (w.maxEnd > static_cast<uint64_t>(-delta)
                                  ? w.maxEnd - static_cast<uint64_t>(-delta)
                                  : 0ULL);
-  return SpanWid{newMin, newMax, w.count};
+  return SpanWid{.minStart = newMin, .maxEnd = newMax, .count = w.count};
 }
 
 static_assert(DisplacementMonoid<SpanDsp>);

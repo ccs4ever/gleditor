@@ -102,51 +102,54 @@ void ZigzagVisualizer::populateFallbackStructure() {
   ZzStructureDocument doc;
   doc.meta.name = "Xanadu ZigZag Sample Structure";
   doc.focus     = 1;
-  doc.view      = ViewAxisBinding{"d.1", "d.2", "d.3"};
+  doc.view      = ViewAxisBinding{
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
 
   Cell c1;
   c1.id         = 1;
   c1.data       = std::string{"Root Focus Node"};
   c1.role       = "root";
-  c1.dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}};
+  c1.dimensions = {{"d.1", {.pos = 2, .neg = 0}},
+                   {"d.2", {.pos = 3, .neg = 0}}};
   doc.cells[1]  = std::move(c1);
 
   Cell c2;
   c2.id         = 2;
   c2.data       = std::string{"Horizontal Cell"};
   c2.role       = "item";
-  c2.dimensions = {{"d.1", {0, 1}}};
+  c2.dimensions = {{"d.1", {.pos = 0, .neg = 1}}};
   doc.cells[2]  = std::move(c2);
 
   Cell c3;
   c3.id         = 3;
   c3.data       = std::string{"Vertical Cell"};
   c3.role       = "item";
-  c3.dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}};
+  c3.dimensions = {{"d.2", {.pos = 0, .neg = 1}},
+                   {"d.3", {.pos = 4, .neg = 0}}};
   doc.cells[3]  = std::move(c3);
 
   Cell c4;
   c4.id         = 4;
   c4.data       = std::string{"Depth Layer Cell"};
   c4.role       = "detail";
-  c4.dimensions = {{"d.3", {0, 3}}};
+  c4.dimensions = {{"d.3", {.pos = 0, .neg = 3}}};
   doc.cells[4]  = std::move(c4);
 
   DimensionMeta dm1;
   dm1.label                 = "Sequence";
-  dm1.color                 = RgbColor{0.89F, 0.36F, 0.36F};
+  dm1.color                 = RgbColor{.r = 0.89F, .g = 0.36F, .b = 0.36F};
   dm1.spacing               = 2.4F;
   doc.dimension_meta["d.1"] = std::move(dm1);
 
   DimensionMeta dm2;
   dm2.label                 = "Detail";
-  dm2.color                 = RgbColor{0.35F, 0.76F, 0.48F};
+  dm2.color                 = RgbColor{.r = 0.35F, .g = 0.76F, .b = 0.48F};
   dm2.spacing               = 1.8F;
   doc.dimension_meta["d.2"] = std::move(dm2);
 
   DimensionMeta dm3;
   dm3.label                 = "Reference";
-  dm3.color                 = RgbColor{0.31F, 0.62F, 0.88F};
+  dm3.color                 = RgbColor{.r = 0.31F, .g = 0.62F, .b = 0.88F};
   dm3.spacing               = 2.0F;
   doc.dimension_meta["d.3"] = std::move(dm3);
 
@@ -299,8 +302,8 @@ ZzStructureDocument ZigzagVisualizer::document() const {
     doc.dimension_meta[dim] = DimensionMeta{
         .label       = vis.label,
         .description = "",
-        .color       = RgbColor{vis.color.r, vis.color.g, vis.color.b},
-        .spacing     = vis.spacing / 100.0F,
+        .color = RgbColor{.r = vis.color.r, .g = vis.color.g, .b = vis.color.b},
+        .spacing = vis.spacing / 100.0F,
     };
   }
   return doc;
@@ -1230,7 +1233,7 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 }
 
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
-                              RenderState &) {
+                              RenderState & /*state*/) {
   if (pick.tag.kind != render::tagKindOverlay || !engine_ ||
       !pick.semanticTarget || !pick.semanticTarget->cellRef ||
       pick.semanticTarget->documentId != engine_->store().documentId().str() ||
@@ -1847,7 +1850,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
 
 bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
                                      const gleditor::a11y::Action action,
-                                     const std::string_view) {
+                                     const std::string_view /*value*/) {
   if (action == gleditor::a11y::Action::Click ||
       action == gleditor::a11y::Action::Focus) {
     const auto localId = gleditor::a11y::Ids::localOf(nodeId);
@@ -2549,7 +2552,7 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
 
   std::vector<std::string> filtered;
   for (const auto &item : items) {
-    if (item.find(paletteFilter_) != std::string::npos) {
+    if (item.contains(paletteFilter_)) {
       filtered.push_back(item);
     }
   }
@@ -2688,7 +2691,7 @@ bool ZigzagVisualizer::executeCommandBar() {
       commandBarFeedbackIsError_ = true;
       return false;
     }
-    std::string dimX = dims.size() > 0 ? dims[0] : "";
+    std::string dimX = !dims.empty() ? dims[0] : "";
     std::string dimY = dims.size() > 1 ? dims[1] : "";
     std::string dimZ = dims.size() > 2 ? dims[2] : "";
     if (vortex_host_) {
@@ -2722,18 +2725,18 @@ bool ZigzagVisualizer::executeCommandBar() {
     std::string argStr;
     while (iss >> argStr) {
       try {
-        if (argStr.find('.') != std::string::npos) {
-          args.push_back(std::stod(argStr));
+        if (argStr.contains('.')) {
+          args.emplace_back(std::stod(argStr));
         } else {
-          args.push_back(static_cast<std::int64_t>(std::stoll(argStr)));
+          args.emplace_back(static_cast<std::int64_t>(std::stoll(argStr)));
         }
       } catch (...) {
-        args.push_back(argStr);
+        args.emplace_back(argStr);
       }
     }
     if (fnPath == "std:ui/view") {
       std::string dimX =
-          args.size() > 0 && std::holds_alternative<std::string>(args[0])
+          !args.empty() && std::holds_alternative<std::string>(args[0])
               ? std::get<std::string>(args[0])
               : "";
       std::string dimY =
@@ -2774,7 +2777,8 @@ bool ZigzagVisualizer::executeCommandBar() {
   if (text.starts_with(":export-lib ") || text.starts_with(":export-lib\t")) {
     std::string_view rest = text.substr(12);
     std::istringstream iss{std::string(rest)};
-    std::string modName, destPath;
+    std::string modName;
+    std::string destPath;
     if (!(iss >> modName >> destPath)) {
       commandBarFeedback_        = "Usage: :export-lib <module> <path>";
       commandBarFeedbackIsError_ = true;

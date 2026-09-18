@@ -72,7 +72,7 @@ private:
   Token currentToken();
   Token peekToken();
   Token advance();
-  bool check(TokenKind kind) const;
+  [[nodiscard]] bool check(TokenKind kind) const;
   bool match(TokenKind kind);
   Token consume(TokenKind kind, std::string_view errorMessage);
   bool isNextTokenComparisonOperand();

@@ -772,10 +772,11 @@ public:
     return std::make_shared<Doc>(renderer, device, model, source, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
+  Doc(RendererRef renderer, render::RenderDevice *device,
+      const glm::mat4 &model, Private /*_priv*/);
   Doc(const RendererRef &renderer, render::RenderDevice *device,
-      const glm::mat4 &model, Private);
-  Doc(const RendererRef &renderer, render::RenderDevice *device,
-      const glm::mat4 &model, const gleditor::TextSource &source, Private);
+      const glm::mat4 &model, const gleditor::TextSource &source,
+      Private /*_priv*/);
   ~Doc() override = default;
   void load(const gleditor::TextSource &source);
   void makePages();

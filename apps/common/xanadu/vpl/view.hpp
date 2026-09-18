@@ -41,7 +41,7 @@ public:
       : origin_(origin) {
     axes_.reserve(dims.size());
     for (zigzag::DimRef d : dims) {
-      axes_.push_back(zigzag::DirectedDim{d, zigzag::DimVector::POS});
+      axes_.emplace_back(d, zigzag::DimVector::POS);
     }
   }
 
@@ -322,8 +322,8 @@ public:
 
 private:
   zigzag::CellRef origin_{zigzag::noCell};
-  std::vector<zigzag::DirectedDim> axes_{};
-  std::vector<std::size_t> extents_{};
+  std::vector<zigzag::DirectedDim> axes_;
+  std::vector<std::size_t> extents_;
   bool isRagged_{false};
 
   bool isEnclosed_{false};
@@ -332,7 +332,7 @@ private:
   // Scalar payload (for valence 0 numbers / strings)
   double scalarFloat_{0.0};
   std::int64_t scalarInt_{0};
-  std::string scalarString_{};
+  std::string scalarString_;
   bool isScalar_{false};
   bool isFloat_{false};
   bool isString_{false};

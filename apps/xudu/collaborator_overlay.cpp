@@ -14,6 +14,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
+#include <utility>
 
 #include "session.hpp"
 
@@ -22,7 +23,8 @@ namespace xudu {
 CollaboratorCaretOverlay::CollaboratorCaretOverlay(Session &session,
                                                    RendererRef renderer,
                                                    std::string fontName)
-    : session_(session), renderer_(renderer), fontName_(std::move(fontName)) {}
+    : session_(session), renderer_(std::move(renderer)),
+      fontName_(std::move(fontName)) {}
 
 CollaboratorCaretOverlay::~CollaboratorCaretOverlay() = default;
 
@@ -157,12 +159,11 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
               ctx.viewProjection, *selStartWorld, screenW, screenH);
           const auto selEndScreen = gleditor::spatial::projectToScreen(
               ctx.viewProjection, *selEndWorld, screenW, screenH);
-          const float x0 = std::min(selStartScreen.x, selEndScreen.x);
-          const float x1 = std::max(selStartScreen.x, selEndScreen.x);
-          const float y0 = std::min(selStartScreen.y, selEndScreen.y);
-          const float y1 = std::max(selStartScreen.y, selEndScreen.y);
-          const std::uint8_t selA =
-              static_cast<std::uint8_t>(55.0F * vis.alpha);
+          const float x0  = std::min(selStartScreen.x, selEndScreen.x);
+          const float x1  = std::max(selStartScreen.x, selEndScreen.x);
+          const float y0  = std::min(selStartScreen.y, selEndScreen.y);
+          const float y1  = std::max(selStartScreen.y, selEndScreen.y);
+          const auto selA = static_cast<std::uint8_t>(55.0F * vis.alpha);
           const std::uint32_t selCol = (collab.colorRgba & 0xFFFFFF00) | selA;
           canvas_->addRect(x0, y0, std::max(x1 - x0, 2.0F),
                            std::max(y1 - y0, 14.0F), selCol);
@@ -171,8 +172,8 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
     }
 
     // Caret glowing vertical bar
-    const std::uint8_t a        = static_cast<std::uint8_t>(255.0F * vis.alpha);
-    const std::uint8_t glowA    = static_cast<std::uint8_t>(90.0F * vis.alpha);
+    const auto a                = static_cast<std::uint8_t>(255.0F * vis.alpha);
+    const auto glowA            = static_cast<std::uint8_t>(90.0F * vis.alpha);
     const std::uint32_t coreCol = (collab.colorRgba & 0xFFFFFF00) | a;
     const std::uint32_t glowCol = (collab.colorRgba & 0xFFFFFF00) | glowA;
 
@@ -198,7 +199,7 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const float badgeX     = vis.top.x - 4.0F;
     const float badgeY     = vis.top.y + 4.0F;
 
-    const std::uint8_t bgA    = static_cast<std::uint8_t>(220.0F * vis.alpha);
+    const auto bgA            = static_cast<std::uint8_t>(220.0F * vis.alpha);
     const std::uint32_t bgCol = 0x0F172A00 | bgA;
     canvas_->addRect(badgeX, badgeY, badgeW, badgeH, bgCol);
     canvas_->addLine(badgeX, badgeY, badgeX + badgeW, badgeY, 1.0F, coreCol);

@@ -60,8 +60,8 @@ public:
     std::string type{"cell"};
     xanadu::ResolutionStatus resolutionStatus{
         xanadu::ResolutionStatus::VerifiedBytes};
-    std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
-    std::optional<xanadu::PublishedHoleRecord> holeRecord{};
+    std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo;
+    std::optional<xanadu::PublishedHoleRecord> holeRecord;
   };
 
   // -- Topological Synchronization ------------------------------------------

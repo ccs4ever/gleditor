@@ -55,8 +55,9 @@ Session::Session(std::string aStorePath,
   auto primaryStore = std::make_unique<Store>(std::move(scroll));
   primaryStore->load(aStorePath);
   primaryStore->setContentSource(&contentSource);
-  stores.push_back(
-      StoreEntry{std::move(primaryStore), std::move(aStorePath), false});
+  stores.push_back(StoreEntry{.store       = std::move(primaryStore),
+                              .path        = std::move(aStorePath),
+                              .isTemporary = false});
 }
 
 const UserPermascroll *Session::userPermascroll() const {
@@ -478,8 +479,8 @@ const MutableKeys &Session::identity() {
     std::string secretHex;
     in >> publicHex >> secretHex;
     if (!publicHex.empty() && !secretHex.empty()) {
-      keys = MutableKeys{PublicKey::fromHex(publicHex),
-                         SecretKey::fromHex(secretHex)};
+      keys = MutableKeys{.publicKey = PublicKey::fromHex(publicHex),
+                         .secretKey = SecretKey::fromHex(secretHex)};
       return *keys;
     }
   }
@@ -695,8 +696,9 @@ std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
   } else {
     aStore->setContentSource(&contentSource);
   }
-  stores.push_back(
-      StoreEntry{std::move(aStore), std::move(aPath), aIsTemporary});
+  stores.push_back(StoreEntry{.store       = std::move(aStore),
+                              .path        = std::move(aPath),
+                              .isTemporary = aIsTemporary});
   return stores.size() - 1U;
 }
 
@@ -763,7 +765,8 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
         scroll.segments[0].mimeType = piece.mimeType;
       }
       const auto sId = newStore->addScroll(scroll);
-      span           = PrimediaSpan{sId, 0, piece.bytes.size()};
+      span =
+          PrimediaSpan{.scroll = sId, .start = 0, .length = piece.bytes.size()};
       Op op;
       op.kind  = OpKind::Transclude;
       op.at    = at;
@@ -897,7 +900,12 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 void Session::viewOpened(const MicroversionId &version,
                          const std::size_t storeIndex) {
   const auto &st = store(storeIndex);
-  open.push_back(OpenView{version, storeIndex, st.rebuild(version), {}, 0, {}});
+  open.push_back(OpenView{.version        = version,
+                          .storeIndex     = storeIndex,
+                          .pieces         = st.rebuild(version),
+                          .decorations    = {},
+                          .decoratedAt    = 0,
+                          .uncommittedLog = {}});
   invalidate();
 }
 
@@ -1044,9 +1052,9 @@ MicroversionId Session::openSystemDoc(const SystemDocKind kind) {
   if (ver.isZero()) {
     ver = st.latest();
   }
-  for (std::size_t i = 0; i < open.size(); ++i) {
-    if (open[i].storeIndex == sIdx) {
-      return open[i].version;
+  for (auto &i : open) {
+    if (i.storeIndex == sIdx) {
+      return i.version;
     }
   }
   viewOpened(ver, sIdx);
@@ -1168,7 +1176,7 @@ ImageFitSize fitWithinBox(const float naturalWidth, const float naturalHeight,
     width *= maxHeight / height;
     height = maxHeight;
   }
-  return {width, height};
+  return {.width = width, .height = height};
 }
 
 /// Both placeholderFor() (how much room to reserve) and ImageOverlay::place()
@@ -1219,8 +1227,8 @@ ImageFitSize videoFitSize(const float naturalWidth, const float naturalHeight) {
   const auto viewport =
       fitWithinBox(naturalWidth, naturalHeight, Doc::textWidthPx,
                    Doc::textHeightPx - gleditor::MediaWidget::chromeHeightPx);
-  return {viewport.width,
-          viewport.height + gleditor::MediaWidget::chromeHeightPx};
+  return {.width  = viewport.width,
+          .height = viewport.height + gleditor::MediaWidget::chromeHeightPx};
 }
 
 /// The widget size for one media span, by MIME type: an image or SVG fit at
@@ -1265,7 +1273,8 @@ ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
     const auto [natW, natH] = videoNaturalSizeFor(bytes);
     return videoFitSize(natW, natH);
   }
-  return {Session::audioCardWidthPx, Session::audioCardHeightPx};
+  return {.width  = Session::audioCardWidthPx,
+          .height = Session::audioCardHeightPx};
 }
 
 /// What sourceFor() anchors one media span's LayoutBox to in a document's
@@ -1324,8 +1333,9 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
     if (0 == length) {
       return;
     }
-    const auto bytes = st.read(PrimediaSpan{run.scroll, start, length});
-    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
+    const auto bytes = st.read(
+        PrimediaSpan{.scroll = run.scroll, .start = start, .length = length});
+    const auto mime = magic.identifyBuffer(bytes.data(), bytes.size());
     if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
       out.push_back(ClassifiedStretch{.isMedia         = true,
                                       .start           = start,
@@ -1399,9 +1409,10 @@ Session::sourceFor(const MicroversionId &version,
     }
     for (const auto &stretch : classifyRun(st, run, magic)) {
       if (!stretch.isMedia) {
-        const auto span =
-            PrimediaSpan{run.scroll, stretch.start, stretch.length};
-        const auto res = st.resolve(span);
+        const auto span = PrimediaSpan{.scroll = run.scroll,
+                                       .start  = stretch.start,
+                                       .length = stretch.length};
+        const auto res  = st.resolve(span);
         if (res.status == ResolutionStatus::VerifiedBytes) {
           concatext += res.text;
         } else if (res.status == ResolutionStatus::TranscopyrightLocked ||
@@ -1416,8 +1427,10 @@ Session::sourceFor(const MicroversionId &version,
       // compressed image or media file cannot be sized (or, for images,
       // meaningfully shown at all -- see ImageOverlay's own container
       // fallback) from a slice of it alone.
-      const auto containerBytes = st.read(PrimediaSpan{
-          run.scroll, stretch.containerStart, stretch.containerLength});
+      const auto containerBytes =
+          st.read(PrimediaSpan{.scroll = run.scroll,
+                               .start  = stretch.containerStart,
+                               .length = stretch.containerLength});
       const std::span<const std::uint8_t> containerSpan(
           reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
           containerBytes.size());
@@ -1520,14 +1533,18 @@ Session::mediaSpansFor(const MicroversionId &version,
         docOffset += static_cast<std::uint32_t>(stretch.length);
         continue;
       }
-      const auto containerBytes = st.read(PrimediaSpan{
-          run.scroll, stretch.containerStart, stretch.containerLength});
+      const auto containerBytes =
+          st.read(PrimediaSpan{.scroll = run.scroll,
+                               .start  = stretch.containerStart,
+                               .length = stretch.containerLength});
       const std::span<const std::uint8_t> containerSpan(
           reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
           containerBytes.size());
 
       MediaSpanInfo info;
-      info.span      = PrimediaSpan{run.scroll, stretch.start, stretch.length};
+      info.span      = PrimediaSpan{.scroll = run.scroll,
+                                    .start  = stretch.start,
+                                    .length = stretch.length};
       info.docOffset = docOffset;
       info.mime      = stretch.mime;
       info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(stretch.mime);
@@ -1638,7 +1655,7 @@ Session::historyOf(const std::uint32_t docIndex) const {
   // Ancestral path leading to current version
   std::vector<MicroversionId> history = curVersion.path();
   if (history.empty()) {
-    history.push_back(MicroversionId{});
+    history.emplace_back();
   }
 
   // Follow forward descendants along main sequential branch
@@ -2174,8 +2191,10 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
     }
     for (const auto &piece : open[other].pieces.pieces()) {
       for (const auto &extent : mine.occurrencesOf(piece)) {
-        found.push_back(gleditor::SpanStyle{extent.start, extent.end,
-                                            Session::transclusionColour});
+        found.push_back(
+            gleditor::SpanStyle{.start  = extent.start,
+                                .end    = extent.end,
+                                .colour = Session::transclusionColour});
       }
     }
   }
@@ -2194,8 +2213,8 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       for (const auto *const ends : {&link.left, &link.right}) {
         for (const auto &span : *ends) {
           for (const auto &extent : mine.occurrencesOf(span)) {
-            found.push_back(
-                gleditor::SpanStyle{extent.start, extent.end, colour});
+            found.push_back(gleditor::SpanStyle{
+                .start = extent.start, .end = extent.end, .colour = colour});
           }
         }
       }
@@ -2218,13 +2237,15 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
                                 ? colourForHole(res.holeRecord->reason)
                                 : Session::redactionColour;
         for (const auto &extent : mine.occurrencesOf(piece)) {
-          found.push_back(
-              gleditor::SpanStyle{extent.start, extent.end, colour});
+          found.push_back(gleditor::SpanStyle{
+              .start = extent.start, .end = extent.end, .colour = colour});
         }
       } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
         for (const auto &extent : mine.occurrencesOf(piece)) {
           found.push_back(gleditor::SpanStyle{
-              extent.start, extent.end, Session::transcopyrightLockedColour});
+              .start  = extent.start,
+              .end    = extent.end,
+              .colour = Session::transcopyrightLockedColour});
         }
       }
     }
@@ -2270,8 +2291,11 @@ void ImageOverlay::place(std::shared_ptr<Doc> doc,
       imageFitSize(static_cast<float>(resource->width),
                    static_cast<float>(resource->height));
 
-  placements.push_back(
-      Placement{std::move(doc), docOffset, *resource, width, height});
+  placements.push_back(Placement{.doc       = std::move(doc),
+                                 .docOffset = docOffset,
+                                 .image     = *resource,
+                                 .width     = width,
+                                 .height    = height});
 }
 
 std::optional<ImageOverlay::Corner>
@@ -2288,7 +2312,7 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
   if (!box.has_value()) {
     return std::nullopt;
   }
-  return Corner{box->pageIndex, box->x, box->y};
+  return Corner{.pageIndex = box->pageIndex, .x = box->x, .y = box->y};
 }
 
 void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {

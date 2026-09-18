@@ -156,7 +156,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   }
 
   case AnchorKind::LiteralCellId: {
-    zigzag::CellRef ref = static_cast<zigzag::CellRef>(anchor.cellId);
+    auto ref = static_cast<zigzag::CellRef>(anchor.cellId);
     if (core_->arena().contains(ref)) {
       results.push_back(ref);
     }
@@ -634,10 +634,10 @@ VQLEngine::evaluateStep(const PathStep &step,
 
   // Range Clamp [start, end]
   if (step.rangeClamp.has_value() && !stepOutput.empty()) {
-    const auto &clamp  = *step.rangeClamp;
-    std::int64_t total = static_cast<std::int64_t>(stepOutput.size());
-    std::int64_t s     = clamp.start;
-    std::int64_t e     = clamp.end.value_or(s);
+    const auto &clamp = *step.rangeClamp;
+    auto total        = static_cast<std::int64_t>(stepOutput.size());
+    std::int64_t s    = clamp.start;
+    std::int64_t e    = clamp.end.value_or(s);
 
     std::int64_t from = (s < 0) ? (total + s) : (s - 1);
     std::int64_t to   = (e < 0) ? (total + e) : (e - 1);

@@ -130,49 +130,49 @@ VplView VPLEngine::evaluate(std::string_view source) {
   Parser parser(source);
   auto program = parser.parseProgram();
   if (!program) {
-    return VplView();
+    return {};
   }
   return evaluate(*program);
 }
 
 VplView VPLEngine::evaluate(const AstNode &node) {
-  if (auto s = dynamic_cast<const ScalarExpr *>(&node)) {
+  if (const auto *s = dynamic_cast<const ScalarExpr *>(&node)) {
     return evalScalar(*s);
   }
-  if (auto v = dynamic_cast<const VectorExpr *>(&node)) {
+  if (const auto *v = dynamic_cast<const VectorExpr *>(&node)) {
     return evalVector(*v);
   }
-  if (auto d = dynamic_cast<const DimensionExpr *>(&node)) {
+  if (const auto *d = dynamic_cast<const DimensionExpr *>(&node)) {
     return evalDimension(*d);
   }
-  if (auto id = dynamic_cast<const IdentifierExpr *>(&node)) {
+  if (const auto *id = dynamic_cast<const IdentifierExpr *>(&node)) {
     return evalIdentifier(*id);
   }
-  if (auto m = dynamic_cast<const MonadicExpr *>(&node)) {
+  if (const auto *m = dynamic_cast<const MonadicExpr *>(&node)) {
     return evalMonadic(*m);
   }
-  if (auto dy = dynamic_cast<const DyadicExpr *>(&node)) {
+  if (const auto *dy = dynamic_cast<const DyadicExpr *>(&node)) {
     return evalDyadic(*dy);
   }
-  if (auto a = dynamic_cast<const AdverbExpr *>(&node)) {
+  if (const auto *a = dynamic_cast<const AdverbExpr *>(&node)) {
     return evalAdverb(*a);
   }
-  if (auto c = dynamic_cast<const ConjunctionExpr *>(&node)) {
+  if (const auto *c = dynamic_cast<const ConjunctionExpr *>(&node)) {
     return evalConjunction(*c);
   }
-  if (auto as = dynamic_cast<const AssignExpr *>(&node)) {
+  if (const auto *as = dynamic_cast<const AssignExpr *>(&node)) {
     return evalAssign(*as);
   }
-  if (auto idx = dynamic_cast<const IndexingExpr *>(&node)) {
+  if (const auto *idx = dynamic_cast<const IndexingExpr *>(&node)) {
     return evalIndexing(*idx);
   }
-  if (auto q = dynamic_cast<const QuadExpr *>(&node)) {
+  if (const auto *q = dynamic_cast<const QuadExpr *>(&node)) {
     return evalQuad(*q);
   }
-  if (auto p = dynamic_cast<const Program *>(&node)) {
+  if (const auto *p = dynamic_cast<const Program *>(&node)) {
     return evalProgram(*p);
   }
-  return VplView();
+  return {};
 }
 
 VplView VPLEngine::evalScalar(const ScalarExpr &expr) {
@@ -187,7 +187,7 @@ VplView VPLEngine::evalScalar(const ScalarExpr &expr) {
 
 VplView VPLEngine::evalVector(const VectorExpr &expr) {
   if (expr.elements().empty()) {
-    return VplView();
+    return {};
   }
 
   std::vector<VplView> elemViews;
@@ -220,7 +220,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
         axes.push_back(ev.axes()[0]);
       }
     }
-    return VplView(zigzag::noCell, std::move(axes));
+    return {zigzag::noCell, std::move(axes)};
   }
 
   // All scalar strings
@@ -244,14 +244,13 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
                                     : static_cast<double>(ev.scalarInt()));
       }
       return mintRank(vals, defaultDim());
-    } else {
-      std::vector<std::int64_t> vals;
-      vals.reserve(elemViews.size());
-      for (const auto &ev : elemViews) {
-        vals.push_back(ev.scalarInt());
-      }
-      return mintRank(vals, defaultDim());
     }
+    std::vector<std::int64_t> vals;
+    vals.reserve(elemViews.size());
+    for (const auto &ev : elemViews) {
+      vals.push_back(ev.scalarInt());
+    }
+    return mintRank(vals, defaultDim());
   }
 
   // Mixed or sub-views: mint cells and link
@@ -272,7 +271,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
     }
   }
 
-  if (cells.empty()) return VplView();
+  if (cells.empty()) return {};
 
   zigzag::DimRef axis = defaultDim();
   for (std::size_t i = 1; i < cells.size(); ++i) {
@@ -291,7 +290,7 @@ VplView VPLEngine::evalDimension(const DimensionExpr &expr) {
 
 VplView VPLEngine::evalIdentifier(const IdentifierExpr &expr) {
   if (expr.name() == "H") {
-    return VplView(core_->home(), std::vector<zigzag::DirectedDim>{});
+    return {core_->home(), std::vector<zigzag::DirectedDim>{}};
   }
   if (expr.name().starts_with("d.")) {
     zigzag::DimRef dim = resolveDimension(expr.name());
@@ -302,7 +301,7 @@ VplView VPLEngine::evalIdentifier(const IdentifierExpr &expr) {
   if (it != env_.end()) {
     return it->second;
   }
-  return VplView();
+  return {};
 }
 
 VplView VPLEngine::evalAssign(const AssignExpr &expr) {
@@ -320,7 +319,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
   VplView idxView = evaluate(*expr.indices()[0]);
   auto cells      = target.collectCells(arena());
   if (cells.empty()) {
-    return VplView();
+    return {};
   }
 
   // Single scalar integer index (e.g. A[3])
@@ -339,7 +338,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
       }
       return VplView::makeScalar(arena().textOf(c), c);
     }
-    return VplView();
+    return {};
   }
 
   // Vector index (e.g. W[⍋≢¨W])
@@ -357,7 +356,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
     }
   }
 
-  if (selected.empty()) return VplView();
+  if (selected.empty()) return {};
 
   zigzag::DimRef axis  = defaultDim();
   zigzag::CellRef head = zigzag::noCell;
@@ -397,10 +396,12 @@ VplView VPLEngine::evalMonadic(const MonadicExpr &expr) {
   VplView right = evaluate(*expr.right());
 
   if (expr.hasCustomVerb()) {
-    if (auto adv = dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
+    if (const auto *adv =
+            dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
       TokenKind adverb = adv->adverb();
       TokenKind verb   = TokenKind::Plus;
-      if (auto v = dynamic_cast<const VerbExpr *>(adv->operand().get())) {
+      if (const auto *v =
+              dynamic_cast<const VerbExpr *>(adv->operand().get())) {
         verb = v->verb();
       }
 
@@ -461,18 +462,19 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
 
   if (expr.hasCustomVerb()) {
     // Outer Product: left ∘.verb right
-    if (auto conj =
+    if (const auto *conj =
             dynamic_cast<const ConjunctionExpr *>(expr.customVerb().get())) {
       if (conj->conjunction() == TokenKind::OuterProduct) {
         TokenKind verb = TokenKind::Plus;
-        if (auto v = dynamic_cast<const VerbExpr *>(conj->left().get())) {
+        if (const auto *v =
+                dynamic_cast<const VerbExpr *>(conj->left().get())) {
           verb = v->verb();
         }
 
         auto leftCells  = left.collectCells(arena());
         auto rightCells = right.collectCells(arena());
         if (leftCells.empty() || rightCells.empty()) {
-          return VplView();
+          return {};
         }
 
         zigzag::DimRef dRow = defaultDim();
@@ -514,7 +516,8 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
     }
 
     // Compress: mask ⌿ view
-    if (auto adv = dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
+    if (const auto *adv =
+            dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
       if (adv->adverb() == TokenKind::Compress) {
         auto maskCells   = left.collectCells(arena());
         auto targetCells = right.collectCells(arena());
@@ -590,7 +593,7 @@ VplView VPLEngine::evalConjunction(const ConjunctionExpr &expr) {
     return mintRank(keys, defaultDim());
   }
 
-  return VplView();
+  return {};
 }
 
 VplView VPLEngine::evalQuad(const QuadExpr &expr) {
@@ -620,7 +623,7 @@ VplView VPLEngine::evalQuad(const QuadExpr &expr) {
       }
       return v;
     }
-    return VplView();
+    return {};
   }
 
   // ⎕READ
@@ -644,7 +647,7 @@ VplView VPLEngine::evalQuad(const QuadExpr &expr) {
     return mintRank(tokens, defaultDim());
   }
 
-  return VplView();
+  return {};
 }
 
 VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
@@ -726,11 +729,11 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
       zigzag::CellRef master =
           arena().cloneMaster(arg.origin(), core_->dims().clone);
       if (master != arg.origin() && master != zigzag::noCell) {
-        return VplView(master, arg.axes());
+        return {master, arg.axes()};
       }
       auto cells = arg.collectCells(arena());
       if (!cells.empty()) {
-        return VplView(cells[0], std::vector<zigzag::DirectedDim>{});
+        return {cells[0], std::vector<zigzag::DirectedDim>{}};
       }
     }
     return arg;
@@ -797,7 +800,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
         t = arena().linked(t, dTrans, zigzag::DimVector::POS);
       }
     }
-    if (trans.empty()) return VplView();
+    if (trans.empty()) return {};
     VplView res(trans[0],
                 {zigzag::DirectedDim{dTrans, zigzag::DimVector::POS}});
     res.setExtents({trans.size()});
@@ -950,7 +953,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   if (verb == TokenKind::Take) {
     std::int64_t n = left.scalarInt();
     auto cells     = right.collectCells(arena());
-    if (cells.empty()) return VplView();
+    if (cells.empty()) return {};
     std::vector<zigzag::CellRef> taken;
     if (n >= 0) {
       std::size_t count = std::min(static_cast<std::size_t>(n), cells.size());
@@ -974,7 +977,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   if (verb == TokenKind::Drop) {
     std::int64_t n = left.scalarInt();
     auto cells     = right.collectCells(arena());
-    if (cells.empty()) return VplView();
+    if (cells.empty()) return {};
     std::vector<zigzag::CellRef> dropped;
     if (n >= 0) {
       std::size_t skip = std::min(static_cast<std::size_t>(n), cells.size());
@@ -1218,7 +1221,7 @@ std::string VPLEngine::cellValueString(zigzag::CellRef cell) const {
 
 VplView VPLEngine::mintRank(const std::vector<double> &values,
                             zigzag::DimRef dim) {
-  if (values.empty()) return VplView();
+  if (values.empty()) return {};
   zigzag::CellRef head = arena().makeScalarCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
@@ -1234,7 +1237,7 @@ VplView VPLEngine::mintRank(const std::vector<double> &values,
 
 VplView VPLEngine::mintRank(const std::vector<std::int64_t> &values,
                             zigzag::DimRef dim) {
-  if (values.empty()) return VplView();
+  if (values.empty()) return {};
   zigzag::CellRef head = arena().makeScalarCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
@@ -1250,7 +1253,7 @@ VplView VPLEngine::mintRank(const std::vector<std::int64_t> &values,
 
 VplView VPLEngine::mintRank(const std::vector<std::string> &values,
                             zigzag::DimRef dim) {
-  if (values.empty()) return VplView();
+  if (values.empty()) return {};
   zigzag::CellRef head = arena().makeCell(values[0]);
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {

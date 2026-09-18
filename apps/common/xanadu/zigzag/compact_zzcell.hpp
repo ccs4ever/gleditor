@@ -169,13 +169,13 @@ struct CompactZZCell {
   std::array<LinkPairs, StandardDimensionCount> standardDimensions{};
 
   /// Dynamic overflow for user-defined dimensions
-  std::vector<DynamicDimensionLink> dynamicDimensions{};
+  std::vector<DynamicDimensionLink> dynamicDimensions;
 
   std::string type{"cell"};
   xanadu::ResolutionStatus resolutionStatus{
       xanadu::ResolutionStatus::VerifiedBytes};
-  std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
-  std::optional<xanadu::PublishedHoleRecord> holeRecord{};
+  std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo;
+  std::optional<xanadu::PublishedHoleRecord> holeRecord;
 
   [[nodiscard]] bool isWithheld() const noexcept {
     return resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted;
@@ -222,7 +222,7 @@ struct CompactZZCell {
         return;
       }
     }
-    dynamicDimensions.push_back({name, lp});
+    dynamicDimensions.push_back({.name = name, .links = lp});
   }
 
   /**

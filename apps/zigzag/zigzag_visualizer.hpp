@@ -363,7 +363,7 @@ public:
   void focusCell(const CellRef cell) override {
     navigateFocusTo(static_cast<CellID>(cell));
   }
-  void activateCell(const CellRef cell) override;
+  void activateCell(CellRef cell) override;
   void setCellActivationCallback(
       xanadu::ZigzagPresentationSurface::CellActivationCallback callback)
       override {
@@ -500,11 +500,11 @@ private:
 
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};
-  std::string paletteFilter_{};
+  std::string paletteFilter_;
 
   bool commandBarVisible_{false};
-  std::string commandBarText_{};
-  std::string commandBarFeedback_{};
+  std::string commandBarText_;
+  std::string commandBarFeedback_;
   bool commandBarFeedbackIsError_{false};
 };
 

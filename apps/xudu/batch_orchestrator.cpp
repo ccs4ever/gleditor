@@ -110,7 +110,7 @@ std::vector<PrimediaSpan> BatchOrchestrator::resolveSingleSpanToken(
     if (query.size() >= 2 && query.front() == '"' && query.back() == '"') {
       query = query.substr(1, query.size() - 2);
     }
-    const auto vList = session.views();
+    const auto &vList = session.views();
     if (docIdx >= vList.size()) {
       throw std::runtime_error("document index out of range: " + token);
     }
@@ -150,7 +150,7 @@ std::vector<PrimediaSpan> BatchOrchestrator::resolveSingleSpanToken(
     start = static_cast<std::uint32_t>(std::stoul(token.substr(0, firstColon)));
     len = static_cast<std::uint32_t>(std::stoul(token.substr(firstColon + 1)));
   }
-  const auto vList = session.views();
+  const auto &vList = session.views();
   if (docIdx >= vList.size()) {
     throw std::runtime_error("document index out of range: " + token);
   }
@@ -172,8 +172,7 @@ BatchOrchestrator::resolveSpans(const Session &session,
       continue;
     }
     auto sp = resolveSingleSpanToken(session, token, leadingDocIdx);
-    if (!token.empty() && token.find(':') != std::string::npos &&
-        !leadingDocIdx) {
+    if (!token.empty() && token.contains(':') && !leadingDocIdx) {
       const auto c = token.find(':');
       if (token.find(':', c + 1) != std::string::npos) {
         leadingDocIdx =
@@ -276,7 +275,8 @@ BatchOrchestrator::execute(Session &session,
             scroll.segments[0].mimeType = piece.mimeType;
           }
           const auto sId = session.store(0).addScroll(scroll);
-          span           = PrimediaSpan{sId, 0, piece.bytes.size()};
+          span           = PrimediaSpan{
+              .scroll = sId, .start = 0, .length = piece.bytes.size()};
           Op op;
           op.kind  = OpKind::Transclude;
           op.at    = at;

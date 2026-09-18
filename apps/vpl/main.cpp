@@ -116,12 +116,12 @@ std::string renderGrid(const VplView &view, const ArenaManifold &arena,
       std::string name   = "d." + std::to_string(i + 1);
       std::string actual = arena.textOf(view.axes()[i].dim);
       if (!actual.empty()) name = actual;
-      viewDims.push_back({name, view.axes()[i].dim});
+      viewDims.push_back({.name = name, .dim = view.axes()[i].dim});
     }
   } else {
-    viewDims.push_back({"d.1", core.dims().dims});
-    viewDims.push_back({"d.spin", core.dims().spin});
-    viewDims.push_back({"d.step", core.dims().step});
+    viewDims.push_back({.name = "d.1", .dim = core.dims().dims});
+    viewDims.push_back({.name = "d.spin", .dim = core.dims().spin});
+    viewDims.push_back({.name = "d.step", .dim = core.dims().step});
   }
 
   return xanadu::vql::AsciiVisualizer::renderCellConnections(arena, cells,
@@ -148,7 +148,7 @@ void printREPLHelp() {
 std::vector<std::string> reorderArgs(int argc, char *argv[]) {
   std::vector<std::string> options;
   std::vector<std::string> positionals;
-  options.push_back(argv[0]);
+  options.emplace_back(argv[0]);
 
   const std::vector<std::string> valueOptions = {
       "-e",      "--eval",   "-f",       "--file",       "-o", "--output-store",
@@ -175,7 +175,7 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
     if (isValueOpt) {
       options.push_back(arg);
       if (i + 1 < argc) {
-        options.push_back(argv[++i]);
+        options.emplace_back(argv[++i]);
       }
     } else if (arg.starts_with("-")) {
       options.push_back(arg);
@@ -261,8 +261,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  std::string vplText = program.get<std::string>("--eval");
-  std::string vplFile = program.get<std::string>("file");
+  auto vplText = program.get<std::string>("--eval");
+  auto vplFile = program.get<std::string>("file");
   if (vplFile.empty()) {
     vplFile = program.get<std::string>("--file");
   }
@@ -277,8 +277,8 @@ int main(int argc, char *argv[]) {
                    (std::istreambuf_iterator<char>()));
   }
 
-  std::string engineMode = program.get<std::string>("--engine");
-  std::string format     = program.get<std::string>("--format");
+  auto engineMode = program.get<std::string>("--engine");
+  auto format     = program.get<std::string>("--format");
   if (program.get<bool>("--grid") || program.get<bool>("--view")) {
     format = "grid";
   }
@@ -294,7 +294,7 @@ int main(int argc, char *argv[]) {
   VPLCompiler compiler(core, vm);
 
   // Optional store loading
-  std::string inputStore = program.get<std::string>("--store");
+  auto inputStore = program.get<std::string>("--store");
   std::shared_ptr<xanadu::UserPermascroll> permascroll =
       std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store store(permascroll);
@@ -367,7 +367,7 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    std::string outStore = program.get<std::string>("--output-store");
+    auto outStore = program.get<std::string>("--output-store");
     if (!outStore.empty()) {
       std::filesystem::create_directories(outStore);
       compiler.exportToStore(store);

@@ -316,17 +316,16 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
           }
         }
         return noCell;
-      } else {
-        if (slot.index > 0) {
-          const auto mDims = metaDimensionsOf(slot.parentCell);
-          if (slot.index - 1 < mDims.size()) {
-            return getOrCreateEphemeralCell(slot.parentCell, slot.index - 1,
-                                            mDims[slot.index - 1],
-                                            slot.totalCount);
-          }
-        }
-        return slot.parentCell;
       }
+      if (slot.index > 0) {
+        const auto mDims = metaDimensionsOf(slot.parentCell);
+        if (slot.index - 1 < mDims.size()) {
+          return getOrCreateEphemeralCell(slot.parentCell, slot.index - 1,
+                                          mDims[slot.index - 1],
+                                          slot.totalCount);
+        }
+      }
+      return slot.parentCell;
     }
 
     if (cloneDim != noCell && dim == cloneDim) {
@@ -580,7 +579,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
   traversalScratch_.visitedSet.clear();
   traversalScratch_.queue.clear();
 
-  traversalScratch_.queue.push_back({startId, 0});
+  traversalScratch_.queue.emplace_back(startId, 0);
   traversalScratch_.visitedSet.insert(startId);
   traversalScratch_.visitedList.push_back(startId);
 
@@ -604,7 +603,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
           traversalScratch_.visitedSet.insert(neighbor).second &&
           findCell(static_cast<CellRef>(neighbor))) {
         traversalScratch_.visitedList.push_back(neighbor);
-        traversalScratch_.queue.push_back({neighbor, dist + 1});
+        traversalScratch_.queue.emplace_back(neighbor, dist + 1);
       }
     };
 

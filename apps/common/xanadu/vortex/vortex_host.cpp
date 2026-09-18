@@ -305,7 +305,9 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
     }
     std::string_view rest = target.substr(target.find(' ') + 1);
     std::istringstream iss{std::string(rest)};
-    std::string dx, dy, dz;
+    std::string dx;
+    std::string dy;
+    std::string dz;
     iss >> dx >> dy >> dz;
     setView(axes, dx, dy, dz);
     return true;
@@ -759,7 +761,8 @@ bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
       xanadu::SettingSpec spec{
           .name    = "macro." + std::string(name),
           .notes   = "User macro: " + std::string(name),
-          .schemas = {{{"string"}, {std::string{vqlExpr}}}}};
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {std::string{vqlExpr}}}}};
       parent = xanadu::ensureSetting(*persistStore, parent, spec);
       parent = xanadu::setSetting(*persistStore, parent,
                                   "macro." + std::string(name),
@@ -806,9 +809,11 @@ xanadu::MicroversionId VortexHost::saveMacroToStore(
           keymapStore, xanadu::SystemDocKind::Keymap, parent);
     }
   }
-  xanadu::SettingSpec spec{.name    = "macro." + std::string(macroName),
-                           .notes   = "User macro: " + std::string(macroName),
-                           .schemas = {{{"string"}, {std::string{vqlExpr}}}}};
+  xanadu::SettingSpec spec{
+      .name    = "macro." + std::string(macroName),
+      .notes   = "User macro: " + std::string(macroName),
+      .schemas = {{.expectedTypes = {"string"},
+                   .defaultValues = {std::string{vqlExpr}}}}};
   parent = xanadu::ensureSetting(keymapStore, parent, spec);
   parent =
       xanadu::setSetting(keymapStore, parent, "macro." + std::string(macroName),
@@ -817,7 +822,8 @@ xanadu::MicroversionId VortexHost::saveMacroToStore(
     xanadu::SettingSpec bindSpec{
         .name    = std::string(macroName),
         .notes   = "Key binding for macro " + std::string(macroName),
-        .schemas = {{{"string"}, {std::string{keyBinding}}}}};
+        .schemas = {{.expectedTypes = {"string"},
+                     .defaultValues = {std::string{keyBinding}}}}};
     parent = xanadu::ensureSetting(keymapStore, parent, bindSpec);
     parent = xanadu::setSetting(keymapStore, parent, macroName,
                                 std::string(keyBinding));

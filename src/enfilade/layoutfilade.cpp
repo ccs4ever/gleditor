@@ -102,7 +102,7 @@ Layoutfilade::fromTextAndBoxes(const std::string_view text,
 
     const auto lineSlice = text.substr(lineStart, lineEnd - lineStart);
     const auto len       = static_cast<std::uint32_t>(lineSlice.size());
-    const float visualLen =
+    const auto visualLen =
         static_cast<float>(len > 0 && lineSlice.back() == '\n' ? len - 1 : len);
 
     entries.push_back(LayoutEntry{
@@ -486,13 +486,9 @@ bool Layoutfilade::verifyAgainstLinearScan(
 
   // Verify total metrics
   const auto &m = metrics();
-  if (m.totalBytes != linearByte ||
-      std::abs(m.totalHeightPx - linearY) > 1e-3F ||
-      m.lineCount != groundTruth.size()) {
-    return false;
-  }
-
-  return true;
+  return !(m.totalBytes != linearByte ||
+           std::abs(m.totalHeightPx - linearY) > 1e-3F ||
+           m.lineCount != groundTruth.size());
 }
 
 } // namespace gleditor::enfilade

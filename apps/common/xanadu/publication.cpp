@@ -64,9 +64,9 @@ std::optional<GlobalSpan> decodeSpan(const bencode::Value &value) {
   if (start->asInteger() < 0 || length->asInteger() < 0) {
     return std::nullopt;
   }
-  return GlobalSpan{scroll->asString(),
-                    static_cast<std::uint64_t>(start->asInteger()),
-                    static_cast<std::uint64_t>(length->asInteger())};
+  return GlobalSpan{.scroll = scroll->asString(),
+                    .start  = static_cast<std::uint64_t>(start->asInteger()),
+                    .length = static_cast<std::uint64_t>(length->asInteger())};
 }
 
 bencode::Value encodeSpans(const std::vector<GlobalSpan> &spans) {
@@ -259,7 +259,7 @@ GlobalSpan GlobalSpan::intersect(const GlobalSpan &other) const {
   if (to <= from) {
     return {};
   }
-  return GlobalSpan{scroll, from, to - from};
+  return GlobalSpan{.scroll = scroll, .start = from, .length = to - from};
 }
 
 bool GlobalSpan::operator<(const GlobalSpan &other) const {
@@ -282,11 +282,12 @@ bool GlobalLink::touches(const GlobalSpan &span) const {
 }
 
 DhtTarget Publication::name() const {
-  return MutableLink{publisher, salt, {}}.target();
+  return MutableLink{.key = publisher, .salt = salt, .displayName = {}}
+      .target();
 }
 
 std::string Publication::uri() const {
-  return MutableLink{publisher, salt, {}}.uri();
+  return MutableLink{.key = publisher, .salt = salt, .displayName = {}}.uri();
 }
 
 std::uint64_t Publication::length() const {
@@ -483,13 +484,16 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   // than being seal-specific content of their own.
   std::vector<TorrentContent> files;
   if (hasNewPrimedia) {
-    files.push_back(TorrentContent{sealedContentName, std::move(wirePayload)});
+    files.push_back(TorrentContent{.path = sealedContentName,
+                                   .data = std::move(wirePayload)});
   }
   if (hasNewOps) {
-    files.push_back(TorrentContent{sealedOpsName, newOps});
+    files.push_back(TorrentContent{.path = sealedOpsName, .data = newOps});
   }
-  files.push_back(TorrentContent{provenanceFileName, provenance.yaml});
-  files.push_back(TorrentContent{provenanceSigName, provenance.signature});
+  files.push_back(
+      TorrentContent{.path = provenanceFileName, .data = provenance.yaml});
+  files.push_back(
+      TorrentContent{.path = provenanceSigName, .data = provenance.signature});
   auto made = makeTorrent(files, name);
 
   SealedScroll sealed;
@@ -612,10 +616,11 @@ sealCompound(const Store &store, const MutableKeys &keys,
     signedMediaProv.signature = provenance.signature;
 
     std::vector<TorrentContent> files;
-    files.push_back(TorrentContent{name, data});
-    files.push_back(TorrentContent{provenanceFileName, signedMediaProv.yaml});
-    files.push_back(
-        TorrentContent{provenanceSigName, signedMediaProv.signature});
+    files.push_back(TorrentContent{.path = name, .data = data});
+    files.push_back(TorrentContent{.path = provenanceFileName,
+                                   .data = signedMediaProv.yaml});
+    files.push_back(TorrentContent{.path = provenanceSigName,
+                                   .data = signedMediaProv.signature});
 
     auto made = makeTorrent(files, name);
 
@@ -738,7 +743,8 @@ std::optional<GlobalSpan> globalise(const Store &store,
   if (key.empty()) {
     return std::nullopt;
   }
-  return GlobalSpan{std::move(key), span.start, span.length};
+  return GlobalSpan{
+      .scroll = std::move(key), .start = span.start, .length = span.length};
 }
 
 std::optional<PrimediaSpan>
@@ -750,15 +756,18 @@ localise(Store &store, const GlobalSpan &span,
   const auto &known = store.scrolls();
   for (std::size_t i = 0; i < known.size(); i++) {
     if (scrollKey(known[i]) == span.scroll) {
-      return PrimediaSpan{static_cast<ScrollId>(i + 1), span.start,
-                          span.length};
+      return PrimediaSpan{.scroll = static_cast<ScrollId>(i + 1),
+                          .start  = span.start,
+                          .length = span.length};
     }
   }
   const auto found = scrolls.find(span.scroll);
   if (scrolls.end() == found) {
     return std::nullopt;
   }
-  return PrimediaSpan{store.addScroll(found->second), span.start, span.length};
+  return PrimediaSpan{.scroll = store.addScroll(found->second),
+                      .start  = span.start,
+                      .length = span.length};
 }
 
 GlobalOpRef opRefOf(const Store &store, const std::uint32_t opIndex,
@@ -769,7 +778,8 @@ GlobalOpRef opRefOf(const Store &store, const std::uint32_t opIndex,
     // too. Neither is an operation, so neither gets a name.
     return {};
   }
-  return GlobalOpRef{scrollKey(sealedAs), std::move(produces)};
+  return GlobalOpRef{.scroll   = scrollKey(sealedAs),
+                     .produces = std::move(produces)};
 }
 
 std::optional<std::uint32_t> localiseOpRef(const Store &store,
@@ -1134,9 +1144,11 @@ std::vector<Library::Sighting> Library::showing(const GlobalSpan &span) const {
       if (!shared.empty()) {
         const auto into =
             static_cast<std::uint32_t>(shared.start - piece.start);
-        out.push_back(Sighting{
-            &pub, at + into,
-            at + into + static_cast<std::uint32_t>(shared.length), shared});
+        out.push_back(Sighting{.document = &pub,
+                               .start    = at + into,
+                               .end = at + into +
+                                      static_cast<std::uint32_t>(shared.length),
+                               .shared = shared});
       }
       at += static_cast<std::uint32_t>(piece.length);
     }
@@ -1155,9 +1167,11 @@ Library::linksTouching(const GlobalSpan &span) const {
         });
       };
       if (onSide(link.left)) {
-        out.push_back(FoundLink{&pub, &link, true});
+        out.push_back(
+            FoundLink{.document = &pub, .link = &link, .onLeft = true});
       } else if (onSide(link.right)) {
-        out.push_back(FoundLink{&pub, &link, false});
+        out.push_back(
+            FoundLink{.document = &pub, .link = &link, .onLeft = false});
       }
     }
   }

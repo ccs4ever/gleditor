@@ -531,10 +531,10 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
 
     // Range Clamp [start, end]
     if (step.rangeClamp.has_value() && !nextStream.empty()) {
-      const auto &clamp  = *step.rangeClamp;
-      std::int64_t total = static_cast<std::int64_t>(nextStream.size());
-      std::int64_t s     = clamp.start;
-      std::int64_t e     = clamp.end.value_or(s);
+      const auto &clamp = *step.rangeClamp;
+      auto total        = static_cast<std::int64_t>(nextStream.size());
+      std::int64_t s    = clamp.start;
+      std::int64_t e    = clamp.end.value_or(s);
 
       std::int64_t from = (s < 0) ? (total + s) : (s - 1);
       std::int64_t to   = (e < 0) ? (total + e) : (e - 1);
@@ -991,7 +991,7 @@ VQLCompiler::exportToStore(xanadu::Store &store,
   // 2. Mint cells
   for (CellRef c = 1; c <= arena.cellCount(); ++c) {
     if (!arena.contains(c)) continue;
-    if (cellMap.count(c)) continue;
+    if (cellMap.contains(c)) continue;
 
     if (auto dVal = arena.asDouble(c)) {
       ver = store.makeScalarCell(ver, *dVal);
@@ -1008,12 +1008,12 @@ VQLCompiler::exportToStore(xanadu::Store &store,
 
   // 3. Link edges (posward links only)
   for (CellRef c = 1; c <= arena.cellCount(); ++c) {
-    if (!arena.contains(c) || !cellMap.count(c)) continue;
+    if (!arena.contains(c) || !cellMap.contains(c)) continue;
     CellRef from = cellMap.at(c);
 
     for (const auto &[dimRef, mappedDim] : dimMap) {
       CellRef target = arena.linked(c, dimRef, DimVector::POS);
-      if (target != zigzag::noCell && cellMap.count(target)) {
+      if (target != zigzag::noCell && cellMap.contains(target)) {
         CellRef to = cellMap.at(target);
         ver =
             store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);

@@ -98,7 +98,7 @@ LinkBeams::~LinkBeams() = default;
 
 void LinkBeams::setBridgeRuntimeConfig(
     xanadu::BridgeRuntimeConfig config) noexcept {
-  bridgeConfig_                   = std::move(config);
+  bridgeConfig_                   = config;
   beamConfig_.loomBundlingEnabled = bridgeConfig_.loom.bundlingEnabled;
   beamConfig_.loomAlpha           = bridgeConfig_.loom.alpha;
   beamConfig_.loomHoverAlpha      = bridgeConfig_.loom.hoverAlpha;
@@ -175,7 +175,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     dangling.clear();
     dangling.reserve(unplaced.size());
     for (auto &one : unplaced) {
-      dangling.push_back(Dangling{std::move(one), false});
+      dangling.push_back(Dangling{.link = std::move(one), .looked = false});
     }
 
     std::vector<TransclusionPair> tPairs;
@@ -229,7 +229,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     dangling.clear();
     dangling.reserve(unplaced.size());
     for (auto &one : unplaced) {
-      dangling.push_back(Dangling{std::move(one), false});
+      dangling.push_back(Dangling{.link = std::move(one), .looked = false});
     }
 
     std::vector<TransclusionPair> tPairs;
@@ -1965,13 +1965,12 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
 
   auto &group = into.add(0, a11y::Role::List);
   group.label = "links between the open documents";
-  for (std::size_t which = 0; which < strands.size(); which++) {
-    group.children.push_back(into.id(strands[which].link + 1));
+  for (auto &strand : strands) {
+    group.children.push_back(into.id(strand.link + 1));
   }
   into.contribute(into.id(0));
 
-  for (std::size_t which = 0; which < strands.size(); which++) {
-    const auto &strand = strands[which];
+  for (const auto &strand : strands) {
     // Numbered by the link rather than by its position, so that a link keeps
     // its identity as others are found and lost around it -- and so that what
     // comes back names a link this can look up. Link ids are small sequential

@@ -77,8 +77,8 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  std::string vplText = program.get<std::string>("--eval");
-  std::string vplFile = program.get<std::string>("file");
+  auto vplText = program.get<std::string>("--eval");
+  auto vplFile = program.get<std::string>("file");
 
   if (vplText.empty() && !vplFile.empty()) {
     std::ifstream ifs(vplFile);
@@ -120,7 +120,7 @@ int main(int argc, char *argv[]) {
   xanadu::vpl::VPLCompiler compiler(core, vm);
 
   xanadu::vpl::CompilationOptions options;
-  std::string libName = program.get<std::string>("--library");
+  auto libName = program.get<std::string>("--library");
   if (!libName.empty()) {
     options.targetLibrary = true;
     options.moduleName    = libName;
@@ -140,7 +140,7 @@ int main(int argc, char *argv[]) {
     std::cout << result.disassembly << "\n";
   }
 
-  std::string outPath = program.get<std::string>("--output");
+  auto outPath = program.get<std::string>("--output");
   if (!outPath.empty()) {
     std::filesystem::create_directories(outPath);
     auto permascroll = std::make_shared<xanadu::UserPermascroll>();

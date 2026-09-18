@@ -53,31 +53,31 @@ ZzStructureDocument projectXuduToZigzag(
   result.dimension_meta[opts.doc_dimension] = DimensionMeta{
       .label       = "Reading Flow",
       .description = "Document reading sequence",
-      .color       = RgbColor{0.3F, 0.7F, 0.9F},
+      .color       = RgbColor{.r = 0.3F, .g = 0.7F, .b = 0.9F},
       .spacing     = 2.2F,
   };
   result.dimension_meta[opts.transclusion_dimension] = DimensionMeta{
       .label       = "Transclusion",
       .description = "Shared primedia scroll spans",
-      .color       = RgbColor{0.95F, 0.5F, 0.2F},
+      .color       = RgbColor{.r = 0.95F, .g = 0.5F, .b = 0.2F},
       .spacing     = 2.5F,
   };
   result.dimension_meta[opts.link_dimension] = DimensionMeta{
       .label       = "Xanalinks",
       .description = "Curated commentary and link relations",
-      .color       = RgbColor{0.8F, 0.3F, 0.85F},
+      .color       = RgbColor{.r = 0.8F, .g = 0.3F, .b = 0.85F},
       .spacing     = 2.5F,
   };
   result.dimension_meta[opts.version_dimension] = DimensionMeta{
       .label       = "Microversions",
       .description = "Version history lineage",
-      .color       = RgbColor{0.3F, 0.85F, 0.4F},
+      .color       = RgbColor{.r = 0.3F, .g = 0.85F, .b = 0.4F},
       .spacing     = 2.0F,
   };
   result.dimension_meta[opts.clone_dimension] = DimensionMeta{
       .label       = "Clone Family",
       .description = "Identical unchanged primedia spans across hypertime",
-      .color       = RgbColor{0.0F, 0.74F, 0.83F},
+      .color       = RgbColor{.r = 0.0F, .g = 0.74F, .b = 0.83F},
       .spacing     = 2.0F,
   };
 
@@ -223,7 +223,8 @@ ZzStructureDocument projectXuduToZigzag(
                                              .sourceCell = doc.sourceCell});
           }
           docCellChains[docIdx].push_back(id);
-          cellMappings.push_back(CellMapping{id, docIdx, span});
+          cellMappings.push_back(
+              CellMapping{.id = id, .docIndex = docIdx, .span = span});
         }
 
         start = (end == doc.text.size()) ? end : end + 2;
@@ -265,7 +266,8 @@ ZzStructureDocument projectXuduToZigzag(
                                          .sourceCell = doc.sourceCell});
       }
       docCellChains[docIdx].push_back(id);
-      cellMappings.push_back(CellMapping{id, docIdx, span});
+      cellMappings.push_back(
+          CellMapping{.id = id, .docIndex = docIdx, .span = span});
     }
   }
 

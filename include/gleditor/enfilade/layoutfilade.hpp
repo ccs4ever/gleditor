@@ -183,7 +183,7 @@ struct VisibleRange {
   float endYPx{0.0F};               ///< Bottom coordinate of last entry.
   std::size_t entryCount{0};        ///< Total entries visible in window.
   std::size_t mediaBoxCount{0}; ///< Total rich-media boxes visible in window.
-  std::vector<std::size_t> visibleMediaBoxIndices{}; ///< Media box indices.
+  std::vector<std::size_t> visibleMediaBoxIndices; ///< Media box indices.
 };
 
 /**

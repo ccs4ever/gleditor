@@ -252,7 +252,7 @@ void DeviceVK::pickPhysicalDevice() {
   std::vector<VkPhysicalDevice> devices(count);
   vkEnumeratePhysicalDevices(instance, &count, devices.data());
 
-  for (const auto candidate : devices) {
+  for (auto *const candidate : devices) {
     std::uint32_t familyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(candidate, &familyCount, nullptr);
     std::vector<VkQueueFamilyProperties> families(familyCount);
@@ -300,8 +300,9 @@ void DeviceVK::pickPhysicalDevice() {
                            VK_VERSION_MINOR(props.apiVersion),
                            VK_VERSION_PATCH(props.apiVersion));
 
-  limits = TextureLimits{static_cast<int>(props.limits.maxImageDimension2D),
-                         static_cast<int>(props.limits.maxImageArrayLayers)};
+  limits = TextureLimits{
+      .maxSize   = static_cast<int>(props.limits.maxImageDimension2D),
+      .maxLayers = static_cast<int>(props.limits.maxImageArrayLayers)};
 
   // Pick the first depth format the device can use as a depth attachment.
   for (const auto candidate :
@@ -472,11 +473,11 @@ void createImage(const VkDevice device,
                  const VkImageUsageFlags usage, const VkImageAspectFlags aspect,
                  VkImage &image, VkDeviceMemory &memory, VkImageView &view) {
   VkImageCreateInfo info{};
-  info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  info.imageType     = VK_IMAGE_TYPE_2D;
-  info.format        = format;
-  info.extent        = {extent.width, extent.height, 1};
-  info.mipLevels     = 1;
+  info.sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  info.imageType = VK_IMAGE_TYPE_2D;
+  info.format    = format;
+  info.extent    = {.width = extent.width, .height = extent.height, .depth = 1};
+  info.mipLevels = 1;
   info.arrayLayers   = 1;
   info.samples       = VK_SAMPLE_COUNT_1_BIT;
   info.tiling        = VK_IMAGE_TILING_OPTIMAL;
@@ -516,7 +517,11 @@ void createImage(const VkDevice device,
   viewInfo.image            = image;
   viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
   viewInfo.format           = format;
-  viewInfo.subresourceRange = {aspect, 0, 1, 0, 1};
+  viewInfo.subresourceRange = {.aspectMask     = aspect,
+                               .baseMipLevel   = 0,
+                               .levelCount     = 1,
+                               .baseArrayLayer = 0,
+                               .layerCount     = 1};
   check(vkCreateImageView(device, &viewInfo, nullptr, &view),
         "vkCreateImageView");
 }
@@ -547,9 +552,10 @@ void DeviceVK::destroyRenderTargets() {
     VkDeviceMemory *memory;
   };
   const std::array<Target, 3> targets = {
-      Target{&colourView, &colourImage, &colourMemory},
-      Target{&tagView, &tagImage, &tagMemory},
-      Target{&depthView, &depthImage, &depthMemory}};
+      Target{
+          .view = &colourView, .image = &colourImage, .memory = &colourMemory},
+      Target{.view = &tagView, .image = &tagImage, .memory = &tagMemory},
+      Target{.view = &depthView, .image = &depthImage, .memory = &depthMemory}};
   for (const auto &[view, image, memory] : targets) {
     if (VK_NULL_HANDLE != *view) {
       vkDestroyImageView(device, *view, nullptr);
@@ -592,10 +598,13 @@ void DeviceVK::createRenderPass() {
   attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
   const std::array<VkAttachmentReference, 2> colourRefs = {
-      VkAttachmentReference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
-      VkAttachmentReference{1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+      VkAttachmentReference{.attachment = 0,
+                            .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+      VkAttachmentReference{
+          .attachment = 1, .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
   const VkAttachmentReference depthRef{
-      2, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+      .attachment = 2,
+      .layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 
   VkSubpassDescription subpass{};
   subpass.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -709,8 +718,10 @@ void DeviceVK::createDescriptorPool() {
   // not disturb the frame the GPU is still reading, nor the other pipeline's.
   constexpr std::uint32_t sets = maxPipelines * framesInFlight;
   const std::array<VkDescriptorPoolSize, 2> sizes = {
-      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets},
-      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sets}};
+      VkDescriptorPoolSize{.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                           .descriptorCount = sets},
+      VkDescriptorPoolSize{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                           .descriptorCount = sets}};
 
   VkDescriptorPoolCreateInfo info{};
   info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

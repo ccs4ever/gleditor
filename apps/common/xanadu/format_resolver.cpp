@@ -30,9 +30,9 @@ std::vector<Extent> findOccurrences(const std::span<const PrimediaSpan> spans,
     const auto shared = run.intersect(target);
     if (!shared.empty()) {
       const auto into = static_cast<std::uint32_t>(shared.start - run.start);
-      found.push_back(
-          Extent{seen + into,
-                 seen + into + static_cast<std::uint32_t>(shared.length)});
+      found.push_back(Extent{.start = seen + into,
+                             .end = seen + into +
+                                    static_cast<std::uint32_t>(shared.length)});
     }
     seen += static_cast<std::uint32_t>(run.length);
   }

@@ -259,7 +259,7 @@ private:
   xanadu::vql::VQLCompiler vqlCompiler_;
   xanadu::vpl::VPLEngine vplEngine_;
 
-  AppActionDelegate appActionDelegate_{};
+  AppActionDelegate appActionDelegate_;
   xanadu::Store *boundStore_{nullptr};
   VortexHostConfig config_{};
   CellRef gcCursor_{noCell};

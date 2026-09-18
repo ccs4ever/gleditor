@@ -36,7 +36,6 @@
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
 #include <gleditor/text/font.hpp>        // for FontManager
 #include <gleditor/text/layout.hpp>      // for TextLayout
-#include <gleditor/utf8.hpp>             // for validateUtf8, makeValidUtf8
 #include <glm/geometric.hpp>             // for dot, normalize
 #include <glm/gtx/string_cast.hpp>
 #include <glm/trigonometric.hpp> // for radians
@@ -143,10 +142,11 @@ struct PageBox {
 PageBox pageBoxFor(const PageShaping &shaping) {
   if (gleditor::PageSizing::Fixed == shaping.page.mode &&
       shaping.page.widthPx > 0.0F) {
-    return {shaping.page.widthPx, shaping.page.heightPx};
+    return {.width = shaping.page.widthPx, .height = shaping.page.heightPx};
   }
-  return {static_cast<float>(shaping.textWidthPx) + (2.0F * pageMargin),
-          static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin)};
+  return {
+      .width  = static_cast<float>(shaping.textWidthPx) + (2.0F * pageMargin),
+      .height = static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin)};
 }
 
 } // namespace
@@ -173,12 +173,31 @@ render::VertexLayout Doc::vertexLayout() {
   render::VertexLayout layout;
   layout.stride     = sizeof(VBORow);
   layout.attributes = {
-      {"position", 0, AttributeType::Float, 2, offsetof(VBORow, pos)},
-      {"foreground", 1, AttributeType::UnsignedInt, 1,
-       offsetof(VBORow, foreground)},
-      {"atlas", 2, AttributeType::UnsignedInt, 1, offsetof(VBORow, atlas)},
-      {"quad", 3, AttributeType::UnsignedInt, 1, offsetof(VBORow, quad)},
-      {"paper", 4, AttributeType::UnsignedInt, 1, offsetof(VBORow, paper)},
+      {.name       = "position",
+       .location   = 0,
+       .type       = AttributeType::Float,
+       .components = 2,
+       .offset     = offsetof(VBORow, pos)},
+      {.name       = "foreground",
+       .location   = 1,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(VBORow, foreground)},
+      {.name       = "atlas",
+       .location   = 2,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(VBORow, atlas)},
+      {.name       = "quad",
+       .location   = 3,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(VBORow, quad)},
+      {.name       = "paper",
+       .location   = 4,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(VBORow, paper)},
   };
   return layout;
 }
@@ -188,7 +207,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
            const std::uint32_t aPageIndex,
            const BufferPool::Allocation &inherited)
     : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
-      textOffset(aTextOffset), pageIndex(aPageIndex) {
+      textOffset(aTextOffset), clusters(std::move(aShaping.clusters)),
+      pageIndex(aPageIndex) {
   const auto color = Doc::VBORow::color;
   const auto box   = Doc::VBORow::box;
 
@@ -203,17 +223,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
   std::vector<Doc::VBORow> vertexData;
   const auto pushBackground = [&] {
-    vertexData.push_back(
-        Doc::VBORow{{0.0F, 0.0F},
-                    Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
-                    0,
-                    box(0,
-                        std::min(Doc::VBORow::maxQuadExtent,
-                                 static_cast<unsigned int>(pageWidth)),
-                        std::min(Doc::VBORow::maxQuadExtent,
-                                 static_cast<unsigned int>(pageHeight)),
-                        render::tagKindPage),
-                    Doc::VBORow::paperAt(color(255), 0)});
+    vertexData.push_back(Doc::VBORow{
+        .pos        = {0.0F, 0.0F},
+        .foreground = Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
+        .atlas      = 0,
+        .quad       = box(0,
+                          std::min(Doc::VBORow::maxQuadExtent,
+                                   static_cast<unsigned int>(pageWidth)),
+                          std::min(Doc::VBORow::maxQuadExtent,
+                                   static_cast<unsigned int>(pageHeight)),
+                          render::tagKindPage),
+        .paper      = Doc::VBORow::paperAt(color(255), 0)});
   };
   pushBackground();
 
@@ -226,8 +246,6 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   };
 
   std::vector<float> lineInk(aShaping.lineCount, 0.0F);
-
-  clusters = std::move(aShaping.clusters);
 
   for (std::size_t gi = 0; gi < aShaping.glyphs.size(); ++gi) {
     const auto &g    = aShaping.glyphs[gi];
@@ -257,15 +275,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       const auto top  = pageMargin + g.clusterTop;
 
       vertexData.push_back(Doc::VBORow{
-          {originX + left + (glyphWidth / 2.0F),
-           originY - (top + (glyphHeight / 2.0F))},
-          Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
-          Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
-                               static_cast<unsigned int>(coords.topLeft.y)),
-          box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
-              extent(glyphHeight), render::tagKindGlyph),
-          Doc::VBORow::paperAt(color(255),
-                               static_cast<unsigned int>(g.clusterIndex))});
+          .pos        = {originX + left + (glyphWidth / 2.0F),
+                         originY - (top + (glyphHeight / 2.0F))},
+          .foreground = Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
+          .atlas =
+              Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
+                                   static_cast<unsigned int>(coords.topLeft.y)),
+          .quad =
+              box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
+                  extent(glyphHeight), render::tagKindGlyph),
+          .paper = Doc::VBORow::paperAt(
+              color(255), static_cast<unsigned int>(g.clusterIndex))});
     }
   }
 
@@ -279,14 +299,14 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     const auto left  = pageMargin + line.left;
     const auto top   = pageMargin + line.top;
     const auto shade = greekedShade(inkArea / (line.barWidth * line.barHeight));
-    vertexData.push_back(
-        Doc::VBORow{{originX + left + (line.barWidth / 2.0F),
-                     originY - (top + (line.barHeight / 2.0F))},
-                    Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
-                    0,
-                    box(0, extent(line.barWidth), extent(line.barHeight),
-                        render::tagKindPage),
-                    Doc::VBORow::paperAt(color(shade), 0)});
+    vertexData.push_back(Doc::VBORow{
+        .pos        = {originX + left + (line.barWidth / 2.0F),
+                       originY - (top + (line.barHeight / 2.0F))},
+        .foreground = Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
+        .atlas      = 0,
+        .quad       = box(0, extent(line.barWidth), extent(line.barHeight),
+                          render::tagKindPage),
+        .paper      = Doc::VBORow::paperAt(color(shade), 0)});
   }
 
   coarseInstances =
@@ -528,10 +548,13 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
   const auto first = coarse ? detailInstances : 0U;
   const auto count = coarse ? coarseInstances : detailInstances;
   batches.push_back(render::GlyphBatch{
-      render::DrawUniforms{toArray(mvp), opacity, identity},
-      doc->pool->buffer(),
-      doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
-      count});
+      .uniforms = render::DrawUniforms{.mvp      = toArray(mvp),
+                                       .opacity  = opacity,
+                                       .identity = identity},
+      .vertices = doc->pool->buffer(),
+      .vertexByteOffset =
+          doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
+      .instanceCount = count});
 }
 
 // Always called from the render thread
@@ -565,7 +588,10 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
     // Asked page by page rather than by searching, because the same call
     // decides whether the offset is on the page and where -- and the deciding
     // half is answered without shaping anything.
-    Anchor anchor{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F};
+    Anchor anchor{.pageIndex = static_cast<std::uint32_t>(i),
+                  .x         = 0.0F,
+                  .y         = 0.0F,
+                  .height    = 0.0F};
     if (pages[i]->caretGeometry(globalOffset, anchor.x, anchor.y,
                                 anchor.height)) {
       return anchor;
@@ -580,7 +606,11 @@ Doc::boxFor(const std::uint32_t globalOffset) const {
     if (!pages[i]) {
       continue;
     }
-    BoxRect rect{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F, 0.0F};
+    BoxRect rect{.pageIndex = static_cast<std::uint32_t>(i),
+                 .x         = 0.0F,
+                 .y         = 0.0F,
+                 .width     = 0.0F,
+                 .height    = 0.0F};
     if (pages[i]->boxGeometry(globalOffset, rect.x, rect.y, rect.width,
                               rect.height)) {
       return rect;
@@ -592,7 +622,7 @@ Doc::boxFor(const std::uint32_t globalOffset) const {
 void Doc::refreshPageIndexFilade() const {
   std::vector<gleditor::enfilade::LayoutEntry> entriesSnapshot;
   {
-    std::lock_guard lock(shapingMutex);
+    std::scoped_lock lock(shapingMutex);
     if (pageEntries.size() > pageIndexFiladeBuiltFor) {
       entriesSnapshot = pageEntries;
     }
@@ -601,8 +631,8 @@ void Doc::refreshPageIndexFilade() const {
     return;
   }
   pageIndexFiladeBuiltFor = entriesSnapshot.size();
-  pageIndexFilade         = gleditor::enfilade::Layoutfilade::buildFromEntries(
-      std::move(entriesSnapshot));
+  pageIndexFilade =
+      gleditor::enfilade::Layoutfilade::buildFromEntries(entriesSnapshot);
 }
 
 std::optional<std::uint32_t>
@@ -621,7 +651,7 @@ Doc::approximateAnchorFor(const std::uint32_t globalOffset) const {
   if (!pageIndex) {
     return std::nullopt;
   }
-  return Anchor{*pageIndex, 0.0F, 0.0F, 0.0F};
+  return Anchor{.pageIndex = *pageIndex, .x = 0.0F, .y = 0.0F, .height = 0.0F};
 }
 
 std::optional<glm::vec3> Doc::worldPoint(const std::uint32_t pageIndex,
@@ -1216,7 +1246,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     page.setModel(trans);
-    pages.push_back(std::move(page));
+    pages.emplace_back(std::move(page));
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
@@ -1228,9 +1258,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
                            pages.size());
 }
 
-Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
+Doc::Doc(RendererRef renderer, render::RenderDevice *device,
          const glm::mat4 &model, [[maybe_unused]] const Private _priv)
-    : Drawable(model), renderer(renderer),
+    : Drawable(model), renderer(std::move(renderer)),
       pool(std::make_unique<BufferPool>(device, sizeof(VBORow),
                                         initialPoolRows)),
       // Matches Drawable's own model translation, the same resting place
@@ -1295,7 +1325,7 @@ void Doc::load(const gleditor::TextSource &source) {
   pages.clear();
   liveLayouts.clear();
   {
-    std::lock_guard lock(shapingMutex);
+    std::scoped_lock lock(shapingMutex);
     pendingShapings.clear();
     pageEntries.clear();
   }
@@ -1329,15 +1359,16 @@ void Doc::makePages() {
     }
     const auto heightPx = pageBoxFor(shaping).height;
     {
-      std::lock_guard lock(shapingMutex);
+      std::scoped_lock lock(shapingMutex);
       // This page's true index is exactly how many entries already exist:
       // makePages() always shapes strictly in document order, and this
       // entry and its pendingShapings counterpart are recorded together
       // under the same lock, so the two never drift apart.
       const auto pageIndex = static_cast<std::uint32_t>(pageEntries.size());
       pendingShapings.emplace(
-          pageIndex, PendingShaping{std::move(shaping),
-                                    static_cast<std::uint32_t>(tSize)});
+          pageIndex,
+          PendingShaping{.shaping    = std::move(shaping),
+                         .textOffset = static_cast<std::uint32_t>(tSize)});
       pageEntries.push_back(gleditor::enfilade::LayoutEntry{
           .byteLength = consumed,
           .heightPx   = heightPx + pageGapPx,
@@ -1360,7 +1391,7 @@ std::optional<Doc::CameraInfo> Doc::cameraInfo() const {
   glm::vec3 front{};
   float fov = 0.0F;
   {
-    std::lock_guard viewLock(appState->view);
+    std::scoped_lock viewLock(appState->view);
     pos   = appState->view.pos;
     front = appState->view.front;
     fov   = appState->view.fov;
@@ -1513,7 +1544,7 @@ bool Doc::buildPendingPages(RenderState &state) {
 
   std::map<std::uint32_t, PendingShaping> toBuild;
   {
-    std::lock_guard lock(shapingMutex);
+    std::scoped_lock lock(shapingMutex);
     toBuild.swap(pendingShapings);
   }
 
@@ -1597,7 +1628,7 @@ bool Doc::buildPendingPages(RenderState &state) {
     // the swap above -- every one names a page index this call either built
     // or never reached -- and merge() splices nodes rather than copying each
     // still-large PageShaping.
-    std::lock_guard lock(shapingMutex);
+    std::scoped_lock lock(shapingMutex);
     pendingShapings.merge(toBuild);
   }
 
@@ -1681,7 +1712,7 @@ void Doc::ensurePagesBuiltThrough(RenderState &state,
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     placePageAt(state, i, std::move(shaping), hit->startByte, trans);
     {
-      std::lock_guard lock(shapingMutex);
+      std::scoped_lock lock(shapingMutex);
       pendingShapings.erase(static_cast<std::uint32_t>(i));
     }
   }

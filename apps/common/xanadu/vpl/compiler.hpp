@@ -36,9 +36,9 @@ struct CompilationOptions {
 struct CompilationResult {
   bool success{true};
   zigzag::CellRef entryOpcode{zigzag::noCell};
-  std::string errorMessage{};
+  std::string errorMessage;
   std::vector<zigzag::CellRef> generatedOpcodes;
-  std::string disassembly{};
+  std::string disassembly;
 };
 
 class VPLCompiler {

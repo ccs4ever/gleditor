@@ -197,7 +197,7 @@ struct Band {
 };
 Band availableAt(const float y, const float height, const float maxWidth,
                  const std::vector<FloatSpan> &floats) {
-  Band band{0.0F, maxWidth};
+  Band band{.left = 0.0F, .right = maxWidth};
   for (const auto &f : floats) {
     if (f.top < y + height && f.bottom > y) {
       if (f.leftSide) {
@@ -622,7 +622,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     // narrowed it from its own side. A line with nothing usable in it (two
     // floats meeting in the middle) advances past the nearer float's bottom
     // and tries again, rather than shaping a zero-width line.
-    Band band{0.0F, maxWidth};
+    Band band{.left = 0.0F, .right = maxWidth};
     bool pageFull = false;
     for (;;) {
       band = availableAt(currentY, lineHeight, maxWidth, floats);

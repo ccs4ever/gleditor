@@ -87,7 +87,7 @@ std::optional<Rect> boundsOf(const Doc &doc, const glm::mat4 &viewProjection,
   if (!any) {
     return std::nullopt;
   }
-  return Rect{left, top, right, bottom};
+  return Rect{.left = left, .top = top, .right = right, .bottom = bottom};
 }
 
 /// Node numbering within this source. A document gets a block of its own, so
@@ -178,12 +178,12 @@ TextPoint DocumentsSource::pointAt(const Described &doc,
     if (byteOffset < end || run + 1 == runs) {
       const std::string_view text{doc.text};
       const auto within = std::min<std::size_t>(byteOffset, end) - start;
-      return TextPoint{
-          firstRun + run,
-          characterIndexOf(text.substr(start, end - start), within)};
+      return TextPoint{.node      = firstRun + run,
+                       .character = characterIndexOf(
+                           text.substr(start, end - start), within)};
     }
   }
-  return TextPoint{firstRun, 0};
+  return TextPoint{.node = firstRun, .character = 0};
 }
 
 void DocumentsSource::describe(Builder &into) {
@@ -212,12 +212,13 @@ void DocumentsSource::describe(Builder &into) {
         // which is how a caret is spelled.
         const auto focus = pointAt(doc, first, doc.caretByte);
         node.selection   = TextSelection{
-            doc.hasSelection ? pointAt(doc, first,
-                                       doc.selectionStart == doc.caretByte
-                                           ? doc.selectionEnd
-                                           : doc.selectionStart)
-                             : focus,
-            focus};
+            .anchor = doc.hasSelection
+                          ? pointAt(doc, first,
+                                    doc.selectionStart == doc.caretByte
+                                        ? doc.selectionEnd
+                                        : doc.selectionStart)
+                          : focus,
+            .focus  = focus};
         into.takeFocus(into.id(id));
       }
     }

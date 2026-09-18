@@ -90,7 +90,7 @@ void HypertimeGraph::drawDisc(gleditor::Canvas &canvas, const float cX,
     const float rOut     = radius;
     const auto nStepsOut = static_cast<int>(std::ceil(rOut));
     for (int yStep = -nStepsOut; yStep <= nStepsOut; ++yStep) {
-      const float y = static_cast<float>(yStep);
+      const auto y = static_cast<float>(yStep);
       if (std::abs(y) > rOut) {
         continue;
       }
@@ -106,7 +106,7 @@ void HypertimeGraph::drawDisc(gleditor::Canvas &canvas, const float cX,
   if (rIn > 0.0F) {
     const auto nStepsIn = static_cast<int>(std::ceil(rIn));
     for (int yStep = -nStepsIn; yStep <= nStepsIn; ++yStep) {
-      const float y = static_cast<float>(yStep);
+      const auto y = static_cast<float>(yStep);
       if (std::abs(y) > rIn) {
         continue;
       }
@@ -147,14 +147,18 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
     float y;
   };
   const std::array<Candidate, 6> candidates = {
-      Candidate{node.x - bw * 0.5F, node.y + node.radius + 5.0F},      // Above
-      Candidate{node.x + node.radius + 6.0F, node.y - bh * 0.5F},      // Right
-      Candidate{node.x - bw * 0.5F, node.y - node.radius - bh - 5.0F}, // Below
-      Candidate{node.x + node.radius * 0.7F + 4.0F,
-                node.y + node.radius + 2.0F}, // Above-Right
-      Candidate{node.x + node.radius * 0.7F + 4.0F,
-                node.y - node.radius - bh}, // Below-Right
-      Candidate{node.x - node.radius - bw - 6.0F, node.y - bh * 0.5F}, // Left
+      Candidate{.x = node.x - bw * 0.5F,
+                .y = node.y + node.radius + 5.0F}, // Above
+      Candidate{.x = node.x + node.radius + 6.0F,
+                .y = node.y - bh * 0.5F}, // Right
+      Candidate{.x = node.x - bw * 0.5F,
+                .y = node.y - node.radius - bh - 5.0F}, // Below
+      Candidate{.x = node.x + node.radius * 0.7F + 4.0F,
+                .y = node.y + node.radius + 2.0F}, // Above-Right
+      Candidate{.x = node.x + node.radius * 0.7F + 4.0F,
+                .y = node.y - node.radius - bh}, // Below-Right
+      Candidate{.x = node.x - node.radius - bw - 6.0F,
+                .y = node.y - bh * 0.5F}, // Left
   };
 
   auto testBoxCollision = [&](const float bx, const float by) -> int {
@@ -216,10 +220,8 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
         const float sMaxX = std::max(x1, x2);
         const float sMinY = std::min(y1, y2);
         const float sMaxY = std::max(y1, y2);
-        if (sMaxX < bx || sMinX > bx + bw || sMaxY < by || sMinY > by + bh) {
-          return false;
-        }
-        return true;
+        return !(sMaxX < bx || sMinX > bx + bw || sMaxY < by ||
+                 sMinY > by + bh);
       };
 
       if (std::abs(n1.y - n2.y) < 0.5F) {
@@ -257,7 +259,7 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
   node.aliasH = bh;
 }
 
-void HypertimeGraph::layout(RenderState &, const float screenW,
+void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
                             const float screenH) {
   if (builtAt == session_.generation() && !nodes_.empty()) {
     return;
@@ -282,7 +284,7 @@ void HypertimeGraph::layout(RenderState &, const float screenW,
     genesisNode.alias = "genesis";
   }
   nodes_.push_back(std::move(genesisNode));
-  chronologicalOrder_.push_back(MicroversionId{});
+  chronologicalOrder_.emplace_back();
 
   std::map<MicroversionId, std::size_t> nodeIndices;
   nodeIndices[MicroversionId{}] = 0;
@@ -623,7 +625,8 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, ortho);
 }
 
-bool HypertimeGraph::picked(const render::PickingResult &pick, RenderState &) {
+bool HypertimeGraph::picked(const render::PickingResult &pick,
+                            RenderState & /*state*/) {
   if (!visible_ || pick.tag.kind != render::tagKindOverlay) {
     return false;
   }

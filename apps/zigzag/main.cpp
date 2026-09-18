@@ -107,8 +107,8 @@ LoadedDocument loadDocument(const std::string &slicePath,
       candidates.push_back(homeSlice);
     }
     candidates.push_back(gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-    candidates.push_back("assets/zigzag/zigzag_structure.yaml");
-    candidates.push_back("zigzag_structure.yaml");
+    candidates.emplace_back("assets/zigzag/zigzag_structure.yaml");
+    candidates.emplace_back("zigzag_structure.yaml");
   }
 
   for (const auto &candidate : candidates) {
@@ -456,7 +456,7 @@ int main(const int argc, char **argv) {
       }
     }
 
-    const std::string xuduPath = parser.get<std::string>("--xudu");
+    const auto xuduPath = parser.get<std::string>("--xudu");
 
     if (rasterMode) {
       auto loaded = loadDocument(slicePath, xuduPath);
@@ -478,8 +478,8 @@ int main(const int argc, char **argv) {
     auto viz =
         std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
 
-    const std::string xuduPath = parser.get<std::string>("--xudu");
-    auto loaded                = loadDocument(slicePath, xuduPath);
+    const auto xuduPath = parser.get<std::string>("--xudu");
+    auto loaded         = loadDocument(slicePath, xuduPath);
     if (loaded.doc) {
       viz->adoptDocument(std::move(*loaded.doc), loaded.sourcePath);
       if (!loaded.description.empty()) {

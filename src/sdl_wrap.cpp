@@ -28,12 +28,12 @@ AutoSDL::~AutoSDL() {
 
 AutoSDLWindow::AutoSDLWindow(const char *title, const int width,
                              const int height, const std::uint64_t flags,
-                             SDL_Surface *icon) {
+                             SDL_Surface *icon)
+    : window(sdl::createWindow(title, width, height, flags)) {
   // The context version and profile belong to the chosen backend, which sets
   // them through render::configureBackendWindowAttributes() before getting
   // here. Forcing a desktop core profile in this constructor would silently
   // defeat a request for OpenGL ES.
-  window = sdl::createWindow(title, width, height, flags);
 
   if (nullptr == window) {
     throw std::runtime_error(std::string("SDL create window failed: ") +
@@ -51,9 +51,8 @@ AutoSDLWindow::~AutoSDLWindow() {
   }
 }
 
-AutoSDLGL::AutoSDLGL(SDL_Window *window) {
+AutoSDLGL::AutoSDLGL(SDL_Window *window) : ctx(SDL_GL_CreateContext(window)) {
   // create context for window and make current
-  ctx = SDL_GL_CreateContext(window);
 
   if (nullptr == ctx) {
     throw std::runtime_error(std::string("SDL create GL context failed: ") +
@@ -67,12 +66,13 @@ AutoSDLGL::~AutoSDLGL() {
   }
 }
 
-AutoSDLSurface::AutoSDLSurface(const char *fileName) {
+AutoSDLSurface::AutoSDLSurface(const char *fileName)
+    : surface(IMG_Load(fileName)) {
   // The window icon is decoration. Failing to load it must not stop the editor
   // from starting -- which it used to, both when SDL_image was unavailable and
   // whenever the program was run from a directory that does not hold the file.
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
-  surface = IMG_Load(fileName);
+
   if (nullptr == surface) {
     std::cerr << "could not load window icon " << fileName << ": "
               << SDL_GetError() << "\n";

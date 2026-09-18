@@ -199,9 +199,7 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
   if (xanadu::OpKind::Structure != node.kind) {
     return;
   }
-  if (opIndex > foldedThrough_) {
-    foldedThrough_ = opIndex;
-  }
+  foldedThrough_ = std::max(opIndex, foldedThrough_);
 
   // R8's boundary on the *address* side, and the twin of the isEphemeral()
   // check the SetLink case makes on cell refs. A span in the scratch scroll
@@ -597,7 +595,7 @@ std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
   queue.reserve(64);
 
   visited.insert(root);
-  queue.push_back({root, 0});
+  queue.emplace_back(root, 0);
   ordered.push_back(root);
 
   std::size_t head = 0;
@@ -611,12 +609,12 @@ std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
       if (dimLink.pos != noCell && contains(dimLink.pos) &&
           visited.insert(dimLink.pos).second) {
         ordered.push_back(dimLink.pos);
-        queue.push_back({dimLink.pos, dist + 1});
+        queue.emplace_back(dimLink.pos, dist + 1);
       }
       if (dimLink.neg != noCell && contains(dimLink.neg) &&
           visited.insert(dimLink.neg).second) {
         ordered.push_back(dimLink.neg);
-        queue.push_back({dimLink.neg, dist + 1});
+        queue.emplace_back(dimLink.neg, dist + 1);
       }
     }
   }

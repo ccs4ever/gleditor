@@ -81,7 +81,7 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   GLint maxLayers = 0;
   api.GetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
   api.GetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
-  limits = TextureLimits{maxSize, maxLayers};
+  limits = TextureLimits{.maxSize = maxSize, .maxLayers = maxLayers};
 
   api.GenBuffers(1, &highlightUbo);
   api.BindBuffer(GL_UNIFORM_BUFFER, highlightUbo);

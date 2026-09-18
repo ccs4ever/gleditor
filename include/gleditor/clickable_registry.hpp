@@ -406,7 +406,7 @@ public:
    * @brief Dispatch an incoming PickingResult across all registered controls.
    * @return true if a registered handler matched and was executed.
    */
-  bool dispatch(const render::PickingResult &pick) const {
+  [[nodiscard]] bool dispatch(const render::PickingResult &pick) const {
     if (pick.tag.empty()) {
       return false;
     }
@@ -423,7 +423,7 @@ public:
    * @brief Dispatch an incoming PickingTag across all registered controls.
    * @return true if a registered handler matched and was executed.
    */
-  bool dispatch(const render::PickingTag &tag) const {
+  [[nodiscard]] bool dispatch(const render::PickingTag &tag) const {
     if (tag.empty()) {
       return false;
     }
@@ -439,7 +439,7 @@ public:
   /**
    * @brief Dispatch an incoming overlay pick by sub-tag offset.
    */
-  bool dispatch(const std::uint32_t tagOffset) const {
+  [[nodiscard]] bool dispatch(const std::uint32_t tagOffset) const {
     for (const auto &ctrl : controls_) {
       if (ctrl.tagKind == render::tagKindOverlay &&
           tagOffset >= ctrl.tagOffset && tagOffset < ctrl.tagEndOffset) {
@@ -455,8 +455,8 @@ public:
   /**
    * @brief Dispatch by kind and tag offset.
    */
-  bool dispatch(const std::uint32_t tagKind,
-                const std::uint32_t tagOffset) const {
+  [[nodiscard]] bool dispatch(const std::uint32_t tagKind,
+                              const std::uint32_t tagOffset) const {
     render::PickingTag tag;
     tag.kind         = tagKind;
     tag.clusterIndex = tagOffset;
@@ -466,9 +466,10 @@ public:
   /**
    * @brief Dispatch by full coordinate tuple.
    */
-  bool dispatch(const std::uint32_t tagKind, const std::uint32_t docIndex,
-                const std::uint32_t pageIndex,
-                const std::uint32_t clusterIndex) const {
+  [[nodiscard]] bool dispatch(const std::uint32_t tagKind,
+                              const std::uint32_t docIndex,
+                              const std::uint32_t pageIndex,
+                              const std::uint32_t clusterIndex) const {
     render::PickingTag tag;
     tag.kind         = tagKind;
     tag.docIndex     = docIndex;

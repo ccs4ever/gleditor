@@ -112,10 +112,10 @@ void Caret::setGeometry(const float posX, const float posY,
 
   const auto colour = Doc::VBORow::color3(32, 96, 220);
   const Doc::VBORow row{
-      {posX, posY},
+      .pos = {posX, posY},
       // In front of the text, which is itself in front of the paper.
-      Doc::VBORow::fill(colour, Doc::VBORow::onTop),
-      0,
+      .foreground = Doc::VBORow::fill(colour, Doc::VBORow::onTop),
+      .atlas      = 0,
       // The caret writes the picking attachment like every other quad, and it
       // is drawn last, so it covers the tag of the glyph beneath it. Tagged
       // zero that reads as empty space, and clicking the caret reported
@@ -125,8 +125,9 @@ void Caret::setGeometry(const float posX, const float posY,
       // second colour attachment alone, which OpenGL ES 3.0 cannot do --
       // per-attachment colour masks arrive in ES 3.2. So the caret carries a
       // kind of its own and the click handler leaves it where it is.
-      Doc::VBORow::box(0, pixelWidth, pixelHeight, render::tagKindOverlay),
-      Doc::VBORow::paperAt(colour, 0)};
+      .quad =
+          Doc::VBORow::box(0, pixelWidth, pixelHeight, render::tagKindOverlay),
+      .paper = Doc::VBORow::paperAt(colour, 0)};
 
   const std::span<const std::byte> bytes{
       reinterpret_cast<const std::byte *>(&row), sizeof(row)};
@@ -145,7 +146,7 @@ void Caret::draw(RenderState &state, const glm::mat4 &pageTransform) const {
   state.device->bindPipeline(pipeline);
   state.device->bindAtlasTexture(state.glyphCache.textureHandle());
 
-  const render::DrawUniforms uniforms{toArray(pageTransform)};
+  const render::DrawUniforms uniforms{.mvp = toArray(pageTransform)};
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
                            caretRows);
 }

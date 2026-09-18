@@ -36,7 +36,7 @@ enum class TetherState : std::uint8_t {
 struct TetherPayload {
   PrimediaSpan span{};
   std::string previewText;
-  MicroversionId originVersion{};
+  MicroversionId originVersion;
   std::uint32_t originDocIndex{0};
   std::uint32_t originCharStart{0};
   std::uint32_t originCharEnd{0};

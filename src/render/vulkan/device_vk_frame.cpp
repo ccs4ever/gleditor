@@ -41,7 +41,11 @@ void transitionColour(const VkCommandBuffer commands, const VkImage image,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = image;
-  barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  barrier.subresourceRange    = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .baseMipLevel   = 0,
+                                 .levelCount     = 1,
+                                 .baseArrayLayer = 0,
+                                 .layerCount     = 1};
   barrier.srcAccessMask       = srcAccess;
   barrier.dstAccessMask       = dstAccess;
   vkCmdPipelineBarrier(commands, srcStage, dstStage, 0, 0, nullptr, 0, nullptr,
@@ -99,13 +103,13 @@ bool DeviceVK::beginFrame() {
   // The picking attachment is an unsigned integer target, so it takes an
   // integer clear rather than the float one the colour target uses.
   clears[1].color        = VkClearColorValue{.uint32 = {0, 0, 0, 0}};
-  clears[2].depthStencil = {1.0F, 0};
+  clears[2].depthStencil = {.depth = 1.0F, .stencil = 0};
 
   VkRenderPassBeginInfo passInfo{};
-  passInfo.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  passInfo.renderPass      = renderPass;
-  passInfo.framebuffer     = framebuffer;
-  passInfo.renderArea      = {{0, 0}, swapchainExtent};
+  passInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  passInfo.renderPass  = renderPass;
+  passInfo.framebuffer = framebuffer;
+  passInfo.renderArea = {.offset = {.x = 0, .y = 0}, .extent = swapchainExtent};
   passInfo.clearValueCount = clears.size();
   passInfo.pClearValues    = clears.data();
   // Every draw of the pass goes into a secondary command buffer, whether or
@@ -134,7 +138,7 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
           "vkAllocateCommandBuffers (secondary)");
     slot.buffers.push_back(allocated);
   }
-  const auto commands = slot.buffers[slot.used++];
+  auto *const commands = slot.buffers[slot.used++];
 
   VkCommandBufferInheritanceInfo inherit{};
   inherit.sType       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
@@ -153,13 +157,14 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   // A secondary buffer inherits the render pass and framebuffer and nothing
   // else: no viewport, no bound pipeline, no descriptor sets. Each one
   // therefore re-establishes the state its draws need.
-  const VkViewport viewport{0.0F,
-                            0.0F,
-                            static_cast<float>(swapchainExtent.width),
-                            static_cast<float>(swapchainExtent.height),
-                            0.0F,
-                            1.0F};
-  const VkRect2D scissor{{0, 0}, swapchainExtent};
+  const VkViewport viewport{.x     = 0.0F,
+                            .y     = 0.0F,
+                            .width = static_cast<float>(swapchainExtent.width),
+                            .height =
+                                static_cast<float>(swapchainExtent.height),
+                            .minDepth = 0.0F,
+                            .maxDepth = 1.0F};
+  const VkRect2D scissor{.offset = {.x = 0, .y = 0}, .extent = swapchainExtent};
   vkCmdSetViewport(commands, 0, 1, &viewport);
   vkCmdSetScissor(commands, 0, 1, &scissor);
 
@@ -167,7 +172,7 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   if (pipelines.end() != pipelineIt) {
     vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS,
                       pipelineIt->second.pipeline);
-    const auto set = pipelineIt->second.sets[frameIndex];
+    auto *const set = pipelineIt->second.sets[frameIndex];
     vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             pipelineIt->second.layout, 0, 1, &set, 0, nullptr);
   }
@@ -236,13 +241,16 @@ void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
     return;
   }
 
-  const VkDescriptorBufferInfo highlightInfo{highlightIt->second.buffer, 0,
-                                             highlightIt->second.bytes};
+  const VkDescriptorBufferInfo highlightInfo{
+      .buffer = highlightIt->second.buffer,
+      .offset = 0,
+      .range  = highlightIt->second.bytes};
   const VkDescriptorImageInfo imageInfo{
-      glyphSampler, textureIt->second.view,
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+      .sampler     = glyphSampler,
+      .imageView   = textureIt->second.view,
+      .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-  const auto set = pipelineIt->second.sets[frameIndex];
+  auto *const set = pipelineIt->second.sets[frameIndex];
   std::array<VkWriteDescriptorSet, 2> writes{};
   writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writes[0].dstSet          = set;
@@ -329,13 +337,16 @@ void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
     return;
   }
   recordBatch(sequentialSecondary(),
-              GlyphBatch{uniforms, vertices, vertexByteOffset, instanceCount});
+              GlyphBatch{.uniforms         = uniforms,
+                         .vertices         = vertices,
+                         .vertexByteOffset = vertexByteOffset,
+                         .instanceCount    = instanceCount});
 }
 
 void DeviceVK::recordSequentially(const std::span<const GlyphBatch> batches) {
   // Keeps the run in the buffer already open, which also saves beginning a
   // fresh secondary.
-  const auto commands = sequentialSecondary();
+  auto *const commands = sequentialSecondary();
   for (const auto &batch : batches) {
     recordBatch(commands, batch);
   }
@@ -362,7 +373,7 @@ void DeviceVK::recordInParallel(const std::span<const GlyphBatch> batches,
     // allocating and recording from it needs no lock. Everything the recording
     // reads -- the pipeline and buffer tables, the bound state -- is written
     // only between frames.
-    const auto commands = beginSecondary(frame.slots[k]);
+    auto *const commands = beginSecondary(frame.slots[k]);
     for (auto i = first; i < last; i++) {
       recordBatch(commands, batches[i]);
     }
@@ -558,9 +569,12 @@ void DeviceVK::endFrame() {
     const auto pickIt = buffers.find(frame.pickingBuffer.id);
     if (buffers.end() != pickIt) {
       VkBufferImageCopy region{};
-      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-      region.imageOffset      = {frame.pickX, frame.pickY, 0};
-      region.imageExtent      = {1, 1, 1};
+      region.imageSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .mipLevel       = 0,
+                                 .baseArrayLayer = 0,
+                                 .layerCount     = 1};
+      region.imageOffset      = {.x = frame.pickX, .y = frame.pickY, .z = 0};
+      region.imageExtent      = {.width = 1, .height = 1, .depth = 1};
       vkCmdCopyImageToBuffer(frame.commands, tagImage,
                              VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                              pickIt->second.buffer, 1, &region);
@@ -579,9 +593,13 @@ void DeviceVK::endFrame() {
       VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
   VkImageBlit blit{};
-  blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  blit.srcOffsets[1]  = {static_cast<std::int32_t>(swapchainExtent.width),
-                         static_cast<std::int32_t>(swapchainExtent.height), 1};
+  blit.srcSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                         .mipLevel       = 0,
+                         .baseArrayLayer = 0,
+                         .layerCount     = 1};
+  blit.srcOffsets[1]  = {.x = static_cast<std::int32_t>(swapchainExtent.width),
+                         .y = static_cast<std::int32_t>(swapchainExtent.height),
+                         .z = 1};
   blit.dstSubresource = blit.srcSubresource;
   blit.dstOffsets[1]  = blit.srcOffsets[1];
   vkCmdBlitImage(frame.commands, colourImage,
@@ -656,10 +674,15 @@ FrameImage DeviceVK::captureColorTarget() {
                                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-  const auto commands = beginOneShot();
+  auto *const commands = beginOneShot();
   VkBufferImageCopy region{};
-  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-  region.imageExtent      = {swapchainExtent.width, swapchainExtent.height, 1};
+  region.imageSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                             .mipLevel       = 0,
+                             .baseArrayLayer = 0,
+                             .layerCount     = 1};
+  region.imageExtent      = {.width  = swapchainExtent.width,
+                             .height = swapchainExtent.height,
+                             .depth  = 1};
   vkCmdCopyImageToBuffer(commands, colourImage,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.buffer,
                          1, &region);

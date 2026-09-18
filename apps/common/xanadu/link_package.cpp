@@ -57,9 +57,9 @@ std::optional<GlobalSpan> decodeSpan(const bencode::Value &value) {
   if (start->asInteger() < 0 || length->asInteger() < 0) {
     return std::nullopt;
   }
-  return GlobalSpan{scroll->asString(),
-                    static_cast<std::uint64_t>(start->asInteger()),
-                    static_cast<std::uint64_t>(length->asInteger())};
+  return GlobalSpan{.scroll = scroll->asString(),
+                    .start  = static_cast<std::uint64_t>(start->asInteger()),
+                    .length = static_cast<std::uint64_t>(length->asInteger())};
 }
 
 bencode::Value encodeSpans(const std::vector<GlobalSpan> &spans) {

@@ -138,7 +138,7 @@ void BridgeCoordinator::synchronize() {
 }
 
 void BridgeCoordinator::applyConfig(xanadu::BridgeRuntimeConfig config) {
-  config_ = std::move(config);
+  config_ = config;
   links_.setCellRadius(config_.cellRadius);
   links_.setBridgeRuntimeConfig(config_);
   if (surface_ != nullptr) {

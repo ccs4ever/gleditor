@@ -370,7 +370,7 @@ std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
     anchorX    = box->x;
     effectiveY = box->y;
   }
-  return Corner{pageIdx, anchorX, effectiveY};
+  return Corner{.pageIndex = pageIdx, .x = anchorX, .y = effectiveY};
 }
 
 std::optional<Doc::Anchor>
@@ -523,7 +523,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
           videoFrameHeight_ > 0) {
         // Letterboxed within the viewport rather than stretched: a frame
         // whose aspect does not match the card would otherwise distort.
-        const float texSize =
+        const auto texSize =
             static_cast<float>(std::max(videoFrameWidth_, videoFrameHeight_));
         const float frameAspect = static_cast<float>(videoFrameWidth_) /
                                   static_cast<float>(videoFrameHeight_);

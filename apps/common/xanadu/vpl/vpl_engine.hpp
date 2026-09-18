@@ -121,7 +121,7 @@ private:
   Store *store_{nullptr};
 
   zigzag::DimRef defaultDim_{zigzag::noCell};
-  std::unordered_map<std::string, VplView> env_{};
+  std::unordered_map<std::string, VplView> env_;
 };
 
 } // namespace xanadu::vpl
