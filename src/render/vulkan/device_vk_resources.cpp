@@ -284,6 +284,11 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   record.levels = std::max(1, levels);
   record.format = format;
 
+  // Standard Vulkan builder pattern: zero-init, then set only the fields
+  // that matter below. Vulkan's bitmask-style flag enums have no declared
+  // zero enumerator even though 0 ("no flags") is a valid value for one,
+  // which this check can't tell apart from an uninitialized read.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   VkImageCreateInfo info{};
   info.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType   = VK_IMAGE_TYPE_2D;
@@ -729,6 +734,9 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   auto *const fragModule = createShaderModule(
       readSpirv(desc.spirvDir + "/" + desc.shaderName + ".frag.spv"));
 
+  // Standard Vulkan builder pattern; every element's .stage is set below.
+  // See the note above createImage()'s info{} in this same file.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
   stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
@@ -782,6 +790,9 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
   raster.lineWidth = 1.0F;
 
+  // Standard Vulkan builder pattern; see the note above createImage()'s
+  // info{} in this same file.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   VkPipelineMultisampleStateCreateInfo multisample{};
   multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
   multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;

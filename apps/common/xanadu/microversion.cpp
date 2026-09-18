@@ -31,6 +31,9 @@ std::uint32_t branchOrdinalFromLetters(const std::string_view letters) {
 
 void MicroversionId::takeStorageFor(const std::size_t n) {
   if (n > inlineSegments) {
+    // Paired with the delete[] in release() below -- MicroversionId's own
+    // small-object-optimization storage, not exposed past this class.
+    // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
     heapParts = new Segment[n];
   }
   count = static_cast<std::uint32_t>(n);

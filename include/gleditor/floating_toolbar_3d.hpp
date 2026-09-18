@@ -37,6 +37,8 @@ class FloatingToolbar3D : public FrameContributor,
                           public a11y::Source {
 public:
   enum class ButtonId : std::uint32_t {
+    None = 0, ///< The value a default-constructed ButtonLayout::id holds.
+
     // Operational
     NewDoc = 100,
     OpenFile,

@@ -87,7 +87,8 @@ bool renderSw(render::RenderDevice *const device,
       tvg::ColorSpace::ABGR8888S);
   if (tvg::Result::Success != targetRes ||
       tvg::Result::Success != canvas->add(picture)) {
-    delete canvas;
+    delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                   // C-style raw-pointer ownership.
     picture->unref();
     return false;
   }
@@ -105,7 +106,8 @@ bool renderSw(render::RenderDevice *const device,
           reinterpret_cast<const std::byte *>(pixels.data()),
           pixels.size() * sizeof(std::uint32_t)));
 
-  delete canvas;
+  delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                 // C-style raw-pointer ownership.
   return true;
 }
 
@@ -153,18 +155,21 @@ bool tryRenderGl(render::RenderDevice *const device,
             nullptr, nullptr, glContext, static_cast<std::int32_t>(fbo),
             texSize, texSize, tvg::ColorSpace::ABGR8888S);
         if (tvg::Result::Success != targetRes) {
-          delete canvas;
+          delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's
+                         // own C-style raw-pointer ownership.
           return;
         }
         canvas->viewport(0, 0, width, height);
         if (tvg::Result::Success != canvas->add(picture)) {
-          delete canvas;
+          delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's
+                         // own C-style raw-pointer ownership.
           return;
         }
         consumed = true;
         rendered = (tvg::Result::Success == canvas->draw());
         canvas->sync();
-        delete canvas;
+        delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's
+                       // own C-style raw-pointer ownership.
       });
 
   if (!consumed) {

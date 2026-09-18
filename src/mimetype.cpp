@@ -59,6 +59,10 @@ struct ThreadLocalMagic {
 
 } // namespace
 
+// These can only throw std::bad_alloc, from constructing a handful of short
+// std::strings at startup -- a condition the program couldn't meaningfully
+// recover from anyway, so terminating is the right outcome.
+// NOLINTBEGIN(bugprone-throwing-static-initialization)
 const MimeType MimeType::TextPlain{"text", "plain"};
 const MimeType MimeType::TextMarkdown{"text", "markdown"};
 const MimeType MimeType::TextHtml{"text", "html"};
@@ -68,6 +72,7 @@ const MimeType MimeType::ImageWebp{"image", "webp"};
 const MimeType MimeType::ImageGif{"image", "gif"};
 const MimeType MimeType::ImageSvg{"image", "svg+xml"};
 const MimeType MimeType::OctetStream{"application", "octet-stream"};
+// NOLINTEND(bugprone-throwing-static-initialization)
 
 MimeType::MimeType() : type_("application"), subtype_("octet-stream") {}
 

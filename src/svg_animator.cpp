@@ -596,14 +596,16 @@ public:
         tvg::ColorSpace::ABGR8888S);
     if (tvg::Result::Success != targetRes ||
         tvg::Result::Success != canvas->add(picture)) {
-      delete canvas;
+      delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                     // C-style raw-pointer ownership.
       picture->unref();
       return false;
     }
 
     canvas->draw();
     canvas->sync();
-    delete canvas;
+    delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                   // C-style raw-pointer ownership.
     return true;
   }
 
@@ -663,7 +665,8 @@ public:
     canvas->add(anim_->picture());
     canvas->draw();
     canvas->sync();
-    delete canvas;
+    delete canvas; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                   // C-style raw-pointer ownership.
     return true;
   }
 
@@ -699,7 +702,8 @@ bool SvgAnimator::isAnimated(std::span<const std::uint8_t> bytes) {
     }
     const bool animated = (tvg::Result::Success == res &&
                            (anim->duration() > 0.0F || anim->totalFrame() > 1));
-    delete anim;
+    delete anim; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                 // C-style raw-pointer ownership.
     thorvgUnref();
     if (animated) {
       return true;
@@ -761,7 +765,8 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
       thorvgUnref();
       return std::make_unique<LottieAnimator>(anim, width, height);
     }
-    delete anim;
+    delete anim; // NOLINT(cppcoreguidelines-owning-memory) -- ThorVG's own
+                 // C-style raw-pointer ownership.
   }
   thorvgUnref();
 

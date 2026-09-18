@@ -378,6 +378,11 @@ void DeviceVK::createLogicalDevice() {
 }
 
 void DeviceVK::createSwapchain(const int width, const int height) {
+  // A pure query-output struct the driver call below fills in; Vulkan's
+  // bitmask-style flag enums have no declared zero enumerator even though 0
+  // ("no flags") is a valid value for one, which this check can't tell apart
+  // from an uninitialized read.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   VkSurfaceCapabilitiesKHR caps{};
   check(
       vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps),
@@ -421,6 +426,10 @@ void DeviceVK::createSwapchain(const int width, const int height) {
     imageCount = caps.maxImageCount;
   }
 
+  // Standard Vulkan builder pattern: zero-init, then set only the fields
+  // that matter below (see the note on caps{} above for why this check
+  // fires on a Vulkan struct's flag-bit fields).
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   VkSwapchainCreateInfoKHR info{};
   info.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
   info.surface          = surface;
@@ -472,6 +481,9 @@ void createImage(const VkDevice device,
                  const VkExtent2D extent, const VkFormat format,
                  const VkImageUsageFlags usage, const VkImageAspectFlags aspect,
                  VkImage &image, VkDeviceMemory &memory, VkImageView &view) {
+  // Standard Vulkan builder pattern; see the note on caps{} in
+  // createSwapchain() above.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   VkImageCreateInfo info{};
   info.sType     = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType = VK_IMAGE_TYPE_2D;
@@ -573,6 +585,10 @@ void DeviceVK::destroyRenderTargets() {
 }
 
 void DeviceVK::createRenderPass() {
+  // Standard Vulkan builder pattern; every element's .samples is set below
+  // (attachments[1] by copying attachments[0]). See the note on caps{} in
+  // createSwapchain() above.
+  // NOLINTNEXTLINE(bugprone-invalid-enum-default-initialization)
   std::array<VkAttachmentDescription, 3> attachments{};
   // colour
   attachments[0].format         = colourFormat;
