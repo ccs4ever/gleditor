@@ -13,6 +13,7 @@
 #include <unordered_set>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
@@ -736,6 +737,544 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     return true;
   }
 
+  // Setting introspection: setting(Name, Value)
+  if (goalFunctor == "setting" && goalArgs.size() == 2) {
+    auto evalSetting = [&](std::string_view sName,
+                           const auto &makeValCell) -> bool {
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) return false;
+      auto mark        = core.arena().mark();
+      CellRef nameCell = core.arena().makeCell(sName);
+      CellRef valCell  = makeValCell();
+      if (stdlib.unify(goalArgs[0], nameCell) &&
+          stdlib.unify(goalArgs[1], valCell)) {
+        bool keepGoing = solveQueryHelper(
+            stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+        core.arena().release(mark);
+        if (cutToFrame > 0) return false;
+        if (!keepGoing && onSolution != nullptr) return false;
+      } else {
+        core.arena().release(mark);
+      }
+      return true;
+    };
+
+    if (stdlib.boundStore() != nullptr) {
+      const auto model =
+          xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
+      for (const auto &s : model.settings()) {
+        bool cont = evalSetting(s.name, [&]() -> CellRef {
+          if (s.value.elements.empty()) {
+            return core.arena().makeCell("");
+          }
+          if (s.value.elements.size() == 1) {
+            const auto &el = s.value.elements[0];
+            if (std::holds_alternative<double>(el)) {
+              return core.arena().makeScalarCell(std::get<double>(el));
+            }
+            if (std::holds_alternative<std::int64_t>(el)) {
+              return core.arena().makeScalarCell(std::get<std::int64_t>(el));
+            }
+            if (std::holds_alternative<bool>(el)) {
+              return core.arena().makeScalarCell(std::get<bool>(el));
+            }
+            return core.arena().makeCell(std::get<std::string>(el));
+          }
+          std::vector<CellRef> elCells;
+          for (const auto &el : s.value.elements) {
+            if (std::holds_alternative<double>(el)) {
+              elCells.push_back(
+                  core.arena().makeScalarCell(std::get<double>(el)));
+            } else if (std::holds_alternative<std::int64_t>(el)) {
+              elCells.push_back(
+                  core.arena().makeScalarCell(std::get<std::int64_t>(el)));
+            } else if (std::holds_alternative<bool>(el)) {
+              elCells.push_back(
+                  core.arena().makeScalarCell(std::get<bool>(el)));
+            } else {
+              elCells.push_back(
+                  core.arena().makeCell(std::get<std::string>(el)));
+            }
+          }
+          return stdlib.makeList(elCells);
+        });
+        if (!cont) break;
+      }
+    } else {
+      DimRef varsDim = core.dims().vars;
+      DimRef valsDim = core.dims().values;
+      CellRef curVar =
+          core.arena().linked(core.home(), varsDim, DimVector::POS);
+      std::size_t limit = core.arena().cellCount() + 1;
+      while (curVar != noCell && limit-- > 0) {
+        std::string sName = core.arena().textOf(curVar);
+        CellRef curVal = core.arena().linked(curVar, valsDim, DimVector::POS);
+        bool cont      = evalSetting(sName, [&]() -> CellRef {
+          return curVal == noCell ? core.arena().makeCell("") : curVal;
+        });
+        if (!cont) break;
+        curVar = core.arena().linked(curVar, varsDim, DimVector::POS);
+      }
+    }
+    return true;
+  }
+
+  // Setting schema shape: setting_shape(Name, Shape)
+  if (goalFunctor == "setting_shape" && goalArgs.size() == 2) {
+    if (stdlib.boundStore() != nullptr) {
+      const auto model =
+          xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
+      for (const auto &s : model.settings()) {
+        for (const auto &alt : s.schema.alternatives) {
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+          auto mark        = core.arena().mark();
+          CellRef nameCell = core.arena().makeCell(s.name);
+          std::vector<CellRef> typeCells;
+          for (const auto &t : alt.expectedTypes) {
+            typeCells.push_back(core.arena().makeCell(t));
+          }
+          CellRef shapeCell = stdlib.makeList(typeCells);
+          if (stdlib.unify(goalArgs[0], nameCell) &&
+              stdlib.unify(goalArgs[1], shapeCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
+            core.arena().release(mark);
+            if (cutToFrame > 0) return false;
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+      }
+    }
+    return true;
+  }
+
+  // Setting default values: setting_default(Name, Default)
+  if (goalFunctor == "setting_default" && goalArgs.size() == 2) {
+    if (stdlib.boundStore() != nullptr) {
+      const auto model =
+          xanadu::SystemStoreModel::fromStore(*stdlib.boundStore());
+      for (const auto &s : model.settings()) {
+        for (const auto &alt : s.schema.alternatives) {
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+          auto mark        = core.arena().mark();
+          CellRef nameCell = core.arena().makeCell(s.name);
+          CellRef defCell  = noCell;
+          if (alt.defaultValues.size() == 1) {
+            const auto &el = alt.defaultValues[0];
+            if (std::holds_alternative<double>(el)) {
+              defCell = core.arena().makeScalarCell(std::get<double>(el));
+            } else if (std::holds_alternative<std::int64_t>(el)) {
+              defCell = core.arena().makeScalarCell(std::get<std::int64_t>(el));
+            } else if (std::holds_alternative<bool>(el)) {
+              defCell = core.arena().makeScalarCell(std::get<bool>(el));
+            } else {
+              defCell = core.arena().makeCell(std::get<std::string>(el));
+            }
+          } else {
+            std::vector<CellRef> defCells;
+            for (const auto &el : alt.defaultValues) {
+              if (std::holds_alternative<double>(el)) {
+                defCells.push_back(
+                    core.arena().makeScalarCell(std::get<double>(el)));
+              } else if (std::holds_alternative<std::int64_t>(el)) {
+                defCells.push_back(
+                    core.arena().makeScalarCell(std::get<std::int64_t>(el)));
+              } else if (std::holds_alternative<bool>(el)) {
+                defCells.push_back(
+                    core.arena().makeScalarCell(std::get<bool>(el)));
+              } else {
+                defCells.push_back(
+                    core.arena().makeCell(std::get<std::string>(el)));
+              }
+            }
+            defCell = stdlib.makeList(defCells);
+          }
+          if (stdlib.unify(goalArgs[0], nameCell) &&
+              stdlib.unify(goalArgs[1], defCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
+            core.arena().release(mark);
+            if (cutToFrame > 0) return false;
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+      }
+    }
+    return true;
+  }
+
+  // Cell value: cell_value(CellId, Value)
+  if (goalFunctor == "cell_value" && goalArgs.size() == 2) {
+    CellRef dId = stdlib.deref(goalArgs[0]);
+    if (!stdlib.isVar(dId)) {
+      std::int64_t idNum = -1;
+      if (auto n = core.arena().asInt64(dId); n.has_value()) {
+        idNum = *n;
+      } else {
+        idNum = static_cast<std::int64_t>(dId);
+      }
+      if (idNum >= 0 && core.arena().contains(static_cast<CellRef>(idNum))) {
+        CellRef target  = static_cast<CellRef>(idNum);
+        auto mark       = core.arena().mark();
+        CellRef valCell = noCell;
+        if (auto d = core.arena().asDouble(target); d.has_value()) {
+          valCell = core.arena().makeScalarCell(*d);
+        } else if (auto i = core.arena().asInt64(target); i.has_value()) {
+          valCell = core.arena().makeScalarCell(*i);
+        } else if (auto b = core.arena().asBool(target); b.has_value()) {
+          valCell = core.arena().makeScalarCell(*b);
+        } else {
+          valCell = core.arena().makeCell(core.arena().textOf(target));
+        }
+        if (stdlib.unify(goalArgs[1], valCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+          core.arena().release(mark);
+          if (cutToFrame > 0) return false;
+          if (!keepGoing && onSolution != nullptr) return false;
+        } else {
+          core.arena().release(mark);
+        }
+      }
+    } else {
+      std::size_t total = core.arena().cellCount();
+      for (std::size_t c = 1; c < total; ++c) {
+        CellRef target = core.arena().refOf(static_cast<std::uint32_t>(c));
+        if (!core.arena().contains(target)) continue;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+        auto mark = core.arena().mark();
+        CellRef idCell =
+            core.arena().makeScalarCell(static_cast<std::int64_t>(target));
+        CellRef valCell = noCell;
+        if (auto d = core.arena().asDouble(target); d.has_value()) {
+          valCell = core.arena().makeScalarCell(*d);
+        } else if (auto i = core.arena().asInt64(target); i.has_value()) {
+          valCell = core.arena().makeScalarCell(*i);
+        } else if (auto b = core.arena().asBool(target); b.has_value()) {
+          valCell = core.arena().makeScalarCell(*b);
+        } else {
+          valCell = core.arena().makeCell(core.arena().textOf(target));
+        }
+        if (stdlib.unify(goalArgs[0], idCell) &&
+            stdlib.unify(goalArgs[1], valCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+          core.arena().release(mark);
+          if (cutToFrame > 0) return false;
+          if (!keepGoing && onSolution != nullptr) return false;
+        } else {
+          core.arena().release(mark);
+        }
+      }
+    }
+    return true;
+  }
+
+  // Cell link: cell_link(FromId, Dim, Dir, ToId)
+  if (goalFunctor == "cell_link" && goalArgs.size() == 4) {
+    auto tryUnifyLink = [&](CellRef fromCell, std::string_view dimName,
+                            std::string_view dirStr, CellRef toCell) -> bool {
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) return false;
+      auto mark = core.arena().mark();
+      CellRef fromRefCell =
+          core.arena().makeScalarCell(static_cast<std::int64_t>(fromCell));
+      CellRef dimCell = core.arena().makeCell(dimName);
+      CellRef dirCell = core.arena().makeCell(dirStr);
+      CellRef toRefCell =
+          core.arena().makeScalarCell(static_cast<std::int64_t>(toCell));
+
+      if (stdlib.unify(goalArgs[0], fromRefCell) &&
+          stdlib.unify(goalArgs[1], dimCell) &&
+          stdlib.unify(goalArgs[2], dirCell) &&
+          stdlib.unify(goalArgs[3], toRefCell)) {
+        bool keepGoing = solveQueryHelper(
+            stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+        core.arena().release(mark);
+        if (cutToFrame > 0) return false;
+        if (!keepGoing && onSolution != nullptr) return false;
+      } else {
+        core.arena().release(mark);
+      }
+      return true;
+    };
+
+    CellRef dFrom = stdlib.deref(goalArgs[0]);
+    if (!stdlib.isVar(dFrom)) {
+      std::int64_t fromNum = -1;
+      if (auto n = core.arena().asInt64(dFrom); n.has_value()) {
+        fromNum = *n;
+      } else {
+        fromNum = static_cast<std::int64_t>(dFrom);
+      }
+      if (fromNum >= 0 &&
+          core.arena().contains(static_cast<CellRef>(fromNum))) {
+        CellRef fromCell = static_cast<CellRef>(fromNum);
+        for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          std::string dimName = core.arena().textOf(dl.dim);
+          if (dimName.empty()) {
+            dimName = "d." + std::to_string(dl.dim);
+          }
+          if (dl.pos != noCell) {
+            if (!tryUnifyLink(fromCell, dimName, "pos", dl.pos)) break;
+          }
+          if (dl.neg != noCell) {
+            if (!tryUnifyLink(fromCell, dimName, "neg", dl.neg)) break;
+          }
+        }
+      }
+    } else {
+      std::size_t total = core.arena().cellCount();
+      for (std::size_t c = 1; c < total; ++c) {
+        CellRef fromCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+        if (!core.arena().contains(fromCell)) continue;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+        for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          std::string dimName = core.arena().textOf(dl.dim);
+          if (dimName.empty()) {
+            dimName = "d." + std::to_string(dl.dim);
+          }
+          if (dl.pos != noCell) {
+            if (!tryUnifyLink(fromCell, dimName, "pos", dl.pos)) break;
+          }
+          if (dl.neg != noCell) {
+            if (!tryUnifyLink(fromCell, dimName, "neg", dl.neg)) break;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  // Transclusion: transclude(OriginDoc, OriginSpan, TargetDoc)
+  if (goalFunctor == "transclude" && goalArgs.size() == 3) {
+    if (stdlib.boundStore() != nullptr) {
+      const auto &store       = *stdlib.boundStore();
+      const std::size_t count = store.opCount();
+      for (std::size_t i = 0; i < count; ++i) {
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+        const auto *cop = store.getCompactOp(static_cast<std::uint32_t>(i));
+        if (cop != nullptr && cop->kind == xanadu::OpKind::Transclude) {
+          auto mark           = core.arena().mark();
+          CellRef oDocCell    = core.arena().makeCell("store");
+          std::string spanStr = "[" + std::to_string(cop->spanStart) + "," +
+                                std::to_string(cop->spanLength) + "]";
+          CellRef spanCell    = core.arena().makeCell(spanStr);
+          CellRef tDocCell    = core.arena().makeCell("active");
+          if (stdlib.unify(goalArgs[0], oDocCell) &&
+              stdlib.unify(goalArgs[1], spanCell) &&
+              stdlib.unify(goalArgs[2], tDocCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
+            core.arena().release(mark);
+            if (cutToFrame > 0) return false;
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  // Xanalink: xanalink(FromSpan, LinkType, ToSpan)
+  if (goalFunctor == "xanalink" && goalArgs.size() == 3) {
+    if (stdlib.boundStore() != nullptr) {
+      const auto &store = *stdlib.boundStore();
+      for (const auto &[id, link] : store.links()) {
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+        auto mark = core.arena().mark();
+        std::string leftStr =
+            link.left.empty()
+                ? "[]"
+                : ("[" + std::to_string(link.left[0].start) + "," +
+                   std::to_string(link.left[0].length) + "]");
+        std::string rightStr =
+            link.right.empty()
+                ? "[]"
+                : ("[" + std::to_string(link.right[0].start) + "," +
+                   std::to_string(link.right[0].length) + "]");
+        std::string typeStr = link.owner.empty()
+                                  ? std::string(xanadu::linkTypeName(link.type))
+                                  : link.owner;
+        CellRef lCell       = core.arena().makeCell(leftStr);
+        CellRef tCell       = core.arena().makeCell(typeStr);
+        CellRef rCell       = core.arena().makeCell(rightStr);
+        if (stdlib.unify(goalArgs[0], lCell) &&
+            stdlib.unify(goalArgs[1], tCell) &&
+            stdlib.unify(goalArgs[2], rCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+          core.arena().release(mark);
+          if (cutToFrame > 0) return false;
+          if (!keepGoing && onSolution != nullptr) return false;
+        } else {
+          core.arena().release(mark);
+        }
+      }
+    }
+    return true;
+  }
+
+  // Cell span: cell_span(CellId, Span)
+  if (goalFunctor == "cell_span" && goalArgs.size() == 2) {
+    CellRef dId         = stdlib.deref(goalArgs[0]);
+    auto matchCellSpans = [&](CellRef c) -> bool {
+      auto spans = core.arena().contentOf(c);
+      for (const auto &sp : spans) {
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) return false;
+        auto mark = core.arena().mark();
+        CellRef cCell =
+            core.arena().makeScalarCell(static_cast<std::int64_t>(c));
+        std::string spanStr = "[" + std::to_string(sp.start) + "," +
+                              std::to_string(sp.length) + "]";
+        CellRef spCell      = core.arena().makeCell(spanStr);
+        if (stdlib.unify(goalArgs[0], cCell) &&
+            stdlib.unify(goalArgs[1], spCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+          core.arena().release(mark);
+          if (cutToFrame > 0) return false;
+          if (!keepGoing && onSolution != nullptr) return false;
+        } else {
+          core.arena().release(mark);
+        }
+      }
+      return true;
+    };
+
+    if (!stdlib.isVar(dId)) {
+      std::int64_t idNum = -1;
+      if (auto n = core.arena().asInt64(dId); n.has_value()) {
+        idNum = *n;
+      } else {
+        idNum = static_cast<std::int64_t>(dId);
+      }
+      if (idNum >= 0 && core.arena().contains(static_cast<CellRef>(idNum))) {
+        matchCellSpans(static_cast<CellRef>(idNum));
+      }
+    } else {
+      std::size_t total = core.arena().cellCount();
+      for (std::size_t c = 1; c < total; ++c) {
+        CellRef target = core.arena().refOf(static_cast<std::uint32_t>(c));
+        if (!core.arena().contains(target)) continue;
+        if (!matchCellSpans(target)) break;
+      }
+    }
+    return true;
+  }
+
+  // Bridge edge: bridge_edge(PresentationCell, DocumentCell) or bridge_edge(U,
+  // Dim, V)
+  if (goalFunctor == "bridge_edge" &&
+      (goalArgs.size() == 2 || goalArgs.size() == 3)) {
+    if (goalArgs.size() == 2) {
+      DimRef cloneDim   = core.dims().clone;
+      std::size_t total = core.arena().cellCount();
+      for (std::size_t c = 1; c < total; ++c) {
+        CellRef presCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+        if (!core.arena().contains(presCell)) continue;
+        CellRef docCell =
+            core.arena().linked(presCell, cloneDim, DimVector::POS);
+        if (docCell != noCell) {
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+          auto mark = core.arena().mark();
+          CellRef pCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(presCell));
+          CellRef dCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(docCell));
+          if (stdlib.unify(goalArgs[0], pCell) &&
+              stdlib.unify(goalArgs[1], dCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
+            core.arena().release(mark);
+            if (cutToFrame > 0) return false;
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+      }
+    } else {
+      CellRef dDim = stdlib.deref(goalArgs[1]);
+      std::string reqDimName;
+      if (!stdlib.isVar(dDim)) {
+        reqDimName = core.arena().textOf(dDim);
+      }
+      auto matchEdgesFrom = [&](CellRef fromCell) -> bool {
+        if (!core.arena().contains(fromCell)) return true;
+        for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
+          if (dl.pos == noCell) continue;
+          std::string dimName = core.arena().textOf(dl.dim);
+          if (dimName.empty()) {
+            dimName = "d." + std::to_string(dl.dim);
+          }
+          if (!reqDimName.empty() && dimName != reqDimName) continue;
+          auto mark = core.arena().mark();
+          CellRef uCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(fromCell));
+          CellRef dCell = core.arena().makeCell(dimName);
+          CellRef vCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(dl.pos));
+          if (stdlib.unify(goalArgs[0], uCell) &&
+              stdlib.unify(goalArgs[1], dCell) &&
+              stdlib.unify(goalArgs[2], vCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
+            core.arena().release(mark);
+            if (cutToFrame > 0) return false;
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+        return true;
+      };
+
+      CellRef dU = stdlib.deref(goalArgs[0]);
+      if (!stdlib.isVar(dU)) {
+        std::int64_t uNum = -1;
+        if (auto n = core.arena().asInt64(dU); n.has_value()) {
+          uNum = *n;
+        } else {
+          uNum = static_cast<std::int64_t>(dU);
+        }
+        if (uNum >= 0 && core.arena().contains(static_cast<CellRef>(uNum))) {
+          matchEdgesFrom(static_cast<CellRef>(uNum));
+        }
+      } else {
+        std::size_t total = core.arena().cellCount();
+        for (std::size_t c = 1; c < total; ++c) {
+          CellRef fromCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
+          if (!matchEdgesFrom(fromCell)) break;
+        }
+      }
+    }
+    return true;
+  }
+
   // Iterate over matching predicates
   for (CellRef pred : candidatePreds) {
     if (pred == noCell) continue;
@@ -860,6 +1399,7 @@ void VortexStdLib::bootstrap() {
   CellRef modUI          = getOrCreateModule("std:ui");
   CellRef modNav         = getOrCreateModule("std:nav");
   CellRef modBridge      = getOrCreateModule("std:bridge");
+  CellRef modXudu        = getOrCreateModule("std:xudu");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -875,6 +1415,7 @@ void VortexStdLib::bootstrap() {
   buildUiModule(modUI);
   buildNavModule(modNav);
   buildBridgeModule(modBridge);
+  buildXuduModule(modXudu);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -2299,6 +2840,33 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
     predVortexParam_ = createPredicate("vortex_param");
     exportSymbol(mod, "vortex_param", predVortexParam_);
+
+    predSetting_ = createPredicate("setting");
+    exportSymbol(mod, "setting", predSetting_);
+
+    predSettingShape_ = createPredicate("setting_shape");
+    exportSymbol(mod, "setting_shape", predSettingShape_);
+
+    predSettingDefault_ = createPredicate("setting_default");
+    exportSymbol(mod, "setting_default", predSettingDefault_);
+
+    predCellValue_ = createPredicate("cell_value");
+    exportSymbol(mod, "cell_value", predCellValue_);
+
+    predCellLink_ = createPredicate("cell_link");
+    exportSymbol(mod, "cell_link", predCellLink_);
+
+    predTransclude_ = createPredicate("transclude");
+    exportSymbol(mod, "transclude", predTransclude_);
+
+    predXanalink_ = createPredicate("xanalink");
+    exportSymbol(mod, "xanalink", predXanalink_);
+
+    predCellSpan_ = createPredicate("cell_span");
+    exportSymbol(mod, "cell_span", predCellSpan_);
+
+    predBridgeEdge_ = createPredicate("bridge_edge");
+    exportSymbol(mod, "bridge_edge", predBridgeEdge_);
   }
 }
 
@@ -2652,6 +3220,16 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
   if (predVortexContract_ != noCell)
     candidatePreds.push_back(predVortexContract_);
   if (predVortexParam_ != noCell) candidatePreds.push_back(predVortexParam_);
+  if (predSetting_ != noCell) candidatePreds.push_back(predSetting_);
+  if (predSettingShape_ != noCell) candidatePreds.push_back(predSettingShape_);
+  if (predSettingDefault_ != noCell)
+    candidatePreds.push_back(predSettingDefault_);
+  if (predCellValue_ != noCell) candidatePreds.push_back(predCellValue_);
+  if (predCellLink_ != noCell) candidatePreds.push_back(predCellLink_);
+  if (predTransclude_ != noCell) candidatePreds.push_back(predTransclude_);
+  if (predXanalink_ != noCell) candidatePreds.push_back(predXanalink_);
+  if (predCellSpan_ != noCell) candidatePreds.push_back(predCellSpan_);
+  if (predBridgeEdge_ != noCell) candidatePreds.push_back(predBridgeEdge_);
   for (CellRef cp : customPredicates) {
     candidatePreds.push_back(cp);
   }
@@ -2918,6 +3496,29 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     routineBindings_[op] = {{cell}, {out}};
     exportSymbol(mod, "duplicate", op);
   }
+
+  constexpr std::pair<std::string_view, std::string_view> kExtraZzActions[] = {
+      {"rasterize_print", "#ZZ_RASTERIZE_PRINT"},
+      {"export_link_package", "#ZZ_EXPORT_LINK_PACKAGE"},
+      {"insert_cell_x_pos", "#ZZ_INSERT_CELL_X_POS"},
+      {"insert_cell_x_neg", "#ZZ_INSERT_CELL_X_NEG"},
+      {"insert_cell_y_pos", "#ZZ_INSERT_CELL_Y_POS"},
+      {"insert_cell_y_neg", "#ZZ_INSERT_CELL_Y_NEG"},
+      {"unlink_x_pos", "#ZZ_UNLINK_X_POS"},
+      {"unlink_x_neg", "#ZZ_UNLINK_X_NEG"},
+      {"delete_focus_cell", "#ZZ_DELETE_FOCUS_CELL"},
+      {"delete_focus_cell_bksp", "#ZZ_DELETE_FOCUS_CELL_BKSP"},
+      {"save_store", "#ZZ_SAVE_STORE"},
+      {"zigzag_duplicate_cell", "#ZZ_ZZ_DUPLICATE_CELL"},
+      {"zigzag_save_store", "#ZZ_ZZ_SAVE_STORE"},
+  };
+  for (const auto &[name, opcode] : kExtraZzActions) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, name, op);
+  }
 }
 
 void VortexStdLib::buildGCModule(CellRef mod) {
@@ -3018,6 +3619,45 @@ void VortexStdLib::buildUiModule(CellRef mod) {
     routineBindings_[op] = {{}, {out}};
     exportSymbol(mod, "bundle_stdlib", op);
   }
+
+  constexpr std::pair<std::string_view, std::string_view> kExtraUiActions[] = {
+      {"bundle_cycle", "#UI_BUNDLE_CYCLE"},
+      {"swap_xy", "#UI_SWAP_XY"},
+      {"toggle_palette", "#UI_TOGGLE_PALETTE"},
+      {"vql_translate_attach", "#UI_VQL_TRANSLATE_ATTACH"},
+      {"toggle_command_bar", "#UI_TOGGLE_COMMAND_BAR"},
+      {"open_command_bar_slash", "#UI_OPEN_COMMAND_BAR_SLASH"},
+      {"open_command_bar_colon", "#UI_OPEN_COMMAND_BAR_COLON"},
+      {"confirm_action", "#UI_CONFIRM_ACTION"},
+      {"dismiss_overlay", "#UI_DISMISS_OVERLAY"},
+      {"view_mode_content_1", "#UI_VIEW_MODE_CONTENT_1"},
+      {"view_mode_content_v", "#UI_VIEW_MODE_CONTENT_V"},
+      {"view_mode_topology", "#UI_VIEW_MODE_TOPOLOGY"},
+      {"view_mode_topology_t", "#UI_VIEW_MODE_TOPOLOGY_T"},
+      {"zigzag_toggle_palette", "#UI_ZZ_TOGGLE_PALETTE"},
+      {"zigzag_vql_translate_attach", "#UI_ZZ_VQL_TRANSLATE_ATTACH"},
+      {"zigzag_toggle_command_bar", "#UI_ZZ_TOGGLE_COMMAND_BAR"},
+      {"zigzag_open_command_bar_slash", "#UI_ZZ_OPEN_COMMAND_BAR_SLASH"},
+      {"zigzag_open_command_bar_colon", "#UI_ZZ_OPEN_COMMAND_BAR_COLON"},
+      {"zigzag_view_mode_content", "#UI_ZZ_VIEW_MODE_CONTENT"},
+      {"zigzag_view_mode_topology", "#UI_ZZ_VIEW_MODE_TOPOLOGY"},
+      {"zigzag_bundle_execution", "#UI_ZZ_BUNDLE_EXECUTION"},
+      {"zigzag_bundle_scope", "#UI_ZZ_BUNDLE_SCOPE"},
+      {"zigzag_bundle_contract", "#UI_ZZ_BUNDLE_CONTRACT"},
+      {"zigzag_bundle_logic", "#UI_ZZ_BUNDLE_LOGIC"},
+      {"zigzag_bundle_stdlib", "#UI_ZZ_BUNDLE_STDLIB"},
+      {"zigzag_bundle_cycle", "#UI_ZZ_BUNDLE_CYCLE"},
+      {"zigzag_swap_xy", "#UI_ZZ_SWAP_XY"},
+      {"zigzag_cycle_dims_forward", "#UI_ZZ_CYCLE_DIMS_FORWARD"},
+      {"zigzag_cycle_dims_backward", "#UI_ZZ_CYCLE_DIMS_BACKWARD"},
+  };
+  for (const auto &[name, opcode] : kExtraUiActions) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, name, op);
+  }
 }
 
 void VortexStdLib::buildNavModule(CellRef mod) {
@@ -3054,6 +3694,31 @@ void VortexStdLib::buildNavModule(CellRef mod) {
     core_.bindOutput(op, out);
     routineBindings_[op] = {{}, {out}};
     exportSymbol(mod, "jump_home", op);
+  }
+
+  constexpr std::pair<std::string_view, std::string_view> kExtraNavActions[] = {
+      {"step_x_pos", "#NAV_STEP_X_POS"},
+      {"step_x_neg", "#NAV_STEP_X_NEG"},
+      {"step_y_pos", "#NAV_STEP_Y_POS"},
+      {"step_y_neg", "#NAV_STEP_Y_NEG"},
+      {"step_z_pos", "#NAV_STEP_Z_POS"},
+      {"step_z_neg", "#NAV_STEP_Z_NEG"},
+      {"zigzag_jump_home", "#NAV_ZZ_JUMP_HOME"},
+      {"zigzag_hop_head", "#NAV_ZZ_HOP_HEAD"},
+      {"zigzag_hop_tail", "#NAV_ZZ_HOP_TAIL"},
+      {"zigzag_step_x_pos", "#NAV_ZZ_STEP_X_POS"},
+      {"zigzag_step_x_neg", "#NAV_ZZ_STEP_X_NEG"},
+      {"zigzag_step_y_pos", "#NAV_ZZ_STEP_Y_POS"},
+      {"zigzag_step_y_neg", "#NAV_ZZ_STEP_Y_NEG"},
+      {"zigzag_step_z_pos", "#NAV_ZZ_STEP_Z_POS"},
+      {"zigzag_step_z_neg", "#NAV_ZZ_STEP_Z_NEG"},
+  };
+  for (const auto &[name, opcode] : kExtraNavActions) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, name, op);
   }
 }
 
@@ -3437,6 +4102,62 @@ std::optional<xanadu::TranscopyrightDescriptor> VortexStdLib::bridgeCellRoyalty(
 bool VortexStdLib::bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
                                     const CellRef cell) {
   return surface.unlockCell(cell);
+}
+
+void VortexStdLib::buildXuduModule(CellRef mod) {
+  constexpr std::pair<std::string_view, std::string_view> kXuduActions[] = {
+      {"quit", "#XUDU_QUIT"},
+      {"save", "#XUDU_SAVE"},
+      {"close", "#XUDU_CLOSE"},
+      {"next_doc", "#XUDU_NEXT_DOC"},
+      {"prev_doc", "#XUDU_PREV_DOC"},
+      {"doc_1", "#XUDU_DOC_1"},
+      {"doc_2", "#XUDU_DOC_2"},
+      {"doc_3", "#XUDU_DOC_3"},
+      {"doc_4", "#XUDU_DOC_4"},
+      {"doc_5", "#XUDU_DOC_5"},
+      {"doc_6", "#XUDU_DOC_6"},
+      {"doc_7", "#XUDU_DOC_7"},
+      {"doc_8", "#XUDU_DOC_8"},
+      {"doc_9", "#XUDU_DOC_9"},
+      {"back", "#XUDU_BACK"},
+      {"new_doc", "#XUDU_NEW_DOC"},
+      {"forward", "#XUDU_FORWARD"},
+      {"open_doc", "#XUDU_OPEN_DOC"},
+      {"close_doc", "#XUDU_CLOSE_DOC"},
+      {"onion_skin", "#XUDU_ONION_SKIN"},
+      {"pouch_toggle", "#XUDU_POUCH_TOGGLE"},
+      {"pouch_toggle_f2", "#XUDU_POUCH_TOGGLE_F2"},
+      {"telescope_toggle", "#XUDU_TELESCOPE_TOGGLE"},
+      {"telescope_toggle_f3", "#XUDU_TELESCOPE_TOGGLE_F3"},
+      {"tension_physics_toggle", "#XUDU_TENSION_PHYSICS_TOGGLE"},
+      {"unlock_transcopyright", "#XUDU_UNLOCK_TRANSCOPYRIGHT"},
+      {"unlock_transcopyright_f5", "#XUDU_UNLOCK_TRANSCOPYRIGHT_F5"},
+      {"unlock_transcopyright_ctrl_u", "#XUDU_UNLOCK_TRANSCOPYRIGHT_CTRL_U"},
+      {"scrub_forward", "#XUDU_SCRUB_FORWARD"},
+      {"scrub_backward", "#XUDU_SCRUB_BACKWARD"},
+      {"transclude", "#XUDU_TRANSCLUDE"},
+      {"xanalink", "#XUDU_XANALINK"},
+      {"cancel_link", "#XUDU_CANCEL_LINK"},
+      {"beams", "#XUDU_BEAMS"},
+      {"sworph", "#XUDU_SWORPH"},
+      {"publish", "#XUDU_PUBLISH"},
+      {"history", "#XUDU_HISTORY"},
+      {"delete", "#XUDU_DELETE"},
+      {"page_break", "#XUDU_PAGE_BREAK"},
+      {"hypertime_map", "#XUDU_HYPERTIME_MAP"},
+      {"map", "#XUDU_MAP"},
+      {"scrub_back", "#XUDU_SCRUB_BACK"},
+      {"radial_menu", "#XUDU_RADIAL_MENU"},
+  };
+
+  for (const auto &[name, opcode] : kXuduActions) {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, opcode);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, name, op);
+  }
 }
 
 } // namespace zigzag::vortex

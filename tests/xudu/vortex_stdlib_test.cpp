@@ -542,4 +542,39 @@ TEST(VortexStdLibTest, SovereignStoreLibraryRoundtrip) {
   EXPECT_NE(imported, noCell);
 }
 
+TEST(VortexStdLibTest, XuduModuleRegistrationAndActions) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:xudu"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/quit"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/save"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/close"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/next_doc"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/prev_doc"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/open_doc"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/close_doc"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/transclude"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/xanalink"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/cancel_link"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/beams"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/sworph"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/publish"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/history"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/delete"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/page_break"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/hypertime_map"));
+  EXPECT_TRUE(h.stdlib.has("std:xudu/radial_menu"));
+  EXPECT_TRUE(h.stdlib.has("std:zigzag/duplicate"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/bundle_execution"));
+
+  // Invoking std:xudu/quit executes opcode successfully
+  auto quitRes = h.stdlib.call("std:xudu/quit", {});
+  ASSERT_EQ(quitRes.size(), 1u);
+  EXPECT_FALSE(quitRes.empty());
+
+  // Invoking std:xudu/save executes opcode successfully
+  auto saveRes = h.stdlib.call("std:xudu/save", {});
+  ASSERT_EQ(saveRes.size(), 1u);
+  EXPECT_FALSE(saveRes.empty());
+}
+
 } // namespace

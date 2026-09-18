@@ -184,11 +184,45 @@ public:
   CellRef addClause(CellRef predCell, CellRef headTerm,
                     std::span<const CellRef> bodyGoals = {});
 
+  void setBoundStore(const xanadu::Store *store) noexcept {
+    boundStore_ = store;
+  }
+  [[nodiscard]] const xanadu::Store *boundStore() const noexcept {
+    return boundStore_;
+  }
+
   [[nodiscard]] CellRef predicateEqual() const noexcept { return predEqual_; }
   [[nodiscard]] CellRef predicateUnify() const noexcept { return predUnify_; }
   [[nodiscard]] CellRef predicateMember() const noexcept { return predMember_; }
   [[nodiscard]] CellRef predicateAppend() const noexcept { return predAppend_; }
   [[nodiscard]] CellRef predicateLength() const noexcept { return predLength_; }
+  [[nodiscard]] CellRef predicateSetting() const noexcept {
+    return predSetting_;
+  }
+  [[nodiscard]] CellRef predicateSettingShape() const noexcept {
+    return predSettingShape_;
+  }
+  [[nodiscard]] CellRef predicateSettingDefault() const noexcept {
+    return predSettingDefault_;
+  }
+  [[nodiscard]] CellRef predicateCellValue() const noexcept {
+    return predCellValue_;
+  }
+  [[nodiscard]] CellRef predicateCellLink() const noexcept {
+    return predCellLink_;
+  }
+  [[nodiscard]] CellRef predicateTransclude() const noexcept {
+    return predTransclude_;
+  }
+  [[nodiscard]] CellRef predicateXanalink() const noexcept {
+    return predXanalink_;
+  }
+  [[nodiscard]] CellRef predicateCellSpan() const noexcept {
+    return predCellSpan_;
+  }
+  [[nodiscard]] CellRef predicateBridgeEdge() const noexcept {
+    return predBridgeEdge_;
+  }
 
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
   bool solveOnce(std::span<const CellRef> goals,
@@ -292,9 +326,11 @@ private:
   void buildUiModule(CellRef mod);
   void buildNavModule(CellRef mod);
   void buildBridgeModule(CellRef mod);
+  void buildXuduModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;
+  const xanadu::Store *boundStore_{nullptr};
 
   struct RoutineBinding {
     std::vector<CellRef> inputParams;
@@ -312,6 +348,15 @@ private:
   CellRef predVortexInstruction_{noCell};
   CellRef predVortexContract_{noCell};
   CellRef predVortexParam_{noCell};
+  CellRef predSetting_{noCell};
+  CellRef predSettingShape_{noCell};
+  CellRef predSettingDefault_{noCell};
+  CellRef predCellValue_{noCell};
+  CellRef predCellLink_{noCell};
+  CellRef predTransclude_{noCell};
+  CellRef predXanalink_{noCell};
+  CellRef predCellSpan_{noCell};
+  CellRef predBridgeEdge_{noCell};
 };
 
 } // namespace zigzag::vortex
