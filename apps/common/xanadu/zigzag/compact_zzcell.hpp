@@ -117,8 +117,9 @@ struct DynamicDimensionLink {
  *
  * **Superseded by zigzag::Manifold, and no longer the model.** Migration step
  * 19 moved UnifiedTransclusionEngine onto a CellSlot (48 bytes) plus a CSR run
- * of DimLink (12 bytes each), so nothing stores one of these any more. It is
- * kept because the zzstructure_loader path and the YAML DTO still name it.
+ * of DimLink (12 bytes each), so nothing stores one of these any more. It has
+ * no production caller and is kept only because its own tests
+ * (CompactZZCellTest) still instantiate it.
  *
  * **Not 64 bytes, and not zero-copy** -- which this comment, the design
  * document and CLAUDE.md all used to claim. It is 792 bytes, aligned

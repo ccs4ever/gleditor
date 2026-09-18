@@ -5,7 +5,6 @@
 #include "zigzag_visualizer.hpp"
 #include "core/format_resolver.hpp"
 #include "core/zzcore.hpp"
-#include "core/zzstructure_loader.hpp"
 
 #include <algorithm>
 #include <cmath>

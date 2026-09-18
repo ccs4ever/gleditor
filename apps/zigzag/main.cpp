@@ -16,7 +16,6 @@
 
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
-#include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
@@ -25,7 +24,6 @@
 
 #include "common/xanadu/system_docs.hpp"
 #include "core/zzcore.hpp"
-#include "core/zzstructure_loader.hpp"
 #include "zigzag_visualizer.hpp"
 
 #ifdef __ANDROID__
@@ -45,10 +43,6 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
     }
   }
   return false;
-}
-
-std::string resolveHomeSlicePath() {
-  return gleditor::paths::configPath("zigzag", "home_slice.yaml");
 }
 
 struct LoadedDocument {
@@ -93,31 +87,8 @@ LoadedDocument loadDocument(const std::string &slicePath,
                   "Loaded sovereign Store into ZigZag Hypermesh from: " +
                   slicePath + " (" + std::to_string(versions.size()) +
                   " versions)"};
-    } catch (...) { // NOLINT(bugprone-empty-catch)
-      // Fall through to slice candidates
-    }
-  }
-
-  std::vector<std::string> candidates;
-  if (!slicePath.empty()) {
-    candidates.push_back(slicePath);
-  } else {
-    const std::string homeSlice = resolveHomeSlicePath();
-    if (!homeSlice.empty()) {
-      candidates.push_back(homeSlice);
-    }
-    candidates.push_back(gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-    candidates.emplace_back("assets/zigzag/zigzag_structure.yaml");
-    candidates.emplace_back("zigzag_structure.yaml");
-  }
-
-  for (const auto &candidate : candidates) {
-    if (fs::exists(candidate)) {
-      if (auto loaded = zigzag::loadZzStructure(candidate)) {
-        return {.doc         = std::move(*loaded),
-                .sourcePath  = candidate,
-                .description = "Loaded ZigZag Slice from: " + candidate};
-      }
+    } catch (const std::exception &err) {
+      std::cerr << "Warning: could not load Store: " << err.what() << "\n";
     }
   }
 
@@ -418,7 +389,7 @@ int main(const int argc, char **argv) {
   parser.add_argument("--xudu")
       .default_value(std::string{})
       .help("load a Xudu store path or document");
-  parser.add_argument("slice").help("Slice or Store file to load").remaining();
+  parser.add_argument("slice").help("Store to load").remaining();
 
   if (detailed) {
     parser.add_group("Batch and export options");

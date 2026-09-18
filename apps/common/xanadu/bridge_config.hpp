@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "common/xanadu/microversion.hpp"
+#include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
 namespace zigzag {

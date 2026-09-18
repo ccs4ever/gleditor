@@ -2,9 +2,12 @@
  * @file zzstructure.hpp
  * @brief Shared Xanadu ZigZag structural data model.
  *
- * A "Slice" is one YAML file following this schema -- a self-contained set of
- * zzcells. A user's default Slice (the "Home Slice") lives at a standard
- * per-user config location.
+ * A "Slice" was once a self-contained YAML file following this schema; since
+ * migration step 20 a slice is a Store, and these types are the transfer
+ * format between a Store/Manifold and ZigzagVisualizer's in-memory model
+ * (see zz_xudu_projector.hpp's sliceToStore()/storeToSlice()) rather than an
+ * on-disk format of their own. Nothing here loads from or saves to a YAML
+ * file any more.
  *
  * A slice used to reference cells in other slices through a Preflet: a magnet
  * URI, a hash, a version string and a target cell id, carried by the cell
@@ -18,7 +21,6 @@
 #define ZIGZAG_ZZSTRUCTURE_HPP
 
 #include <cstdint>
-#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -48,10 +50,10 @@ struct LinkPairs {
 using CellData =
     std::variant<std::string, double, bool, std::vector<std::uint8_t>>;
 
-/// A cell's representation in an authored YAML Slice document (DTO).
-/// In-memory runtime cell topology is managed by Manifold and backed by
-/// xanadu::Store operations; Cell serves as the serialization interchange
-/// format for YAML loading, dumping, and testing.
+/// A cell's representation in a ZzStructureDocument (DTO). In-memory
+/// runtime cell topology is managed by Manifold and backed by xanadu::Store
+/// operations; Cell serves as the transfer/testing interchange format
+/// between that and ZigzagVisualizer's own model.
 struct Cell {
   CellID id = 0;
   CellData data;
@@ -194,10 +196,11 @@ struct StructureMeta {
   std::vector<std::string> tags;
 };
 
-/// An authored YAML Slice document (DTO). In-memory runtime state is
-/// managed by xanadu::Store and zigzag::Manifold (via
-/// UnifiedTransclusionEngine), while ZzStructureDocument serves as the
-/// serialization/deserialization interchange schema for YAML slices.
+/// A Slice document (DTO). In-memory runtime state is managed by
+/// xanadu::Store and zigzag::Manifold (via UnifiedTransclusionEngine);
+/// ZzStructureDocument is the transfer format between that and
+/// ZigzagVisualizer's own model (see zz_xudu_projector.hpp's
+/// sliceToStore()/storeToSlice()), not an on-disk format of its own.
 struct ZzStructureDocument {
   StructureMeta meta;
   CellID focus = 0;
@@ -206,22 +209,6 @@ struct ZzStructureDocument {
   SceneMeta scene;
   std::unordered_map<CellID, Cell> cells;
 };
-
-/// Why a Slice load failed.
-struct LoadError {
-  enum class Kind {
-    FileUnreadable,  // Missing, permissions, not a file
-    MalformedYaml,   // YAML parser syntax error
-    SchemaViolation, // Parsed, but not a valid zzstructure
-    DanglingFocus    // Focus names an undefined cell
-  };
-
-  Kind kind = Kind::SchemaViolation;
-  std::string message;
-  std::string path;
-};
-
-[[nodiscard]] std::string_view describe(LoadError::Kind kind);
 
 } // namespace zigzag
 

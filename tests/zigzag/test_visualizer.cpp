@@ -9,7 +9,6 @@
 
 #include "xudu/core/format.hpp"
 #include "zigzag/core/zzstructure.hpp"
-#include "zigzag/core/zzstructure_loader.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
 
 using namespace zigzag;
@@ -123,24 +122,13 @@ TEST(ZigzagVisualizerTest, DirectNavigationToCell) {
 TEST(ZigzagVisualizerTest, AdoptDocument) {
   ZigzagVisualizer viz("Sans 12");
 
-  const std::string yaml = R"(
-zzstructure:
-  meta:
-    name: "Custom Outline"
-  focus: 10
-  view:
-    x_dimension: d.a
-    y_dimension: d.b
-    z_dimension: d.c
-  cells:
-    - id: 10
-      text: "Custom Focus"
-)";
+  ZzStructureDocument doc;
+  doc.meta.name = "Custom Outline";
+  doc.focus     = 10;
+  doc.view = {.x_dimension = "d.a", .y_dimension = "d.b", .z_dimension = "d.c"};
+  doc.cells[10] = Cell{.id = 10, .data = std::string("Custom Focus")};
 
-  auto doc = parseZzStructure(yaml, "custom");
-  ASSERT_TRUE(doc.has_value());
-
-  viz.adoptDocument(std::move(*doc), "custom.yaml");
+  viz.adoptDocument(std::move(doc), "custom");
   EXPECT_NE(viz.focusCellId(), 0U);
   EXPECT_EQ(viz.structureName(), "Custom Outline");
   EXPECT_EQ(viz.currentView().x_dimension, "d.a");
@@ -249,45 +237,21 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
   EXPECT_EQ(viz.focusCellId(), rootId);
 }
 
-TEST(ZigzagVisualizerTest, YamlSerializationRoundTrip) {
-  ZigzagVisualizer viz("Sans 12");
-  const auto doc = viz.document();
-
-  const auto yamlStr = serializeZzStructure(doc);
-  EXPECT_FALSE(yamlStr.empty());
-
-  const auto roundtripped = parseZzStructure(yamlStr, "roundtrip");
-  ASSERT_TRUE(roundtripped.has_value());
-  EXPECT_EQ(roundtripped->meta.name, doc.meta.name);
-  EXPECT_EQ(roundtripped->cells.size(), doc.cells.size());
-}
-
 TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
   ZigzagVisualizer viz("Sans 12");
 
-  const std::string yaml = R"(
-zzstructure:
-  meta:
-    name: "Clone Sync Test"
-  focus: 2
-  view:
-    x_dimension: d.1
-    y_dimension: d.clone
-    z_dimension: d.3
-  cells:
-    - id: 1
-      text: "Original Text"
-      dimensions:
-        d.clone: { pos: 2 }
-    - id: 2
-      dimensions:
-        d.clone: { neg: 1 }
-)";
+  ZzStructureDocument doc;
+  doc.meta.name = "Clone Sync Test";
+  doc.focus     = 2;
+  doc.view      = {
+      .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
+  doc.cells[1] = Cell{.id         = 1,
+                      .data       = std::string("Original Text"),
+                      .dimensions = {{"d.clone", LinkPairs{.pos = 2}}}};
+  doc.cells[2] =
+      Cell{.id = 2, .dimensions = {{"d.clone", LinkPairs{.neg = 1}}}};
 
-  auto doc = parseZzStructure(yaml, "clone_test");
-  ASSERT_TRUE(doc.has_value());
-
-  viz.adoptDocument(std::move(*doc), "clone_test.yaml");
+  viz.adoptDocument(std::move(doc), "clone_test");
   const auto cloneFocus = viz.focusCellId();
   EXPECT_NE(cloneFocus, 0U);
 
@@ -324,26 +288,13 @@ TEST(ZigzagVisualizerTest, MultiViewModeToggle) {
 TEST(ZigzagVisualizerTest, DefaultFocusOnHomeWhenUnspecified) {
   ZigzagVisualizer viz("Sans 12");
 
-  constexpr std::string_view yaml = R"(
-zzstructure:
-  version: "1.0"
-  meta:
-    name: "No Focus Slice"
-  focus: 10
-  view:
-    x_dimension: d.1
-    y_dimension: d.2
-    z_dimension: d.3
-  cells:
-    - id: 10
-      text: "Only cell"
-)";
+  ZzStructureDocument doc;
+  doc.meta.name = "No Focus Slice";
+  doc.focus     = 0; // Explicitly no focus
+  doc.view = {.x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+  doc.cells[10] = Cell{.id = 10, .data = std::string("Only cell")};
 
-  auto doc = parseZzStructure(std::string(yaml), "no_focus_test");
-  ASSERT_TRUE(doc.has_value());
-  doc->focus = 0; // Explicitly no focus
-
-  viz.adoptDocument(std::move(*doc), "no_focus.yaml");
+  viz.adoptDocument(std::move(doc), "no_focus");
   EXPECT_NE(viz.focusCellId(), 0U);
   // Default focus on empty/missing focus adopts home cell
   EXPECT_TRUE(viz.isProtected(viz.focusCellId()));

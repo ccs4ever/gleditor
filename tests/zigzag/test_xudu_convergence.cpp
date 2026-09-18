@@ -18,7 +18,6 @@
 #include "zigzag/core/zz_xudu_projector.hpp"
 #include "zigzag/core/zzcore.hpp"
 #include "zigzag/core/zzstructure.hpp"
-#include "zigzag/core/zzstructure_loader.hpp"
 
 using namespace zigzag;
 
@@ -213,9 +212,8 @@ TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
   EXPECT_EQ(c1.dimensions.at("d.clone").pos, 3U);
   EXPECT_EQ(c3.dimensions.at("d.clone").neg, 1U);
 
-  EXPECT_FALSE(zzcore::isCloneCell(zzDoc.cells, 1));
-  EXPECT_TRUE(zzcore::isCloneCell(zzDoc.cells, 3));
-  EXPECT_EQ(zzcore::findCloneMaster(zzDoc.cells, 3), 1U);
+  EXPECT_EQ(zzcore::findCloneMaster(zzDoc.cells, 1), 1U); // 1 is its own master
+  EXPECT_EQ(zzcore::findCloneMaster(zzDoc.cells, 3), 1U); // 3 is a clone of 1
 
   // Content lookup
   EXPECT_EQ(zzcore::getEffectiveCellText(zzDoc.cells, 1),
@@ -512,45 +510,6 @@ TEST(SliceToStoreTest, aSecondSliceReusesTheDimensionsAlreadyMinted) {
   EXPECT_NE(two.cells.at(1), one.cells.at(1));
   EXPECT_EQ(manifold.textOf(one.cells.at(1), store),
             manifold.textOf(two.cells.at(1), store));
-}
-
-TEST(SliceToStoreTest, theSampleSliceMintsAsAStore) {
-  // The check that matters for regenerating fixtures: the real
-  // assets/zigzag/zigzag_structure.yaml, not a hand-built document. If this
-  // passes, that file can be converted once and deleted.
-  const auto loaded = loadZzStructure("assets/zigzag/zigzag_structure.yaml");
-  if (!loaded) {
-    GTEST_SKIP() << "run from the repository root; sample slice not found";
-  }
-
-  xudu::Store store;
-  const auto minted = sliceToStore(*loaded, store, xudu::MicroversionId{});
-  EXPECT_EQ(minted.cells.size(), loaded->cells.size());
-
-  const auto manifold = store.rebuildManifold(minted.version);
-  EXPECT_EQ(manifold.refusedOps(), 0U);
-  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
-
-  const auto back = storeToSlice(store, manifold, minted.focus);
-  EXPECT_EQ(back.cells.size(), loaded->cells.size());
-
-  // Every cell's text, role and rank survives the trip -- compared through the
-  // id mapping, since the YAML's numbering does not survive and is not meant
-  // to.
-  for (const auto &[id, before] : loaded->cells) {
-    const auto ref = minted.cells.at(id);
-    ASSERT_TRUE(back.cells.contains(ref)) << "cell " << id;
-    const auto &after = back.cells.at(ref);
-    EXPECT_EQ(after.text(), before.text()) << "cell " << id;
-    EXPECT_EQ(after.role, before.role) << "cell " << id;
-    EXPECT_EQ(after.mime_type, before.mime_type) << "cell " << id;
-    for (const auto &[dim, links] : before.dimensions) {
-      if (0 != links.pos && loaded->cells.contains(links.pos)) {
-        EXPECT_EQ(after.dimensions.at(dim).pos, minted.cells.at(links.pos))
-            << "cell " << id << " " << dim << " posward";
-      }
-    }
-  }
 }
 
 // The heuristic step 20 set out to remove. projectXuduToZigzag() resolves a

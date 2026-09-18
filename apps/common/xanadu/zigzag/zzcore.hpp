@@ -1,17 +1,14 @@
 /**
  * @file zzcore.hpp
- * @brief Pure Xanadu ZigZag logic: link derivation, referential integrity,
- *        and parsing helpers.
+ * @brief Pure Xanadu ZigZag logic: clone-master resolution and cell content
+ *        rendering over the ZzStructureDocument cell map.
  */
 #ifndef ZIGZAG_ZZCORE_HPP
 #define ZIGZAG_ZZCORE_HPP
 
-#include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
-#include <array>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -54,33 +51,6 @@ private:
 
 inline constexpr std::string_view cloneDimension = "d.clone";
 
-[[nodiscard]] std::optional<RgbColor> parseHexColor(std::string_view text);
-[[nodiscard]] std::string resolveXdgPath(const char *xdgValue,
-                                         const char *homeValue,
-                                         std::string_view homeRelativeDir,
-                                         std::string_view leaf);
-
-[[nodiscard]] std::string selectSliceFile(const std::vector<std::string> &paths,
-                                          std::string_view preferred);
-
-struct ExplicitLink {
-  CellID from = 0;
-  DimID dimension;
-  DimVector dir = DimVector::POS;
-  CellID target = 0;
-};
-
-void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
-                     const std::vector<ExplicitLink> &explicitLinks,
-                     Diagnostics &diagnostics);
-
-void neutralizeDanglingLinks(std::unordered_map<CellID, Cell> &cells,
-                             Diagnostics &diagnostics);
-
-/// Returns the 6 axis neighbours: [x+, x-, y+, y-, z+, z-] (0 for absent).
-[[nodiscard]] std::array<CellID, 6> axisNeighbours(const Cell *cell,
-                                                   const ViewAxisBinding &view);
-
 [[nodiscard]] const Cell *
 findCell(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
@@ -95,13 +65,6 @@ findCell(const std::unordered_map<CellID, Cell> &cells, CellID id);
  */
 [[nodiscard]] CellID
 findCloneMaster(const std::unordered_map<CellID, Cell> &cells, CellID id);
-
-/**
- * @brief Returns true iff this cell is a clone (i.e. has a negward link on
- * d.clone).
- */
-[[nodiscard]] bool isCloneCell(const std::unordered_map<CellID, Cell> &cells,
-                               CellID id);
 
 /**
  * @brief A cell's content rendered as text, whichever alternative is live.
@@ -125,20 +88,6 @@ findCloneMaster(const std::unordered_map<CellID, Cell> &cells, CellID id);
  */
 [[nodiscard]] std::string
 getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells, CellID id);
-
-/**
- * @brief Returns all cells in the d.clone rank containing @p id, starting from
- * the head master cell and walking posward.
- */
-[[nodiscard]] std::vector<CellID>
-getCloneRank(const std::unordered_map<CellID, Cell> &cells, CellID id);
-
-/**
- * @brief Updates the text on the master cell at the head of @p id's d.clone
- * rank.
- */
-void updateMasterText(std::unordered_map<CellID, Cell> &cells, CellID id,
-                      std::string newText);
 
 } // namespace zigzag::zzcore
 
