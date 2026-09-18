@@ -72,10 +72,15 @@ public:
    *         fromAncestor is not an ancestor of toDescendant or a node was
    *         unreadable.
    */
+  // getNode and visitor are each invoked once per step of the walked path
+  // (potentially many times), so std::forward-ing either here would move
+  // from it on the first call and leave later calls operating on a
+  // moved-from callable.
   template <typename NodeAccessor, OsmicVisitor Visitor>
-  static bool walkPathCustom(const std::uint32_t fromAncestor,
-                             const std::uint32_t toDescendant,
-                             NodeAccessor &&getNode, Visitor &&visitor) {
+  static bool walkPathCustom(
+      const std::uint32_t fromAncestor, const std::uint32_t toDescendant,
+      NodeAccessor &&getNode, // NOLINT(cppcoreguidelines-missing-std-forward)
+      Visitor &&visitor) {    // NOLINT(cppcoreguidelines-missing-std-forward)
     if (fromAncestor == toDescendant || 0 == toDescendant) {
       return true;
     }
@@ -177,10 +182,14 @@ public:
    * @brief Fold operations from @p fromAncestor to @p toDescendant onto
    *        @p state.
    */
+  // folder is invoked once per op along the path (potentially many times)
+  // through the lambda captured below, so std::forward-ing it here would
+  // move from it on the first call.
   template <typename State, OsmicFolder<State> Folder>
   static bool
   fold(const SegmentedOpsSpool &spool, const std::uint32_t fromAncestor,
-       const std::uint32_t toDescendant, State &state, Folder &&folder) {
+       const std::uint32_t toDescendant, State &state,
+       Folder &&folder) { // NOLINT(cppcoreguidelines-missing-std-forward)
     return walkPath(
         spool, fromAncestor, toDescendant,
         [&state, &folder](const std::uint32_t idx, const CompactOpNode &node) {

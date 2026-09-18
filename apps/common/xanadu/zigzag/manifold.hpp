@@ -99,9 +99,13 @@ static_assert(sizeof(DimLink) == 12);
  * - `void(CellRef)` or `bool(CellRef)`
  * - `void(CellRef, std::size_t step)` or `bool(CellRef, std::size_t step)`
  */
+// fn is invoked once per cell in the rank (potentially many times), so
+// std::forward-ing it here would move from it on the first call and leave
+// later calls operating on a moved-from callable.
 template <typename ManifoldT, typename Fn>
 void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
-              const DimVector dir, Fn &&fn,
+              const DimVector dir,
+              Fn &&fn, // NOLINT(cppcoreguidelines-missing-std-forward)
               const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
   if (start == noCell || dim == noCell) {
     return;
