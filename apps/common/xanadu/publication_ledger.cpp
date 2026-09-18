@@ -170,8 +170,9 @@ PublicationLedger::appendPublication(PublicationEntry entry) {
     }
   }
 
+  const std::uint64_t sequence = entry.sequence;
   impl_->entries.push_back(std::move(entry));
-  return {entry.sequence, root()};
+  return {sequence, root()};
 }
 
 std::array<std::uint8_t, 32> PublicationLedger::root() const {

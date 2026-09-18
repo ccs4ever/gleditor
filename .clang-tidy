@@ -6,6 +6,17 @@
 # YAML block-scalar value can't carry per-line comments, so the reasoning
 # lives here instead of next to each `-check` entry):
 #
+# clang-analyzer-* findings that resolve into thirdparty/ (e.g.
+# clang-analyzer-core.NonNullParamChecker inside thirdparty/merklecpp's own
+# TreeT::walk_to/path) are out of scope by policy -- AGENTS.md forbids
+# hand-editing vendored sources, and -header-filter doesn't suppress
+# clang-analyzer's path-sensitive notes the way it does ordinary lexical
+# checks, since the analyzer walks the whole call path regardless of which
+# file each frame lives in. Confirmed (by reading the note trail) that our
+# own call sites (identity_validation.cpp, merkle_ledger.cpp) already
+# bounds-check before calling in; if this is a real bug it belongs to
+# upstream merklecpp, not something to route around locally.
+#
 # Required by C APIs and the low-level memory management this project does
 # on purpose -- mmap'd arenas/spools with pointer-offset access, binary wire
 # formats needing reinterpret_cast, POSIX file I/O taking C varargs, and a

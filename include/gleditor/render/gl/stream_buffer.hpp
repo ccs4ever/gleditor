@@ -39,7 +39,7 @@ struct SyncSegment {
   std::size_t size{0};
 };
 
-class StreamBufferGL : public render::IStreamBuffer {
+class StreamBufferGL final : public render::IStreamBuffer {
 public:
   StreamBufferGL(const GLApi &glApi, const GLenum target,
                  const std::size_t capacityBytes)

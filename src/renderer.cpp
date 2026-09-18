@@ -436,13 +436,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // taking the next step.
   if (settled) {
     if (awaitingSettle) {
-      if (settled) {
-        // The frame this step's work was scheduled on has been and gone, and
-        // this one is settled, so the work is done and the script may go on.
-        awaitingSettle = false;
-        awaitingStep   = false;
-        nextStep++;
-      }
+      // The frame this step's work was scheduled on has been and gone, and
+      // this one is settled, so the work is done and the script may go on.
+      awaitingSettle = false;
+      awaitingStep   = false;
+      nextStep++;
     } else if (!scriptFinished()) {
       advanceScript(state);
     } else if (awaitingStep) {

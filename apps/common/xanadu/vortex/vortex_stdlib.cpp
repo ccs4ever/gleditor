@@ -223,6 +223,10 @@ bool evalArithmetic(const VortexStdLib &stdlib, const VortexCore &core,
     }
     if (fn == "//") {
       if (static_cast<std::int64_t>(v2) == 0) return false;
+      // Deliberate floor division -- every numeric result here is stored as
+      // a double regardless of semantic type, with outIsInt tracking whether
+      // it should be read back as an integer.
+      // NOLINTNEXTLINE(bugprone-integer-division)
       outVal   = static_cast<double>(static_cast<std::int64_t>(v1) /
                                      static_cast<std::int64_t>(v2));
       outIsInt = true;

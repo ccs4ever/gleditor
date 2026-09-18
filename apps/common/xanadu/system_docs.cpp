@@ -2079,6 +2079,10 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
   if (known == nullptr) {
     folded = store.rebuildManifold(curVer);
   }
+  // folded is populated in exactly the branch where the ternary below reads
+  // it (known == nullptr), so .value() can't actually throw here -- the
+  // analyzer just can't correlate the two conditions.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const zigzag::Manifold *m = (known != nullptr) ? known : &folded.value();
   const auto &reader        = static_cast<const SpanReader &>(store);
   const auto valuesDim      = m->dimensionNamed(kDimValues, reader);
@@ -2108,11 +2112,9 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       cur    = makeValueCell(store, cur, v, valRef);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
-      cur = store.setLink(cur, prev, valuesDim, zigzag::DimVector::POS, valRef,
-                          m);
-      folded = store.rebuildManifold(cur);
-      m      = &folded.value();
-      prev   = valRef;
+      cur  = store.setLink(cur, prev, valuesDim, zigzag::DimVector::POS, valRef,
+                           m);
+      prev = valRef;
     }
   }
 

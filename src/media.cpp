@@ -252,6 +252,9 @@ struct MediaPlayer::Impl {
                                    unsigned *height, unsigned *pitches,
                                    unsigned *lines) {
     auto *self = static_cast<Impl *>(*opaque);
+    // libvlc's chroma is a raw 4-byte FourCC, not a C-string -- it must NOT
+    // be null-terminated, or the fifth byte would corrupt whatever follows.
+    // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
     std::memcpy(chroma, "RV32", 4); // 32-bit RGBA
     self->frameWidth  = static_cast<int>(*width);
     self->frameHeight = static_cast<int>(*height);

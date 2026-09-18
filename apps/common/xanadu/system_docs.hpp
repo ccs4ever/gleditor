@@ -770,6 +770,22 @@ struct ZigzagPresentationConfig {
   float hudVerticalPaddingPx{8.0F};
   float hudColumnGapPx{8.0F};
   float connectionBeamWidthPx{4.0F};
+
+  // A byte-wise memcmp is unsafe here: +0.0F and -0.0F compare equal but
+  // have different bit patterns, so field-wise == is the correct notion of
+  // equality for a struct of floats.
+  bool operator==(const ZigzagPresentationConfig &other) const noexcept {
+    return cellHorizontalPaddingPx == other.cellHorizontalPaddingPx &&
+           cellVerticalPaddingPx == other.cellVerticalPaddingPx &&
+           cellBandGapPx == other.cellBandGapPx &&
+           contentMaxWidthPx == other.contentMaxWidthPx &&
+           topologyMaxWidthPx == other.topologyMaxWidthPx &&
+           rankClearancePx == other.rankClearancePx &&
+           hudHorizontalPaddingPx == other.hudHorizontalPaddingPx &&
+           hudVerticalPaddingPx == other.hudVerticalPaddingPx &&
+           hudColumnGapPx == other.hudColumnGapPx &&
+           connectionBeamWidthPx == other.connectionBeamWidthPx;
+  }
 };
 
 struct LayoutConfig {

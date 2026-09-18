@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -55,7 +54,7 @@ void ZigzagVisualizer::setCellRadius(const int radius) noexcept {
 
 void ZigzagVisualizer::setPresentationConfig(
     xanadu::ZigzagPresentationConfig config) {
-  if (std::memcmp(&presentation_config_, &config, sizeof(config)) == 0) {
+  if (presentation_config_ == config) {
     return;
   }
   presentation_config_ = config;

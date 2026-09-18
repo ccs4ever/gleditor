@@ -111,18 +111,24 @@ inline HoleWid HoleDsp::act(const HoleWid &w) const noexcept {
   if (w.isEmpty() || 0 == deltaOffset) {
     return w;
   }
-  const auto newMin =
-      (deltaOffset >= 0)
-          ? (w.minOffset + static_cast<std::uint64_t>(deltaOffset))
-          : (w.minOffset > static_cast<std::uint64_t>(-deltaOffset)
-                 ? w.minOffset - static_cast<std::uint64_t>(-deltaOffset)
-                 : 0ULL);
-  const auto newMax =
-      (deltaOffset >= 0)
-          ? (w.maxOffset + static_cast<std::uint64_t>(deltaOffset))
-          : (w.maxOffset > static_cast<std::uint64_t>(-deltaOffset)
-                 ? w.maxOffset - static_cast<std::uint64_t>(-deltaOffset)
-                 : 0ULL);
+
+  const auto shiftBack = [](const std::uint64_t offset,
+                            const std::uint64_t magnitude) -> std::uint64_t {
+    return offset > magnitude ? offset - magnitude : 0ULL;
+  };
+
+  std::uint64_t newMin;
+  std::uint64_t newMax;
+  if (deltaOffset >= 0) {
+    const auto delta = static_cast<std::uint64_t>(deltaOffset);
+    newMin           = w.minOffset + delta;
+    newMax           = w.maxOffset + delta;
+  } else {
+    const auto magnitude = static_cast<std::uint64_t>(-deltaOffset);
+    newMin               = shiftBack(w.minOffset, magnitude);
+    newMax               = shiftBack(w.maxOffset, magnitude);
+  }
+
   auto res      = w;
   res.minOffset = newMin;
   res.maxOffset = newMax;
@@ -217,10 +223,10 @@ struct alignas(64) HoleCrum {
   HoleDsp dsp{};
   HoleWid wid{};
   std::uint32_t firstChild{0};
-  std::uint16_t childCount{0};
   std::uint32_t firstEntry{0};
-  std::uint16_t entryCount{0};
   std::uint32_t parentIndex{0};
+  std::uint16_t childCount{0};
+  std::uint16_t entryCount{0};
   bool isLeaf{true};
   std::uint8_t padding[15]{0};
 };

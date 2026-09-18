@@ -376,6 +376,10 @@ Token Lexer::nextToken() {
     return Token{.kind = TokenKind::Greater,
                  .text = source_.substr(startPos, 1),
                  .loc  = startLoc};
+  default:
+    // Every character not one of the delimiters/operators above falls
+    // through to the checks below (quoted atoms, numbers, identifiers, ...).
+    break;
   }
 
   // Quoted atom: '...'

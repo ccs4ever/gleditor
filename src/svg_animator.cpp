@@ -2,7 +2,6 @@
  * @file svg_animator.cpp
  * @brief Vector animation and animated SVG (SMIL) playback engine via ThorVG.
  */
-#include <algorithm>
 #include <gleditor/color.hpp>
 #include <gleditor/svg_animator.hpp>
 
@@ -558,6 +557,11 @@ public:
       }
     }
 
+    // Each entry's accumulated string is already fixed by the earlier,
+    // deterministic vector loop above; this second pass only applies each
+    // node's own final value to that same node, so the unordered_map's
+    // pointer-keyed iteration order has no effect on the result.
+    // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
     for (const auto &entry : transforms) {
       entry.first->setAttr("transform", entry.second);
     }
