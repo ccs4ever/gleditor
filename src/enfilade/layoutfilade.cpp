@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 namespace gleditor::enfilade {
 
@@ -222,7 +223,8 @@ Layoutfilade::findEntryAtY(const float targetYPx) const {
       const auto childIdx  = crum.firstChild + c;
       const float chHeight = crums_[childIdx].wid.totalHeightPx;
 
-      if (c == crum.childCount - 1 || targetYPx < (currY + chHeight)) {
+      if (std::cmp_equal(c, crum.childCount - 1) ||
+          targetYPx < (currY + chHeight)) {
         currCrumIdx = childIdx;
         stepped     = true;
         break;
@@ -243,7 +245,8 @@ Layoutfilade::findEntryAtY(const float targetYPx) const {
     const auto &entry   = entries_[entryIdx];
     const float eHeight = entry.heightPx + (2.0F * entry.marginPx);
 
-    if (i == leaf.entryCount - 1 || targetYPx < (currY + eHeight)) {
+    if (std::cmp_equal(i, leaf.entryCount - 1) ||
+        targetYPx < (currY + eHeight)) {
       return LayoutHit{
           .entryIndex      = entryIdx,
           .startByte       = currByte,
@@ -277,7 +280,8 @@ Layoutfilade::findEntryAtByte(const std::uint32_t targetByteOffset) const {
       const auto childIdx = crum.firstChild + c;
       const auto chBytes  = crums_[childIdx].wid.totalBytes;
 
-      if (c == crum.childCount - 1 || targetByteOffset < (currByte + chBytes)) {
+      if (std::cmp_equal(c, crum.childCount - 1) ||
+          targetByteOffset < (currByte + chBytes)) {
         currCrumIdx = childIdx;
         stepped     = true;
         break;
@@ -298,7 +302,8 @@ Layoutfilade::findEntryAtByte(const std::uint32_t targetByteOffset) const {
     const auto &entry   = entries_[entryIdx];
     const auto eBytes   = entry.byteLength;
 
-    if (i == leaf.entryCount - 1 || targetByteOffset < (currByte + eBytes)) {
+    if (std::cmp_equal(i, leaf.entryCount - 1) ||
+        targetByteOffset < (currByte + eBytes)) {
       const auto intra =
           (targetByteOffset >= currByte) ? (targetByteOffset - currByte) : 0U;
       return LayoutHit{
@@ -335,7 +340,8 @@ Layoutfilade::findEntryByIndex(const std::size_t entryIndex) const {
       const auto childIdx = crum.firstChild + c;
       const auto chLines  = crums_[childIdx].wid.lineCount;
 
-      if (c == crum.childCount - 1 || entryIndex < (currLines + chLines)) {
+      if (std::cmp_equal(c, crum.childCount - 1) ||
+          entryIndex < (currLines + chLines)) {
         currCrumIdx = childIdx;
         stepped     = true;
         break;

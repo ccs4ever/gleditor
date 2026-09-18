@@ -110,7 +110,12 @@ void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
   if (start == noCell || dim == noCell) {
     return;
   }
-  CellRef cur             = start;
+  CellRef cur = start;
+  // maxSteps is already std::size_t; the comparison below is unsigned on
+  // both sides. std::cmp_equal(maxSteps, -1) -- this check's own -fix --
+  // would compare against a *signed* -1 instead and can never be true for
+  // an unsigned maxSteps, silently turning "unlimited" into "zero steps".
+  // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
   const std::size_t limit = (maxSteps == static_cast<std::size_t>(-1))
                                 ? (m.cellCount() + 1)
                                 : maxSteps;

@@ -104,6 +104,12 @@ std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, DimVector dir,
   const CellRef raw_target = *target;
 
   // 2. Allocation form (target == -1)
+  // raw_target is already CellRef (unsigned); std::cmp_equal(raw_target, -1)
+  // -- this check's own -fix -- compares against a *signed* -1 instead and
+  // can never be true for an unsigned raw_target, silently disabling this
+  // allocation form. See the modernize-use-integer-sign-comparison note in
+  // .clang-tidy.
+  // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
   if (raw_target == static_cast<CellRef>(-1)) {
     CellRef created = arena_.makeCell();
     arena_.link(cell, dim, dir, created);

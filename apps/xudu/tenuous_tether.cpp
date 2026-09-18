@@ -72,7 +72,7 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const glm::vec3 ctrl =
         computeControlPoint(t.originPos, t.currentPos, controlDepth_);
 
-    for (int i = 0; i <= kSegments; ++i) {
+    for (std::size_t i = 0; i <= kSegments; ++i) {
       const float param = static_cast<float>(i) / static_cast<float>(kSegments);
       curve[i] = evaluateBezier(t.originPos, ctrl, t.currentPos, param);
     }

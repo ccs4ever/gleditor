@@ -12,6 +12,7 @@
 #include <cstring>
 #include <format>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <gleditor/sdl_wrap.hpp>
@@ -473,8 +474,8 @@ bool DeviceVK::requestPickingTag(const int coordX, const int coordY,
     return false;
   }
   if (coordX < 0 || coordY < 0 ||
-      coordX >= static_cast<int>(swapchainExtent.width) ||
-      coordY >= static_cast<int>(swapchainExtent.height)) {
+      std::cmp_greater_equal(coordX, swapchainExtent.width) ||
+      std::cmp_greater_equal(coordY, swapchainExtent.height)) {
     return false;
   }
 

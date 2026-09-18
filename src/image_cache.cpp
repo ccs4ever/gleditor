@@ -175,7 +175,7 @@ ImageResource ImageCache::put(const std::string &id,
     }
   }
 
-  if (chosenLayer < 0 && static_cast<int>(layers_.size()) < maxLayers_) {
+  if (chosenLayer < 0 && std::cmp_less(layers_.size(), maxLayers_)) {
     const int nextLayer = static_cast<int>(layers_.size());
     layers_.push_back(AtlasLayer{
         .layerIndex = nextLayer,

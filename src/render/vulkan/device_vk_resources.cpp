@@ -424,8 +424,7 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
              VK_PIPELINE_STAGE_TRANSFER_BIT);
 
   auto extent = record.size;
-  for (std::uint32_t level = 1;
-       level < static_cast<std::uint32_t>(record.levels); level++) {
+  for (std::uint32_t level = 1; std::cmp_less(level, record.levels); level++) {
     const auto next = std::max(1, extent / 2);
 
     transition(level, VK_IMAGE_LAYOUT_UNDEFINED,

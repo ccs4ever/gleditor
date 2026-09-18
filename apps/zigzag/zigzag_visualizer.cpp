@@ -1669,8 +1669,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const float itemLineHeight = 28.0F;
     float currentY             = palY + palHeight - 64.0F;
     for (int i = startIdx; i < endIdx; ++i) {
-      const bool isSelected =
-          (static_cast<std::size_t>(i) == paletteSelectedIndex_);
+      const bool isSelected = std::cmp_equal(i, paletteSelectedIndex_);
       if (isSelected) {
         hudCanvas_->addRect(palX + 8.0F, currentY - 6.0F, palWidth - 16.0F,
                             itemLineHeight, 0x1E3A8ABBU);

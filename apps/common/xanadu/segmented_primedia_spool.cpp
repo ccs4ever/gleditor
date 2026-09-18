@@ -188,7 +188,7 @@ bool SegmentedPrimediaSpool::addSealedSegment(
       return false;
     }
     const auto readBytes = ::read(fd, arena.base() + start, segSize);
-    if (readBytes != static_cast<ssize_t>(segSize)) {
+    if (std::cmp_not_equal(readBytes, segSize)) {
       ::close(fd);
       return false;
     }
