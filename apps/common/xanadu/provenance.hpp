@@ -226,7 +226,7 @@ verifyProvenance(const SignedProvenance &signed_,
  *
  * @return Nothing when the text is not of that shape.
  */
-[[nodiscard]] std::optional<Provenance> parseProvenance(std::string_view yaml);
+[[nodiscard]] std::optional<Provenance> parseProvenance(std::string_view text);
 
 /// A published work in an author's body of work, indexed by GPG key identity.
 struct PublishedWork {

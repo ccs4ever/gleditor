@@ -239,7 +239,7 @@ Term Parser::parseTerm(int maxPrecedence) {
 
     advance(); // Consume operator
 
-    int rightPrec;
+    int rightPrec = 0;
     if (infOp->assoc == Assoc::XFY) {
       rightPrec = infOp->prec;
     } else {

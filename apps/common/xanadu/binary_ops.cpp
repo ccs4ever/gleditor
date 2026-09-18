@@ -46,7 +46,8 @@ constexpr std::uint32_t branchOrdinalEscape = 255;
 } // namespace
 
 void writeVarint(std::ostream &out, std::uint64_t val) {
-  do {
+  // A varint always writes at least one byte, even for val == 0.
+  do { // NOLINT(cppcoreguidelines-avoid-do-while)
     auto byte = static_cast<std::uint8_t>(val & 0x7FU);
     val >>= 7U;
     if (val != 0) {

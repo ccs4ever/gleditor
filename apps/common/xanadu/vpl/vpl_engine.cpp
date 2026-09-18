@@ -259,7 +259,7 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
     if (ev.origin() != zigzag::noCell) {
       cells.push_back(ev.origin());
     } else if (ev.isScalar()) {
-      zigzag::CellRef c;
+      zigzag::CellRef c = zigzag::noCell;
       if (ev.isString()) {
         c = arena().makeCell(ev.scalarString());
       } else if (ev.isFloat()) {

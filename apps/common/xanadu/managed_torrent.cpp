@@ -158,7 +158,7 @@ SystemTorrentManager &
 SystemTorrentManager::operator=(SystemTorrentManager &&) noexcept = default;
 
 std::string SystemTorrentManager::defaultCacheRoot() {
-  const std::string root = gleditor::paths::cacheDir("gleditor/torrents");
+  std::string root = gleditor::paths::cacheDir("gleditor/torrents");
   if (!root.empty()) {
     return root;
   }

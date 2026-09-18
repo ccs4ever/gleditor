@@ -117,8 +117,8 @@ inline HoleWid HoleDsp::act(const HoleWid &w) const noexcept {
     return offset > magnitude ? offset - magnitude : 0ULL;
   };
 
-  std::uint64_t newMin;
-  std::uint64_t newMax;
+  std::uint64_t newMin = 0;
+  std::uint64_t newMax = 0;
   if (deltaOffset >= 0) {
     const auto delta = static_cast<std::uint64_t>(deltaOffset);
     newMin           = w.minOffset + delta;

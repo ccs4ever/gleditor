@@ -8,6 +8,11 @@
 /// Each of these owns a single SDL resource and releases it in its destructor,
 /// so copying one would destroy that resource twice. They are only ever used as
 /// scoped locals; copies and moves are deleted to keep it that way.
+///
+/// A function-like macro rather than a constexpr helper because it declares
+/// deleted special member functions, which must be written as actual member
+/// declarations inside the class body -- a function cannot inject those.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define GLEDITOR_NON_COPYABLE(Type)                                            \
   Type(const Type &)            = delete;                                      \
   Type &operator=(const Type &) = delete;                                      \

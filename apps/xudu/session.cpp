@@ -1583,12 +1583,12 @@ Session::mediaSpansFor(const MicroversionId &version,
   return list;
 }
 
-bool Session::unlockTranscopyright(const std::size_t storeIdx,
+bool Session::unlockTranscopyright(const std::size_t storeIndex,
                                    const PrimediaSpan &span) {
-  if (storeIdx >= stores.size() || !stores[storeIdx].store) {
+  if (storeIndex >= stores.size() || !stores[storeIndex].store) {
     return false;
   }
-  auto &st       = *stores[storeIdx].store;
+  auto &st       = *stores[storeIndex].store;
   const auto res = st.resolve(span);
   if (res.status != ResolutionStatus::TranscopyrightLocked ||
       !res.lockInfo.has_value()) {
@@ -1606,7 +1606,7 @@ bool Session::unlockTranscopyright(const std::size_t storeIdx,
   // Invalidate cached decorations and notify observers
   invalidate();
   for (std::size_t d = 0; d < open.size(); ++d) {
-    if (open[d].storeIndex == storeIdx) {
+    if (open[d].storeIndex == storeIndex) {
       open[d].decoratedAt = 0;
       open[d].decorations.clear();
       if (tcUnlockedHandler_) {
@@ -1865,17 +1865,17 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
   markDecorated(doc.documentIndex(), at, length, mask);
 }
 
-void Session::markDecorated(const std::size_t which, const std::uint32_t at,
+void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
                             const std::uint32_t length,
                             const gleditor::DecorationMask mask) {
-  if (which >= open.size()) {
+  if (docIndex >= open.size()) {
     return;
   }
-  flushUncommitted(which);
-  const auto sIdx = open[which].storeIndex;
+  flushUncommitted(docIndex);
+  const auto sIdx = open[docIndex].storeIndex;
   auto &st        = store(sIdx);
 
-  const auto textStr  = sourceFor(open[which].version, sIdx)->text();
+  const auto textStr  = sourceFor(open[docIndex].version, sIdx)->text();
   std::uint32_t start = at;
   std::uint32_t end   = at + length;
   if (length == 0 && !textStr.empty() && start < textStr.size()) {
@@ -1891,11 +1891,12 @@ void Session::markDecorated(const std::size_t which, const std::uint32_t at,
 
   const auto effLen =
       (end > start) ? (end - start) : (length > 0 ? length : 1U);
-  const auto content = st.rebuild(open[which].version).spansFor(start, effLen);
+  const auto content =
+      st.rebuild(open[docIndex].version).spansFor(start, effLen);
   if (content.empty()) {
     return;
   }
-  auto version = open[which].version;
+  auto version = open[docIndex].version;
   for (const auto decoration :
        {gleditor::Decoration::Bold, gleditor::Decoration::Italic,
         gleditor::Decoration::Underline, gleditor::Decoration::Overline,
@@ -1919,7 +1920,7 @@ void Session::markDecorated(const std::size_t which, const std::uint32_t at,
               << (start + effLen) << ")\n";
   }
   save(sIdx);
-  refresh(which, version);
+  refresh(docIndex, version);
 }
 
 void Session::setAlignment(Doc &doc, const std::uint32_t at,
@@ -1928,17 +1929,17 @@ void Session::setAlignment(Doc &doc, const std::uint32_t at,
   setAlignment(doc.documentIndex(), at, length, align);
 }
 
-void Session::setAlignment(const std::size_t which, const std::uint32_t at,
+void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
                            const std::uint32_t length,
                            const gleditor::TextAlign align) {
-  if (which >= open.size()) {
+  if (docIndex >= open.size()) {
     return;
   }
-  flushUncommitted(which);
-  const auto sIdx = open[which].storeIndex;
+  flushUncommitted(docIndex);
+  const auto sIdx = open[docIndex].storeIndex;
   auto &st        = store(sIdx);
 
-  const auto textStr  = sourceFor(open[which].version, sIdx)->text();
+  const auto textStr  = sourceFor(open[docIndex].version, sIdx)->text();
   std::uint32_t start = at;
   std::uint32_t end   = at + length;
   if (length == 0 && !textStr.empty()) {
@@ -1955,7 +1956,8 @@ void Session::setAlignment(const std::size_t which, const std::uint32_t at,
 
   const auto effLen =
       (end > start) ? (end - start) : (length > 0 ? length : 1U);
-  const auto content = st.rebuild(open[which].version).spansFor(start, effLen);
+  const auto content =
+      st.rebuild(open[docIndex].version).spansFor(start, effLen);
   if (content.empty()) {
     return;
   }
@@ -1968,12 +1970,12 @@ void Session::setAlignment(const std::size_t which, const std::uint32_t at,
   link.owner = "--type";
   link.left  = content;
   link.right.push_back(xudu::vocabularySpanFor(*attribute));
-  auto version = st.addLink(open[which].version, link);
+  auto version = st.addLink(open[docIndex].version, link);
   std::cout << "xudu: " << version.str() << " align "
             << xudu::formatAttributeName(*attribute) << " [" << start << ", "
             << (start + effLen) << ")\n";
   save(sIdx);
-  refresh(which, version);
+  refresh(docIndex, version);
 }
 
 void Session::setLocalCollaboratorInfo(std::string name,

@@ -91,7 +91,7 @@ std::string MimeType::essence() const {
 }
 
 std::string MimeType::str() const {
-  const std::string ess = essence();
+  std::string ess = essence();
   if (parameters_.empty()) {
     return ess;
   }

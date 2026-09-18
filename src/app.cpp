@@ -42,6 +42,9 @@
 // Android build points this at "opengles" instead; everywhere else the
 // desktop default of plain OpenGL is unchanged.
 #ifndef GLEDITOR_DEFAULT_BACKEND
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) -- the #ifndef above is the
+// point: this is a build-time -D override (see the Android build note
+// above), which a constexpr constant can't be.
 #define GLEDITOR_DEFAULT_BACKEND "opengl"
 #endif
 
@@ -1167,7 +1170,9 @@ int Application::run() {
     if (!SDL_WaitEventTimeout(&evt, eventWaitMs)) {
       continue;
     }
-    do {
+    // The event already received above from SDL_WaitEventTimeout must be
+    // processed at least once before polling for any more that queued up.
+    do { // NOLINT(cppcoreguidelines-avoid-do-while)
       switch (evt.type) {
       case SDL_EVENT_QUIT: {
         state->alive = false;

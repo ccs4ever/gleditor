@@ -845,7 +845,7 @@ std::string Store::read(const PrimediaSpan &span) const {
     return {};
   }
   // Check ephemeral live author buffer if not yet sealed into a torrent piece
-  const auto liveText = readRemoteAuthorBuffer(span);
+  auto liveText = readRemoteAuthorBuffer(span);
   if (!liveText.empty()) {
     return liveText;
   }
@@ -1063,7 +1063,7 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
   op.parent = parent;
 
   // Straight on, when nothing has followed this state yet.
-  const auto onward = parent.next();
+  auto onward = parent.next();
   if (!opsSpool.contains(onward)) {
     putOp(onward, op);
     return onward;

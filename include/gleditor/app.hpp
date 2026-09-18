@@ -51,6 +51,9 @@ enum class Mod : std::uint16_t {
 };
 
 inline Mod operator|(const Mod lhs, const Mod rhs) {
+  // Standard flag-enum bitwise-OR idiom: the combined bit pattern is a
+  // legitimate Mod value even though it has no enumerator of its own.
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   return static_cast<Mod>(static_cast<std::uint16_t>(lhs) |
                           static_cast<std::uint16_t>(rhs));
 }

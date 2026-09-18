@@ -228,7 +228,7 @@ xanadu::PrimediaSpan ArenaManifold::intern(const std::string_view text) {
 
 CellRef
 ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
-                        const std::span<const xanadu::PrimediaSpan> spans) {
+                        const std::span<const xanadu::PrimediaSpan> content) {
   const auto dense = static_cast<std::uint32_t>(slots_.size());
   slots_.push_back(CellSlot{
       .spanOffset  = static_cast<std::uint32_t>(content_.size()),
@@ -245,8 +245,8 @@ ArenaManifold::mintSlot(const xanadu::ValueKind kind, const std::uint64_t bits,
       .flags      = 0,
       .valueBits  = bits,
   });
-  if (!spans.empty()) {
-    setContentAt(dense, spans);
+  if (!content.empty()) {
+    setContentAt(dense, content);
   }
   return refOf(dense);
 }

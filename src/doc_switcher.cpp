@@ -82,7 +82,10 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
 
   const auto width  = static_cast<float>(ctx.screenWidth);
   const auto height = static_cast<float>(ctx.screenHeight);
-  const auto ortho  = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
+  const auto
+      ortho = // NOLINTNEXTLINE(readability-suspicious-call-argument) -- correct
+              // left,right,bottom,top order for a screen-space projection
+      glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
 
   canvas->clear();
   currentTabs.clear();

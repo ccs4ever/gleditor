@@ -964,7 +964,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
-        CellRef target = core.arena().refOf(static_cast<std::uint32_t>(c));
+        CellRef target =
+            zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(target)) continue;
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark = core.arena().mark();
@@ -1052,7 +1053,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
-        CellRef fromCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+        CellRef fromCell =
+            zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(fromCell)) continue;
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         for (const auto &dl : core.arena().dimensionsOf(fromCell)) {
@@ -1187,7 +1189,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     } else {
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
-        CellRef target = core.arena().refOf(static_cast<std::uint32_t>(c));
+        CellRef target =
+            zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(target)) continue;
         if (!matchCellSpans(target)) break;
       }
@@ -1203,7 +1206,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       DimRef cloneDim   = core.dims().clone;
       std::size_t total = core.arena().cellCount();
       for (std::size_t c = 1; c < total; ++c) {
-        CellRef presCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+        CellRef presCell =
+            zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
         if (!core.arena().contains(presCell)) continue;
         CellRef docCell =
             core.arena().linked(presCell, cloneDim, DimVector::POS);
@@ -1280,7 +1284,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       } else {
         std::size_t total = core.arena().cellCount();
         for (std::size_t c = 1; c < total; ++c) {
-          CellRef fromCell = core.arena().refOf(static_cast<std::uint32_t>(c));
+          CellRef fromCell =
+              zigzag::ArenaManifold::refOf(static_cast<std::uint32_t>(c));
           if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           if (!matchEdgesFrom(fromCell)) break;
         }

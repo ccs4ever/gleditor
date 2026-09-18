@@ -749,7 +749,9 @@ PageShaping TextLayout::layoutPage(std::string_view text,
         // A no-op everywhere extraPerSpace is 0.
         .width = filled.width + static_cast<float>(spaceCount) * extraPerSpace,
         .top   = currentY,
-        .left  = band.left + alignedLeft(bandWidth, ink, align),
+        // bandWidth is the column (maxWidth), ink is the content's own width.
+        // NOLINTNEXTLINE(readability-suspicious-call-argument)
+        .left          = band.left + alignedLeft(bandWidth, ink, align),
         .barHeight     = lineBarHeight,
         .extraPerSpace = extraPerSpace,
         .stretchEnd    = filled.endGlyph - trailingSpaceGlyphs,

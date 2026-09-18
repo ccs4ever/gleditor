@@ -1759,7 +1759,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   hudCanvas_->commit();
-  const glm::mat4 ortho = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
+  const glm::mat4
+      ortho = // NOLINTNEXTLINE(readability-suspicious-call-argument) -- correct
+              // left,right,bottom,top order for a screen-space projection
+      glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
   hudCanvas_->draw(ctx.state, ortho, 1.0F);
 }
 

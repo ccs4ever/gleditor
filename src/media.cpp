@@ -196,7 +196,7 @@ struct MediaPlayer::Impl {
   void updateAnimFrame() {
     if (backend == Backend::Gif && gifDecoder) {
       const auto &f = gifDecoder->frameAt(animPosition);
-      std::lock_guard<std::mutex> lock(videoMutex);
+      std::scoped_lock lock(videoMutex);
       videoBuffer      = f.rgba;
       auto newFrame    = std::make_shared<VideoFrame>();
       newFrame->width  = frameWidth;
@@ -207,7 +207,7 @@ struct MediaPlayer::Impl {
       frame          = newFrame;
       frameAvailable = true;
     } else if (backend == Backend::Thorvg && svgAnimator) {
-      std::lock_guard<std::mutex> lock(videoMutex);
+      std::scoped_lock lock(videoMutex);
       if (svgAnimator->renderFrame(animPosition, videoBuffer)) {
         auto newFrame    = std::make_shared<VideoFrame>();
         newFrame->width  = frameWidth;
@@ -236,7 +236,7 @@ struct MediaPlayer::Impl {
 
   static void videoDisplay(void *opaque, [[maybe_unused]] void *picture) {
     auto *self = static_cast<Impl *>(opaque);
-    std::lock_guard<std::mutex> lock(self->videoMutex);
+    std::scoped_lock lock(self->videoMutex);
     if (self->frameWidth > 0 && self->frameHeight > 0 &&
         !self->videoBuffer.empty()) {
       auto newFrame        = std::make_shared<VideoFrame>();
@@ -261,7 +261,7 @@ struct MediaPlayer::Impl {
     *pitches          = (*width) * 4;
     *lines            = *height;
 
-    std::lock_guard<std::mutex> lock(self->videoMutex);
+    std::scoped_lock lock(self->videoMutex);
     self->videoBuffer.resize(static_cast<std::size_t>(*width) * (*height));
     return 1;
   }
@@ -728,13 +728,13 @@ float MediaPlayer::aspectRatio() const {
 }
 
 std::shared_ptr<VideoFrame> MediaPlayer::latestFrame() const {
-  std::lock_guard<std::mutex> lock(impl->videoMutex);
+  std::scoped_lock lock(impl->videoMutex);
   impl->frameAvailable = false;
   return impl->frame;
 }
 
 bool MediaPlayer::isNewFrameAvailable() const {
-  std::lock_guard<std::mutex> lock(impl->videoMutex);
+  std::scoped_lock lock(impl->videoMutex);
   return impl->frameAvailable;
 }
 

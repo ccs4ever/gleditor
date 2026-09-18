@@ -745,7 +745,9 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   ZSTD_inBuffer din{
       .src = zstdBytes.data(), .size = zstdBytes.size(), .pos = 0};
   bool decodeOk = true;
-  do {
+  // ZSTD's own streaming idiom: the first call to ZSTD_decompressStream is
+  // what discovers whether there's anything to decode at all.
+  do { // NOLINT(cppcoreguidelines-avoid-do-while)
     ZSTD_outBuffer dout{.dst = ioBuf.data(), .size = ioBuf.size(), .pos = 0};
     if (ZSTD_isError(ZSTD_decompressStream(dstream, &dout, &din))) {
       decodeOk = false;
@@ -782,8 +784,10 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
                   ioBuf.begin() + static_cast<long>(cout.pos));
   }
   if (compressOk) {
-    std::size_t remaining;
-    do {
+    std::size_t remaining = 0;
+    // Same ZSTD streaming idiom as the decompress loop above: the first call
+    // to ZSTD_seekable_endStream is what sets `remaining` at all.
+    do { // NOLINT(cppcoreguidelines-avoid-do-while)
       ZSTD_outBuffer cout{.dst = ioBuf.data(), .size = ioBuf.size(), .pos = 0};
       remaining = ZSTD_seekable_endStream(cstream, &cout);
       if (ZSTD_isError(remaining)) {

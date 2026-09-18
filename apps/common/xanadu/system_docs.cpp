@@ -2125,8 +2125,8 @@ MicroversionId
 SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
                                  const std::string_view name,
                                  const zigzag::Manifold *const known) {
-  const auto curVer = parent.isZero() ? store.primaryCurrentVersion() : parent;
-  const auto model  = fromStore(store, curVer);
+  auto curVer      = parent.isZero() ? store.primaryCurrentVersion() : parent;
+  const auto model = fromStore(store, curVer);
   const auto *const entry = model.find(name);
   if (entry == nullptr) {
     throw std::invalid_argument("Setting '" + std::string(name) +
