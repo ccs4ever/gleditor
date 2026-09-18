@@ -271,7 +271,8 @@ bool MicroversionId::isAncestorOf(const MicroversionId &other) const {
          (their.number == mine.number && theirs.size() > ours.size());
 }
 
-bool MicroversionId::operator<(const MicroversionId &other) const {
+std::strong_ordering
+MicroversionId::operator<=>(const MicroversionId &other) const {
   const auto parts  = segments();
   const auto theirs = other.segments();
   const auto common = std::min(parts.size(), theirs.size());
@@ -282,13 +283,13 @@ bool MicroversionId::operator<(const MicroversionId &other) const {
     // first and lexicographically second. Plain integer comparison of the
     // ordinal is that closed form, for free.
     if (parts[i].branch != theirs[i].branch) {
-      return parts[i].branch < theirs[i].branch;
+      return parts[i].branch <=> theirs[i].branch;
     }
     if (parts[i].number != theirs[i].number) {
-      return parts[i].number < theirs[i].number;
+      return parts[i].number <=> theirs[i].number;
     }
   }
-  return parts.size() < theirs.size();
+  return parts.size() <=> theirs.size();
 }
 
 } // namespace xanadu

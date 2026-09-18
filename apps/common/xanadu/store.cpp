@@ -1222,12 +1222,7 @@ std::vector<MicroversionId> Store::allVersions() const {
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
     found.push_back(opsSpool.idOf(idx));
   }
-  // MicroversionId's operator< doesn't satisfy std::sortable (no
-  // strict_weak_order over it in the concept sense libstdc++ checks) --
-  // std::ranges::sort's own constraint check rejects it, so this stays the
-  // pre-ranges algorithm. See the modernize-use-ranges note in .clang-tidy.
-  // NOLINTNEXTLINE(modernize-use-ranges)
-  std::sort(found.begin(), found.end());
+  std::ranges::sort(found);
   return found;
 }
 

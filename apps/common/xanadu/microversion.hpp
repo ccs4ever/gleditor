@@ -32,6 +32,7 @@
 #ifndef XUDU_MICROVERSION_H
 #define XUDU_MICROVERSION_H
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -156,8 +157,12 @@ public:
 
   [[nodiscard]] bool operator==(const MicroversionId &other) const noexcept;
   /// Ordering by the sequence names are replayed in, so that a container of
-  /// these iterates in an order a person would recognise.
-  [[nodiscard]] bool operator<(const MicroversionId &other) const;
+  /// these iterates in an order a person would recognise. A real
+  /// std::strong_ordering (not just operator<) so std::sortable is
+  /// satisfied and this can be sorted with std::ranges::sort like any other
+  /// value type, rather than needing a hand-supplied comparator.
+  [[nodiscard]] std::strong_ordering
+  operator<=>(const MicroversionId &other) const;
 
 private:
   /// Where the segments are, which is the inline buffer until there are more
