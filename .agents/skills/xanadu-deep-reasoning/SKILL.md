@@ -18,9 +18,10 @@ theoretical, and implementation challenges across the **gleditor**, **xudu** (xa
        |                  Xanadulogical Purist                       |
        |  - Absolute Transclusion (zero copy-paste)                  |
        |  - Universal Docuverse & Infinite Permascrolls              |
-       |  - N-Dimensional Orthogonal Zigzag Topology                 |
+       |  - N-Dimensional Orthogonal Zigzag Topology (deep ZZ study) |
        |  - Fine-Grained Character-Level Provenance & Micropayments  |
        |  - Deep Intrinsic Bidirectionality                          |
+       |  - Zigzag/Xanadu-Space Convergence (xuzz intertwingularity) |
        +-------------------------------------------------------------+
                                    ▲   │
                      Nelsonian     │   │ Real-World
@@ -65,6 +66,21 @@ ______________________________________________________________________
   - **Bi-Directional Permanence**: Links never rot, are indexed from both ends, and preserve full
     authorial attribution.
   - **N-Dimensional Topology**: Information is organized into orthogonal continuous zigzag ranks.
+  - **Zigzag Deep Research (mandatory)**: Since `xuzz` has merged the xanadoc and Zigzag worlds, the
+    Purist must reason from Ted Nelson's original Zigzag/Enfilade sources directly — *Literary
+    Machines* 87.1's Zigzag chapters, the Xanadu Green/Gold design notes, `xanadu.com.au`'s ZigZag
+    materials, and Nelson's own ZigZag Rhetorical Structure and "Geeks Bearing Gifts" commentary —
+    not just this repo's `design/enfilade/*` notes. Ground every claim about ranks, dimensions,
+    crums, and enfilades in that primary material before treating `apps/zigzag` or
+    `apps/common/xanadu` as the final word on what Zigzag *should* be; the codebase is one
+    implementation of the idea, not the idea itself. Treat `d.*` dimensions, `CellRef`, and
+    `Manifold`/`ArenaManifold` as candidate mappings of Nelsonian Zigzag concepts to be critiqued
+    against the primary sources, not accepted uncritically.
+  - **xuzz Intertwingularity**: Because `xuzz` fuses xudu's xanalogical hypertext model with
+    zigzag's multidimensional space, the Purist must evaluate any proposal for whether it honors
+    *both* halves simultaneously — a xanadoc that is not also addressable as zigzag structure (via
+    `OpKind::Structure` / `Manifold`) is an incomplete convergence, and a zigzag space with no
+    xanalogical provenance is not truly Xanadu space.
 
 ### 1.2 The Systems Realist (`systems_realist`)
 
@@ -104,6 +120,12 @@ follows a 4-phase cycle:
 - **Goal**: Define the purest theoretical model. What would Ted Nelson build if computing power,
   memory, and networking were boundless? How are the dimensions, spools, and transclusion spans
   mathematically structured?
+- **Required step for anything touching zigzag, `xuzz`, or cross-cutting hypertext/space
+  questions**: before formulating the thesis, do deep research on Project Xanadu's Zigzag from
+  primary Nelsonian sources (not just this repo's design notes) — ranks, dimensions, crums,
+  enfilades — and explicitly reason about how the xanalogical model (xudu) and the Zigzag
+  multidimensional model (zigzag) are meant to be one intertwingled thing in `xuzz`, since the two
+  are no longer separable concerns.
 
 ### Phase 2: Silicon & Network Stress-Testing (Antithesis)
 
