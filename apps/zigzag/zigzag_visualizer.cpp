@@ -85,13 +85,11 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
-  for (const auto &[id, cell] : visible_cells_) {
-    if (std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
-        glm::length(cell.target_pos - cell.current_pos) > 0.5F) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(visible_cells_, [](const auto &entry) {
+    const auto &cell = entry.second;
+    return std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
+           glm::length(cell.target_pos - cell.current_pos) > 0.5F;
+  });
 }
 
 std::string ZigzagVisualizer::documentId() const {

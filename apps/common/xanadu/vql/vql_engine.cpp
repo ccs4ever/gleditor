@@ -819,22 +819,16 @@ bool VQLEngine::evaluateFactor(const BooleanFactor &factor,
 }
 
 bool VQLEngine::evaluateTerm(const BooleanTerm &term, zigzag::CellRef context) {
-  for (const auto &factor : term.factors) {
-    if (!evaluateFactor(factor, context)) {
-      return false; // Short-circuit AND
-    }
-  }
-  return true;
+  return std::ranges::all_of(term.factors, [this, context](const auto &factor) {
+    return evaluateFactor(factor, context);
+  }); // Short-circuit AND
 }
 
 bool VQLEngine::evaluatePredicate(const BooleanExpr &expr,
                                   zigzag::CellRef context) {
-  for (const auto &term : expr.terms) {
-    if (evaluateTerm(term, context)) {
-      return true; // Short-circuit OR
-    }
-  }
-  return false;
+  return std::ranges::any_of(expr.terms, [this, context](const auto &term) {
+    return evaluateTerm(term, context);
+  }); // Short-circuit OR
 }
 
 std::vector<zigzag::CellRef>

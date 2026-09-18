@@ -79,10 +79,9 @@ void WireframeHullOverlay::finishLoading(const std::size_t docIndex) {
 
 bool WireframeHullOverlay::isLoading(
     const std::size_t docIndex) const noexcept {
-  for (const auto &ld : loadingDocs_) {
-    if (ld.docIndex == docIndex) return true;
-  }
-  return false;
+  return std::ranges::any_of(loadingDocs_, [docIndex](const auto &ld) {
+    return ld.docIndex == docIndex;
+  });
 }
 
 void WireframeHullOverlay::drawFrame(gleditor::FrameContext &ctx) {

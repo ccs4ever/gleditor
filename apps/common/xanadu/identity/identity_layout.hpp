@@ -63,13 +63,9 @@ struct Fingerprint {
       : hex(chars) {}
 
   [[nodiscard]] constexpr bool isValid() const noexcept {
-    for (const char c : hex) {
-      const bool isHex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
-      if (!isHex) {
-        return false;
-      }
-    }
-    return true;
+    return std::ranges::all_of(hex, [](const char c) {
+      return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+    });
   }
 
   [[nodiscard]] std::string_view view() const noexcept {

@@ -410,13 +410,13 @@ public:
     if (pick.tag.empty()) {
       return false;
     }
-    for (const auto &ctrl : controls_) {
-      if (ctrl.matches(pick.tag, tagBase_)) {
-        ctrl.execute(pick);
-        return true;
+    return std::ranges::any_of(controls_, [this, &pick](const auto &ctrl) {
+      if (!ctrl.matches(pick.tag, tagBase_)) {
+        return false;
       }
-    }
-    return false;
+      ctrl.execute(pick);
+      return true;
+    });
   }
 
   /**
@@ -427,29 +427,29 @@ public:
     if (tag.empty()) {
       return false;
     }
-    for (const auto &ctrl : controls_) {
-      if (ctrl.matches(tag, tagBase_)) {
-        ctrl.execute(tag);
-        return true;
+    return std::ranges::any_of(controls_, [this, &tag](const auto &ctrl) {
+      if (!ctrl.matches(tag, tagBase_)) {
+        return false;
       }
-    }
-    return false;
+      ctrl.execute(tag);
+      return true;
+    });
   }
 
   /**
    * @brief Dispatch an incoming overlay pick by sub-tag offset.
    */
   [[nodiscard]] bool dispatch(const std::uint32_t tagOffset) const {
-    for (const auto &ctrl : controls_) {
-      if (ctrl.tagKind == render::tagKindOverlay &&
-          tagOffset >= ctrl.tagOffset && tagOffset < ctrl.tagEndOffset) {
-        if (ctrl.onClick) {
-          ctrl.onClick();
-        }
-        return true;
+    return std::ranges::any_of(controls_, [tagOffset](const auto &ctrl) {
+      if (ctrl.tagKind != render::tagKindOverlay ||
+          tagOffset < ctrl.tagOffset || tagOffset >= ctrl.tagEndOffset) {
+        return false;
       }
-    }
-    return false;
+      if (ctrl.onClick) {
+        ctrl.onClick();
+      }
+      return true;
+    });
   }
 
   /**

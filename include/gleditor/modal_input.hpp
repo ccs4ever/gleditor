@@ -148,12 +148,9 @@ public:
   void remove(ModalInput *modal) { std::erase(modals_, modal); }
 
   [[nodiscard]] bool grabbing() const override {
-    for (auto *modal : std::views::reverse(modals_)) {
-      if (modal != nullptr && modal->grabbing()) {
-        return true;
-      }
-    }
-    return false;
+    return std::ranges::any_of(std::views::reverse(modals_), [](auto *modal) {
+      return modal != nullptr && modal->grabbing();
+    });
   }
 
   bool keyPressed(const Key key, const KeyMods mods) override {

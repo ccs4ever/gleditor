@@ -10,6 +10,7 @@
 #ifndef GLEDITOR_DRAW_BUDGET_H
 #define GLEDITOR_DRAW_BUDGET_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -84,12 +85,7 @@ inline bool outsideFrustum(const glm::mat4 &mvp, const float halfW,
       mvp * glm::vec4(halfW, halfH, depth, 1.0F)};
 
   const auto allOutside = [&corners](auto beyond) {
-    for (const auto &corner : corners) {
-      if (!beyond(corner)) {
-        return false;
-      }
-    }
-    return true;
+    return std::ranges::all_of(corners, beyond);
   };
   return allOutside([](const glm::vec4 &pos) { return pos.x < -pos.w; }) ||
          allOutside([](const glm::vec4 &pos) { return pos.x > pos.w; }) ||

@@ -79,12 +79,9 @@ void SatelloidOverlay::deviceReady(render::RenderDevice &device,
 }
 
 bool SatelloidOverlay::busy() const {
-  for (const auto &s : satelloids_) {
-    if (s.pulseAlpha > 0.01F || std::abs(s.alpha - s.targetAlpha) > 0.02F) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(satelloids_, [](const auto &s) {
+    return s.pulseAlpha > 0.01F || std::abs(s.alpha - s.targetAlpha) > 0.02F;
+  });
 }
 
 void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {

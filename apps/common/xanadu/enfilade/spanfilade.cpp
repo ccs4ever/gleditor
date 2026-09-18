@@ -154,12 +154,8 @@ void ScrollSpanfilade::stabNode(const uint32_t nodeIdx, const int64_t parentDsp,
 void Spanfilade::clear() { scrolls_.clear(); }
 
 bool Spanfilade::empty() const noexcept {
-  for (const auto &[scroll, enfilade] : scrolls_) {
-    if (!enfilade.empty()) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(
+      scrolls_, [](const auto &entry) { return entry.second.empty(); });
 }
 
 std::size_t Spanfilade::totalSpans() const noexcept {

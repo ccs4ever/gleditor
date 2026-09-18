@@ -576,17 +576,11 @@ bool Arrayfilade::verifyReductionsAgainstLinear(
 
 bool Arrayfilade::verifySubscriptAgainstLinear(
     std::span<const ArrayCellEntry> linearCells) const {
-  for (const auto &cell : linearCells) {
+  return std::ranges::all_of(linearCells, [this](const auto &cell) {
     const auto res = subscript(cell.coords);
-    if (!res.has_value()) {
-      return false;
-    }
-    if (res->cellRef != cell.cellRef ||
-        res->numericValue != cell.numericValue) {
-      return false;
-    }
-  }
-  return true;
+    return res.has_value() && res->cellRef == cell.cellRef &&
+           res->numericValue == cell.numericValue;
+  });
 }
 
 bool Arrayfilade::verifySliceAgainstLinear(
@@ -612,13 +606,10 @@ bool Arrayfilade::verifySliceAgainstLinear(
     return false;
   }
 
-  for (const auto &cell : expected) {
+  return std::ranges::all_of(expected, [&slicedFilade](const auto &cell) {
     const auto found = slicedFilade.subscript(cell.coords);
-    if (!found.has_value() || found->cellRef != cell.cellRef) {
-      return false;
-    }
-  }
-  return true;
+    return found.has_value() && found->cellRef == cell.cellRef;
+  });
 }
 
 } // namespace xanadu::enfilade

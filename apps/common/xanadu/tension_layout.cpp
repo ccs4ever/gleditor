@@ -329,13 +329,10 @@ void TensionLayoutEngine::step(const float dt) {
 }
 
 bool TensionLayoutEngine::isSettled() const {
-  for (const auto &b : bodies_) {
-    if (!b.pinned &&
-        glm::length(b.velocity) > params_.settleVelocityThreshold) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(bodies_, [this](const auto &b) {
+    return b.pinned ||
+           glm::length(b.velocity) <= params_.settleVelocityThreshold;
+  });
 }
 
 void TensionLayoutEngine::solveEquilibrium() {

@@ -204,16 +204,15 @@ bool TranscopyrightOverlay::picked(const render::PickingResult &pick,
   }
 
   const auto tagId = pick.tag.clusterIndex;
-  for (const auto &badge : activeBadges_) {
-    if (badge.tagId == tagId) {
-      if (onUnlock_) {
-        onUnlock_(badge.storeIndex, badge.span);
-      }
-      return true;
+  return std::ranges::any_of(activeBadges_, [this, tagId](const auto &badge) {
+    if (badge.tagId != tagId) {
+      return false;
     }
-  }
-
-  return false;
+    if (onUnlock_) {
+      onUnlock_(badge.storeIndex, badge.span);
+    }
+    return true;
+  });
 }
 
 } // namespace xudu
