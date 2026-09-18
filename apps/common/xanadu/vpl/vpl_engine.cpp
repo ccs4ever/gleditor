@@ -26,6 +26,14 @@ bool isScalarCell(const zigzag::ArenaManifold &arena, zigzag::CellRef c) {
 
 } // namespace
 
+// core_/vm_/stdlib_ are raw aliases into the just-constructed ownedXxx_
+// unique_ptrs above them, so each depends on a preceding *body* statement
+// rather than only on constructor parameters or earlier members -- moving
+// them into the member initializer list, as clang-tidy's own -fix does,
+// captures a still-null pointer from an ownedXxx_ that the initializer list
+// already default-constructed to nullptr and the body has not reassigned
+// yet. See the cppcoreguidelines-prefer-member-initializer note in
+// .clang-tidy for the MultiStoreCoordinator instance of this same bug.
 VPLEngine::VPLEngine() {
   ownedArena_ = std::make_unique<zigzag::ArenaManifold>();
   ownedCore_  = std::make_unique<zigzag::vortex::VortexCore>(*ownedArena_);
@@ -33,9 +41,11 @@ VPLEngine::VPLEngine() {
   ownedStdlib_ =
       std::make_unique<zigzag::vortex::VortexStdLib>(*ownedCore_, *ownedVm_);
 
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   core_   = ownedCore_.get();
   vm_     = ownedVm_.get();
   stdlib_ = ownedStdlib_.get();
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
 VPLEngine::VPLEngine(zigzag::ArenaManifold &arena) {
@@ -44,9 +54,11 @@ VPLEngine::VPLEngine(zigzag::ArenaManifold &arena) {
   ownedStdlib_ =
       std::make_unique<zigzag::vortex::VortexStdLib>(*ownedCore_, *ownedVm_);
 
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   core_   = ownedCore_.get();
   vm_     = ownedVm_.get();
   stdlib_ = ownedStdlib_.get();
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
 VPLEngine::VPLEngine(zigzag::vortex::VortexCore &core) : core_(&core) {
@@ -54,8 +66,10 @@ VPLEngine::VPLEngine(zigzag::vortex::VortexCore &core) : core_(&core) {
   ownedStdlib_ =
       std::make_unique<zigzag::vortex::VortexStdLib>(*core_, *ownedVm_);
 
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   vm_     = ownedVm_.get();
   stdlib_ = ownedStdlib_.get();
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
 VPLEngine::VPLEngine(Store &store) : store_(&store) {
@@ -65,9 +79,11 @@ VPLEngine::VPLEngine(Store &store) : store_(&store) {
   ownedStdlib_ =
       std::make_unique<zigzag::vortex::VortexStdLib>(*ownedCore_, *ownedVm_);
 
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   core_   = ownedCore_.get();
   vm_     = ownedVm_.get();
   stdlib_ = ownedStdlib_.get();
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 }
 
 VPLEngine::~VPLEngine() = default;

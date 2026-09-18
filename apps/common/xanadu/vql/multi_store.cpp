@@ -15,7 +15,14 @@ using zigzag::DimVector;
 MultiStoreCoordinator::MultiStoreCoordinator() {
   ownedArena_ = std::make_unique<zigzag::ArenaManifold>();
   ownedCore_  = std::make_unique<zigzag::vortex::VortexCore>(*ownedArena_);
-  core_       = ownedCore_.get();
+  // core_ aliases the ownedCore_ unique_ptr just constructed above it, so it
+  // depends on that body statement rather than only on constructor
+  // parameters -- moving it into the member initializer list, as
+  // clang-tidy's own -fix does, captures ownedCore_ while it is still the
+  // nullptr the initializer list default-constructed it to. See the
+  // cppcoreguidelines-prefer-member-initializer note in .clang-tidy.
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+  core_ = ownedCore_.get();
   initDimensions();
 }
 

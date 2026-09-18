@@ -208,7 +208,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
            const BufferPool::Allocation &inherited)
     : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
       textOffset(aTextOffset), clusters(std::move(aShaping.clusters)),
-      pageIndex(aPageIndex) {
+      pageIndex(aPageIndex),
+      identity(render::packTagIdentity(0, doc->documentIndex(), aPageIndex)) {
   const auto color = Doc::VBORow::color;
   const auto box   = Doc::VBORow::box;
 
@@ -216,10 +217,16 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   pageWidth          = pageBox.width;
   pageHeight         = pageBox.height;
 
+  // originX/originY depend on pageWidth/pageHeight above, which themselves
+  // depend on the pageBoxFor() call just above them -- moving these into the
+  // member initializer list (as clang-tidy's own -fix does) reorders them
+  // ahead of that computation and reads pageWidth/pageHeight before they
+  // exist. See the cppcoreguidelines-prefer-member-initializer note in
+  // .clang-tidy for the same bug caught here previously.
+  // NOLINTBEGIN(cppcoreguidelines-prefer-member-initializer)
   originX = -pageWidth / 2.0F;
   originY = pageHeight / 2.0F;
-
-  identity = render::packTagIdentity(0, this->doc->documentIndex(), aPageIndex);
+  // NOLINTEND(cppcoreguidelines-prefer-member-initializer)
 
   std::vector<Doc::VBORow> vertexData;
   const auto pushBackground = [&] {
