@@ -891,10 +891,10 @@ void Store::setExternalLiveBytes(const std::string_view authorScrollKey,
   }
 
   if (chunks.size() > 1) {
-    std::sort(chunks.begin(), chunks.end(),
-              [](const RemoteAuthorChunk &a, const RemoteAuthorChunk &b) {
-                return a.start < b.start;
-              });
+    std::ranges::sort(
+        chunks, [](const RemoteAuthorChunk &a, const RemoteAuthorChunk &b) {
+          return a.start < b.start;
+        });
     std::vector<RemoteAuthorChunk> consolidated;
     consolidated.reserve(chunks.size());
     for (auto &c : chunks) {
@@ -1222,6 +1222,11 @@ std::vector<MicroversionId> Store::allVersions() const {
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
     found.push_back(opsSpool.idOf(idx));
   }
+  // MicroversionId's operator< doesn't satisfy std::sortable (no
+  // strict_weak_order over it in the concept sense libstdc++ checks) --
+  // std::ranges::sort's own constraint check rejects it, so this stays the
+  // pre-ranges algorithm. See the modernize-use-ranges note in .clang-tidy.
+  // NOLINTNEXTLINE(modernize-use-ranges)
   std::sort(found.begin(), found.end());
   return found;
 }
@@ -1326,10 +1331,9 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
                  .op       = node->toOp(opsSpool.idOf(node->parentIndex),
                                         opsSpool.idOf(node->sourceOpIndex))});
   }
-  std::sort(records.begin(), records.end(),
-            [](const OpRecord &lhs, const OpRecord &rhs) {
-              return lhs.produces < rhs.produces;
-            });
+  std::ranges::sort(records, [](const OpRecord &lhs, const OpRecord &rhs) {
+    return lhs.produces < rhs.produces;
+  });
   return records;
 }
 

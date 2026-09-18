@@ -188,10 +188,10 @@ void Arrayfilade::buildTree(std::span<const ArrayCellEntry> entries) {
 
   // Sort entries lexicographically by coordinates for cache locality and
   // ordinal descent
-  std::sort(leaves_.begin(), leaves_.end(),
-            [](const ArrayCellEntry &a, const ArrayCellEntry &b) {
-              return a.coords < b.coords;
-            });
+  std::ranges::sort(leaves_,
+                    [](const ArrayCellEntry &a, const ArrayCellEntry &b) {
+                      return a.coords < b.coords;
+                    });
 
   std::vector<std::uint32_t> currentLevelNodeIndices{};
 

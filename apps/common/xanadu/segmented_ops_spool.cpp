@@ -464,7 +464,7 @@ SegmentedOpsSpool::ancestralPath(const std::uint32_t targetIndex) const {
     }
     current = node->parentIndex;
   }
-  std::reverse(path.begin(), path.end());
+  std::ranges::reverse(path);
   return path;
 }
 
@@ -533,8 +533,14 @@ bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
   }
   {
     auto sorted = names;
+    // MicroversionId's operator< doesn't satisfy std::sortable (no
+    // strict_weak_order over it in the concept sense libstdc++ checks) --
+    // std::ranges::sort's own constraint check rejects it, so this stays
+    // the pre-ranges algorithm. See the modernize-use-ranges note in
+    // .clang-tidy.
+    // NOLINTNEXTLINE(modernize-use-ranges)
     std::sort(sorted.begin(), sorted.end());
-    if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
+    if (std::ranges::adjacent_find(sorted) != sorted.end()) {
       return false; // two nodes in this segment name the same state
     }
   }

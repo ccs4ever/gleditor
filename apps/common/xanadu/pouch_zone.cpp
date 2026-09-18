@@ -35,9 +35,9 @@ bool DropZone::contains(const float screenX,
 void DropZone::addItem(PouchItem item) { items_.push_back(std::move(item)); }
 
 bool DropZone::removeItem(const std::uint64_t itemId) {
-  const auto it = std::find_if(
-      items_.begin(), items_.end(),
-      [itemId](const PouchItem &item) { return item.itemId == itemId; });
+  const auto it = std::ranges::find_if(items_, [itemId](const PouchItem &item) {
+    return item.itemId == itemId;
+  });
   if (it != items_.end()) {
     items_.erase(it);
     return true;
@@ -126,8 +126,8 @@ DropZone &PouchManager::addZone(DropZoneConfig config) {
 }
 
 bool PouchManager::removeZone(const std::string_view id) {
-  const auto it = std::find_if(zones_.begin(), zones_.end(),
-                               [id](const auto &z) { return z->id() == id; });
+  const auto it = std::ranges::find_if(
+      zones_, [id](const auto &z) { return z->id() == id; });
   if (it != zones_.end()) {
     zones_.erase(it);
     return true;
@@ -136,15 +136,15 @@ bool PouchManager::removeZone(const std::string_view id) {
 }
 
 DropZone *PouchManager::zoneById(const std::string_view id) noexcept {
-  const auto it = std::find_if(zones_.begin(), zones_.end(),
-                               [id](const auto &z) { return z->id() == id; });
+  const auto it = std::ranges::find_if(
+      zones_, [id](const auto &z) { return z->id() == id; });
   return (it != zones_.end()) ? it->get() : nullptr;
 }
 
 const DropZone *
 PouchManager::zoneById(const std::string_view id) const noexcept {
-  const auto it = std::find_if(zones_.begin(), zones_.end(),
-                               [id](const auto &z) { return z->id() == id; });
+  const auto it = std::ranges::find_if(
+      zones_, [id](const auto &z) { return z->id() == id; });
   return (it != zones_.end()) ? it->get() : nullptr;
 }
 
@@ -265,9 +265,10 @@ PouchItem PouchManager::dropCell(const std::string_view zoneId,
 bool PouchManager::dismissItem(const std::uint64_t itemId) {
   for (const auto &zone : zones_) {
     const auto &items = zone->items();
-    const auto it     = std::find_if(
-        items.begin(), items.end(),
-        [itemId](const PouchItem &item) { return item.itemId == itemId; });
+    const auto it =
+        std::ranges::find_if(items, [itemId](const PouchItem &item) {
+          return item.itemId == itemId;
+        });
     if (it != items.end()) {
       const auto span = it->span;
       zone->removeItem(itemId);

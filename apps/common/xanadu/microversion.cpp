@@ -48,7 +48,7 @@ void MicroversionId::release() noexcept {
 
 MicroversionId::MicroversionId(const std::span<const Segment> aSegments) {
   takeStorageFor(aSegments.size());
-  std::copy(aSegments.begin(), aSegments.end(), data());
+  std::ranges::copy(aSegments, data());
 }
 
 MicroversionId::MicroversionId(const MicroversionId &other)
@@ -71,7 +71,7 @@ MicroversionId &MicroversionId::operator=(const MicroversionId &other) {
     const auto theirs = other.segments();
     release();
     takeStorageFor(theirs.size());
-    std::copy(theirs.begin(), theirs.end(), data());
+    std::ranges::copy(theirs, data());
   }
   return *this;
 }
@@ -103,7 +103,7 @@ std::string MicroversionId::branchLetters(std::uint32_t ordinal) {
     letters.push_back(static_cast<char>('a' + (ordinal % 26)));
     ordinal /= 26;
   }
-  std::reverse(letters.begin(), letters.end());
+  std::ranges::reverse(letters);
   return letters;
 }
 
@@ -222,7 +222,7 @@ MicroversionId MicroversionId::branch(const std::uint32_t ordinal) const {
   // Built at its final length rather than grown into: a name is short, and a
   // spilled one holds exactly its own segments and no spare capacity.
   branched.takeStorageFor(mine.size() + 1);
-  std::copy(mine.begin(), mine.end(), branched.data());
+  std::ranges::copy(mine, branched.data());
   branched.data()[mine.size()] = Segment{.branch = ordinal, .number = 1};
   return branched;
 }

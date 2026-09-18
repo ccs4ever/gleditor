@@ -238,7 +238,7 @@ InfoHash SystemTorrentManager::registerLedger(
           outSeq       = 1;
           const auto s = signMutableItem(
               mutableSigningBuffer(itemSalt, outSeq, encodedValueOf(value)), k);
-          std::copy(s.bytes.begin(), s.bytes.end(), sig.begin());
+          std::ranges::copy(s.bytes, sig.begin());
         },
         salt);
   }
@@ -272,7 +272,7 @@ InfoHash SystemTorrentManager::updateLedger(const InfoHash &oldHash,
           const auto s = signMutableItem(
               mutableSigningBuffer(itemSalt, nextSeq, encodedValueOf(value)),
               keys);
-          std::copy(s.bytes.begin(), s.bytes.end(), sig.begin());
+          std::ranges::copy(s.bytes, sig.begin());
         },
         salt);
   }
