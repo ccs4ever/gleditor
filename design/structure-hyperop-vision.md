@@ -1,239 +1,386 @@
-# Beyond Cells: A Vision for the OSMIC Structure Hyperop
+# Beyond Cells: What Else MAKE/CHANGE STRUCTURE MAP Can Carry
 
-**Status:** speculative — a brainstorm synthesis, not a ruling. Nothing here changes `ops.hpp`,
-`CompactOpNode`, or any on-disk format on its own; each category below would need its own design
-note (in the shape of [`vlog-logic-extension.md`](vlog-logic-extension.md) or
-[`enfilade/enfilade-rank-indexing.md`](enfilade/enfilade-rank-indexing.md)) before any code moves.
+**Document Version:** 2.0 — grounded rewrite. **Status:** a vision note and a ranked proposal, not a
+ruling. Nothing here changes `ops.hpp`, `CompactOpNode`, or any on-disk format on its own; each
+numbered proposal in §5 needs its own design note in the shape of
+[`vlog-logic-extension.md`](vlog-logic-extension.md) before code moves. **One exception:** §3
+records a live defect found while grounding this note, and its fix is owed regardless of anything
+else here.
 
-`OpKind::Structure` (migration step 12) was built to let a Zigzag manifold be a second replay
-product of the same ops spool that produces a document's text. But a "structure map" op is not a
-cell-grid feature — it is OSMIC's general mechanism for recording a typed, directional, versioned
-edge between two addressable points in permascroll. A Zigzag cell link is one instantiation of that:
-the case where both endpoints happen to be dimension coordinates. This note catalogs what else the
-same mechanism could instantiate, produced by a tripartite dialectic (Purist thesis, Systems Realist
-antithesis, Codebase Expert grounding) and converged into verdicts.
+Version 1.0 of this note ideated before reading the tree and re-proposed several things that were
+already built (the Spanfilade, `provenance.hpp`, R4's `GlobalOpRef`, hypertime projected into cells)
+or already refused (R8's cursor ruling, enfilade-rank-indexing §3). This version was produced the
+other way round: a verified ledger of what exists (§1–§2) first, then a Nelsonian brainstorm and a
+systems stress-test against that ledger, then a cross-critique until the two agreed. Where they
+still disagreed, §5 says so and records the ruling taken.
 
-## How to read the table
+## 1. What a Structure operation is today
 
-- **Nelsonian case** — why this is more than convenience; which invariant from Nelson's own writing
-  it satisfies.
-- **Systems verdict** — cheap/natural, expensive-but-tractable (with mitigation), or wrong data
-  structure, argued from the append-only spool, CSR link-run shape, and the render/UI thread budget.
-- **Codebase reality** — what already exists, what's greenfield, and which hard invariant
-  (`CompactOpNode`'s 64B immutability, the one-writer rule, `ephemeralBit`, `sourceOpIndex`
-  addressing) it must respect.
+`OpKind::Structure` (`apps/common/xanadu/ops.hpp`) is OSMIC's sixth hyperop. Four verbs live in
+`CompactOpNode::flags` bits 0–2 — `MakeCell = 0`, `SetLink = 1`, `SetValue = 2`, `Splice = 3`,
+values 4–7 unused — with bit 3 the link direction, bits 4–6 a `ValueKind` (`None/Double/Bool/Int64`,
+values 4–7 unused) and bit 7 unclaimed. There is deliberately no `MakeDim`: a dimension is a cell on
+the `d.dims` rank (R2, R12).
 
-## 1. Transclusion provenance graphs
+A cell **is** an operation. `CellRef` is the ops-spool index of its `MakeCell`; every later verb on
+that cell names it by chaining `sourceOpIndex` to the previous operation on the same cell, and the
+chain's far end is the `MakeCell` (R7). A cell's content is a run of primedia spans (U3, resolved:
+`Splice` edits one piece and leaves every other address alone; `spliceCellSpan` transcludes *into* a
+cell). A scalar cell carries both a real span and canonical bits (R6).
 
-**Nelsonian case:** Xanadu Green's promise that every quotation is traceable to its origin, made
-into queryable data instead of an inference reconstructed from spans.
+Which fields each verb reads (`zigzag/manifold.cpp` `applyStructure`, and the emitters in
+`store.cpp`):
 
-**Systems verdict:** Cheap and natural. Write-once per transclusion, read-heavy via per-cell CSR
-fan-out — exactly the access pattern CSR is built for. Durable by nature (attribution matters
-forever).
+| verb       | reads                                                 |
+| ---------- | ----------------------------------------------------- |
+| `MakeCell` | span, `flags` value kind, `value`                     |
+| `SetLink`  | `sourceOpIndex` (subject), `linkId` (dimension), `to` |
+| `SetValue` | `sourceOpIndex`, span, `flags` value kind, `value`    |
+| `Splice`   | `sourceOpIndex`, `at`, `length`, span                 |
 
-**Codebase reality:** Partially built. `Manifold` links plus `zz_xudu_projector.cpp`'s `d.role` /
-`d.mime` / `d.media` dimensions already encode instance relationships, and
-`UnifiedTransclusionEngine` (step 19) folds ops but has no production caller yet. A dedicated
-`d.provenance` / `d.derived-from` dimension convention is enough — `SetLink` already suffices, no
-`CompactOpNode` change.
+So for the three non-`Splice` verbs, **sixteen bytes of the 64-byte node are idle**: `at`, `length`,
+`sourceAt`, `sourceLength`. §5 spends four of them.
 
-**Verdict: build it.** Lowest risk, highest fidelity to the core insight, and the closest to
-already-shipped.
+Every `Store` structure call — `sliceGenesis`, `makeCell`, `makeScalarCell`, `setScalar`,
+`setCellText`, `setLink`, `spliceCell`, `spliceCellSpan`, `setValue`, `makeDimension` — takes a
+parent `MicroversionId` and returns the one it produced. **A structure change is a named state in
+hypertime**, branchable and scrubbable exactly as an insertion is. `Manifold` is the fold (R9: an
+explicitly materialised view with `advance()` and `verifyAgainstFullRebuild()`); `ArenaManifold` is
+its ephemeral copy-on-write twin, and R8 draws the persistent/ephemeral boundary at the *type*.
 
-## 2. Rhetorical/argument structure
+Who writes Structure operations today, outside tests: `system_docs.cpp` (the dominant writer, 34
+calls), `zz_xudu_projector.cpp`'s `sliceToStore()`, `unified_transclusion_engine.cpp`,
+`arena_manifold.cpp`'s `promote()` (the one road from ephemeral to persistent),
+`vortex_host.cpp::promoteAndAttachToStore()`, the VQL and VPL compilers' persist paths,
+`dimension_registry.cpp`, and `apps/xudu/batch_orchestrator.cpp`. **Xudu the editor itself emits
+none** — the xanadoc editor is text-ops only, which is worth knowing before proposing anything that
+assumes a document's structure is authored in xudu.
 
-**Nelsonian case:** ZigZag's own founding demonstration was argument mapping — claims linked by
-`supports`/`attacks`/`refines` edges on a dedicated dimension. This is not an extension of Zigzag;
-it's the use case it was built to prove.
+## 2. What already exists, so it is not proposed again
 
-**Systems verdict:** Cheap, low write frequency (an author restructures an argument occasionally,
-not per keystroke) — as long as no UI does live drag-to-reorder against it (that pushes toward
-category 6's failure mode; keep commits coarse, on release, not per-frame).
+**Built on Structure.** ZigZag slices (`sliceToStore`/`storeToSlice`, `d.role`/`d.mime`/`d.media`).
+The five system xanadocs as configuration-as-structure with ten dimensions — `d.dims`, `d.vars`,
+`d.values`, `d.groups`, `d.subgroups`, `d.clone`, `d.notes`, `d.schemas`, `d.alternates`,
+`d.default` — with live schema validation and defaults
+([system-xanadocs §6.2](system-xanadocs-customization-and-metasystem.md)). The Vortex runtime's
+dimensions on the arena (`d.spin`, `d.step`, `d.grab`, `d.contract`, `d.cache`, `d.pinning-cursors`,
+`d.stdlib`, `d.clause`, …), with `promoteAndAttachToStore()` persisting a compiled program as real
+Structure operations — **and it has a production caller**, the zigzag VQL palette
+(`apps/zigzag/main.cpp:201`). VQL's `MultiStoreCoordinator` composing many stores in *one arena* via
+a `d.stores` rank, re-minting every foreign cell as a fresh ephemeral ref. Hypertime projected into
+cells: `ZigzagVisualizer::adoptDocument` hands the projector's DTO to `sliceToStore`, so
+`d.doc`/`d.transclude`/`d.link`/`d.version` cells are minted as persistent operations into an
+in-memory store. (`apps/xudu/hypertime_graph.cpp` only *renders*; its one `Structure` mention is a
+glyph.)
 
-**Codebase reality:** Greenfield. Current links carry direction but no edge label beyond the
-dimension cell itself — a `Supports`/`Attacks` relation either becomes the dimension cell's identity
-(fits today, zero new fields) or wants a real edge-attribute, which competes for the one spare bit
-in `CompactOpNode::flags` (see the cross-cutting note below). Prefer the dimension-cell encoding
-first; it needs nothing new.
+**Built elsewhere, on purpose.** All five enfilades — Spanfilade (who quotes this span, across
+documents and cells), Layoutfilade, Chronofilade with the `EdlTransform` monoid, Holefilade,
+Arrayfilade — are ephemeral replay products that mint no operations (R8; their banners say so). The
+butterfly `Link` records (type, tier, owner, curator, left and right spans) live in `store.tables`;
+an `OpKind::Link` operation carries only the link id. GPG-signed `AUTHORSHIP.yaml`
+(`provenance.hpp`) with a scroll-level `quotes` list. `GlobalSpan`/`globalise`/`localise` for
+content and `GlobalOpRef{scroll, produces}`/`opRefOf()`/`localiseOpRef()` for operations
+(`publication.hpp`). Identity, the Merkle ledger, transcopyright holes.
 
-## 3. Hypertime/version DAGs as structure
+**Refused already.** R8: only a user-generated update persists; navigation, cursors and view state
+never earn a hypertime name; no persistent-side GC. R6 and Non-Goal 2: no canonical scroll of
+values. Non-Goal 4: a `Link`'s ends stay spans. R1: `PageBreak` stays a special case. R12: no
+privileged dimensions. [enfilade-rank-indexing §3](enfilade/enfilade-rank-indexing.md): an index's
+crums are not cells. R11: layout is soft, but 64-byte nodes, cache alignment, 64 KiB pieces and
+append-only-ness are hard.
 
-**Nelsonian case:** version history is content, navigable the same way text is — collapsing "history
-browser" and "document browser" into one mechanism.
+**Designed and not built.** `Manifold::externalCells` (named in R4, never written). The bridge's
+"federated link-source interface" for links across independently stored documents
+([bridge-next-stage](xudu-zigzag-hypermedia-bridge-next-stage.md), deferred by name). §4.1 preset
+sharing (zero code hits for `preset`). U3.4's option (B): framing the other four hyperops in a cell.
+Vlog §6. AGENTS.md's line that `UnifiedTransclusionEngine` "has no production caller" is stale —
+`zigzag_visualizer.cpp:203` and `:252` construct one.
 
-**Systems verdict:** Expensive but tractable, with a real trap. The DAG a version query wants is
-full-spool-scale topology, not one cell's CSR run — re-encoding it as ordinary Structure ops is
-redundant with what microversioning already gives for free, and a naive fold would refold the whole
-spool for a question CSR isn't shaped to answer.
+## 3. A defect found on the way: published Structure operations lose their chain
 
-**Codebase reality:** Not built via Structure today; `osmic-microversioning-and-dag.md`'s own
-branching already carries this, and `MicroversionId` is separately `operator<=>`-sortable. Making
-the version DAG a `Manifold` would duplicate existing information.
+**Verified.** `Store::setLink` sets `op.source = opsSpool.idOf(previous)` (`store.cpp:484–486`);
+`opRecords()` reconstitutes it as a live `MicroversionId` (`store.cpp:1326–1327`); `sealableOps()`
+includes Structure operations wholesale (`publication.cpp:803–848`). Then the binary writer's
+`BinStructure` case (`binary_ops.cpp:256–266`) writes tag, `produces`, `flags`, `to`, `link`, span
+and `value` — **and never `op.source`**, where the `Transclude` case one screen up does
+(`binary_ops.cpp:212`). The reader (`:409–430`) leaves `source` zero; `putOp` resolves that to
+`sourceOpIndex == 0` (`store.cpp:118`); `applyStructure`'s `SetLink`, `SetValue` and `Splice` all do
+`denseOf(0)`, get `noDense`, and refuse (`manifold.cpp:245–250`, `:320–323`, `:307–310`).
 
-**Verdict: don't build the graph — build the projection.** A `Store::rebuildVersionManifold()`
-read-only fold over existing microversion metadata gets the query power (browsable/forkable history,
-Nelson's actual insight) without a second source of truth. This is the load-bearing idea of the
-whole brainstorm precisely because it's the one that resists being "just another Structure op" — the
-right shape is a fold, not new ops.
+So a published slice arrives as isolated cells with no links, and the only trace is `refusedOps()`.
+It has gone unnoticed for two reasons: `MakeCell` reads no chain, so a genesis-only slice
+round-trips perfectly; and the one round-trip test (`tests/xudu/binary_ops.cpp:390–425`) builds its
+`SetLink` with `source` left default-zero and asserts on the other fields, so it passes vacuously.
+Nothing in the tree publishes a Structure operation and folds a `Manifold` on the ingested side. The
+OSMIC *text* encoding is unaffected (`writeOsmicTextOpsSpool` emits `source`, `at` and `length` as
+columns for every kind).
 
-## 4. Transcopyright royalty/micropayment flow graphs
+**The fix is `CompactBinaryV4`, and it is smaller than it sounds.** The writer already chains by
+*name*, not index, so V4's `BinStructure` record adds `writeMicroversionId(out, op.source)` — the
+same call the other kinds make — and `putOp`'s `indexOf()` re-localises it on the reader. That is
+R4-correct by construction: the name survives a seal, the index does not. The same record must add
+varint `at` and `length` for `Splice` (U3.4 already owes this; the export currently throws rather
+than corrupts). Two more things belong in the same bump so there is no V5 for structure: the
+three-bit wire kind field is exactly full at `BinStructure = 7`, and a published cell still carries
+only its first span (U3.4's `storeToLinkPackage` defect). A length-prefixed, skippable extension
+record is the right place for anything variable-length that comes later — the one place a shim is
+worth having, because R11's "no compatibility" is about files on this machine, not a wire two peers
+negotiate. **Add the missing test: publish a slice with links, ingest it, fold, assert
+`refusedOps() == 0` and `equivalentTo()` the original.**
 
-**Nelsonian case:** royalty obligations must propagate through every transclusion chain; payment
-provenance and quotation provenance are the same edge, viewed differently.
+Every cross-store proposal below is gated on this. So, today, is publishing any ZigZag slice.
 
-**Systems verdict:** Cheap, and the textbook case for "rare update, must be durable." Established
-once (or on infrequent renegotiation) per document/scroll, settled in batch/background — never
-touches the render loop or the input path.
+## 4. The principle the proposals share
 
-**Codebase reality:** Genuinely new territory — `publication.hpp/.cpp` and `identity/` have no
-`CompactOpNode` involvement today. Needs a `d.royalty` dimension and a deliberate choice: is a
-payment *tick* ephemeral (ArenaManifold, since a flow computation shouldn't mint permanent ops per
-micropayment event) versus the *agreement* itself, which is durable and belongs in real Structure
-ops. `ephemeralBit` already exists for exactly this split.
+Three observations organise everything in §5.
 
-## 5. Annotation and marginalia graphs
+**A cell is an operation, so any operation is almost a cell.** R7 already means a cell's address is
+an operation index and its history is a chain of operations. What the tree does not yet have is the
+converse: a way to point *at* an operation that is not a `MakeCell`. An `Insert`, a `Delete`, a
+`Transclude`, the making of a link — the atomic acts of authorship — each has a permanent name in
+hypertime and no address a link can reach. Nelson's founding ZigZag principle is that every cell is
+a link target; here the one thing you cannot point at is an edit.
 
-**Nelsonian case:** Nelson rejected inline comments as content pollution — annotation belongs beside
-the text, on its own dimension, always two-way traversable, never interleaved.
+**The side tables are the authorial acts OSMIC declines to record.** `store.tables` holds the scroll
+registry, the local segments, the link records, the author's designated current versions, and the
+version annotations. The first two are name-resolution facts a reader needs before it can interpret
+any span, and must stay tables (a bootstrapping argument, not a taste). The last two are decisions a
+person made — *this* is the French edition; *this* state is called `release-1.0` — and they are
+mutable, unattributed, unbranchable and undiffable. Under branching the flat `currentVersions`
+vector is already slightly wrong: two futures of one document share one list of heads. There is no
+recorded reason for this; `store_tables.hpp`'s only rationale is the R11 consolidation of two
+plaintext files, which says nothing about whether a head is an operation.
 
-**Systems verdict:** Cheap if write rate stays human-paced (mouse-up/blur commits, not
-per-drag-frame updates).
+**A link to a document you do not have yet is normal, not corruption.** A docuverse is mostly
+elsewhere. Today the fold has one response to a target it cannot resolve — `refusedOps_++`, whose
+documented meaning is "the spool holds something unintelligible." Any cross-store structure needs a
+second, visible, non-pejorative state.
 
-**Codebase reality:** Largely already the model via the existing `Link`/`LinkType`/`ProminenceTier`
-xanalink system — this category is less "greenfield" than "should the existing annotation links and
-the Manifold's `d.*` link space be the same mechanism," an architectural unification question rather
-than a code gap.
+## 5. Proposals, in build order
 
-## 6. Live collaborative cursors / per-keystroke provenance
+Each entry gives the operations appended, the wire impact, what the fold does when a referenced
+store is absent, and the rulings it touches. The order is a prerequisite chain, not a preference
+ranking; the Nelsonian weight is stated where it differs.
 
-**Systems verdict: fundamentally the wrong data structure.** A cursor position changes at
-input-event frequency across N collaborators. Spooling one Structure op per movement means unbounded
-append-only growth for data nobody wants past the session, `rebuildManifold()`'s full-refold cost
-sitting on a render-adjacent path, and CSR churn on a handful of hot cells — the exact pattern CSR
-handles worst. Keep live cursors as transient state-channel messages over the existing BEP10 wire
-path; the durable record of "who edited what span when" is already the ops themselves, no new edge
-needed.
+### 5.1 `CompactBinaryV4`
 
-## 7. Permission/identity graphs
+§3. Prerequisite for 5.6–5.10 and for shipping slice publication at all. No new operations.
 
-**Nelsonian case:** "who may edit this" answered by the same relationship engine that answers "what
-links to this," rather than a parallel, siloed ACL system.
+### 5.2 `d.hist`: a cell's own past as a rank
 
-**Systems verdict:** Expensive but tractable, and off the hot path in terms of latency — but a
-*dense, global* many-to-many graph (many users × many documents) is the pattern per-cell CSR fan-out
-handles worst if cells are documents rather than users.
+**Appends nothing. No wire.** The R7 chain already exists — `CellSlot::lastOp`, and `byRef` holds
+*every* chain index by `slot()`'s contract — and is walked only by the fold. Surface it as a read
+API, `Manifold::historyOf(CellRef) -> span<const CellRef>`, or as an ephemeral rank in an arena. A
+cell's earlier states become things you can look at, link to and quote: "quote the third draft of
+this paragraph, and show me who changed it." Distinct from the projector's `d.version` cells, which
+are a whole-document projection into a throwaway store. R8 is untouched because nothing is written.
+Cheapest good idea on the list; build it first.
 
-**Codebase reality — biggest invariant collision on the list.** Identity/permission already lives in
-`identity/` (BEP10 plugins, `MerkleLedger`), which is append-only and built for exactly this kind of
-consensus data. Recasting it as generic Structure ops would also raise the **one-writer rule**
-sharply: `SegmentedOpsSpool::writeSegmentFile()` is single-author-oriented today, and a permission
-graph implies multi-writer semantics the current model has no answer for.
+### 5.3 Pouch and clasp staging on `ArenaManifold`
 
-**Verdict: don't build it on Structure.** The Merkle ledger is the right home; don't make Structure
-a second identity system.
+**Appends nothing until the drop.** The bridge's work package 3 builds each pouch item by hand from
+`contentOf(cell)` spans — a hand-rolled arena with none of the mark/release discipline.
+`ArenaManifold` over a base `Manifold` is exactly a staging buffer: the dragged cell shadows its
+base slot, the base is untouched, `release()` is drag-cancel by truncation, and `promote()` on drop
+is the only write. Buys allocation-free drag, free undo, and R8 enforced by the type system rather
+than by care. Dragging is navigation; the drop is the authorial act; the two-type split says so
+already.
 
-## 8. Enfilade rank indices (open question U1)
+### 5.4 Operation handle cells
 
-**Codebase reality — the design notes already rule this out.**
-[`enfilade-rank-indexing.md`](enfilade/enfilade-rank-indexing.md) §3 is explicit: crums as ordinary
-cells would make rebalancing an edit to the document, which R8 forbids for the same reason it
-forbids path compression. This wants a *third* replay product alongside `Manifold`, with a swappable
-per-consumer Wid (count / Bloom summary / span set), not a `d.*` dimension.
+**One `MakeCell` per handle, minted on demand. Wire: V4.** A handle is an ordinary `MakeCell` whose
+idle `sourceAt` carries the index of the operation it stands for — 32 bits, the width of a `CellRef`
+— and whose value kind says so. `sourceOpIndex` keeps its R7 meaning unbroken: the handle's own
+chain ends at its own `MakeCell`. (A first draft routed the handle through `sourceOpIndex` to the
+referenced `Insert`; that would make `denseOf()` resolve a text operation to a cell, a category
+error the fold cannot detect, and was withdrawn.) The referenced index is local, and is globalised
+on export through `opRefOf()` exactly as a span is through `globalise()` — the precedent for "a
+local address that becomes a global one at the wire" is every content span in the system.
 
-**Verdict: explicitly not a Structure-map use case.** Worth restating in this vision doc precisely
-so it doesn't get quietly reopened by a future reader skimming the brainstorm out of context.
+**Ruling taken here:** the marker is a spare `ValueKind`, `ValueKind::OpHandle = 4`, not flags bit
+7\. It is a statement about what the cell's value *is*, which is what `ValueKind` is for, and it
+leaves bit 7 for something that is not a value.
 
-## 9. Spatial/3D beam layout as structure
+What it buys, in one mechanism: commentary on an edit ("why was this deleted" — nothing else in the
+tree can answer it, and the link table cannot address an operation at all); a review rank of edits;
+links-to-links, because *making a link is itself an `OpKind::Link` operation*, so a handle to that
+act delivers Nelson's commentable link without touching the `Link` record or Non-Goal 4; and version
+annotations — an alias, a description, a tag become the content of the handle cell for the operation
+that produced the state, on `d.notes` like any other cell's notes. That retires the
+`versionAnnotations` table.
 
-**Systems verdict:** ArenaManifold territory, not durable Structure. Beam geometry (spring tension,
-anchor preference) is recomputed every frame or on layout invalidation, carries no attribution or
-hypertime meaning, and modeling it as permanent ops would mean re-authoring "the same" geometry
-forever as the window resizes — spool bloat with zero informational value, and a likely violation of
-the hot-rendering-loop zero-allocation rule.
+**Refused alongside:** a slot per operation. A 32-byte `CellSlot` plus its hash entry for every
+operation is roughly +75% resident over the node for a table nobody queries; one cell where a
+comment exists is the sparse reality. Also refused: a "link handle" that names a `linkId` — a
+durable name for a mutable table row is half a solution, and the handle to the link-making
+*operation* is the whole one.
 
-**Codebase reality:** Already implemented outside Structure (`apps/xudu/beams.cpp`, `framing.cpp`,
-computed directly from `Store`/`Link` data at render time). If this is ever formalized, it belongs
-in `ArenaManifold`'s `mark()`/scratch/`discard()` cycle — the pattern already reserved for exactly
-this kind of ephemeral, derived graph.
+### 5.5 The editions rank
 
-## 10. Undo/redo as structure
+**One `MakeCell` plus one `SetLink` per edition; a `SetValue` to repoint. No wire.** The author's
+designated current versions become cells on `d.editions` off `home`. The cell's content is the
+edition's name; it is linked on `d.edition-of` to the operation handle (5.4) for the state it
+designates, so 5.5 is a special case of 5.4 and needs no encoding of its own. Declaring "this is the
+French edition, as of now" then has an author, a hypertime name, a branch and a diff — and each
+branch carries its own heads, which the flat vector cannot. `storeTablesFormatVersion` goes to 4 and
+drops `currentVersions` and `versionAnnotations`; `scrolls`, `localSegments` and `links` stay.
 
-**Systems and codebase verdict: redundant, already better solved.** `CompactOpNode` is immutable
-once stored and the spool is append-only, so undo is inherently "replay to an earlier microversion,"
-not a separate structure graph — encoding it a second time as Structure ops would duplicate ordering
-information the ops spool already gives for free. `ArenaManifold::release()`/`discard()` is already
-the ephemeral analog (mark/release = undo-by-truncation). No new machinery needed.
+R8 is not crossed: designating an edition is authorship about the document, not a record of where
+anyone is looking. It is the same class of fact the annotations table already treats as durable.
 
-## 11. Cross-document docuverse topology
+### 5.6 Persistent references to cells in other stores
 
-**Nelsonian case:** the entire point of Xanadu since 1960 — a single addressable literature where
-every relationship is visible, two-way, and traversable, and everything else on this list is a
-special case of it.
+The one design that serves 5.7–5.10, and the point where the Purist and the Realist disagreed. The
+Purist wanted the foreign reference in the node's idle bytes with no side table, on the ground that
+a side table is "an authorial act filed where hypertime cannot name it." The Realist's objection is
+mechanical and decisive: reader-side indices after `historyFromSeal()` are deterministic for a given
+seal but **renumber when the publisher later adds a branch** (`opRecords()` sorts by
+`MicroversionId`, `store.cpp:1329`), so a stored local index would have to be rewritten on re-seal —
+and the node it lives in is in a `PROT_READ` segment (R10). Only `GlobalOpRef` survives, and R4
+already says it cannot fit in a node.
 
-**Systems verdict:** Same shape as category 1 (write-rare, read-via-fan-out, durable), just spanning
-`ScrollId` boundaries instead of staying within one store — no new access-pattern risk, only a
-scoping question (does a fold need to touch more than one store's spool at once).
+**Ruling taken:** the *act* stays in hypertime and only the *name resolution* is tabled — the status
+the scroll registry already has.
 
-**Codebase reality:** Greenfield, and the most consequential kind of greenfield: it's the natural
-generalization of category 1's provenance edges once they're allowed to cross scroll boundaries.
+- `store.tables` gains a section `externals`: a vector of `GlobalOpRef`, whose index *i* corresponds
+  to a local **placeholder cell**. Bencode, where variable-length things already live.
+- The placeholder is an ordinary `MakeCell` with `ValueKind::ExternRef = 5` and the `externals`
+  index in `sourceAt`. It has an operation behind it, so it is **not** ephemeral: R8's refusal and
+  `refusedOps_` keep their meaning.
+- A link to a foreign cell is an ordinary `SetLink` whose `to` is the placeholder. **The 64-byte
+  node is untouched and no new verb is needed.**
+- The fold mints the placeholder like any cell — `spanCount == 0`, no value — and counts it in a new
+  `unresolvedExternals()`, distinct from `refusedOps()`. Absent store: the rank dead-ends at a
+  visible placeholder rather than vanishing.
+- Resolution is on demand: `localiseOpRef()` against the foreign store when it is loaded, memoised
+  in an arena, never written back. Re-localisation on re-seal is therefore a cache invalidation, not
+  a segment rewrite.
+- Wire: V4 carries the `GlobalOpRef` for placeholder `MakeCell`s only, via `writeMicroversionId`.
+  Merkle cost is zero — `store.tables` is not in the piece stream, and `ops.nodes` remains a run of
+  64-byte appends, 1,024 per piece.
 
-## 12. Type/schema-as-structure
+This is `Manifold::externalCells` built, and the bridge's federated link source made concrete.
 
-**Nelsonian case:** a cell's meaning shouldn't be out-of-band convention — types are literature too,
-transcludable and versioned like anything else.
+### 5.7 Cross-store ranks: the anthology
 
-**Systems/codebase verdict:** Cheap; `has-type` as an ordinary `SetLink` to a schema-defining cell
-needs nothing new. Mostly a documentation/convention exercise once category 1's plumbing exists.
+**Per foreign member, one placeholder `MakeCell` (5.6) and one `SetLink`. Wire: V4.** A rank that
+threads through cells in several documents. A syllabus, a compilation, an issue of a journal is then
+a structure map — not a copy, not a list of addresses in prose. The docuverse as one address space
+where a compilation quotes rather than reproduces is the anthology argument of *Literary Machines*.
+Distinct from `d.stores` in `multi_store.hpp`, whose cells represent stores, not cells inside them.
 
-## 13. Vlog unification and clause selection
+### 5.8 Quoted ranks: transclusion of a shape
 
-Already the most concretely scoped item in this space and already underway, not a new proposal:
-[`vlog-logic-extension.md`](vlog-logic-extension.md) has step 21 (`ArenaManifold`) done, with §6
-clause selection explicitly gated on U1 (item 8 above). Its ask on the C++ core is deliberately
-small — two methods and a 16-byte-per-entry vector on `ArenaManifold`, no `ops.hpp`/`Manifold`/
-on-disk format changes. Listed here because it's the existence proof that "generalize Structure
-without touching the wire format" is not merely a design-doc aspiration — it's already the pattern
-one real feature followed.
+**Two operations to quote, two to override. Wire: V4.** `spliceCellSpan` transcludes content into a
+cell; nothing yet transcludes a *rank*. Quoting appends a `MakeCell` for the quotation head and a
+`SetLink` from it to the placeholder for the foreign rank's head; traversal falls through at fold
+time. Overriding one position appends a `MakeCell` with the local content and a `SetLink` to the
+placeholder for the foreign cell it shadows — **keyed by that cell's `GlobalOpRef`, not by
+ordinal**, which keeps U1 out of it. With the foreign store absent the quote is a visibly empty
+rank.
 
-## Cross-cutting constraint: the flag-bit budget
+A first draft called this "ArenaManifold's copy-on-write overlay made durable," which sounded like a
+crossing of R8. It is not: R8's boundary is authorship versus navigation, and adopting someone's
+shape is authorship; every appended operation is a user-generated update. The COW overlay is the
+same *mechanism*, and mechanism is not regime.
 
-`StructureVerb` occupies bits 0-2 of `CompactOpNode::flags` (4 of 8 possible verbs already used:
-`MakeCell`, `SetLink`, `SetValue`, `Splice`), `ValueKind` occupies 3 bits (4 of 8 values used:
-`None`/`Double`/`Bool`/`Int64`), and there is exactly **one free bit** left in the whole encoding.
-Categories 2 and 4 above, if they ever want a genuine new verb or edge-attribute value rather than a
-dimension-cell encoding, are pressure on that budget — not free. The fix, if it's ever needed, is a
-`ValueKind::Extended` indirection (a small typed side-table keyed by a spare code) rather than
-widening `CompactOpNode` past 64 bytes, since the struct's size, alignment, and `value` offset are
-each pinned by a `static_assert` for reasons unrelated to this brainstorm (a sealed segment is
-mapped `PROT_READ`; the struct's shape is a promise made to already-written files).
+This is the honest implementation of two things already wanted: §4.1 preset sharing (adopt a
+published keymap by quoting its rank, then override one key) and schema adoption outside the system
+stores. A published sequence — a reader's alternate path through an author's text — is also an
+application of this rather than a mechanism of its own.
 
-## What's essentially Nelsonian vs. merely convenient
+### 5.9 Published vocabularies
 
-Three ideas are the core of this vision, in the sense that they're the least "convenient" and the
-most load-bearing:
+**No operations of its own; rides 5.8.** A set of dimension cells — `supports`, `refutes`,
+`qualifies`; Toulmin's roles; a discipline's citation types — published as a store and adopted by
+quoting its `d.dims` rank. Arguments across documents become comparable because they share a
+vocabulary with an author, a version and a citation, instead of each author minting private
+dimension names. `LinkType::Disagreement` is already Nelson's example; this makes disagreement a
+publishable frame. Deferred behind 5.8 by dependency, not by weight.
 
-- **#2, rhetorical structure** — not an extension of Zigzag, Nelson's own founding demonstration of
-  it.
-- **#3, hypertime as structure** — dissolves the false distinction between "the document" and "its
-  history" that most systems never question; the deepest use of "a second replay product," even
-  though the systems verdict says build it as a read-only fold, not new ops.
-- **#11, cross-document docuverse topology** — the entire point of Xanadu since 1960; everything
-  else here is a special case of it.
+### 5.10 Plural structure maps: overlays
 
-The rest — royalty flow, annotation, type-as-structure — are important, correctly cheap, and worth
-building, but they are Nelsonian principles applied to practical subsystems rather than the core
-insight itself. And three ideas are ruled out cleanly enough to be worth stating plainly so a future
-reader doesn't reopen them by accident: **live cursors** (wrong cadence for an append-only spool),
-**permission graphs** (already has a better home in the Merkle ledger, and collides with the
-one-writer rule), and **enfilade rank indices** (explicitly forbidden by R8 in the existing design
-note).
+**Appended in the overlay author's own store. Wire: V4.** Another author publishes Structure
+operations *over your document's cells* — an outline, an argument map, a translator's alignment —
+addressed through 5.6, folded in as an overlay at a `ProminenceTier`, never touching your spool. The
+one-writer rule holds because an overlay is a separate store folded beside yours, never a second
+writer to `ops.nodes`. An overlay is sparse by nature (an outline over ten thousand cells touches
+dozens), so it holds boundary references, not a shadow of the base, and it records which sealed
+state of the base it was written against so renumbering is a non-issue.
 
-## Suggested next design notes, in priority order
+"THE AUTHOR'S LINKS ARE NO DIFFERENT FROM ANYONE ELSE'S" is quoted in `ops.hpp`; a structure map is
+a link set and deserves the same pluralism, or the reader is back in a walled document. Last in the
+order only because it needs an overlay *fold mode* — composing two manifolds at a tier — which
+nothing in the tree has yet.
 
-1. Transclusion/cross-document provenance (#1 + #11) — lowest risk, `d.provenance` dimension
-   convention only, extends what's already shipped.
-1. Version-DAG-as-fold (#3) — a read-only `Store::rebuildVersionManifold()`, no new ops.
-1. Rhetorical structure (#2) — dimension-cell encoding, no `CompactOpNode` change.
-1. Royalty flow graphs (#4) — the first case needing a real ephemeral/durable split decision, good
-   proving ground for `ephemeralBit` outside Vlog.
+### Ordinary, needing no new mechanism
+
+- **A second reading order** over a document's own cells is a second dimension on cells the
+  projector already mints (R12); content-addressed, so unlike `PageBreak` it travels with a
+  quotation (R1). Two operations per piece. Fine, and not a category.
+- **Schema islands in any store.** The `d.schemas`/`d.alternates`/`d.default` pattern generalises
+  today with zero new machinery. The validator runs as a pinned arena island on the write path,
+  behind `Store::put*`, and never in `applyStructure`, which is `noexcept` and allocation-free.
+- **Keymap macro *definitions* as Structure; invocations never.** R8 drawn on the right seam, and
+  `promoteAndAttachToStore` already does it. One condition the Purist adds and this note adopts: a
+  promoted definition must be a cell with readable content, not an opaque compiled artefact — a
+  program nobody can read is not literature, and readability is the whole justification for
+  persisting it.
+
+## 6. Refused this round
+
+- **Decomposing `Link` records into cells.** Four to eight times the bytes for a structure whose
+  access pattern is point lookup by id and bulk scan by the Spanfilade. Wrong data structure; the
+  table stays, and 5.4 makes the *act* of linking addressable instead.
+- **A persisted `Manifold` checkpoint.** The fold is estimated at 4–10 million operations per second
+  (from its component costs; §7), so a 60,000-operation slice folds in tens of milliseconds. A
+  checkpoint is a derived artefact that can disagree with the spool — exactly what
+  `verifyAgainstFullRebuild()` exists to catch — bought against fifteen milliseconds.
+- **Glyph, layout or Spanfilade state as Structure.** Per-frame or derived; the pinned arena island
+  is already the answer, and putting a derived index into operations is enfilade §3's crums-as-cells
+  mistake in a second costume.
+- **A slot per operation** (see 5.4) and **a stored reader-local foreign index** (see 5.6).
+- **Dimension genealogy** as a category: "which dimension superseded which" is an ordinary link
+  between two dimension cells and works today.
+- **Live cursors, permission graphs, rank indices** — refused in 1.0 and still refused, for R8, the
+  Merkle ledger, and enfilade §3 respectively.
+
+## 7. Open, and measured before believed
+
+- **No fold-rate measurement exists.** `tests/xudu/manifold_test.cpp` times a hop (R12 §12.5:
+  9.9–11.3 ns per CSR hop), never a fold. The figures in §6 are estimates from `applyStructure`'s
+  component operations and should be replaced by a benchmark before 5.7–5.10 add foreign cells.
+- **`compact()` is the scaling risk, not the fold.** `linkFor()` triggers it when
+  `links.size() > 2 * liveLinks + compactionSlack`, and it is linear in all links, so a build
+  pattern that alternates relocation and compaction on a large manifold is quadratic. Benchmark it.
+- **U1 is unchanged.** Nothing here needs random access along a rank; 5.8 keys overrides by
+  `GlobalOpRef` specifically to stay out of it.
+- **The overlay fold mode** 5.10 needs is unspecified.
+- **Multi-author structure over one document within one store** was not resolved: the one-writer
+  rule on `ops.nodes` makes it an overlay (5.10) or nothing, and whether that is the right answer
+  for live collaboration is a question for the collaboration design, not this note.
+
+## 8. The chain, in one picture
+
+```text
+5.1 CompactBinaryV4 ───────────────────────────────────────────┐
+  (source, at, length, kind width, extension record, spans)    │
+                                                               │
+5.2 d.hist            zero ops, read API                       │
+5.3 pouch on Arena    zero ops until drop                       │
+                                                               │
+5.4 operation handles ── 5.5 editions rank (tables v4)         │
+        │                                                      │
+        └── 5.6 extern refs (externals table + placeholder) ◄──┘
+                  │
+                  ├── 5.7 anthology ranks
+                  ├── 5.8 quoted ranks ── 5.9 vocabularies
+                  └── 5.10 overlays (needs a fold mode)
+```
+
+## Appendix: Change History
+
+- **2.0** — Full rewrite after a grounded tripartite pass. Removed every proposal that was already
+  built or already refused; added the §3 defect and its verification; replaced the flat idea list
+  with a prerequisite chain; recorded the two rulings taken in 5.4 and 5.6.
+- **1.0** — Initial brainstorm. Superseded; its errors are listed in the preamble.

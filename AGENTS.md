@@ -1,627 +1,418 @@
 # gleditor
 
-GPU-rendered text editor library (`gleditor`) plus three programs built on it: `apps/gleditor`
-(plain editor), `apps/xudu` (a xanadoc/xanalogical editor), and `apps/zigzag` (a Project Xanadu
-Zigzag multidimensional slice visualizer). Backends: OpenGL, OpenGL ES, and optionally Vulkan, all
-driven from one rendering pipeline. C++23, built with GNU Make + pkg-config — **no CMake**.
+A GPU-rendered text editor library (`gleditor`) and the programs built on it. C++23, GNU Make +
+pkg-config, **no CMake**. Backends: OpenGL, OpenGL ES, and Vulkan when available, from one rendering
+pipeline.
 
-The README is the source of truth for anything not covered below (rendering architecture,
-accessibility, xudu's data model, zigzag's multidimensional space, SDL2/SDL3 differences, etc.) —
-read the relevant section there before making non-trivial changes in that area.
+| program                   | what it is                                                                                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/gleditor`           | the plain editor; shares no code with anything Xanadu-related and keeps its own YAML config                                                               |
+| `apps/xudu`               | the xanadoc (xanalogical hypertext) editor                                                                                                                |
+| `apps/zigzag`             | the Project Xanadu ZigZag multidimensional visualizer                                                                                                     |
+| `apps/xuzz`               | xudu and zigzag fused: `apps/xuzz/main.cpp` includes xudu's `main.cpp` under `XUZZ_BUILD`, which enables the Zigzag presentation boundary at compile time |
+| `apps/vquery` / `vqueryc` | VQL query REPL/runner over one or many stores, and the standalone VQL-to-Vortex-bytecode compiler                                                         |
+| `apps/vpl` / `vplc`       | VPL array-language REPL/runner (APL/J syntax, lattice grids), and its compiler                                                                            |
+| `apps/vprolog`            | Prolog REPL over the Vortex/Vlog logic runtime                                                                                                            |
+| `build/xudu-dump`         | reads a store directory or a single `ops.nodes` without the loader; the format-change diffing tool                                                        |
+| `build/xudu-swarm-peer`   | the peer the network-namespace swarm tests drive                                                                                                          |
+
+The README is the source of truth for anything not covered here (rendering architecture,
+accessibility, xudu's data model, zigzag's space, SDL2/SDL3 differences); read the relevant section
+before a non-trivial change in that area.
 
 ## Setup: submodules
 
-Vendored deps (`thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/merklecpp`,
-`thirdparty/SDL`, `thirdparty/zstd`) are git submodules and the tree will not build without them:
-
-```sh
-git submodule update --init --recursive
-```
-
-Run this first in any fresh clone or worktree. If a submodule appears empty or a build fails with
-missing headers under `thirdparty/`, re-run the above before investigating anything else. Do not
-vendor these sources directly into the tree or hand-edit files under `thirdparty/` — bump the
-submodule pointer (`cd thirdparty/<name> && git checkout <ref>`) instead, and commit the resulting
-gitlink change in the parent repo.
+`thirdparty/argparse`, `Choreograph`, `merklecpp`, `SDL`, `zstd` are git submodules; the tree does
+not build without them. Run `git submodule update --init --recursive` first in any fresh clone or
+worktree, and re-run it before investigating any build failure with missing headers under
+`thirdparty/`. Never vendor or hand-edit under `thirdparty/`; bump the submodule pointer and commit
+the gitlink.
 
 ## Build
 
+Always `make -j$(nproc)`.
+
 ```sh
-make -j$(nproc)                   # library, all three programs, test binaries, compile_commands.json (includes Vulkan if available)
-make -j$(nproc) lib               # library only
-make -j$(nproc) gleditor          # apps/gleditor only
-make -j$(nproc) xudu              # apps/xudu only
-make -j$(nproc) zigzag            # apps/zigzag only
-make -j$(nproc) GLEDITOR_DISABLE_VULKAN=1 # disables the Vulkan backend and SPIR-V compilation
-make -j$(nproc) GLEDITOR_SDL=2    # force SDL2 instead of the SDL3/SDL2 auto-probe
-make clean
-make format                       # clang-format + shfmt, in place; no build deps needed
-make format-check                 # same, --dry-run; what CI runs
-make lint                         # shellcheck + yamllint + mdl; what CI runs
-make check                        # all quality gates: format-check + lint + analyze
-make analyze                      # standardized static analyzers: tidy + scan-build
-make tidy                         # clang-tidy via compile_commands.json (TIDY_FILES=..., TIDY_CHECKS=...)
-make scan-build                   # Clang Static Analyzer build interception
-make cppcheck                     # backup static analyzer
+make -j$(nproc)              # lib, every program above, the four test binaries, shaders, compile_commands.json
+make -j$(nproc) lib|gleditor|xudu|xuzz|zigzag|xudu-dump|vquery|vqueryc|vpl|vplc|vprolog|xudu-swarm-peer
+make -j$(nproc) shaders      # glslangValidator over every shader; SPIR-V when Vulkan is on
+make -j$(nproc) fuzz         # fuzz_binary_ops, fuzz_link_package, fuzz_identity_wire (sanitizer build of the engine)
+make profile                 # llvm-cov coverage report for gleditor_test
+make clean | dist | doc
+make format | format-check   # clang-format + shfmt + yamlfmt + mdformat; -check is what CI runs
+make lint                    # shellcheck + yamllint + mdl + check-config-harmony
+make tidy | scan-build | cppcheck | analyze (= tidy + scan-build) | check (= format-check + lint + analyze)
+make tidy TIDY_FILES=... TIDY_CHECKS=...
 ```
 
-Key variables and guidelines:
+Variables, all optional:
 
-- **Parallelism**: Always use `make -j$(nproc)` when invoking `make` to maximize build throughput
-  across all available CPU cores.
-- `DEBUG=1` — debug flags + sanitizer flag sets available.
-- `GLEDITOR_DISABLE_VULKAN=1` — disable the Vulkan backend (Vulkan is built by default when
-  available via pkg-config). **This flips the compile flags for every object file**, so toggling it
-  rebuilds the whole tree. `ccache` (used automatically when installed; disable with
-  `GLEDITOR_NO_CCACHE=1`) is what makes flipping it back and forth cheap.
-- `GLEDITOR_SDL=2` / `=3` — pick SDL major version explicitly; unset probes via pkg-config (SDL3 if
-  present, else SDL2).
-- `GLEDITOR_ENABLE_A11Y=1` / `=0` — require/disable AccessKit; unset uses it if found.
-- `CXX=g++ make` (or `make CXX=g++`) — override the compiler; only used when no `CXX` is otherwise
-  set (`clang++` is the default).
+- `DEBUG=1` — debug flags and sanitizer flag sets.
+- `GLEDITOR_DISABLE_VULKAN=1` — no Vulkan backend, no SPIR-V. **Flips the flags of every object**,
+  so toggling it rebuilds the tree; `ccache` (automatic when installed; `GLEDITOR_NO_CCACHE=1` to
+  disable) is what makes that cheap.
+- `GLEDITOR_SDL=2|3` — pick the SDL major; unset probes pkg-config (SDL3 if present, else SDL2).
+- `GLEDITOR_ENABLE_A11Y=1|0` — require/disable AccessKit; unset uses it if found.
+- `CXX=g++` — override the compiler (default `clang++`).
 
-Don't hand-pick `-std=` or hardcode a compiler in new build logic — the Makefile already probes for
-what the toolchain supports.
+Do not hand-pick `-std=` or hardcode a compiler in new build logic; the Makefile probes.
 
 ## Tests
 
-### Everything runs headless. No exceptions without being asked.
+### Everything runs headless
 
-**Any command that could open a window or touch a display, GPU or audio device — `make test`, any
-test binary, `gleditor`, `xudu`, `zigzag`, `tools/compare-backends.sh`, an ad-hoc harness — MUST be
-run headless, unless the user has explicitly asked for visual confirmation.** This is not a
-preference about tidiness: a window stealing focus interrupts whoever is at the keyboard, and a run
-that silently depends on a real display is a run that cannot be reproduced in CI or over SSH.
+**Anything that could open a window or touch a display, GPU or audio device — `make test`, a test
+binary, any program, `tools/compare-backends.sh`, an ad-hoc harness — runs headless unless the user
+has explicitly asked for visual confirmation.** A window stealing focus interrupts whoever is at the
+keyboard, and a run that depends on a real display cannot be reproduced in CI or over SSH.
 
-**`make` does this for you now.** The Makefile sets `SDL_VIDEODRIVER=offscreen`,
-`SDL_AUDIODRIVER=dummy` and `LIBGL_ALWAYS_SOFTWARE=1` at the top and `export`s them, so every target
-it runs — the three test binaries, and the shell scripts they drive, and every program *those* start
-— inherits it. `make test` on a machine with no display at all passes. It did not always: the test
-target launched the binaries bare, so on any developer's machine the suites that construct a window
-got a real one, and nobody noticed because a window that opens and closes during a build looks like
-a build. Exported rather than written onto each recipe line precisely so there is no list of run
-sites to keep up to date.
+`make` handles it: the Makefile exports `SDL_VIDEODRIVER=offscreen`, `SDL_AUDIODRIVER=dummy`,
+`LIBGL_ALWAYS_SOFTWARE=1`, plus `XDG_DATA_HOME`/`XDG_CONFIG_HOME` pointed into `build/xdg/`, so
+every target, script and child process inherits them. The XDG pair matters: a store holds no
+primedia, so what tests type goes into the author's permascroll under `$XDG_DATA_HOME`, and the
+system xanadocs live under `$XDG_CONFIG_HOME` — without the redirect a test run pollutes your real
+permascroll and overwrites your real settings. All five are `?=`, so an explicit override survives
+(`SDL_VIDEODRIVER=wayland make test` still means it).
 
-`?=`, so an explicit request survives — `SDL_VIDEODRIVER=wayland make test` still means it.
-
-**It exports `XDG_DATA_HOME` and `XDG_CONFIG_HOME` into `build/xdg/` for the same reason.** Since
-step 13 a store holds no primedia: what the tests type goes into the author's permascroll, which
-`xudu` resolves under `$XDG_DATA_HOME` — so without this a test run appends every byte it invents to
-the real permascroll of whoever ran it, and leaves it there. `$XDG_CONFIG_HOME` is the same argument
-for the system xanadocs (keymap, settings, layout, ui), which `xudu` writes for itself on first run
-and a test would otherwise overwrite with whatever it was demonstrating. Both `?=`, both survive
-being pointed elsewhere.
-
-For anything **outside** `make`, it is still yours to set. In rough order of preference:
+Outside `make` it is yours to set, in order of preference:
 
 ```sh
-# 1. The environment variables, which are enough for almost everything here.
-#    The XDG pair keeps a run out of your real permascroll and system xanadocs.
 SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
-  XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config <command>
-
-# 2. A virtual X server, when something insists on a real display connection.
-xvfb-run -s "-screen 0 1024x768x24" <command>
-
-# 3. Both, which is what tools/compare-backends.sh wants.
-xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
+  XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config <command>   # 1. almost always enough
+xvfb-run -s "-screen 0 1024x768x24" <command>                                          # 2. when something insists on a display
+xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh                        # 3. both; what compare-backends wants
 ```
 
-That covers running a test binary directly (`./build/xudu_test --gtest_filter=...`), which is the
-common case and does **not** go through make.
-
-`--headless` is also a flag on `xudu` and `zigzag` themselves, and it is what
-`tools/create-sample-xanadocs.sh` uses. Prefer it when driving those programs; it is stronger than
-the environment variables because it skips window creation rather than redirecting it.
-
-"By any means necessary" is meant literally: if none of the above works for some new tool, find a
-way (a dummy driver, a `Xvfb` you start yourself, a `--no-window` flag you add) rather than falling
-back to opening a window. **When visual confirmation genuinely is the point — a screenshot, a
-rendering regression, a layout check — the user will say so.** Then, and only then, run it against a
-real display and look at the result.
+That covers `./build/xudu_test --gtest_filter=...`, the common case that bypasses make. `xudu` (and
+therefore `xuzz`) also take `--headless`, which skips window creation entirely and is what
+`tools/create-sample-xanadocs.sh` uses; prefer it when driving them. `zigzag` has no such flag — use
+the environment. If nothing above works for a new tool, add a way (a dummy driver, your own `Xvfb`,
+a `--no-window` flag) rather than opening a window. When visual confirmation is the point, the user
+will say so.
 
 ### Running them
 
 ```sh
-make -j$(nproc) test        # builds + runs gleditor_test, xudu_test, zigzag_test, and rootless swarm tests
-make test TEST_FILTER='MediaTest.*'   # run/override a specific gtest filter
+make -j$(nproc) test                  # gleditor_test, xudu_test, xuzz_test, zigzag_test, then the rootless swarm tests
+make test TEST_FILTER='MediaTest.*'   # gtest filter applied to all four
+make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against build/xudu
 ```
 
-- **Parallelism**: Always run `make -j$(nproc) test` to utilize all available cores.
-- `gleditor_test` links the real shared library (catches export-boundary bugs); `xudu_test` links
-  only the xanalogical engine, with no graphics device, on purpose — that's the boundary being
-  tested. `zigzag_test` covers the slice model and the transclusion engine.
-- `make test` finishes by running the isolated network-namespace swarm tests
-  (`tools/swarm-netns-test.sh`) rootlessly via unprivileged user namespaces (`unshare -Urnm`). That
-  step needs the `veth` kernel module loaded; without it the run ends in
-  `Error: Unknown device type.` and a non-zero exit **after all three gtest binaries have passed**.
-  An unprivileged user namespace cannot autoload a module, so `sudo modprobe veth` is the fix and it
-  is the user's to run. Read the three `[  PASSED  ]` lines before concluding anything is broken.
-- `test/all` is aliased directly to `test`.
+- `gleditor_test` links the real shared library (catches export-boundary bugs). `xudu_test` and
+  `xuzz_test` link only the xanalogical engine, no graphics device, on purpose. `zigzag_test` covers
+  the slice model and the transclusion engine.
+- `make test` ends with `tools/swarm-netns-test.sh` under `unshare -Urnm`. That needs the `veth`
+  kernel module; without it the run ends in `Error: Unknown device type.` and a non-zero exit
+  **after all four gtest binaries passed**. `sudo modprobe veth` is the fix and it is the user's to
+  run. Read the four `[  PASSED  ]` lines before concluding anything is broken.
+- `E2EBinaryOrchestrationTest` and `AnimationTransclusionTest` shell out to `build/xudu`;
+  `xudu binary not found` means the app did not link, not a test regression.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in backend and diffs the
-  output — the real check that a backend still draws correctly, since a backend that draws nothing
-  still exits 0.
-- **Some tests shell out to `build/xudu`** (the `E2EBinaryOrchestration` and `AnimationTransclusion`
-  suites). They fail with `xudu binary not found` if the app did not link, which is a different
-  problem from a test regression — check `make -j$(nproc)` succeeded before investigating them.
+  PNGs — the real check that a backend still draws, since one that draws nothing exits 0.
 
-Tests live in `tests/lib/` (library, GoogleTest/GoogleMock), `tests/xudu/` (engine) and
-`tests/zigzag/`. Add new unit tests next to the existing files there, matching the GoogleTest style
-already in use.
+Unit tests live in `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` (GoogleTest/
+GoogleMock; match the style in place); fuzzers in `tests/fuzz/`.
 
-### Binary fixtures under `tests/samples/xudu/`
+### Binary fixtures under `tests/samples/`
 
-These are real on-disk stores — `ops.nodes`, `store.tables`, and `ops.export` where `--export-osmic`
-was used — checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s layout
-invalidates every one of them.** Since migration step 8 they say so: `ops.nodes` opens with an
-`OpsSegmentHeader` recording `sizeof(CompactOpNode)`, so a stale fixture is refused with
-`OpsSegmentUnreadable` naming the two sizes rather than loading and meaning something else.
-Regenerate in the same commit anyway — a refused fixture is a red test, not a working one:
+`tests/samples/xudu/` — `core_hypertext/` (`unified_store`, `xanadoc_a`, `xanadoc_b`),
+`multimedia/01…11`, `beams/01…03`, their generator inputs in `sources/`, and **`permascroll/`, which
+is part of the fixture**: every store is an edit decision list whose spans address that one shared
+permascroll, so without it every document renders empty. `SampleXanadocsTest` loads them and checks
+the permascroll first, by name. `tests/samples/xuzz/slice_then_xanadoc/` is the combined
+Xanadu/ZigZag store (`XuzzConvergenceSample`), from `sources/slice_then_xanadoc.xuzz`.
+
+**Any change to `CompactOpNode`'s layout invalidates all of them.** `ops.nodes` records
+`sizeof(CompactOpNode)` in its header, so a stale fixture is refused with `OpsSegmentUnreadable`
+naming both sizes — a red test, not a working one. Regenerate in the same commit:
 
 ```sh
 make -j$(nproc) xudu
-./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, permascroll/
-./tools/create-floating-image-sample.sh    # 11_floating_image, which the above deletes
+./tools/create-sample-xanadocs.sh        # core_hypertext, multimedia, beams, permascroll/, the xuzz sample
+./tools/create-floating-image-sample.sh  # multimedia/11_floating_image, which the script above deletes
 ```
 
-**`tests/samples/xudu/permascroll/` is part of the fixture, not a stray directory.** None of these
-stores holds any primedia: they are edit decision lists whose local spans are addresses in the one
-permascroll all of them were generated against, so opening one without it gives a document whose
-every version renders empty. `SampleXanadocsTest` constructs a `UserPermascroll` pointed at it and
-passes it to every `Store`, and `TheSharedPermascrollExistsAndIsNonEmpty` checks it first so that a
-missing one fails by name instead of as seventeen documents that mysteriously say nothing.
-`11_floating_image` has its own alongside it, for the reason its generator script explains.
-
-The second script exists because `create-sample-xanadocs.sh` opens by removing the whole
-`multimedia` directory, and `11_floating_image` is built by hand with its own scroll rather than the
-shared `000.scroll`. Run both, or that fixture silently disappears.
+Run both: the first removes the whole `multimedia/` directory, and `11_floating_image` is built by
+hand with its own `.permascroll` beside it.
 
 ## Code style
 
-- `.editorconfig` sets each extension's indent style/size, charset, line ending and
-  trailing-whitespace handling for editors that read it, matching the settings the real formatters
-  below enforce (`.clang-format`'s `IndentWidth: 2`, shfmt's `-i 2`, `.yamlfmt`'s `indent: 2`, ...).
-  It's a hint for editors, not a gate — nothing runs `editorconfig-checker` in CI; see the note at
-  the end of the coverage table below for why.
-- Formatting is governed by `.clang-format` (LLVM-based, 2-space access modifier offset, aligned
-  consecutive assignments, etc.), and covers `.glsl` shader sources as well as C++: GLSL is close
-  enough to C that clang-format reformats it correctly rather than needing a separate tool. Run
-  `make format` on touched files' languages before committing, or
-  `clang-format -i --style=file <file>` for a single file.
-- **CI enforces formatting** (`.github/workflows/c-cpp.yml`, job `format`): `make format-check`
-  fails the build on the first unformatted C++/GLSL file or shell script; `make lint` runs the
-  linters below. Both run without the graphics/build dependencies installed — see "Gotchas" below
-  for how that works.
-- Indentation and coding style are defined in `.editorconfig` at the root of the project and
-  strictly aligned with `.clang-format` (`IndentWidth: 2`, `UseTab: Never`, `ColumnLimit: 80`). Vim
-  modelines have been removed across the codebase in favor of `.editorconfig`.
-- `.clangd` and `.clang-tidy` enable `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
-  `performance-*`, `readability-*`, `portability-*`, and `clang-analyzer-*` checks (minus a few
-  disabled ones — see `.clangd`). `tools/check-config-harmony.sh` ensures that `.clangd` and
-  `.clang-tidy` stay in strict harmony. Treat clangd/clang-tidy warnings on lines you touch as worth
-  fixing, not noise. `make tidy` runs clang-tidy over translation units in parallel via
-  `compile_commands.json`; `make scan-build` runs Clang Static Analyzer via build interception;
-  `make analyze` runs both; `make check` executes all gates (`format-check` + `lint` + `analyze`).
-- Match the prevailing comment style in this codebase: comments explain *why* a non-obvious choice
-  was made (a constraint, a workaround, a tradeoff), not what the code does. Don't add narrating
-  comments.
-- `compile_commands.json` is regenerated by `make` automatically; don't hand edit it.
+- `.clang-format` (LLVM-based, `IndentWidth: 2`, `ColumnLimit: 80`, aligned consecutive assignments)
+  governs C++ **and `.glsl`**. `.editorconfig` mirrors every formatter's settings for editors; it is
+  a hint, not a gate. Run `make format` before committing, or `clang-format -i --style=file <file>`
+  for one file.
+- CI (`.github/workflows/c-cpp.yml`, job `format`) runs `make format-check` and `make lint` on a
+  checkout with no build dependencies installed — see "Makefile gotchas" for how.
+- `.clangd`/`.clang-tidy` enable `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
+  `performance-*`, `readability-*`, `portability-*`, `clang-analyzer-*` (minus the few disabled in
+  `.clangd`). Treat warnings on lines you touch as worth fixing.
+- Comments explain *why* a non-obvious choice was made — a constraint, a workaround, a tradeoff —
+  never what the code does.
+- `compile_commands.json` is regenerated by `make`; do not hand-edit it.
 
-### Formatting and linting coverage, by language
+### Formatting and linting, by language
 
-| Language                                                 | Formatter                                                      | Linter                                                                                                                                   | CI gate                                                                                             |
-| -------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                                   | clang-tidy (`make tidy`, `.clangd`), scan-build (`make scan-build`)                                                                      | blocking (`format-check`); `make check` runs all gates                                              |
-| GLSL (`.glsl`)                                           | clang-format, same as C++                                      | `glslangValidator` via `make shaders` (compiles every shader)                                                                            | blocking (both)                                                                                     |
-| Shell (`.sh`, `PKGBUILD`)                                | shfmt (`make format`)                                          | shellcheck (`make lint`)                                                                                                                 | blocking                                                                                            |
-| YAML (workflows, dependabot)                             | yamlfmt (`make format`), config in `.yamlfmt`                  | yamllint (`make lint`), config in `.yamllint`                                                                                            | blocking                                                                                            |
-| Markdown (every `*.md` outside `thirdparty/`)            | mdformat `--wrap 100` + three required plugins (`make format`) | mdl `-i` (`make lint`), config in `.mdlrc`/`.mdl_style.rb`                                                                               | blocking                                                                                            |
-| Nix (`flake.nix`, `packaging/nix/*.nix`)                 | nixfmt-rfc-style, the flake's own `formatter` output           | nix-linter                                                                                                                               | blocking (job `nix`), separate from `format` because it needs Nix installed                         |
-| Ruby (`packaging/macos/gleditor.rb`, a Homebrew formula) | `brew style` (needs Homebrew; not run in CI)                   | `ruby -c` (syntax only)                                                                                                                  | non-blocking, see `packaging.yml`'s `macos` job                                                     |
-| RPM spec (`packaging/fedora/gleditor.spec`)              | —                                                              | rpmlint (needs `rpm`'s native Python binding, so only runs inside the `fedora:latest` container the `fedora` packaging job already uses) | non-blocking until its output has been triaged                                                      |
-| Debian (`debian/rules`, `debian/control`, ...)           | —                                                              | —                                                                                                                                        | not covered: `debian/rules` is a `dh`-sequenced Makefile, not a shell script shellcheck understands |
+| Language                                    | Formatter                                      | Linter                                                       | CI gate                                         |
+| ------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------- |
+| C++ (`.cpp`/`.hpp`/`.h`)                    | clang-format                                   | clang-tidy (`make tidy`), scan-build                         | blocking; `make check` runs all gates           |
+| GLSL (`.glsl`)                              | clang-format                                   | `glslangValidator` via `make shaders`                        | blocking (both)                                 |
+| Shell (`.sh`, `PKGBUILD`)                   | shfmt `-i 2 -ci`                               | shellcheck                                                   | blocking                                        |
+| YAML (workflows, dependabot)                | yamlfmt (`.yamlfmt`)                           | yamllint (`.yamllint`)                                       | blocking                                        |
+| Markdown (all `*.md` outside `thirdparty/`) | mdformat `--wrap 100` + three required plugins | mdl `-i` (`.mdlrc`, `.mdl_style.rb`)                         | blocking                                        |
+| Nix (`flake.nix`, `packaging/nix/`)         | nixfmt-rfc-style (the flake's `formatter`)     | nix-linter                                                   | blocking, job `nix` (needs Nix)                 |
+| Ruby (`packaging/macos/gleditor.rb`)        | `brew style` (needs Homebrew; not in CI)       | `ruby -c`                                                    | non-blocking (`packaging.yml`, `macos`)         |
+| RPM spec (`packaging/fedora/`)              | —                                              | rpmlint, inside the `fedora:latest` packaging container only | non-blocking until triaged                      |
+| Debian (`debian/`)                          | —                                              | —                                                            | not covered (`debian/rules` is a `dh` Makefile) |
 
-yamlfmt and mdformat are Go/Python tools rather than apt packages (`go install`/`pip install` in the
-CI `format` job); they were picked over the better-known Node ones (`prettier`,
-`markdownlint-cli2 --fix`) to avoid adding a Node toolchain to an otherwise zero-Node tree, the same
-reasoning `.yamllint`/`.mdl_style.rb` already used for the linters. **mdformat needs three plugins
-here and refuses to run without them** — see the `--extensions` note below before running
-`make format` on a machine you have not set up.
+Formatter and linter settings are kept in one place per language so `make format` never leaves a
+file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) enforces that
+`.editorconfig`, `.clang-format`, `.yamlfmt`, `.yamllint`, `.mdl_style.rb`, `.clangd` and
+`.clang-tidy` agree. Details worth knowing:
 
-**Formatter and linter settings are kept in one place per language on purpose**, so running the
-formatter never leaves a file the linter still rejects:
-
-- `.yamlfmt`'s `indentless_arrays: true` matches `.yamllint`'s `indent-sequences: false`; both
-  encode the same "`- uses:` sits level with `steps:`" convention. `retain_line_breaks: true` is
-  load-bearing but has a known bug with folded (`>`) block scalars that leaks a placeholder into the
-  string (google/yamlfmt#84) — this repo has none, on purpose; see the comment in `.yamlfmt` before
-  adding one back.
-
-- mdformat's `--wrap 100` matches `.mdl_style.rb`'s `MD013` `line_length`, so the formatter reflows
-  every paragraph to fit the same limit the linter enforces — a file `make format` just wrote is a
-  file `make lint` already accepts, same as every other language pair in this table. The one failure
-  mode is an inline code span (`` `...` ``) or a `$...$` math span near the 100-column boundary:
-  mdformat treats each as a single atomic token and will not break inside one, so a line whose only
-  long token is a code span or an equation can still land over the limit — shorten the surrounding
-  prose, or promote a `$$...$$` block equation to a ```` ```math ```` fenced block (still renders on
-  GitHub, and fenced code is exempt from `MD013` via `:ignore_code_blocks => true`).
-
-- `design/` narrates a lot of geometry and layout math in `$...$`/`$$...$$` LaTeX (rendered by
-  GitHub's own math support). Plain mdformat has no concept of that syntax — it parses `\text{...}`
-  as literal backslash-letter text and re-escapes the backslash on write, silently turning `\text`
-  into `\\text` and corrupting the math. `mdformat-dollarmath` teaches it to treat `$...$`/`$$...$$`
-  spans as opaque, so it formats around the math instead of through it; required by name, so an
-  mdformat that could do that damage refuses to start. A `$$...$$` block sitting directly under a
-  list item with no blank line before/after it will still make mdformat refuse to write the file
-  (`Formatted Markdown renders to different HTML than input Markdown`) — give it a blank line on
-  both sides, same as a fenced code block would need.
-
-- **The Makefile *requires* mdformat's plugins rather than hoping for them.** Both `make format` and
-  `make format-check` pass `--extensions gfm --extensions dollarmath --extensions frontmatter`, and
-  `--extensions` requires a plugin rather than merely enabling it, so an mdformat without them
-  refuses:
-
-  ```text
-  Error: Invalid extension required.
-  The required 'gfm' extension is not available. Please install a plugin that adds
-  the extension, or remove it from required extensions.
-  ```
-
-  Nothing is written and the target fails. Install what it names:
-
-  ```sh
-  pip install --user mdformat-gfm mdformat-dollarmath mdformat-frontmatter
-  ```
-
-  This used to be the sharpest edge in the whole toolchain, because it failed *quietly*. The
-  Makefile probed for the `mdformat` binary alone, so a machine with the binary and none of the
-  plugins ran `make format` happily and corrupted every `design/` file it touched — tables reflowed
-  into prose, `\times` double-escaped to `\\times` — while `make format-check` reported around
-  thirty files as unformatted that CI considered perfectly fine. Both halves of that are gone: the
-  failure is now a refusal that names the missing plugin, and a green `format-check` means the same
-  thing everywhere. If you are wondering whether your markdown is really formatted, the answer is
-  now whatever the target says.
-
-- `.agents/skills/*.md` open with YAML front matter (`name:`/`description:` consumed by the skill
-  loader); `mdformat-frontmatter` is what stops mdformat parsing the closing `---` as a second
-  thematic break and mangling everything after it into a heading, and `mdl -i` is the matching half
-  on the lint side (see the comment above the `mdl` invocation in the Makefile). Required by name
-  too, for the same reason as the other two.
-
-- A code sample pasted into `design/` without a fence around it is invisible to both tools: mdl
-  can't tell it apart from prose (so `#include <...>` lines get flagged as malformed ATX headers)
-  and `--wrap 100` will happily reflow it into unreadable run-on lines. Fence anything that looks
-  like C++/GLSL/shell output, even in an informal notes file.
-
-- `tools/check-config-harmony.sh` validates that `.editorconfig`, `.clang-format`, `.yamlfmt`,
-  `.yamllint`, and `.mdl_style.rb` remain in strict harmony across all languages so configuration
-  rules never drift. It is wired into both `make format-check` and `make lint`.
-
-- nixfmt-rfc-style and nix-linter check disjoint things (whitespace/layout vs. semantic style like
-  unused arguments), so there is nothing for them to disagree about.
-
-A repo-wide `editorconfig-checker` run (not wired into CI) is noisy on this tree for reasons that
-are the checker's limits, not real problems: it doesn't understand clang-format's alignment-based
-continuation indents, treats Markdown table cell padding as "wrong" indentation, and applies
-`max_line_length` to LICENSE/Doxyfile text nobody intends to rewrap. Use it to sanity-check
-`.editorconfig` itself, not as a gate.
+- yamlfmt and mdformat are Go/Python tools (`go install`/`pip install`), chosen over the Node
+  equivalents to keep the tree zero-Node. `.yamlfmt`'s `indentless_arrays` matches `.yamllint`'s
+  `indent-sequences: false`; its `retain_line_breaks` has a known bug with folded `>` scalars
+  (google/yamlfmt#84), so this repo has none.
+- **mdformat requires three plugins and refuses to start without them:**
+  `pip install --user mdformat-gfm mdformat-dollarmath mdformat-frontmatter`. The Makefile passes
+  them as `--extensions`, so a missing one fails loudly by name rather than silently corrupting
+  `design/` (which is what an unplugged mdformat did: `\text` → `\\text`, tables reflowed to prose).
+  A green `format-check` therefore means the same thing everywhere. `dollarmath` keeps `$...$` and
+  `$$...$$` opaque; `frontmatter` keeps `.agents/skills/*.md`'s YAML header from being parsed as a
+  heading (`mdl -i` is the lint-side half).
+- `--wrap 100` matches `MD013`'s limit. An inline code span or `$...$` near column 100 is atomic to
+  mdformat and can still overflow: shorten the prose, or promote `$$...$$` to a ```` ```math ````
+  fence (exempt from `MD013`). A `$$...$$` block directly under a list item needs blank lines on
+  both sides or mdformat refuses to write.
+- Unfenced code in `design/` is invisible to both tools (mdl flags `#include` as a bad header,
+  mdformat reflows it). Fence anything that looks like code.
+- `editorconfig-checker` is not a gate: it misreads clang-format continuation indents and table
+  padding. Use it only to sanity-check `.editorconfig` itself.
 
 ## Project structure
 
-- `src/` — the library: document model, glyph cache, SDL wrappers, render loop
-- `src/text/` — native text layout engine: `FontManager`, `FontFace`, `TextLayout` (HarfBuzz,
-  FreeType, libunibreak, FriBidi)
-- `src/render/` — device abstraction and backends (`gl/`, `vulkan/`)
-- `src/a11y/` — accessibility tree / AccessKit integration
-- `include/gleditor/` — the library's public headers
-- `include/gleditor/text/` — text layout and font management public headers
-- `apps/gleditor/` — the plain editor program
-- **`apps/common/xanadu/` — where the xanalogical engine actually lives.** `apps/xudu/core/` and
-  `apps/zigzag/core/` are one-line forwarding headers into it (`#include "common/xanadu/x.hpp"` plus
-  `namespace xudu { using namespace ::xanadu; }`), so `<xudu/core/store.hpp>` and
-  `<zigzag/core/zzcore.hpp>` are the include spellings while `apps/common/xanadu/store.cpp` is the
-  file to edit. Editing a `core/` shim is almost always a mistake:
-  - `store.hpp/.cpp`: OSMIC time branches, microversions, and EDL operations
-  - `ops.hpp`: the six hyperops. `OpKind::Structure` is OSMIC's sixth, MAKE/CHANGE STRUCTURE MAP,
-    added in migration step 12; `Store::replay()` treats it as a text no-op because a slice's
-    structure is a *second* replay product of the same spool — `Store::rebuildManifold()` is the
-    fold that builds it. Its verb, link direction and value type live in `CompactOpNode::flags`
-    (`StructureVerb`, `ValueKind`), not in sibling `OpKind`s. **A `SetLink`'s subject is not in a
-    field of its own**: `sourceOpIndex` names the previous operation on the same cell, and that
-    chain's far end is the `MakeCell` whose index *is* the `CellRef`
-  - `compact_op.hpp`: the 64-byte `CompactOpNode`. Cache-line aligned, and **immutable once stored**
-    — the child/sibling tree edges live in `SegmentedOpsSpool::tree` beside the nodes, because a
-    sealed segment is mapped `PROT_READ` and writing a parent's child pointer took SIGSEGV. Three
-    `static_assert`s hold the line: size, alignment, and `offsetof(value) == 56` (`alignas(64)`
-    would pad a shrunken struct back to 64 on its own, so the size assertion cannot catch a field
-    going missing)
-  - `segmented_ops_spool.hpp/.cpp`: the memory-mapped ops tree; sealed segments, the id hash, and
-    the `TreeLinks` side array
-  - `user_permascroll.hpp/.cpp`: sovereign user permascroll stream and registry. Since step 13 this
-    is the *only* place primedia is stored — `segmented_primedia_spool.cpp`'s active segment is what
-    makes it durable, and a `Store` is handed one rather than making its own
-  - `merkle_ledger.hpp/.cpp`: append-only Merkle ledger for identity consensus
-  - `managed_torrent.hpp/.cpp`: system-managed torrent swarms coordinator
-  - `publication.hpp/.cpp`: `publish`/`adopt`, `globalise`/`localise`, scroll keys
-  - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
-  - `zigzag/zzcore.{hpp,cpp}`, `zigzag/zzstructure.hpp`: the slice model shared with `apps/zigzag`
-  - `zigzag/manifold.{hpp,cpp}`: **the slice model** (migration step 14). A second replay product of
-    the ops spool, folded from `OpKind::Structure`: a `CellRef` is an ops-spool index, links are
-    per-cell CSR runs keyed by a dimension *cell*, and both ends of a link are maintained by the
-    fold, so asymmetry is not constructible through the API. `Store::rebuildManifold()` folds one,
-    `Manifold::advance()` carries it forward one operation at a time, and
-    `verifyAgainstFullRebuild()` is what says the two agree. `UnifiedTransclusionEngine` reads it
-    (step 19); `ZigzagVisualizer` does not yet. Spelled `<zigzag/core/manifold.hpp>` from an app or
-    a test. **A cell exists only where an operation minted one** — typing into a xanadoc mints no
-    cells, which is the thing most likely to surprise you
-  - `zigzag/arena_manifold.{hpp,cpp}`: the *ephemeral* half of R8's two-type split (migration step
-    21\) — the same cells and CSR runs with the operations removed, so an evaluation that mutates
-    structure a million times costs no ops and earns no names in hypertime. **An arena cell's ref
-    carries `ephemeralBit`**, which is why `Store::setLink()` and `Manifold::applyStructure()`
-    already refuse one: leakage is caught by machinery written for R12's derived cells. `mark()` is
-    a choice point (seven arena lengths, no allocation), `release()` is undo-by-truncation plus a
-    conditional trail, `discard()` is cut, and **`compact()` is refused while a mark is
-    outstanding** because compaction moves the runs a mark's offsets name. `promote()` is the one
-    road to the persistent side: it maps refs rather than being trusted with them, spools scratch
-    bytes for real, and writes only what is reachable from the promoted root. Content bytes an
-    evaluation constructs live under `scratchScroll` and are refused everywhere else. The design is
-    `design/vlog-logic-extension.md` §5.2–§5.5. **An arena may be given a base `Manifold`** and is
-    then a copy-on-write view of a document: reads fall through, the first write to a cell *shadows*
-    it (whole slot, links and content copied in, keeping the base's `CellRef` — an overlaid cell is
-    the same cell), and the base is never touched. Dropping a shadow is the undo, so `release()`
-    needs no trail entry for one; `promote()` mints only refs carrying `ephemeralBit`, since
-    anything else already has a name. **Step 21 is done** — what is not built is anything *above*
-    the arena: no unification, no clause selection, no solver
-  - `scalar.hpp/.cpp`: a scalar cell's two halves (migration step 15, R6) — the shortest round-trip
-    `to_chars` rendering, spooled as ordinary primedia, and the canonical bits in
-    `CompactOpNode::value`. Canonicalisation is for value equality only and never for addresses: two
-    cells holding `3.14` are two cells at two addresses, because numeric coincidence is not
-    quotation. A signalling NaN is refused rather than quieted. Minted with
-    `Store::makeScalarCell()`, which is deliberately *not* an overload of `makeCell()` — a `bool`
-    overload would capture `makeCell(v, "d.1")`
-- `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
-  transclusion prisms), `session.cpp`, the overlays, `main.cpp`
-- `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
-  - `unified_transclusion_engine.hpp/.cpp`: interactive render staging over a `Manifold`, plus the
-    shaping cache. Since step 19 it holds no cell space of its own: `syncIncremental()` *folds*
-    operations rather than projecting them, `addCell()` mints an operation rather than filing a
-    struct, and `cellForOp()` is gone because a `CellRef` already is an operation index. **It still
-    has no production caller** — only its own tests; what zigzag actually draws is
-    `ZigzagVisualizer` over `space_`
-  - `compact_zzcell.hpp`: the cell layout the manifold replaced. Not the model any more, and not a
-    render-side cache yet either — a type the engine no longer stores. 792 bytes, down from 960 now
-    that `ephemeralText` and `Preflet` are deleted (steps 18–19), against 48 for a `CellSlot` plus
-    12 per dimension. Prefer `zigzag::CellSlot`
-  - `zz_xudu_projector.hpp/.cpp`: bidirectional xanadoc-to-zigzag mapping (in `apps/common/`), and
-    since step 20 the YAML conversions: `sliceToStore()` mints a slice as `Structure` operations,
-    `storeToSlice()` reads a `Manifold` back out. **There are no YAML slices to preserve** — sample
-    and system slices are regenerated as stores, so this is a conversion and not a compatibility
-    layer. A cell's `role`/`mime_type`/`media_path` live on `d.role`/`d.mime`/`d.media` ranks, since
-    `CellSlot` has no field for them
-- `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
-- `assets/zigzag/` — sample slice YAML documents
-- `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
-- `tests/samples/` — source material for tests; `tests/samples/xudu/` holds checked-in binary stores
-  that must be regenerated whenever the on-disk format moves, plus the `permascroll/` their spans
-  address (see "Tests" above)
-- `tools/` — build-time and verification helpers (`compare-backends.sh`, `benchmark-kjv-load.py`,
-  `layout-latency-probe.cpp`, `shader_assemble.cpp`, `swarm-netns-test.sh`,
-  `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`)
-- `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
-- `design/` — design notes and the reasoning behind non-obvious decisions
-- `thirdparty/` — vendored dependencies (git submodules; see above)
+- `src/` — the library: document model, glyph cache, SDL wrappers, render loop. `src/text/` (native
+  layout: `FontManager`, `FontFace`, `TextLayout` over HarfBuzz/FreeType/libunibreak/FriBidi),
+  `src/render/` (`gl/`, `vulkan/`), `src/a11y/` (AccessKit), `src/enfilade/` (Layoutfilade).
+- `include/gleditor/` — public headers, incl. `text/`, `render/`, `enfilade/`.
+- **`apps/common/xanadu/` — where the xanalogical engine lives.** `apps/xudu/core/` and
+  `apps/zigzag/core/` are one-line forwarding shims (`#include "common/xanadu/x.hpp"` plus
+  `namespace xudu { using namespace ::xanadu; }`); `<xudu/core/store.hpp>` is the include spelling,
+  `apps/common/xanadu/store.cpp` is the file to edit. Editing a `core/` shim is almost always a
+  mistake. Subdirectories: `enfilade/` (Spanfilade, Chronofilade + `EdlTransform`, Holefilade,
+  Arrayfilade — all ephemeral replay products that mint no operations), `identity/` (BEP 10 plugins,
+  Hashcash PoW, network controller), `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`,
+  `zigzag/`.
+- `apps/xudu/` — the editor's own UI: `beams.cpp`, `framing.cpp`, `session.cpp`,
+  `hypertime_graph.cpp`, `bridge_coordinator.cpp`, the overlays, `main.cpp`. **Xudu emits no
+  Structure operations itself** (only `batch_orchestrator.cpp` does); the editor is text-ops only.
+- `apps/zigzag/` — the visualizer. `ZigzagVisualizer` owns a `UnifiedTransclusionEngine` over a
+  `Manifold` and draws from it; the legacy `ZZSpace` is gone from it. `adoptDocument()` takes the
+  projector's `ZzStructureDocument` DTO and mints it as Structure operations via `sliceToStore()`.
+- `apps/xuzz/`, `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
+- `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
+  any more: the YAML slice format is deleted and every slice is a store.
+- `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/`, `tests/samples/`.
+- `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,
+  `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
+  `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,
+  `xudu-swarm-peer.cpp`, `code-quality-audit.py`, and the scene/showcase generators.
+- `packaging/` (arch, debian, fedora, macos, windows, nix), `design/` (the *why*), `thirdparty/`.
 
-## Xanadulogical & Identity Architecture
+### The engine's load-bearing types
 
-- **One Permascroll Per User**:
-  - Primedia is never siloed per document; all typing flows into a single append-only
-    `UserPermascroll` bound to the author's OpenPGP / BEP 46 identity.
-  - Page-aligned 64 KiB segments preserve BitTorrent v2 Merkle piece stability and enable zero-copy
-    `mmap(MAP_FIXED)` address space expansion.
-  - Documents (`Store`) are lightweight Edit Decision Lists referencing slot 0 (local author's
-    permascroll) or external scrolls (`ScrollId > 0`).
-  - Dual-key delegation (`DeviceDelegation`) maps master GPG fingerprints to device-salted BEP 46
-    keypairs for offline multi-device authoring.
-  - Collaborative live editing operates with **zero raw text in live ops**, passing canonical
-    48-byte descriptors and `GlobalSpan` references to eliminate local spool pollution.
-- **Decentralized Merkle Identity Ledger**:
-  - `MerkleLedger` maintains an append-only tree of verified GPG fingerprints and email mappings
-    using `microsoft/merklecpp`.
-  - BEP 10 peer wire protocol plugins (`xudu_identity_lookup`, `xudu_oracle_vote`,
-    `xudu_oracle_verify`) handle challenge-response authentication and peer gating.
-  - Dynamic `HashcashEngine` PoW enforcement protects swarms against Sybil/DoS.
-- **Beam & Optical Rendering**:
-  - Distinguishes emergent transclusion prisms (Identity Gold volumetric quads) from explicit
-    xanalinks (cyan/magenta ribbons).
-  - Multi-span link disambiguation spines and instance hue shifts prevent visual overlap in dense
-    hypertexts.
-  - Document margin anchor brackets sit flush inside page boundaries, supporting up to 4 distinct
-    overlapping link anchor colors.
-- **Zigzag Transclusion & Manifold Engine**:
-  - `CompactZZCell` and `UnifiedTransclusionEngine` stage cells and link beams for interactive
-    high-throughput rendering.
-  - `zz_xudu_projector` projects xanadocs and hypertime branches into Zigzag cells, mapping
-    unchanged spans across revisions to clone cells.
+- `store.hpp/.cpp` — OSMIC hypertime: branches, microversions, the six hyperops as operations, and
+  the Structure API (`sliceGenesis`, `makeCell`, `makeScalarCell`, `setLink`, `spliceCell`,
+  `spliceCellSpan`, `setValue`, `makeDimension`, `rebuildManifold`).
+- `ops.hpp` — `OpKind`. `Structure` is OSMIC's sixth hyperop (MAKE/CHANGE STRUCTURE MAP): verb
+  (`MakeCell`/`SetLink`/`SetValue`/`Splice`), direction and `ValueKind` ride in
+  `CompactOpNode::flags`. `Store::replay()` treats it as a text no-op because a slice's structure is
+  a *second* replay product of the same spool. **A `SetLink`'s subject is not a field**:
+  `sourceOpIndex` names the previous operation on the same cell, and the chain's far end is the
+  `MakeCell` whose index *is* the `CellRef` (R7).
+- `compact_op.hpp` — the 64-byte `CompactOpNode`, cache-line aligned, **immutable once stored**
+  (sealed segments are `PROT_READ`; tree edges live in `SegmentedOpsSpool::tree`). Three
+  `static_assert`s: size, alignment, `offsetof(value) == 56` — the last because `alignas(64)` would
+  pad a shrunken struct back to 64 silently.
+- `segmented_ops_spool.hpp/.cpp` — the mmap'd ops tree; 64 KiB Merkle-piece-aligned segments (1,024
+  nodes each), sealed segments, the id hash, `TreeLinks`.
+- `user_permascroll.hpp/.cpp` — the author's one permascroll, **the only place primedia is stored**;
+  a `Store` is handed one, never makes its own.
+- `store_tables.hpp` — `store.tables` (bencode, version 3): scroll registry, local segments, the
+  `Link` records, designated current versions, version annotations. None has a hypertime name.
+- `publication.hpp/.cpp` — publish/adopt, `GlobalSpan` ↔ `PrimediaSpan` (`globalise`/`localise`),
+  `GlobalOpRef` ↔ op index (`opRefOf`/`localiseOpRef`), `historyFromSeal`. `provenance.hpp` — the
+  GPG-signed `AUTHORSHIP.yaml` sealed into a torrent. `merkle_ledger`, `managed_torrent`,
+  `transcopyright_*`, `swarm*` — identity and swarm.
+- `zigzag/manifold.{hpp,cpp}` — **the slice model**: cells folded from Structure operations, a
+  `CellRef` is an ops index, links are per-cell CSR runs keyed by a dimension *cell*, a cell's
+  content is a run of spans. `Store::rebuildManifold()` folds, `advance()` steps,
+  `verifyAgainstFullRebuild()` is the honesty check. **A cell exists only where an operation minted
+  one** — typing into a xanadoc mints no cells.
+- `zigzag/arena_manifold.{hpp,cpp}` — the ephemeral half of R8's two-type split: same cells and
+  runs, no operations, refs carry `ephemeralBit` (which `Store::setLink` and `applyStructure`
+  refuse). `mark()`/`release()`/`discard()` are choice point/undo-by-truncation/cut; `compact()` is
+  refused while a mark is outstanding; `promote()` is the one road to persistence and maps refs
+  rather than trusting them. Given a base `Manifold` it is a copy-on-write view (first write shadows
+  the slot, keeps the `CellRef`, base untouched). Scratch bytes live under `scratchScroll` and are
+  refused everywhere else. Hosts Vortex, VQL, VPL and Vlog.
+- `zigzag/vlog.{hpp,cpp}` — `unify()` and the trail over the arena. `vortex/vortex_vm.hpp` carries
+  the logic opcodes (`Unify`, `Choice`, `Fail`, `Cut`, `ChoicePoint`) that `vprolog` runs on.
+- `zigzag/zz_xudu_projector.{hpp,cpp}` — xanadoc ↔ ZigZag: `projectXuduToZigzag` (documents and
+  hypertime branches into cells on `d.doc`/`d.transclude`/`d.link`/`d.version`), `sliceToStore()`
+  (mint a DTO as operations), `storeToSlice()`. `role`/`mime_type`/`media_path` live on
+  `d.role`/`d.mime`/`d.media` ranks.
+- `zigzag/compact_zzcell.hpp` — a dead type: the pre-manifold cell layout, referenced by nothing but
+  itself, budgeted by `static_assert` at ≤ 1024 bytes. Prefer `zigzag::CellSlot` (32 bytes plus 12
+  per dimension).
+- `scalar.hpp/.cpp` — a scalar cell's two halves (R6): shortest-round-trip text spooled as primedia
+  plus canonical bits in `value`. Canonicalisation is for equality, never addresses. Signalling NaN
+  refused. `makeScalarCell()` is deliberately not a `makeCell()` overload.
+- `system_docs.hpp/.cpp` — the five system xanadocs (`system://keymap|settings|layout|ui|pouches`)
+  as configuration-as-structure over ten dimensions (`d.dims`, `d.vars`, `d.values`, `d.groups`,
+  `d.subgroups`, `d.clone`, `d.notes`, `d.schemas`, `d.alternates`, `d.default`), with schema
+  validation and defaults; the heaviest emitter of Structure operations in the tree. Adding a
+  setting means adding a `defaultSettingSpecs()` entry, which is easy to skip.
+- `vql/multi_store.hpp` — many stores composed in **one arena** via a `d.stores` rank; foreign cells
+  are re-minted as fresh ephemeral refs. Nothing persistent crosses stores anywhere yet.
+- `vortex/vortex_host.hpp` — `promoteAndAttachToStore()` persists a compiled program as real
+  Structure operations; the zigzag VQL palette calls it in production.
+
+## Xanadulogical and identity architecture
+
+- **One permascroll per user.** All typing appends to one `UserPermascroll` bound to the author's
+  OpenPGP / BEP 46 identity, in 64 KiB page-aligned segments (Merkle piece stability, zero-copy
+  `mmap(MAP_FIXED)` growth). A `Store` is an edit decision list over slot 0 (local) or external
+  scrolls (`ScrollId > 0`). `DeviceDelegation` maps master GPG fingerprints to device-salted BEP 46
+  keys. Live collaboration carries **no raw text**: 48-byte descriptors and `GlobalSpan`s.
+- **Merkle identity ledger.** `MerkleLedger` (merklecpp) holds verified fingerprints and email
+  mappings; BEP 10 plugins `xudu_identity_lookup`, `xudu_oracle_vote`, `xudu_oracle_verify` do
+  challenge-response and peer gating; `HashcashEngine` PoW resists Sybil/DoS.
+- **Beams.** Emergent transclusion prisms (Identity Gold quads) versus explicit xanalinks
+  (cyan/magenta ribbons); multi-span spines and hue shifts disambiguate dense hypertexts; margin
+  anchor brackets support four overlapping anchor colours.
+- **Transclusion discovery** is the Spanfilade (O(log N + K) interval stabbing over permascroll
+  addresses, across documents and cells); `link_layout.cpp` still holds a duplicate linear scanner
+  the bridge plan retires.
 
 ### On-disk formats: bump the version, don't carry a shim
 
-Nothing here is in production and every store can be regenerated from its inputs, so **a format is
-free to change shape: bump the version, write the new shape, and delete the old reader.** Keeping a
-field only so an old file still parses is not caution, it is a permanent tax paid to protect data
-nobody has. What is *not* negotiable is the structural invariants — `sizeof(CompactOpNode) == 64`
-and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
-invariants are hard.
+Nothing is in production and every store regenerates from its inputs, so **a format may change
+shape: bump the version, write the new shape, delete the old reader.** Non-negotiable are the
+invariants: `sizeof(CompactOpNode) == 64` and its alignment, 64 KiB Merkle pieces, append-only-ness.
+This ruling expires the first time someone outside this repository has a document they care about
+(R11 in `design/store-slice-convergence.md`).
 
-**What a store is, on disk, after migration steps 8–13:**
+A store directory is exactly:
 
-| file           | shape                                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------- |
-| `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse) then a run of `CompactOpNode`                                          |
-| `store.tables` | `\x89XUDUTBL` + version 2 + bencode: scroll registry, local segments, links, current versions, annotations |
-| `ops.export`   | only when `--export-osmic` was given: the operations in OSMIC text, or the compact binary wire format      |
+| file           | shape                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse, records `nodeSize`) then a run of `CompactOpNode`                          |
+| `store.tables` | `\x89XUDUTBL` + version 3 + bencode: scrolls, local segments, links, current versions, annotations             |
+| `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV3`) |
 
-**That is the whole list — a store holds no primedia.** Everything typed goes into the author's one
-`UserPermascroll` (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia`, or wherever
-`--permascroll` says), and a store is an edit decision list naming addresses in it. So a store
-directory is **not portable on its own**: opening one needs the permascroll it was written against,
-which is why every checked-in fixture has one beside it and why `Store`'s permascroll is a
-constructor argument rather than something it makes for itself.
+**A store holds no primedia**, so it is not portable alone: it needs the permascroll it was written
+against (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia` or `--permascroll`). The retired
+files — `primedia.spool`, `ops.spool`, `current.yaml`, `versions.yaml`, `scrolls.spool`,
+`links.spool`, `origins.spool` — are **refused by name**, because loading one against the wrong
+permascroll renders a document that is not the document. `ops.spool` now names only the in-memory
+`SegmentedOpsSpool`; nothing on disk may use it.
 
-`primedia.spool`, `ops.spool`, `current.yaml`, `versions.yaml`, `scrolls.spool`, `links.spool` and
-`origins.spool` are gone, and **a directory holding any of them is refused by name.** Each was the
-only copy of something: loading a `primedia.spool` store against the caller's permascroll would
-resolve every local span into the wrong scroll and render a document that is not the document, which
-is worse than failing because it looks like it worked. `Store::save()` deletes the superseded ones
-once the new shape is written.
+Rules:
 
-The one name worth being careful about is `ops.spool`. It meant the *binary operations spool* back
-when the spool was a file; since `ops.nodes` it names the in-memory `SegmentedOpsSpool` instead, so
-nothing on disk may be called that — `ops.export` is the export's name, and it holds either encoding
-because `readOpsSpool()` tells them apart by magic.
+- **Refuse loudly, by number.** Each format checks a signature and version and throws a typed
+  exception naming what was wrong. A reader that returns empty for a file it did not understand is
+  the failure all of this exists to prevent. A new format does the same.
+- **Regenerate every fixture in the same commit** as a layout change.
+- **One writer.** `SegmentedOpsSpool::writeSegmentFile()` alone produces `ops.nodes`;
+  `Store::save()` calls it.
+- **Diff meaning, not bytes.** Before and after a format change, diff
+  `xudu-dump --section=ops <store>` (add `--permascroll=<dir>` to render text); `--section=header`
+  is where a version bump shows.
+- **System xanadocs are the one exception to "refused means refused":**
+  `Session::systemStoreIndex()` moves an unreadable one aside and writes a default, catching every
+  typed refusal *by name* — add a format, add it there, or an old config stops the program starting.
+  A user's document is never treated that way.
 
-**Three formats, one habit: refuse loudly, by number.** `ops.nodes` checks a signature and its
-`nodeSize`; `store.tables` checks a signature and its version; the compact binary ops spool (now
-`CompactBinaryV3`, four-bit kind field) refuses versions 1 and 2 with *"is version 2 and this build
-reads version 3"*. Each throws a typed exception naming what was wrong. If you add a fourth format,
-it does this too — a reader that returns an empty result for a file it did not understand is the
-failure mode all of this exists to prevent.
-
-Two rules follow:
-
-- **A layout change still means regenerating every fixture in the same commit** (see "Tests"). The
-  header turns silent corruption into a loud failure; it does not make the fixtures correct.
-- **One writer.** `SegmentedOpsSpool::writeSegmentFile()` is the only thing that produces a segment
-  file, and `Store::save()` calls it. Do not write `ops.nodes` from anywhere else — a format known
-  in two places is what let step 1's change go unnoticed.
-- **`build/xudu-dump` reads a store without the loader**, which is what lets a format here stop
-  being human-readable at all. Point it at a store directory or at a single `ops.nodes`. Before and
-  after any format change, diff `xudu-dump --section=ops <store>`: it renders what each operation
-  *means*, including the text its span names, so a change that preserves meaning shows no diff.
-  `--section=header` is where a version bump is supposed to show. Rendering the *text* needs
-  `--permascroll=<dir>` as well, since the store does not have it; without one every other field
-  still renders and only `text=` goes missing.
-
-A *system* xanadoc under `~/.config/xudu/system/` is the one exception to "refused means refused":
-`Session::systemStoreIndex()` moves an unreadable one aside and writes a default in its place,
-because the program generates those itself and would otherwise refuse to start over its own
-scaffolding. It catches every typed refusal a store shape can raise, listed rather than caught as a
-common base — add a format and add it there too, or a config written by an older build becomes a
-reason the program will not start. A document the user named is never treated that way.
-
-This ruling has an expiry. It is void the first time someone outside this repository has a document
-they care about; see R11 in `design/store-slice-convergence.md`.
+**Known defect:** the `CompactBinaryV3` writer omits `op.source` for Structure operations, so a
+published `SetLink`/`SetValue`/`Splice` arrives with no R7 chain and the reader's fold refuses it;
+published slices land as unlinked cells. `Splice` also lacks `at`/`length` on the wire. The fix is
+`CompactBinaryV4`; see `design/structure-hyperop-vision.md` §3 before touching `binary_ops.cpp`.
 
 ### Where the reasoning lives
 
-`design/` is the record of *why*, and three notes are load-bearing for current work:
-
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
-  operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–20 are done bar the visualizer's move onto
-  `Manifold`**), and the measurements behind each. Read this before touching `CompactOpNode`,
-  `Manifold`, `CompactZZCell` or the zigzag engine's sync path.
-- [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
-  [`vql-query-language.md`](design/vql-query-language.md) — a speculative runtime and query language
-  over the same manifold. Neither is built, but both constrain the cell layout, and each now carries
-  a reconciliation section against the convergence. Both are versioned with a change history, and
-  the rule is stated in each: major for a change a conforming implementation could not ignore, minor
-  for anything else that still alters the specification.
-- [`vpl-array-language.md`](design/vpl-array-language.md) — an APL over the same manifold, written
-  for fun and kept because it puts pressure where VQL does not: it is a language built on random
-  access, which is exactly the convergence's open question U1 (a rank answers successor and
-  predecessor, not "the *n*-th thing"). Read §5 before taking any of it seriously.
-- [`vlog-logic-extension.md`](design/vlog-logic-extension.md) — **Vlog**, the Vortex Logic
-  Extension: Prolog's unification and backtracking *inside* Vortex rather than compiled onto it,
-  because `d.clone` is already a variable binding and a microversion is already a choice point. An
-  extension and not a fourth language — it has no syntax of its own, and unlike VQL and VPL it is
-  **the one design note here that asks the C++ core for something**. That ask is deliberately small:
-  two methods and a 16-byte-per-entry vector on `ArenaManifold`, a class convergence step 21 has not
-  written yet. Nothing in `ops.hpp`, `Manifold`, `Store` or any on-disk format changes. §10 lists
-  what is gating, and §6.3 is U1 again from the logic side.
-- [`enfilade-rank-indexing.md`](design/enfilade/enfilade-rank-indexing.md) — a **proposal**, not a
-  ruling: the candidate answer to open question U1, which is that a rank answers successor and
-  predecessor and nothing else. One enfilade folded as a third replay product of the ops spool, with
-  the tree's Wid swapped per consumer (count for an ordinal, Bloom summary for a key, span set for
-  link discovery). Read §3 before reaching for a `d.enfilade` dimension — crums as cells would make
-  rebalancing an edit to the document, which R8 forbids for the same reason it forbids path
-  compression.
-- [`enfilade-discussion.md`](design/enfilade/enfilade-discussion.md) — an architectural survey:
-  Grand Enfilade Theory, Udanax Green's Ent, silicon constraints (the 4.96 ns breakeven curve), and
-  five frontiers beyond U1 (Spanfilade, Layoutfilade, Chronofilade, Holefilade, Arrayfilade).
-- [`chronofilade-example.md`](design/enfilade/chronofilade-example.md) — architecture, worked
-  example, and benchmarks for the Osmic Chronofilade and EDL transformation monoid.
-- [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
-  branches, and what a microversion is.
+  operation and a slice is a replay product. Fourteen rulings (R1–R14) with prices, the migration
+  (complete through step 21, `ArenaManifold`), open questions U1–U3. Read before touching
+  `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (only a user-generated update persists;
+  navigation never does), R11 and R12 are the ones most often needed.
+- [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
+  carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
+- [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),
+  [`vql-query-language.md`](design/vql-query-language.md),
+  [`vpl-array-language.md`](design/vpl-array-language.md) — the runtime and the two front-end
+  languages over the manifold. All three are now implemented under `apps/common/xanadu/`; each doc
+  carries a reconciliation section against the convergence and a versioned change history.
+- [`vlog-logic-extension.md`](design/vlog-logic-extension.md) — Vlog: unification and backtracking
+  inside Vortex. §4–§5 (arena, choice points, trail, `unify()`) are built; §6–§7 (clause selection
+  and a solver written *in Vortex*) are not and are gated on U1. `vprolog` runs on the VM's C++
+  logic opcodes instead.
+- [`enfilade/`](design/enfilade/) — `enfilade-discussion.md` (the survey and the 4.96 ns breakeven),
+  `enfilade-rank-indexing.md` (the U1 proposal; §3 says why crums are not cells), and one note per
+  built enfilade (spanfilade, chronofilade, holefilade, layoutfilade, arrayfilade).
+- [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming.
+- [`system-xanadocs-customization-and-metasystem.md`](design/system-xanadocs-customization-and-metasystem.md)
+  — the settings model; §6.2 is the live ten-dimension geometry, §4.1 preset sharing is unbuilt.
+- [`xudu-zigzag-unified-hypermedia-bridge.md`](design/xudu-zigzag-unified-hypermedia-bridge.md) and
+  [`xudu-zigzag-hypermedia-bridge-next-stage.md`](design/xudu-zigzag-hypermedia-bridge-next-stage.md)
+  — the bridge (`UniversalLinkEnd`, `BridgeCoordinator`, Spanfilade as canonical discovery); the
+  federated cross-store link source is explicitly deferred.
 
-## Text Architecture & Shaping Pipeline
+## Text architecture
 
-- **Zero Cairo / Zero Pango**: The text stack is built directly on **FreeType 2**, **HarfBuzz**,
-  **libunibreak** (UAX #14), **FriBidi**, and **Fontconfig**. Cairo, Pango, PangoFT2, and Pangomm
-  are eliminated.
-- **`text::FontManager` & `text::FontFace`** (`src/text/font.cpp`):
-  - Resolves font descriptions (e.g. `"Monospace 16"`, `"Sans Bold 12"`) via Fontconfig
-    (`FcPattern*`) and loads them into thread-safe FreeType `FT_Face` and HarfBuzz `hb_font_t`
-    instances.
-  - Computes typographic metrics (`ascent`, `descent`, `lineHeight`, `spaceWidth`).
-- **`text::TextLayout`** (`src/text/layout.cpp`):
-  - `layoutPage(text, font, options)`: Breaks lines with `libunibreak` (`set_linebreaks_utf8`),
-    shapes runs with HarfBuzz (`hb_shape`), wraps at `maxWidthPx`, and paginates by `maxHeightPx`.
-  - **Height-Budgeted Slicing**: When `maxHeightPx > 0`, input text is sliced to the maximum lines
-    that could fit the height budget. This guarantees $O(1)$ page generation time rather than
-    $O(N^2)$ whole-document shaping across thousands of pages.
-  - `layoutSingleLine(text, font, options)`: Single-line fast path for toasts and canvas
-    measurement.
-  - Outputs `PageShaping` (`limit`, `lineCount`, `clusters`, `glyphs`, `lines`) consumed directly by
-    `Doc` and `Page`.
-- **`GlyphCache`** (`src/glyphcache/cache.cpp`):
-  - Direct 8-bit grayscale coverage texture rasterization using FreeType (`FT_Load_Glyph`,
-    `FT_Glyph_To_Bitmap`).
-  - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture array atlas (512x512
-    growing up to 16384x16384 across 64 layers).
-- **Baseline Alignment & Quad Geometry**:
-  - `Doc` glyph quads are anchored to `line.top` with height set to the font's logical `lineHeight`.
-  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at
-    $Y = \text{ascent}$.
-  - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and inspect the
-    frames it captures — flat baselines, correct cluster height, sharp glyphs. This is the one place
-    the work *is* visual, and it still needs no window: run the script under `xvfb-run` (see
-    "Tests") and read the PNGs it writes. Looking at a captured frame is inspection; opening a live
-    window on the user's desktop to look at the same thing is not.
+Zero Cairo, zero Pango: FreeType 2, HarfBuzz, libunibreak (UAX #14), FriBidi, Fontconfig.
 
-## Sovereign keymap and Vortex hyperstructural governance
+- `text::FontManager`/`FontFace` (`src/text/font.cpp`) resolve `"Sans Bold 12"`-style descriptions
+  via Fontconfig into thread-safe `FT_Face`/`hb_font_t` pairs and compute `ascent`, `descent`,
+  `lineHeight`, `spaceWidth`.
+- `text::TextLayout` (`src/text/layout.cpp`): `layoutPage()` breaks with libunibreak, shapes with
+  HarfBuzz, wraps at `maxWidthPx`, paginates by `maxHeightPx`. **Height-budgeted slicing** — input
+  is cut to the lines that could fit — keeps page generation $O(1)$ instead of $O(N^2)$ over
+  thousands of pages. `layoutSingleLine()` is the toast/measurement fast path. Output is
+  `PageShaping`, consumed by `Doc` and `Page`.
+- `GlyphCache` (`src/glyphcache/cache.cpp`) rasterises 8-bit coverage with FreeType into a 2D
+  texture array atlas (512² growing to 16384² over 64 layers). Quads anchor to `line.top` at
+  `lineHeight`; cluster textures put the baseline at $Y = \text{ascent}$.
+- After any shaping or layout change run `./tools/compare-backends.sh` under `xvfb-run` and inspect
+  the PNGs it writes (flat baselines, correct cluster height, sharp glyphs). Reading a captured
+  frame is inspection; opening a live window is not.
 
-- **Key bindings in system store**: All key bindings across `xudu`, `zigzag`, and `xuzz` must be
-  defined in the `system://keymap` system store, never hardcoded in C++ application code. Key
-  binding actions must use Vortex function calls (or registered Vortex routines/macros) for their
-  actions. The `gleditor` application is explicitly exempt: `apps/gleditor` is the plain editor that
-  must not share any code or dependency with Zigzag, Xanadu, or Xuzz, and retains its own
-  independent YAML configuration.
-- **C++ justification requirement**: New C++ code must justify why it isn't being written in Vortex
-  (e.g., hardware/driver interfacing, low-level rendering intrinsics, memory allocator primitives,
-  or raw OS event handling).
-- **Vortex standard library reuse**: New Vortex standard library code written in Vortex must
-  leverage existing Vortex standard library functions unless absolutely necessary.
+## Sovereign keymap and Vortex governance
 
-## Gotchas worth knowing before editing the Makefile
+- Every key binding in `xudu`, `zigzag` and `xuzz` is defined in `system://keymap`, never hardcoded;
+  binding actions are Vortex calls or registered Vortex routines/macros. `gleditor` is exempt and
+  must share no code or dependency with Xanadu, ZigZag or Xuzz.
+- New C++ must justify why it is not Vortex (hardware/driver interfacing, rendering intrinsics,
+  allocator primitives, raw OS events).
+- New Vortex standard-library code reuses existing standard-library functions unless it cannot.
+- Configuration lives in system xanadocs (xudu/xuzz), sovereign-store-backed system slices (zigzag),
+  or gleditor's YAML — no naked magic numbers in algorithms; see
+  `.agents/rules/architectural_governance.md`.
 
-- Toggling `GLEDITOR_DISABLE_VULKAN` or `DEBUG` changes flags for *every* object; the build records
-  a flags signature (`$(OBJDIR)/.buildflags`) so stale objects get rebuilt rather than silently
-  linked in — preserve that mechanism if you touch flag handling.
-- SDL major version is auto-probed via pkg-config, not assumed — don't hardcode SDL2 or SDL3
-  assumptions in new code without checking `GLEDITOR_SDL` handling.
-- GL/GLES entry points are resolved at runtime via `SDL_GL_GetProcAddress`, not linked — don't add
-  `-lGL` or equivalent link flags.
-- `format`, `format-check`, `lint`, and `doc` targets probe tool existence dynamically via
-  `command -v` and gracefully echo missing tool notices rather than failing when optional
-  linters/formatters are not installed locally.
-- `format`, `format-check` and `lint` are the one place `NO_SDL_GOALS` is checked: they're exempted
-  from the top-of-Makefile pkg-config checks *and* from `include $(DEPS)` (the same exemption
-  `clean`/`dist` already had, for the same reason — see the comment above that `include`), because
-  they compile nothing and are meant to run on a checkout that never installed SDL, font packages,
-  or anything else the build needs. A goal that does need a compiler must not be added to
-  `NO_SDL_GOALS`.
+## Makefile gotchas
+
+- Toggling `GLEDITOR_DISABLE_VULKAN` or `DEBUG` changes every object's flags;
+  `$(OBJDIR)/.buildflags` records a signature so stale objects rebuild. Preserve it if you touch
+  flag handling.
+- SDL major is probed, not assumed; GL/GLES entry points come from `SDL_GL_GetProcAddress` — never
+  add `-lGL`.
+- `format`, `format-check`, `lint`, `doc` probe tools with `command -v` and echo a notice rather
+  than fail when one is missing.
+- `format`, `format-check`, `lint` are the `NO_SDL_GOALS`: exempt from the pkg-config checks and
+  from `include $(DEPS)` (as `clean`/`dist` are) so they run on a checkout with no build deps. Never
+  add a goal that compiles anything to that list.
 
 ## License
 
-GPL-3.0 (see `LICENSE`). The README notes the GPL-3.0-only vs. GPL-3.0-or-later distinction is still
-unconfirmed — don't resolve that ambiguity unilaterally in code headers or packaging metadata.
+GPL-3.0 (see `LICENSE`). Whether it is GPL-3.0-only or -or-later is unconfirmed; do not resolve that
+in headers or packaging metadata.

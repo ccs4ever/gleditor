@@ -75,9 +75,12 @@ enum class OpKind : std::uint8_t {
    * move -- CompactBinaryV3 widened the wire format's kind field to four bits
    * (migration step 10), so BinStructure = 7 no longer fills it.
    *
-   * Nothing emits one yet. Store::replay() treats it as a text no-op, because
-   * a slice's structure is a *second* replay product of the same spool -- see
-   * design/store-slice-convergence.md §3 and R1.
+   * Emitted by system_docs.cpp (dominant, 34 calls), zz_xudu_projector.cpp,
+   * arena_manifold.cpp::promote(), vortex_host.cpp::promoteAndAttachToStore(),
+   * the VQL and VPL compilers, and batch_orchestrator.cpp. Store::replay()
+   * treats it as a text no-op because a slice's structure is a *second* replay
+   * product of the same spool -- see design/store-slice-convergence.md §3 and
+   * R1. The xanadoc editor (xudu) emits no Structure operations itself.
    */
   Structure,
 };
