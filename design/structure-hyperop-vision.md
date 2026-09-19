@@ -453,7 +453,10 @@ cells — `supports`, `refutes`, `qualifies`; Toulmin's roles; a discipline's ci
 published as a store and adopted by quoting its `d.dims` rank. Arguments across documents become
 comparable because they share a vocabulary with an author, a version and a citation, instead of each
 author minting private dimension names. `LinkType::Disagreement` is already Nelson's example; this
-makes disagreement a publishable frame. Deferred behind 5.8 by dependency, not by weight.
+makes disagreement a publishable frame. Deferred behind 5.8 by dependency, not by weight — and
+**promoted by §5.10.1 from a nicety to a prerequisite**: binding a dimension across federated
+manifolds has to bind a *set*, one dimension cell per document, and a published vocabulary is what
+makes that set an address rather than a string match.
 
 ### 5.10 Plural structure maps: overlays
 
@@ -469,6 +472,30 @@ state of the base it was written against so renumbering is a non-issue.
 a link set and deserves the same pluralism, or the reader is back in a walled document. Last in the
 order only because it needs an overlay *fold mode* — composing two manifolds at a tier — which
 nothing in the tree has yet.
+
+#### 5.10.1 Arena federation: the composition substrate
+
+**Plan:
+[`structure-hyperop/5.10.1-arena-federation.md`](structure-hyperop/5.10.1-arena-federation.md).**
+The fold mode above, specified — and it is owed earlier than §5.10, because composing manifolds is
+what a docuverse does at rest and the tree currently renders a space of slices by photocopying it.
+`MultiStoreCoordinator::addStore()` copies every cell of every store into one arena and **discards
+their identity** along the way, so a cell in a composite arena cannot be linked to, cited or
+promoted as a reference; §5.8's materialiser as drafted would have added a second copier.
+
+The mechanism is half-built: `ArenaManifold`'s reads already fall through to `base_`, which is
+federation with exactly one foreign space. What is missing is that refs carry no space, so two
+documents' operation 87 collide. Four bits are free — a ref is 32 bits, `ephemeralBit` takes one,
+and the operation ceiling is 27 — giving one own space and fifteen attached, with existing refs
+bit-identical in space 0. It stays ephemeral by necessity (a 64-byte node cannot hold a wide ref,
+R4) and `isEphemeral()` keeps meaning exactly what it already means, since a foreign operation index
+is precisely the reference R4 forbids storing.
+
+**It makes the chain cohere.** `promote()` gains one case — a foreign ref promotes to a §5.6
+placeholder — so federation is the ephemeral tissue, §5.6 is the persistent name of a federated
+cell, §5.8 is the authored statement that part of the tissue belongs to your document, and
+`promote()` is the road between them, which it already was. Federation says only *how* two manifolds
+are read together; which author wins where they disagree stays §5.10's ruling.
 
 ### Ordinary, needing no new mechanism
 
@@ -531,8 +558,11 @@ nothing in the tree has yet.
                   │
                   ├── 5.3 pouch items as cells (refiled here)
                   ├── 5.7 anthology ranks
-                  ├── 5.8 quoted ranks ── 5.9 vocabularies
-                  └── 5.10 overlays (needs a fold mode)
+                  ├── 5.8 quoted structure ── 5.9 vocabularies ◄──┐
+                  └── 5.10 overlays                               │
+                             │                                    │
+5.10.1 arena federation ─────┴── the fold mode 5.10 needs ────────┘
+  (no dependencies; unblocks the three above and stops VQL copying)
 ```
 
 ## Appendix: Change History
@@ -541,6 +571,18 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
+- **2.8** — Plan for 5.10.1 written: **arena federation**, the composition substrate §5.10 asks for
+  and does not specify. It is owed earlier than §5.10, because `MultiStoreCoordinator::addStore()`
+  already renders a space of slices by copying every cell of every store into one arena — and
+  discarding their identity, so a composite cell cannot be linked to, cited or promoted. The
+  mechanism is half-built (`ArenaManifold`'s reads already fall through to `base_`, which is one
+  foreign space); what is missing is a space field in the ref, and four bits are free because the
+  operation ceiling is 27 of the 31 a non-ephemeral ref has. Ephemeral by necessity per R4, with
+  `isEphemeral()` keeping its existing meaning, and `promote()` gaining one case that joins it to
+  §5.6. Promotes §5.9 to a prerequisite: a bound dimension across documents is a set, and a
+  published vocabulary is what makes that set an address rather than a string match. Also records
+  that progressive loading is per *space* for shape and per cell for content — there is no folding a
+  suffix — with the bound dimensions crossed with the view radius driving both.
 - **2.7** — Plan for 5.8 written, and two of the section's claims fail against the code. **A rank is
   the wrong unit**: a keymap is ten dimensions per setting, so rank-by-rank quoting is one quotation
   per setting per dimension and a Vortex module is not expressible at all — while the obvious fix,
