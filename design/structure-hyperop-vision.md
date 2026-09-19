@@ -499,6 +499,34 @@ rather than a translation. Federation is the ephemeral tissue, §5.6 is the same
 them, which it already was. Federation says only *how* two manifolds are read together; which author
 wins where they disagree stays §5.10's ruling.
 
+### 5.11 The store's tables as cells
+
+**No new verb; consolidation. Wire: V4.** `store.tables` holds five sections in a bencode container
+beside `ops.nodes`, and AGENTS says the thing that matters about all five: **"None has a hypertime
+name."** So a link, an annotation and a designated version have no when, no branch, no author, no R7
+micro-history, and cannot be quoted — while a `SetLink` between two cells has all of it. That is the
+layout contradicting the sentence `ops.hpp` quotes at line 245, "THE AUTHOR'S LINKS ARE NO DIFFERENT
+FROM ANYONE ELSE'S IN IMPLEMENTATION", for the author's own links.
+
+Four of the five move, as ordinary `MakeCell`s plus links: annotations onto §5.4 handles, current
+versions onto §5.5's editions rank, scrolls onto a `d.scrolls` rank, and links as cells whose two
+endpoints are cells — at which point **another author's link set over your document is just their
+cells over your cells**, which is what §5.10 wants and cannot express while a link is a row of
+bencode. `localSegments` stays, and the line it draws is the ruling: **an operation records what the
+document is, never where this copy of it happens to live.**
+
+Two things make or break it, and both have answers. The registry bootstraps from scroll 0 only —
+"this machine's permascroll has no entry in the registry" — with a two-pass fold and a loud refusal
+for anything else, the same shape as genesis minting `home` and `d.dims` by fiat. And the fast
+lookup becomes a **third replay product** beside `Version` and `Manifold`, so nothing walks a rank
+in the hot path and the tables stop being an artefact that can disagree with the operations.
+
+It also makes three stated invariants true: "one writer" (today `Store::save()` calls
+`writeStoreTables()` as well as `writeSegmentFile()`), append-only-ness (the tables are rewritten
+whole on every save), and one publication stream. **Wanted before §5.6 is built**, because §5.6's
+`externals` table is one this removes. **Plan:
+[`structure-hyperop/5.11-tables-as-cells.md`](structure-hyperop/5.11-tables-as-cells.md).**
+
 ### Ordinary, needing no new mechanism
 
 - **A second reading order** over a document's own cells is a second dimension on cells the
@@ -565,6 +593,9 @@ wins where they disagree stays §5.10's ruling.
                              │                                    │
 5.10.1 arena federation ─────┴── the fold mode 5.10 needs ────────┘
   (no dependencies; unblocks the three above and stops VQL copying)
+
+5.11 tables as cells ── decide before 5.6 is built; removes its externals table
+  (needs 5.4 + 5.5; gives links, annotations and scrolls a hypertime name)
 ```
 
 ## Appendix: Change History
@@ -573,6 +604,22 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
+- **2.11** — §5.11 added and planned: **the store's tables as cells**, asked as a hypothetical and
+  kept because the answer was yes for four of the five sections. The defect is AGENTS' own four
+  words — "None has a hypertime name" — which leaves a xanalink with no author, date, branch or
+  micro-history while a `SetLink` has all four, contradicting the line `ops.hpp` quotes about the
+  author's links being no different from anyone else's. Annotations ride §5.4 handles, current
+  versions ride §5.5's editions rank, scrolls take a `d.scrolls` rank, and links become cells whose
+  endpoints are cells, which is what lets another author's link set fold over your document at all.
+  `localSegments` stays, drawing the ruling that an operation records what a document *is*, never
+  where a copy of it lives. The registry bootstraps from scroll 0 with a two-pass fold and a loud
+  refusal, and the fast lookup becomes a third replay product beside `Version` and `Manifold`.
+  Consequences elsewhere: §5.6's `externals` table becomes unnecessary — a placeholder links to a
+  scroll cell instead of indexing a row, which is §5.10.1's proxy shape on the persistent side, so
+  the two halves finally agree — and §5.6's plan is annotated to say so, since building it first
+  ships a reader, a writer and a version bump that §5.11 removes. The window argument is recorded
+  rather than argued: R11 "is void at first external publication", so this costs nothing today and a
+  migration later.
 - **2.10** — 5.10.1 rewritten around **proxy cells**, abandoning the ref encoding of 2.9 entirely. A
   foreign cell is an ordinary arena cell carrying `ValueKind::ExternRef` and a
   `(space, operation index)` value, linked on `d.stores` to its store's cell. `CellRef` does not
