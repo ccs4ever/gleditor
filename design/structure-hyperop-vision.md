@@ -381,13 +381,52 @@ condition U1's own experiment names for the concession holding.
 
 ### 5.8 Quoted ranks: transclusion of a shape
 
-**Two operations to quote, two to override. Wire: V4.** `spliceCellSpan` transcludes content into a
-cell; nothing yet transcludes a *rank*. Quoting appends a `MakeCell` for the quotation head and a
-`SetLink` from it to the placeholder for the foreign rank's head; traversal falls through at fold
-time. Overriding one position appends a `MakeCell` with the local content and a `SetLink` to the
-placeholder for the foreign cell it shadows — **keyed by that cell's `GlobalOpRef`, not by
-ordinal**, which keeps U1 out of it. With the foreign store absent the quote is a visibly empty
-rank.
+**Four to six operations plus the selector, and four to override. Wire: V4.** `spliceCellSpan`
+transcludes content into a cell; nothing yet transcludes a *shape*. Quoting appends a `MakeCell` for
+the quotation head, a placeholder for what is quoted, a cell saying *which* structure is taken, and
+the links joining them. Overriding one position appends a `MakeCell` with the local content and a
+`SetLink` to the placeholder for the foreign cell it shadows — **keyed by that cell's `GlobalOpRef`,
+not by ordinal**, which keeps U1 out of it. **Plan:
+[`structure-hyperop/5.8-quoted-ranks.md`](structure-hyperop/5.8-quoted-ranks.md).**
+
+**Corrected by the plan, first: a rank is the wrong unit, and "the whole closure" is not a unit at
+all.** A keymap is ten dimensions hanging off every setting, so rank-by-rank quoting costs one
+quotation per setting per dimension, and something the size of a Vortex module is not expressible at
+all; meanwhile unbounded reachability from any cell of a connected slice is the *whole foreign
+store*, which is copying rather than quoting and is not even deterministic across two readers. **A
+quotation therefore names a selector**, which answers a deterministic set of foreign cells given the
+document and the pinned state, and the materialiser imports the **induced** subgraph on that set —
+an edge travels only when both of its ends do. Four kinds: a cell, a rank, a closure over a
+*declared* carry set of dimensions, and a **VQL query**. The query kind is what makes arbitrary
+structure adoptable, and it is the cheapest of the four in new code: every app already links `vql/`,
+`VQLEngine` takes an `ArenaManifold &`, and an arena opened over the *foreign* manifold as its base
+answers in that store's own refs with nothing copied. Its price is that a query is a recipe rather
+than an address, so the quotation records the VQL language version and a build that does not know it
+refuses loudly and by number, as R11 and R14 require of every other format here.
+
+**Corrected by the plan, third, and it lightens §5.6's stated cost.** "Resolution means loading the
+foreign store and folding a manifold on it" reads as *download the document*; it is not. The fold
+reads addresses and never bytes — `applyStructure` copies `PrimediaSpan`s into `CellSlot`s and
+dereferences none of them — so folding a foreign manifold yields the whole shape, scalar values
+included (R6 again), with the permascroll untouched. What must be complete is the *operation
+history* to the pinned state, at 64 bytes an operation and 1,024 to a Merkle piece, because a replay
+missing its prefix is a different document. Content is fetched per cell at render time, which is
+what `Scroll::segments`' gaps and `SwarmContentSource`'s deadline-bounded reads already do. A
+`closure` selector therefore resolves with zero permascroll traffic; only a selector with a *text*
+predicate pays for bytes, and it pays for its candidate set rather than its answer.
+
+**Corrected by the plan, second: "traversal falls through at fold time" is the one thing this cannot
+do.** The fold is `noexcept` and allocation-free and §5.6 already rules that resolution is I/O; a
+foreign cell has no local `CellRef` and the only non-index refs a manifold may hold are
+`ephemeralBit` ones, which `applyStructure` refuses by design; and a fold that reached outside the
+spool would stop a manifold being a replay product of *one spool*, which is what
+`verifyAgainstFullRebuild()` exists to police. **Fall-through is a materialisation into an
+`ArenaManifold` above the fold**: the persistent side records the quotation, a resolver imports the
+foreign closure as ephemeral cells and splices it onto the local rank, and `walkRank` then traverses
+it with no special-casing. What is durable is the quotation; what is ephemeral is the view of what
+was quoted — R8 on the seam it was drawn for. The plan also corrects "with the foreign store absent
+the quote is a visibly empty rank": the quotation head is an ordinary local cell, so an unresolved
+quote reads as a citation that did not resolve rather than as a gap, which is the behaviour to want.
 
 A first draft called this "ArenaManifold's copy-on-write overlay made durable," which sounded like a
 crossing of R8. It is not: R8's boundary is authorship versus navigation, and adopting someone's
@@ -399,14 +438,22 @@ published keymap by quoting its rank, then override one key) and schema adoption
 stores. A published sequence — a reader's alternate path through an author's text — is also an
 application of this rather than a mechanism of its own.
 
+**One promise it deliberately does not keep.** §5.7's ruling is inherited: an `ExternOpRef` names a
+microversion, so a quoted rank **pins**. `system-xanadocs-customization-and-metasystem.md` §4.1 says
+Bob's keymap "automatically receives the update" when Alice improves hers, and that is not this and
+should not be: an upstream author silently changing a reader's keybindings or their validation
+schema is not a feature arriving. Updating is an authorial act — one `SetLink` to a new placeholder,
+with an author, a date and a diff, and the previous adoption still in the R7 chain. §4.1 wants
+correcting to match.
+
 ### 5.9 Published vocabularies
 
-**No operations of its own; rides 5.8.** A set of dimension cells — `supports`, `refutes`,
-`qualifies`; Toulmin's roles; a discipline's citation types — published as a store and adopted by
-quoting its `d.dims` rank. Arguments across documents become comparable because they share a
-vocabulary with an author, a version and a citation, instead of each author minting private
-dimension names. `LinkType::Disagreement` is already Nelson's example; this makes disagreement a
-publishable frame. Deferred behind 5.8 by dependency, not by weight.
+**No operations of its own; rides 5.8 as one `rank` selector over a `d.dims`.** A set of dimension
+cells — `supports`, `refutes`, `qualifies`; Toulmin's roles; a discipline's citation types —
+published as a store and adopted by quoting its `d.dims` rank. Arguments across documents become
+comparable because they share a vocabulary with an author, a version and a citation, instead of each
+author minting private dimension names. `LinkType::Disagreement` is already Nelson's example; this
+makes disagreement a publishable frame. Deferred behind 5.8 by dependency, not by weight.
 
 ### 5.10 Plural structure maps: overlays
 
@@ -494,6 +541,26 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
+- **2.7** — Plan for 5.8 written, and two of the section's claims fail against the code. **A rank is
+  the wrong unit**: a keymap is ten dimensions per setting, so rank-by-rank quoting is one quotation
+  per setting per dimension and a Vortex module is not expressible at all — while the obvious fix,
+  importing the reachable closure, is the *whole foreign store* in any connected slice, which is
+  copying and is not deterministic. A quotation therefore names a **selector** (cell, rank, declared
+  closure, or a VQL query) answering a set, and the materialiser imports the **induced** subgraph on
+  it. The query selector is the general case and the cheapest in new code, since `vql/` is already
+  linked everywhere and `VQLEngine` runs over an arena opened on the foreign manifold with nothing
+  copied; its price is that a query is a recipe rather than an address, paid by recording the
+  language version and refusing an unknown one by number. And **traversal cannot fall through at
+  fold time**, for three separate reasons, so fall-through is a materialisation into an
+  `ArenaManifold` above the fold and the persistent side records only the quotation. Also: operation
+  counts corrected per selector; a quotation is always walked posward; overrides are scoped to their
+  quotation and may name any cell in the answer set; substitution is total for the cell it replaces.
+  Records that §5.8 inherits §5.7's pinning ruling and therefore does *not* deliver system-xanadocs
+  §4.1's "automatically receives the update", which wants correcting there. Names the section's
+  other real cost: every system-store consumer reads a `Manifold`, and `ArenaManifold` has no
+  `dimensionNamed()`, so the consumer seam is a larger piece of work than the resolver. Lightens
+  §5.6's stated resolution cost on the way: a fold needs the foreign *operations* and no content at
+  all, so "load the foreign store" is a Merkle piece or two for a keymap, not a document.
 - **2.6** — Plan for 5.7 written; thin, as expected, since §5.6 carries the mechanism. Adds a ruling
   (an anthology pins a state, never tracks a moving one, because tracking would let someone else's
   edits change your document), sharpens the `d.stores` distinction to copying versus quoting, and
