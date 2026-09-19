@@ -485,9 +485,14 @@ promoted as a reference; §5.8's materialiser as drafted would have added a seco
 
 The mechanism is half-built: `ArenaManifold`'s reads already fall through to `base_`, which is
 federation with exactly one foreign space. What is missing is that refs carry no space, so two
-documents' operation 87 collide. Four bits are free — a ref is 32 bits, `ephemeralBit` takes one,
-and the operation ceiling is 27 — giving one own space and fifteen attached, with existing refs
-bit-identical in space 0. It stays ephemeral by necessity (a 64-byte node cannot hold a wide ref,
+documents' operation 87 collide. The 31 bits below `ephemeralBit` are split between *which space*
+and *which cell in it*, and that split is a **policy of the arena rather than a constant** — default
+21, giving 1,023 spaces of 2,097,151 cells, with existing refs bit-identical in space 0. Fixing it
+at four bits would cap a view at fifteen documents, which is the single-letter mistake OSMIC's
+branch ordinals already refused: a branch there is not one letter, it spells past `z` into `aa` and
+is a full `uint32_t` in memory, so that nobody arranges their work around the numbering. Whatever
+the split, a view addresses at most 2³¹ cells — 68 GB of `CellSlot` before any content, so memory
+binds before the ref does. It stays ephemeral by necessity (a 64-byte node cannot hold a wide ref,
 R4) and `isEphemeral()` keeps meaning exactly what it already means, since a foreign operation index
 is precisely the reference R4 forbids storing.
 
@@ -571,6 +576,20 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
+- **2.9** — 5.10.1's ref encoding revised and its 64-bit alternative measured. The fixed four-bit
+  space field is gone: a fifteen-document ceiling on a federated view is a storage layout dictating
+  how a person may read, and OSMIC's own branch ordinals already refused that shape of limit — a
+  branch is not one letter, it spells past `z` into `aa` and is a full `uint32_t`. The split between
+  space and index is now a policy of the arena (default 21: 1,023 spaces of 2,097,151 cells), with
+  overflow refused loudly by number and no re-splitting of a live arena. Whatever the split, a view
+  addresses 2³¹ cells, which is 68 GB of slots — memory binds first, so the ceiling is out of reach
+  rather than out of existence. Widening `CellRef` to 64 bits was then tried against a real build:
+  `CompactOpNode` survives at 64 bytes (its fields are explicit fixed-width and never name
+  `CellRef`), but `DimLink` doubles and `DirectedDim` breaks both its size and alignment asserts,
+  per-cell memory rises 65% at three dimensions, and — the finding — 586 errors across 52 files are
+  four distinct problems, because `CellSlot::birthOp`, `UniversalLinkEnd::targetId` and 165
+  `static_cast<std::uint32_t>` sites are typed for the old width and there is no `-Wconversion`. The
+  compiler stops at the sizes and waves through the truncations.
 - **2.8** — Plan for 5.10.1 written: **arena federation**, the composition substrate §5.10 asks for
   and does not specify. It is owed earlier than §5.10, because `MultiStoreCoordinator::addStore()`
   already renders a space of slices by copying every cell of every store into one arena — and
