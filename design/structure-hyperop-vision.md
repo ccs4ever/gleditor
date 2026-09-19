@@ -477,30 +477,27 @@ nothing in the tree has yet.
 
 **Plan:
 [`structure-hyperop/5.10.1-arena-federation.md`](structure-hyperop/5.10.1-arena-federation.md).**
-The fold mode above, specified — and it is owed earlier than §5.10, because composing manifolds is
-what a docuverse does at rest and the tree currently renders a space of slices by photocopying it.
+The fold mode above, specified — and owed earlier than §5.10, because composing manifolds is what a
+docuverse does at rest and the tree currently renders a space of slices by photocopying it.
 `MultiStoreCoordinator::addStore()` copies every cell of every store into one arena and **discards
-their identity** along the way, so a cell in a composite arena cannot be linked to, cited or
-promoted as a reference; §5.8's materialiser as drafted would have added a second copier.
+their identity** on the way, so a cell in a composite arena cannot be linked to, cited or promoted
+as a reference; §5.8's materialiser as drafted would have added a second copier.
 
-The mechanism is half-built: `ArenaManifold`'s reads already fall through to `base_`, which is
-federation with exactly one foreign space. What is missing is that refs carry no space, so two
-documents' operation 87 collide. The 31 bits below `ephemeralBit` are split between *which space*
-and *which cell in it*, and that split is a **policy of the arena rather than a constant** — default
-21, giving 1,023 spaces of 2,097,151 cells, with existing refs bit-identical in space 0. Fixing it
-at four bits would cap a view at fifteen documents, which is the single-letter mistake OSMIC's
-branch ordinals already refused: a branch there is not one letter, it spells past `z` into `aa` and
-is a full `uint32_t` in memory, so that nobody arranges their work around the numbering. Whatever
-the split, a view addresses at most 2³¹ cells — 68 GB of `CellSlot` before any content, so memory
-binds before the ref does. It stays ephemeral by necessity (a 64-byte node cannot hold a wide ref,
-R4) and `isEphemeral()` keeps meaning exactly what it already means, since a foreign operation index
-is precisely the reference R4 forbids storing.
+**A foreign cell is a proxy cell on `d.stores`**: an ordinary arena cell whose `valueKind` says it
+stands for a cell elsewhere, whose `valueBits` carry which space and which operation index, and
+which links on `d.stores` to the cell naming its store. Both halves are half-built —
+`ArenaManifold`'s reads already fall through to `base_`, and `MultiStoreCoordinator` already mints a
+store cell per attachment on a `d.stores` rank that VQL addresses as `##/d.stores>[d.name = "…"]`.
+`CellRef` does not change, no bits are stolen, and identity never rides in the name, so nothing
+collides, nothing counts documents, and "where is this cell from" is a link walk a person and a
+query can both perform.
 
-**It makes the chain cohere.** `promote()` gains one case — a foreign ref promotes to a §5.6
-placeholder — so federation is the ephemeral tissue, §5.6 is the persistent name of a federated
-cell, §5.8 is the authored statement that part of the tissue belongs to your document, and
-`promote()` is the road between them, which it already was. Federation says only *how* two manifolds
-are read together; which author wins where they disagree stays §5.10's ruling.
+**The proxy is §5.6's placeholder, un-persisted** — both are a `MakeCell` with
+`ValueKind::ExternRef` and a foreign reference in `value` — so `promote()` on one is a *filing*
+rather than a translation. Federation is the ephemeral tissue, §5.6 is the same cell made durable,
+§5.8 is the authored statement that part of the tissue is yours, and `promote()` is the road between
+them, which it already was. Federation says only *how* two manifolds are read together; which author
+wins where they disagree stays §5.10's ruling.
 
 ### Ordinary, needing no new mechanism
 
@@ -576,6 +573,22 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
+- **2.10** — 5.10.1 rewritten around **proxy cells**, abandoning the ref encoding of 2.9 entirely. A
+  foreign cell is an ordinary arena cell carrying `ValueKind::ExternRef` and a
+  `(space, operation index)` value, linked on `d.stores` to its store's cell. `CellRef` does not
+  change and no bits are stolen, so the fifteen-document ceiling, the runtime-tunable split that
+  tried to widen it, and the ruling needed to stop an exhausted arena aliasing into another
+  document's cell all cease to exist — every one of them was a problem created by packing identity
+  into the name. Both halves were already built: `ArenaManifold`'s reads fall through to `base_`,
+  and `MultiStoreCoordinator` already mints a store cell per attachment on a `d.stores` rank VQL can
+  address. And the proxy turns out to be §5.6's placeholder un-persisted, so `promote()` becomes a
+  filing rather than a translation. Cost, stated plainly: one arena cell per *touched* foreign cell
+  and one map lookup per foreign hop, which is the one place the refused encoding was ahead and is
+  owed a measurement against R12's 4.96 ns. Recorded in §3.1 as a lesson rather than only a
+  decision: **when a design starts needing scarce-resource tricks — stolen bits, a wider scalar, a
+  ceiling, a tunable — check whether more cells and more dimensions solve it first.** The model is
+  the tool, and the tell that a problem is being solved at the wrong layer is a limit a person would
+  have to work around.
 - **2.9** — 5.10.1's ref encoding revised and its 64-bit alternative measured. The fixed four-bit
   space field is gone: a fifteen-document ceiling on a federated view is a storage layout dictating
   how a person may read, and OSMIC's own branch ordinals already refused that shape of limit — a
