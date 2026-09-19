@@ -120,13 +120,24 @@ columns for every kind).
 same call the other kinds make — and `putOp`'s `indexOf()` re-localises it on the reader. That is
 R4-correct by construction: the name survives a seal, the index does not. The same record must add
 varint `at` and `length` for `Splice` (U3.4 already owes this; the export currently throws rather
-than corrupts). Two more things belong in the same bump so there is no V5 for structure: the
-three-bit wire kind field is exactly full at `BinStructure = 7`, and a published cell still carries
-only its first span (U3.4's `storeToLinkPackage` defect). A length-prefixed, skippable extension
-record is the right place for anything variable-length that comes later — the one place a shim is
-worth having, because R11's "no compatibility" is about files on this machine, not a wire two peers
-negotiate. **Add the missing test: publish a slice with links, ingest it, fold, assert
+than corrupts). **Add the missing test: publish a slice with links, ingest it, fold, assert
 `refusedOps() == 0` and `equivalentTo()` the original.**
+
+Two further items were listed here in draft and did not survive the code review in
+[`structure-hyperop/5.1-compact-binary-v4.md`](structure-hyperop/5.1-compact-binary-v4.md) §2. The
+wire kind field is **not** full: `CompactBinaryV3` already widened it to four bits, so
+`BinStructure = 7` is the eighth of sixteen values with eight free after it — the claim was true of
+version 2 and was carried forward stale. What *is* full is the tag byte, four kind bits plus four
+flags, held by a `static_assert`; a new *flag* needs a second byte, and V4 needs no new flag. And
+`storeToLinkPackage()`'s first-span-only defect is a change to `LinkPackage`'s own wire format in
+`link_package.cpp`, not to the ops spool — still owed, but not in this bump, because moving two
+formats' versions in lockstep couples things that have no reason to agree.
+
+A length-prefixed, skippable extension record was proposed for the same bump, on the ground that
+R11's "no compatibility" is about files on this machine rather than a wire two peers negotiate. The
+plan recommends deferring it: §5.6's own ruling puts the variable-length part of a cross-store
+reference in `store.tables` precisely so the ops wire stays fixed-shape, and nothing could test the
+mechanism today.
 
 Every cross-store proposal below is gated on this. So, today, is publishing any ZigZag slice.
 
@@ -164,42 +175,87 @@ ranking; the Nelsonian weight is stated where it differs.
 
 ### 5.1 `CompactBinaryV4`
 
-§3. Prerequisite for 5.6–5.10 and for shipping slice publication at all. No new operations.
+§3. Prerequisite for 5.6–5.10 and for shipping slice publication at all. No new operations. **Plan:
+[`structure-hyperop/5.1-compact-binary-v4.md`](structure-hyperop/5.1-compact-binary-v4.md)** — three
+fields appended to the `BinStructure` record (`source` always; `at` and `length` when the verb is
+`Splice`, keyed off the verb the reader has already decoded), version 3 refused by number, and no
+fixture regenerated, because all seventeen checked-in `ops.export` files are OSMIC text rather than
+binary.
 
 ### 5.2 `d.hist`: a cell's own past as a rank
 
-**Appends nothing. No wire.** The R7 chain already exists — `CellSlot::lastOp`, and `byRef` holds
-*every* chain index by `slot()`'s contract — and is walked only by the fold. Surface it as a read
-API, `Manifold::historyOf(CellRef) -> span<const CellRef>`, or as an ephemeral rank in an arena. A
-cell's earlier states become things you can look at, link to and quote: "quote the third draft of
-this paragraph, and show me who changed it." Distinct from the projector's `d.version` cells, which
-are a whole-document projection into a throwaway store. R8 is untouched because nothing is written.
-Cheapest good idea on the list; build it first.
+**Appends nothing. No wire.** The R7 chain is walked only by the fold today; surface it as a read
+API. A cell's earlier states become things you can look at, link to and quote: "quote the third
+draft of this paragraph, and show me who changed it." Distinct from the projector's `d.version`
+cells, which are a whole-document projection into a throwaway store. R8 is untouched because nothing
+is written. Cheapest good idea on the list; build it first. **Plan:
+[`structure-hyperop/5.2-cell-history.md`](structure-hyperop/5.2-cell-history.md).**
 
-### 5.3 Pouch and clasp staging on `ArenaManifold`
+Two corrections to the draft, from the code review in that plan. **`byRef` does not hold the
+chain**: it is an unordered `CellRef -> dense` map, so it answers "which cell does this operation
+belong to" and not "what is this cell's chain" — the predecessor links live in each node's
+`sourceOpIndex`, in the ops spool, which means the walk needs a `Store` and cannot sit on
+`Manifold`'s no-allocation, no-Store-access read path. And the sketched
+`historyOf() -> span<const CellRef>` cannot return a span, because no such array is stored; the walk
+is a callback in the style of the existing `walkRank`, or it materialises a vector. Enumerating the
+chain is also not the same as *reconstructing* a past state: `MakeCell` and `SetValue` carry the
+whole content, but `Splice` is a delta, so rendering "the third draft" is a mini-replay and is
+scoped as the plan's second half.
 
-**Appends nothing until the drop.** The bridge's work package 3 builds each pouch item by hand from
-`contentOf(cell)` spans — a hand-rolled arena with none of the mark/release discipline.
-`ArenaManifold` over a base `Manifold` is exactly a staging buffer: the dragged cell shadows its
-base slot, the base is untouched, `release()` is drag-cancel by truncation, and `promote()` on drop
-is the only write. Buys allocation-free drag, free undo, and R8 enforced by the type system rather
-than by care. Dragging is navigation; the drop is the authorial act; the two-type split says so
-already.
+### 5.3 ~~Pouch and clasp staging on `ArenaManifold`~~ — withdrawn; refiled after 5.6
+
+**Withdrawn as written.** Review:
+[`structure-hyperop/5.3-pouch-staging.md`](structure-hyperop/5.3-pouch-staging.md). Every premise
+failed: work package 3's cell-drop path is **built and wired** (`pouch_drawer.cpp:140`, called from
+`main.cpp:2912`); there is no hand-rolled arena, only one in-flight `KineticTetherEngine::payload()`
+with `cancelDrag()`; and **nothing is written during a drag**, so cancelling is already free and R8
+is already satisfied by construction rather than needing the type system's help. `promote()` earns
+its keep when an evaluation builds a graph of unknown size; a drop emits two or three operations.
+
+What the section was reaching for is one layer down: **the pouch has no persistent item model.**
+Zone definitions are proper system-xanadoc cells, but zone *contents* are a RAM-only
+`std::vector<PouchItem>` that nothing rebuilds on load — while every drop appends an `Insert` and a
+`VersionAnnotation` nobody reads. That persistence is improvised inside the annotation's string
+fields (`alias` = zone, `description` = preview, `tag` = which kind of drop), which makes the pouch
+§5.5's second customer. And a dropped ZigZag cell's `originCell` is a bare `std::uint32_t` into
+another store's spool — exactly the reference R4 says cannot survive that store gaining a branch.
+
+So the replacement, **pouch items as cells**, depends on §5.6 and is sequenced after it. Nothing
+else in the chain depended on this section.
 
 ### 5.4 Operation handle cells
 
-**One `MakeCell` per handle, minted on demand. Wire: V4.** A handle is an ordinary `MakeCell` whose
-idle `sourceAt` carries the index of the operation it stands for — 32 bits, the width of a `CellRef`
-— and whose value kind says so. `sourceOpIndex` keeps its R7 meaning unbroken: the handle's own
-chain ends at its own `MakeCell`. (A first draft routed the handle through `sourceOpIndex` to the
-referenced `Insert`; that would make `denseOf()` resolve a text operation to a cell, a category
-error the fold cannot detect, and was withdrawn.) The referenced index is local, and is globalised
-on export through `opRefOf()` exactly as a span is through `globalise()` — the precedent for "a
-local address that becomes a global one at the wire" is every content span in the system.
+### 5.4 Operation handle cells
+
+**One `MakeCell` per handle, minted on demand. Wire: V4.** A handle is an ordinary `MakeCell`
+carrying the index of the operation it stands for, marked by its value kind. `sourceOpIndex` keeps
+its R7 meaning unbroken: the handle's own chain ends at its own `MakeCell`. (A first draft routed
+the handle through `sourceOpIndex` to the referenced `Insert`; that would make `denseOf()` resolve a
+text operation to a cell, a category error the fold cannot detect, and was withdrawn.) The
+referenced index is local, and is globalised on export exactly as a span is through `globalise()` —
+the precedent for "a local address that becomes a global one at the wire" is every content span in
+the system. **Plan:
+[`structure-hyperop/5.4-operation-handles.md`](structure-hyperop/5.4-operation-handles.md).**
 
 **Ruling taken here:** the marker is a spare `ValueKind`, `ValueKind::OpHandle = 4`, not flags bit
 7\. It is a statement about what the cell's value *is*, which is what `ValueKind` is for, and it
 leaves bit 7 for something that is not a value.
+
+**Corrected by the plan: the target goes in `value`, not the idle `sourceAt`.** A `ValueKind`
+describing a field other than `value` is not the statement the ruling above claims for it, and
+`value` wins on every practical count: `applyStructure`'s `MakeCell` case **already** copies both
+`valueKind` and `value` into the slot (`manifold.cpp:218-226`), so the fold needs no change at all
+and `CellSlot` needs no new field; the manifold can then answer `handleTarget()` off the slot
+without the `Store` access `sourceAt` would force; `value` is already on the wire where `sourceAt`
+is not; and it is exactly R6's scalar precedent, where `ValueKind` says how to read `value`. The
+existing `asDouble`/`asBool`/`asInt64` return `nullopt` on a kind mismatch, so a handle is never
+read as a number.
+
+**And it widens §5.1's scope.** `value` travels as a plain varint, and an operation index renumbers
+on the reader — so a published handle would arrive naming a *different* operation, silently. That is
+R14's failure by a second door, and the fix is the one §5.1 already uses for `source`: when the kind
+is `OpHandle`, write the target as a `MicroversionId`. Folded into V4 rather than bumped to a V5,
+since neither section is built.
 
 What it buys, in one mechanism: commentary on an edit ("why was this deleted" — nothing else in the
 tree can answer it, and the link table cannot address an operation at all); a review rank of edits;
@@ -221,12 +277,34 @@ durable name for a mutable table row is half a solution, and the handle to the l
 designated current versions become cells on `d.editions` off `home`. The cell's content is the
 edition's name; it is linked on `d.edition-of` to the operation handle (5.4) for the state it
 designates, so 5.5 is a special case of 5.4 and needs no encoding of its own. Declaring "this is the
-French edition, as of now" then has an author, a hypertime name, a branch and a diff — and each
-branch carries its own heads, which the flat vector cannot. `storeTablesFormatVersion` goes to 4 and
-drops `currentVersions` and `versionAnnotations`; `scrolls`, `localSegments` and `links` stay.
+French edition, as of now" then has an author, a hypertime name, a branch and a diff.
+`storeTablesFormatVersion` goes to 4 and drops `versionAnnotations`; `scrolls`, `localSegments` and
+`links` stay. **Plan:
+[`structure-hyperop/5.5-editions-rank.md`](structure-hyperop/5.5-editions-rank.md).**
 
-R8 is not crossed: designating an edition is authorship about the document, not a record of where
-anyone is looking. It is the same class of fact the annotations table already treats as durable.
+**The section is right, and the code has drifted away from it.** `currentVersions` is an array *on
+purpose* — the author designates the current French version, the current English version, and so on,
+and the UI presents them; paired with version aliases, that was the plan for making editions real.
+The alias half is built and on screen (`hypertime_graph.cpp:281-300` renders each as a label beside
+its node). The system-store concession — exactly one current version, because a config document
+presents one chosen set of values to the system — is intact, `repointCurrentVersion()` being guarded
+by `isSystem()` at every call site.
+
+What drifted is the array. `Session::syncCurrentVersions()` (`session.cpp:849-872`), called
+unguarded from `save()`, *derives* the designations from whatever versions happen to be open in
+windows. In the common case the two coincide, which is how it survived; they diverge the moment
+anyone opens a third state to compare, and saving then silently redesignates the document.
+`batch_orchestrator.cpp:765-774` now reasons from the drifted behaviour as settled ("interactive
+multi-view sessions retain all heads") and works around it on the export path.
+
+**Fixing the drift is not enough, which is what keeps this section a migration.** An edition today
+has no identity: "French is at X" is `X ∈ currentVersions` joined to
+`versionAnnotations[X].alias == "French"` by microversion id, so repointing means three edits across
+two tables — and **the alias moves with the key**, so nothing remembers French was ever at X. As a
+cell, the identity is the cell, the name is its content, the designation is one `SetLink` to a §5.4
+handle, its own history is its R7 chain (§5.2), and per-branch heads come free because editions are
+folded per state. `currentVersions` stays in the table as a *cache* of the rank, for the same
+bootstrapping reason as `scrolls`.
 
 ### 5.6 Persistent references to cells in other stores
 
@@ -242,11 +320,19 @@ already says it cannot fit in a node.
 **Ruling taken:** the *act* stays in hypertime and only the *name resolution* is tabled — the status
 the scroll registry already has.
 
-- `store.tables` gains a section `externals`: a vector of `GlobalOpRef`, whose index *i* corresponds
-  to a local **placeholder cell**. Bencode, where variable-length things already live.
+- `store.tables` gains a section `externals`, whose index *i* corresponds to a local **placeholder
+  cell**. Bencode, where variable-length things already live. **Corrected by the plan:** it holds a
+  *local* `ExternOpRef{ScrollId, produces}`, not a `GlobalOpRef` with a scroll-key string — the same
+  relation `PrimediaSpan` has to `GlobalSpan`, converted at the publication boundary by
+  `globalise`/`localise`, which is what R4 meant by localising "through the identical
+  `Store::externals`/`scrollKey` path". Forty references into one foreign store then share one
+  registry entry instead of carrying forty copies of its key, and the registry already holds the
+  segments needed to fetch it.
 - The placeholder is an ordinary `MakeCell` with `ValueKind::ExternRef = 5` and the `externals`
-  index in `sourceAt`. It has an operation behind it, so it is **not** ephemeral: R8's refusal and
-  `refusedOps_` keep their meaning.
+  index **in `value`, not `sourceAt`** — the same correction §5.4 took, for the same reason: the
+  fold already copies `valueKind` and `value` into `CellSlot`, so it does not move. It has an
+  operation behind it, so it is **not** ephemeral: R8's refusal and `refusedOps_` keep their
+  meaning.
 - A link to a foreign cell is an ordinary `SetLink` whose `to` is the placeholder. **The 64-byte
   node is untouched and no new verb is needed.**
 - The fold mints the placeholder like any cell — `spanCount == 0`, no value — and counts it in a new
@@ -260,6 +346,15 @@ the scroll registry already has.
   64-byte appends, 1,024 per piece.
 
 This is `Manifold::externalCells` built, and the bridge's federated link source made concrete.
+**Plan: [`structure-hyperop/5.6-extern-refs.md`](structure-hyperop/5.6-extern-refs.md)**, which also
+drops the floated `SetExternLink` verb as unnecessary — the link is local; only its target stands
+for something remote — and states the cost the bullets above understate: **resolution is not a
+lookup.** Turning a placeholder into a foreign cell means finding the store behind a `Scroll`,
+loading it (possibly over BitTorrent), knowing its `sealedAs`, calling `localiseOpRef()` for an
+index, and then *folding a manifold on it*, because an index is not a cell. That needs a
+foreign-store cache nothing in the tree has, and it splits a placeholder's status three ways —
+resolved, not fetched yet, permanently absent — where a spinner and a dead link must not look alike.
+The fold itself resolves nothing: it is `noexcept` and allocation-free, and resolution is I/O.
 
 ### 5.7 Cross-store ranks: the anthology
 
@@ -268,6 +363,21 @@ threads through cells in several documents. A syllabus, a compilation, an issue 
 a structure map — not a copy, not a list of addresses in prose. The docuverse as one address space
 where a compilation quotes rather than reproduces is the anthology argument of *Literary Machines*.
 Distinct from `d.stores` in `multi_store.hpp`, whose cells represent stores, not cells inside them.
+**Plan: [`structure-hyperop/5.7-anthology-ranks.md`](structure-hyperop/5.7-anthology-ranks.md)** —
+thin by design, since §5.6 was built to carry it, and `walkRank` needs no change because a
+placeholder is an ordinary local cell.
+
+Two decisions the section leaves open, and one question it can close. The `d.stores` distinction is
+sharper than "cells represent stores": `importManifold()` **copies** every cell, dimension, link and
+span into a composite arena, so `d.stores` *reproduces* where an anthology *quotes* — the tree
+currently has only the reproducing half. **Ruling taken: an anthology pins a state and does not
+track a moving one.** `ExternOpRef` names a specific microversion, and tracking "whatever Alice's
+current edition is" would make a document's content change because someone else edited theirs,
+breaking the property that a document is what its own EDL says. The price is that an anthology goes
+stale and refreshing it is an authorial act — a `SetLink` with an author and a diff, which is the
+same answer transclusion already gives for content. And **U1 does not bite here**: an anthology is
+tens of members walked from a cursor, not a scrollbar over five thousand cells, which is the
+condition U1's own experiment names for the concession holding.
 
 ### 5.8 Quoted ranks: transclusion of a shape
 
@@ -367,12 +477,12 @@ nothing in the tree has yet.
   (source, at, length, kind width, extension record, spans)    │
                                                                │
 5.2 d.hist            zero ops, read API                       │
-5.3 pouch on Arena    zero ops until drop                       │
                                                                │
 5.4 operation handles ── 5.5 editions rank (tables v4)         │
         │                                                      │
         └── 5.6 extern refs (externals table + placeholder) ◄──┘
                   │
+                  ├── 5.3 pouch items as cells (refiled here)
                   ├── 5.7 anthology ranks
                   ├── 5.8 quoted ranks ── 5.9 vocabularies
                   └── 5.10 overlays (needs a fold mode)
@@ -380,6 +490,41 @@ nothing in the tree has yet.
 
 ## Appendix: Change History
 
+Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per §5 subsection,
+written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
+this note the plan is right and this note is corrected to match.
+
+- **2.6** — Plan for 5.7 written; thin, as expected, since §5.6 carries the mechanism. Adds a ruling
+  (an anthology pins a state, never tracks a moving one, because tracking would let someone else's
+  edits change your document), sharpens the `d.stores` distinction to copying versus quoting, and
+  closes U1 for anthology-scale ranks. Notes in passing that U1's experiment text points at
+  `assets/zigzag/`, which no longer exists.
+- **2.5** — Plan for 5.6 written. R4 turns out to have ratified the side table and its price
+  already, so the ruling stands. Two corrections: the table holds a *local*
+  `ExternOpRef{ScrollId, produces}` rather than a scroll-key string, mirroring `PrimediaSpan`
+  against `GlobalSpan`; and the index goes in `value`, as in 5.4. The floated `SetExternLink` verb
+  is dropped as unnecessary. The section's real cost is named: resolution requires loading *and
+  folding* the foreign document, so phase 3 is a subsystem and should be scoped separately from the
+  persistent model in phases 1–2.
+- **2.4** — Plan for 5.5 written. The section stands: `currentVersions` is an array so the author
+  can designate a current version per edition, aliases name them, and system stores take one by
+  concession. The **code** has drifted — `syncCurrentVersions()` derives the designations from open
+  windows on every save, silently redesignating a document whenever someone opens a third state to
+  compare. An earlier draft of the plan read that drift as the design and proposed collapsing the
+  array to one; that was wrong, is recorded in the plan, and would have destroyed the edition model.
+  The migration to cells stands because an edition needs an identity the two tables cannot give it.
+- **2.3** — Plan for 5.4 written. Its encoding corrected: the handle's target belongs in `value`,
+  marked by `ValueKind::OpHandle`, not in the idle `sourceAt` — the fold already carries both halves
+  into `CellSlot`, so the fold does not move. This widens §5.1's V4 record by one conditional field,
+  without which a published handle silently names a different operation.
+- **2.2** — 5.3 reviewed and **withdrawn as written**: its cell-drop path is already built, its
+  "hand-rolled arena" is one drag payload, and nothing is written during a drag, so the arena buys
+  none of the three things claimed. Refiled after 5.6 as "pouch items as cells", the pouch having no
+  persistent item model and holding a bare cross-store `CellRef` R4 forbids. Build order updated.
+- **2.1** — Plans for 5.1 and 5.2 written, and this note corrected against them. §3: the wire kind
+  field is not full (V3 already widened it) and `storeToLinkPackage` is a different format, so both
+  leave the V4 bump; the extension record is deferred with its reasoning. §5.2: `byRef` does not
+  hold the chain, the walk needs a `Store`, and a past *state* needs a replay rather than a lookup.
 - **2.0** — Full rewrite after a grounded tripartite pass. Removed every proposal that was already
   built or already refused; added the §3 defect and its verification; replaced the flat idea list
   with a prerequisite chain; recorded the two rulings taken in 5.4 and 5.6.

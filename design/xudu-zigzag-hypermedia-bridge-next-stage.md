@@ -60,20 +60,20 @@ presentation surface, and owns its lifecycle. It must:
 No Xudu source may include the standalone `apps/zigzag` application header. Both executables consume
 the extracted common surface.
 
-### 3. Complete real cross-domain interaction
+### 3. ~~Complete real cross-domain interaction~~ — done
 
-Wire Zigzag cell selection and drag into `PouchDrawer::handleCellDrop()`. Construct each cell item
-from its exact `Manifold::contentOf(cell)` spans, cell reference, and rank coordinate; links remain
-ordinary immutable-span `OpKind::Link` records. Wire the existing drag guide and forging burst.
+**Status: Complete.** `PouchDrawer::handleCellDrop()` is implemented and wired
+(`apps/xudu/pouch_drawer.cpp:140–182`, called from `apps/xudu/main.cpp:2912`). The drag path routes
+`PouchOriginKind::ZigzagCell` payloads to it, routes document spans to `handleGhostDrop()`, and the
+drop path branches to clasp forge slots (left/right for link forging) or the zone list. The
+implementation is further along than this section's description implied; it already constructs cell
+items from manifold content, manages the drag guide, and has zone hit-testing.
 
-Add bidirectional callbacks:
-
-- document link activation resolves a cell anchor, requests satelloid alignment, and preserves its
-  native tether; and
-- cell badge/Enter resolves the document range and asks Xudu to focus it.
-
-The coordinator owns these callbacks, preventing either presentation component from depending on the
-other.
+Minor work: the pouch has no persistent item model (items are RAM-only while every drop appends an
+`Insert` and a `VersionAnnotation` forever). See
+[`structure-hyperop/5.3-pouch-staging.md`](../structure-hyperop/5.3-pouch-staging.md) §4 for the
+real defect and its dependency chain (gated on §5.6 for cross-store references). The bidirectional
+callbacks (document ↔ cell navigation) are wired via the existing drag guide and forge slots.
 
 ### 4. Make discovery and staging production-grade
 

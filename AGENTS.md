@@ -387,6 +387,14 @@ Zero Cairo, zero Pango: FreeType 2, HarfBuzz, libunibreak (UAX #14), FriBidi, Fo
   the PNGs it writes (flat baselines, correct cluster height, sharp glyphs). Reading a captured
   frame is inspection; opening a live window is not.
 
+## ZigZag cell representation: text and mixed media
+
+Text that would require parsing or mixed-media cells are better represented by additional cells and
+dimensions rather than crammed into a cell's content span. A cell's span is its canonical text; new
+dimensions (`d.parsed`, `d.media`, `d.roles`, etc.) let structure live in the model rather than in
+prose. This keeps ZigZag cells orthogonal, keeps them quotable, and avoids the grammar-lock that
+arises when meaning is hidden in paragraph structure or embedded markup.
+
 ## Sovereign keymap and Vortex governance
 
 - Every key binding in `xudu`, `zigzag` and `xuzz` is defined in `system://keymap`, never hardcoded;
