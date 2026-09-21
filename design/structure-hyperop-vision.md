@@ -175,7 +175,7 @@ ranking; the Nelsonian weight is stated where it differs.
 
 ### 5.1 `CompactBinaryV4`
 
-§3. Prerequisite for 5.6–5.10 and for shipping slice publication at all. No new operations. **Plan:
+§3. Prerequisite for 5.6–5.12 and for shipping slice publication at all. No new operations. **Plan:
 [`structure-hyperop/5.1-compact-binary-v4.md`](structure-hyperop/5.1-compact-binary-v4.md)** — three
 fields appended to the `BinStructure` record (`source` always; `at` and `length` when the verb is
 `Splice`, keyed off the verb the reader has already decoded), version 3 refused by number, and no
@@ -308,7 +308,7 @@ bootstrapping reason as `scrolls`.
 
 ### 5.6 Persistent references to cells in other stores
 
-The one design that serves 5.7–5.10, and the point where the Purist and the Realist disagreed. The
+The one design that serves 5.7–5.11, and the point where the Purist and the Realist disagreed. The
 Purist wanted the foreign reference in the node's idle bytes with no side table, on the ground that
 a side table is "an authorial act filed where hypertime cannot name it." The Realist's objection is
 mechanical and decisive: reader-side indices after `historyFromSeal()` are deterministic for a given
@@ -454,30 +454,18 @@ published as a store and adopted by quoting its `d.dims` rank. Arguments across 
 comparable because they share a vocabulary with an author, a version and a citation, instead of each
 author minting private dimension names. `LinkType::Disagreement` is already Nelson's example; this
 makes disagreement a publishable frame. Deferred behind 5.8 by dependency, not by weight — and
-**promoted by §5.10.1 from a nicety to a prerequisite**: binding a dimension across federated
+**promoted by §5.10 from a nicety to a prerequisite**: binding a dimension across federated
 manifolds has to bind a *set*, one dimension cell per document, and a published vocabulary is what
-makes that set an address rather than a string match.
+makes that set an address rather than a string match. **Plan:
+[`structure-hyperop/5.9-published-vocabularies.md`](structure-hyperop/5.9-published-vocabularies.md)**
+— it separates adopting the catalogue from filing a term for local use, and separates the term's
+stable identity from the release operation that pins the vocabulary state.
 
-### 5.10 Plural structure maps: overlays
-
-**Appended in the overlay author's own store. Wire: V4.** Another author publishes Structure
-operations *over your document's cells* — an outline, an argument map, a translator's alignment —
-addressed through 5.6, folded in as an overlay at a `ProminenceTier`, never touching your spool. The
-one-writer rule holds because an overlay is a separate store folded beside yours, never a second
-writer to `ops.nodes`. An overlay is sparse by nature (an outline over ten thousand cells touches
-dozens), so it holds boundary references, not a shadow of the base, and it records which sealed
-state of the base it was written against so renumbering is a non-issue.
-
-"THE AUTHOR'S LINKS ARE NO DIFFERENT FROM ANYONE ELSE'S" is quoted in `ops.hpp`; a structure map is
-a link set and deserves the same pluralism, or the reader is back in a walled document. Last in the
-order only because it needs an overlay *fold mode* — composing two manifolds at a tier — which
-nothing in the tree has yet.
-
-#### 5.10.1 Arena federation: the composition substrate
+### 5.10 Arena federation: the composition substrate
 
 **Plan:
-[`structure-hyperop/5.10.1-arena-federation.md`](structure-hyperop/5.10.1-arena-federation.md).**
-The fold mode above, specified — and owed earlier than §5.10, because composing manifolds is what a
+[`structure-hyperop/5.10-arena-federation.md`](structure-hyperop/5.10-arena-federation.md).** The
+composition substrate §5.11 needs — and owed before it, because composing manifolds is what a
 docuverse does at rest and the tree currently renders a space of slices by photocopying it.
 `MultiStoreCoordinator::addStore()` copies every cell of every store into one arena and **discards
 their identity** on the way, so a cell in a composite arena cannot be linked to, cited or promoted
@@ -497,9 +485,43 @@ query can both perform.
 rather than a translation. Federation is the ephemeral tissue, §5.6 is the same cell made durable,
 §5.8 is the authored statement that part of the tissue is yours, and `promote()` is the road between
 them, which it already was. Federation says only *how* two manifolds are read together; which author
-wins where they disagree stays §5.10's ruling.
+wins where they disagree stays §5.11's ruling.
 
-### 5.11 The store's tables as cells
+### 5.11 Plural structure maps: overlays
+
+**Appended in the overlay author's own store. Wire: V4.** Another author publishes Structure
+operations *over your document's cells* — an outline, an argument map, a translator's alignment —
+addressed through 5.6, composed through 5.10 at a `ProminenceTier`, never touching your spool. The
+one-writer rule holds because an overlay is a separate store folded beside yours, never a second
+writer to `ops.nodes`. An overlay is sparse by nature (an outline over ten thousand cells touches
+dozens), so it holds boundary references, not a shadow of the base, and records the exact document
+states it was written against. **Plan:
+[`structure-hyperop/5.11-plural-structure-maps.md`](structure-hyperop/5.11-plural-structure-maps.md).**
+
+**Corrected by the plan: federation is the prerequisite, not a subsection.** It moves from 5.10.1 to
+5.10, this section becomes 5.11, and tables-as-cells becomes 5.12. Federation preserves identity
+across stores; it does not decide which of several claims occupies one directional slot.
+
+An overlay claim is a `SetLink` over a §5.6 boundary placeholder, named by a §5.4 operation handle
+on `d.overlay-claims`. Naming the act preserves its authored subject and an explicit break after the
+manifold fold would erase both. Target snapshots are `GlobalDocumentState{scroll, version}` values,
+not cell references, and a multi-document alignment may declare more than one on
+`d.overlay-targets`.
+
+Composition keeps every candidate with its provenance while materialising one effective view for
+existing rank walkers. Intrinsic target links occupy both reciprocal slots first; overlay claims are
+then considered by reader-assigned `ProminenceTier`, discovery score and stable identity. A claim is
+accepted only when both slots are free, so network arrival order cannot create an asymmetric rank.
+An explicit break suppresses only lower overlay claims, never the target author's own structure. The
+overlay author cannot self-assign `Author`: prominence comes from the verified target publisher and
+the reader's curator/blessing graph.
+
+"THE AUTHOR'S LINKS ARE NO DIFFERENT FROM ANYONE ELSE'S" is quoted in `ops.hpp`; a structure map is
+a link set and deserves the same pluralism, or the reader is back in a walled document. Pinning is
+inherited from 5.7–5.9: applying a map to a newer target is an authored rebase and a new overlay
+release, not a resolver convenience.
+
+### 5.12 The store's tables as cells
 
 **No new verb; consolidation. Wire: V4.** `store.tables` holds five sections in a bencode container
 beside `ops.nodes`, and AGENTS says the thing that matters about all five: **"None has a hypertime
@@ -511,7 +533,7 @@ FROM ANYONE ELSE'S IN IMPLEMENTATION", for the author's own links.
 Four of the five move, as ordinary `MakeCell`s plus links: annotations onto §5.4 handles, current
 versions onto §5.5's editions rank, scrolls onto a `d.scrolls` rank, and links as cells whose two
 endpoints are cells — at which point **another author's link set over your document is just their
-cells over your cells**, which is what §5.10 wants and cannot express while a link is a row of
+cells over your cells**, which is what §5.11 wants and cannot express while a link is a row of
 bencode. `localSegments` stays, and the line it draws is the ruling: **an operation records what the
 document is, never where this copy of it happens to live.**
 
@@ -525,7 +547,7 @@ It also makes three stated invariants true: "one writer" (today `Store::save()` 
 `writeStoreTables()` as well as `writeSegmentFile()`), append-only-ness (the tables are rewritten
 whole on every save), and one publication stream. **Wanted before §5.6 is built**, because §5.6's
 `externals` table is one this removes. **Plan:
-[`structure-hyperop/5.11-tables-as-cells.md`](structure-hyperop/5.11-tables-as-cells.md).**
+[`structure-hyperop/5.12-tables-as-cells.md`](structure-hyperop/5.12-tables-as-cells.md).**
 
 ### Ordinary, needing no new mechanism
 
@@ -543,9 +565,11 @@ whole on every save), and one publication stream. **Wanted before §5.6 is built
 
 ## 6. Refused this round
 
-- **Decomposing `Link` records into cells.** Four to eight times the bytes for a structure whose
-  access pattern is point lookup by id and bulk scan by the Spanfilade. Wrong data structure; the
-  table stays, and 5.4 makes the *act* of linking addressable instead.
+- **Decomposing `Link` records into cells merely to make the act addressable.** Four to eight times
+  the bytes for a point-lookup and Spanfilade-scan structure was the wrong trade; 5.4 handles that
+  narrower need. Section 5.12 reopens the ruling for a different reason — a cross-author link set
+  needs hypertime identity before it can participate in 5.11's overlay model — and pays the fold
+  cost explicitly.
 - **A persisted `Manifold` checkpoint.** The fold is estimated at 4–10 million operations per second
   (from its component costs; §7), so a 60,000-operation slice folds in tens of milliseconds. A
   checkpoint is a derived artefact that can disagree with the spool — exactly what
@@ -563,15 +587,17 @@ whole on every save), and one publication stream. **Wanted before §5.6 is built
 
 - **No fold-rate measurement exists.** `tests/xudu/manifold_test.cpp` times a hop (R12 §12.5:
   9.9–11.3 ns per CSR hop), never a fold. The figures in §6 are estimates from `applyStructure`'s
-  component operations and should be replaced by a benchmark before 5.7–5.10 add foreign cells.
+  component operations and should be replaced by a benchmark before 5.7–5.11 add foreign cells.
 - **`compact()` is the scaling risk, not the fold.** `linkFor()` triggers it when
   `links.size() > 2 * liveLinks + compactionSlack`, and it is linear in all links, so a build
   pattern that alternates relocation and compaction on a large manifold is quadratic. Benchmark it.
 - **U1 is unchanged.** Nothing here needs random access along a rank; 5.8 keys overrides by
   `GlobalOpRef` specifically to stay out of it.
-- **The overlay fold mode** 5.10 needs is unspecified.
+- **Overlay arbitration is specified and unmeasured.** Section 5.11's two-slot selection prevents
+  asymmetric ranks, but its claim-index and composition costs need measurements before production
+  discovery is enabled.
 - **Multi-author structure over one document within one store** was not resolved: the one-writer
-  rule on `ops.nodes` makes it an overlay (5.10) or nothing, and whether that is the right answer
+  rule on `ops.nodes` makes it an overlay (5.11) or nothing, and whether that is the right answer
   for live collaboration is a question for the collaboration design, not this note.
 
 ## 8. The chain, in one picture
@@ -588,13 +614,15 @@ whole on every save), and one publication stream. **Wanted before §5.6 is built
                   │
                   ├── 5.3 pouch items as cells (refiled here)
                   ├── 5.7 anthology ranks
-                  ├── 5.8 quoted structure ── 5.9 vocabularies ◄──┐
-                  └── 5.10 overlays                               │
-                             │                                    │
-5.10.1 arena federation ─────┴── the fold mode 5.10 needs ────────┘
-  (no dependencies; unblocks the three above and stops VQL copying)
+                  ├── 5.8 quoted structure ── 5.9 vocabularies ──┐
+                  └──────────────────────────────────────────────┤
+                                                                 │
+5.10 arena federation (no dependencies; stops VQL copying) ──────┤
+  (also enables resolved 5.7/5.8 tissue)                          │
+                                                                 │
+5.11 overlays (claims + prominence + arbitration) ◄──────────────┘
 
-5.11 tables as cells ── decide before 5.6 is built; removes its externals table
+5.12 tables as cells ── decide before 5.6 is built; removes its externals table
   (needs 5.4 + 5.5; gives links, annotations and scrolls a hypertime name)
 ```
 
@@ -604,64 +632,82 @@ Implementation plans live in [`structure-hyperop/`](structure-hyperop/), one per
 written in build order. Each is grounded in a fresh reading of the code, so where a plan contradicts
 this note the plan is right and this note is corrected to match.
 
-- **2.11** — §5.11 added and planned: **the store's tables as cells**, asked as a hypothetical and
-  kept because the answer was yes for four of the five sections. The defect is AGENTS' own four
-  words — "None has a hypertime name" — which leaves a xanalink with no author, date, branch or
-  micro-history while a `SetLink` has all four, contradicting the line `ops.hpp` quotes about the
-  author's links being no different from anyone else's. Annotations ride §5.4 handles, current
-  versions ride §5.5's editions rank, scrolls take a `d.scrolls` rank, and links become cells whose
-  endpoints are cells, which is what lets another author's link set fold over your document at all.
-  `localSegments` stays, drawing the ruling that an operation records what a document *is*, never
-  where a copy of it lives. The registry bootstraps from scroll 0 with a two-pass fold and a loud
-  refusal, and the fast lookup becomes a third replay product beside `Version` and `Manifold`.
-  Consequences elsewhere: §5.6's `externals` table becomes unnecessary — a placeholder links to a
-  scroll cell instead of indexing a row, which is §5.10.1's proxy shape on the persistent side, so
-  the two halves finally agree — and §5.6's plan is annotated to say so, since building it first
-  ships a reader, a writer and a version bump that §5.11 removes. The window argument is recorded
-  rather than argued: R11 "is void at first external publication", so this costs nothing today and a
-  migration later.
-- **2.10** — 5.10.1 rewritten around **proxy cells**, abandoning the ref encoding of 2.9 entirely. A
-  foreign cell is an ordinary arena cell carrying `ValueKind::ExternRef` and a
-  `(space, operation index)` value, linked on `d.stores` to its store's cell. `CellRef` does not
-  change and no bits are stolen, so the fifteen-document ceiling, the runtime-tunable split that
-  tried to widen it, and the ruling needed to stop an exhausted arena aliasing into another
-  document's cell all cease to exist — every one of them was a problem created by packing identity
-  into the name. Both halves were already built: `ArenaManifold`'s reads fall through to `base_`,
-  and `MultiStoreCoordinator` already mints a store cell per attachment on a `d.stores` rank VQL can
-  address. And the proxy turns out to be §5.6's placeholder un-persisted, so `promote()` becomes a
-  filing rather than a translation. Cost, stated plainly: one arena cell per *touched* foreign cell
-  and one map lookup per foreign hop, which is the one place the refused encoding was ahead and is
-  owed a measurement against R12's 4.96 ns. Recorded in §3.1 as a lesson rather than only a
-  decision: **when a design starts needing scarce-resource tricks — stolen bits, a wider scalar, a
-  ceiling, a tunable — check whether more cells and more dimensions solve it first.** The model is
-  the tool, and the tell that a problem is being solved at the wrong layer is a limit a person would
-  have to work around.
-- **2.9** — 5.10.1's ref encoding revised and its 64-bit alternative measured. The fixed four-bit
-  space field is gone: a fifteen-document ceiling on a federated view is a storage layout dictating
-  how a person may read, and OSMIC's own branch ordinals already refused that shape of limit — a
-  branch is not one letter, it spells past `z` into `aa` and is a full `uint32_t`. The split between
-  space and index is now a policy of the arena (default 21: 1,023 spaces of 2,097,151 cells), with
-  overflow refused loudly by number and no re-splitting of a live arena. Whatever the split, a view
-  addresses 2³¹ cells, which is 68 GB of slots — memory binds first, so the ceiling is out of reach
-  rather than out of existence. Widening `CellRef` to 64 bits was then tried against a real build:
-  `CompactOpNode` survives at 64 bytes (its fields are explicit fixed-width and never name
-  `CellRef`), but `DimLink` doubles and `DirectedDim` breaks both its size and alignment asserts,
-  per-cell memory rises 65% at three dimensions, and — the finding — 586 errors across 52 files are
-  four distinct problems, because `CellSlot::birthOp`, `UniversalLinkEnd::targetId` and 165
-  `static_cast<std::uint32_t>` sites are typed for the old width and there is no `-Wconversion`. The
-  compiler stops at the sizes and waves through the truncations.
-- **2.8** — Plan for 5.10.1 written: **arena federation**, the composition substrate §5.10 asks for
-  and does not specify. It is owed earlier than §5.10, because `MultiStoreCoordinator::addStore()`
-  already renders a space of slices by copying every cell of every store into one arena — and
-  discarding their identity, so a composite cell cannot be linked to, cited or promoted. The
-  mechanism is half-built (`ArenaManifold`'s reads already fall through to `base_`, which is one
-  foreign space); what is missing is a space field in the ref, and four bits are free because the
-  operation ceiling is 27 of the 31 a non-ephemeral ref has. Ephemeral by necessity per R4, with
-  `isEphemeral()` keeping its existing meaning, and `promote()` gaining one case that joins it to
-  §5.6. Promotes §5.9 to a prerequisite: a bound dimension across documents is a set, and a
-  published vocabulary is what makes that set an address rather than a string match. Also records
-  that progressive loading is per *space* for shape and per cell for content — there is no folding a
-  suffix — with the bound dimensions crossed with the view radius driving both.
+- **2.13** — Plan for plural structure maps written, and the numbering corrected to match the build
+  order: arena federation moves from 5.10.1 to 5.10, overlays become 5.11, and tables-as-cells
+  becomes 5.12. An overlay is a sparse signed store whose claims are `SetLink` operations named by
+  §5.4 handles on `d.overlay-claims`; the handle preserves the authored subject and explicit breaks
+  that a final manifold cannot. Target snapshots use a distinct
+  `GlobalDocumentState{scroll, version}` and may be plural. Composition retains every candidate and
+  materialises one effective arena view through deterministic two-slot arbitration: intrinsic target
+  structure first, then reader-assigned Author/Curated/Public claims, never network arrival order.
+  Prominence comes from verified publishers and the reader's trust graph, not a field the overlay
+  author can self-assign. Rebasing onto a newer target is a new release, never silent tracking.
+- **2.12** — Plan for 5.9 written. The mechanism remains deliberately small — a `rank` quotation of
+  `d.dims`, then a §5.6 placeholder only for each term actually used — but the plan finds two names
+  the vision had collapsed. Quoting a catalogue materialises ephemeral cells and cannot by itself
+  supply the `DimRef` a persistent `SetLink` needs; filing a term makes its placeholder a local
+  dimension and interns it by the term's `GlobalOpRef`. And the term's birth address cannot also pin
+  a later vocabulary state, so a release cell is touched last and its operation becomes the §5.8
+  selector root. Federation binds local placeholders by shared term identity, retaining explicit
+  provenance when a reader instead requests a name match. No new verb, node field or wire record.
+- **2.11** — §5.12 (then numbered §5.11) added and planned: **the store's tables as cells**, asked
+  as a hypothetical and kept because the answer was yes for four of the five sections. The defect is
+  AGENTS' own four words — "None has a hypertime name" — which leaves a xanalink with no author,
+  date, branch or micro-history while a `SetLink` has all four, contradicting the line `ops.hpp`
+  quotes about the author's links being no different from anyone else's. Annotations ride §5.4
+  handles, current versions ride §5.5's editions rank, scrolls take a `d.scrolls` rank, and links
+  become cells whose endpoints are cells, which is what lets another author's link set fold over
+  your document at all. `localSegments` stays, drawing the ruling that an operation records what a
+  document *is*, never where a copy of it lives. The registry bootstraps from scroll 0 with a
+  two-pass fold and a loud refusal, and the fast lookup becomes a third replay product beside
+  `Version` and `Manifold`. Consequences elsewhere: §5.6's `externals` table becomes unnecessary — a
+  placeholder links to a scroll cell instead of indexing a row, which is §5.10's proxy shape on the
+  persistent side, so the two halves finally agree — and §5.6's plan is annotated to say so, since
+  building it first ships a reader, a writer and a version bump that §5.12 removes. The window
+  argument is recorded rather than argued: R11 "is void at first external publication", so this
+  costs nothing today and a migration later.
+- **2.10** — The then-numbered 5.10.1, now §5.10, rewritten around **proxy cells**, abandoning the
+  ref encoding of 2.9 entirely. A foreign cell is an ordinary arena cell carrying
+  `ValueKind::ExternRef` and a `(space, operation index)` value, linked on `d.stores` to its store's
+  cell. `CellRef` does not change and no bits are stolen, so the fifteen-document ceiling, the
+  runtime-tunable split that tried to widen it, and the ruling needed to stop an exhausted arena
+  aliasing into another document's cell all cease to exist — every one of them was a problem created
+  by packing identity into the name. Both halves were already built: `ArenaManifold`'s reads fall
+  through to `base_`, and `MultiStoreCoordinator` already mints a store cell per attachment on a
+  `d.stores` rank VQL can address. And the proxy turns out to be §5.6's placeholder un-persisted, so
+  `promote()` becomes a filing rather than a translation. Cost, stated plainly: one arena cell per
+  *touched* foreign cell and one map lookup per foreign hop, which is the one place the refused
+  encoding was ahead and is owed a measurement against R12's 4.96 ns. Recorded in §3.1 as a lesson
+  rather than only a decision: **when a design starts needing scarce-resource tricks — stolen bits,
+  a wider scalar, a ceiling, a tunable — check whether more cells and more dimensions solve it
+  first.** The model is the tool, and the tell that a problem is being solved at the wrong layer is
+  a limit a person would have to work around.
+- **2.9** — The then-numbered 5.10.1's ref encoding revised and its 64-bit alternative measured. The
+  fixed four-bit space field is gone: a fifteen-document ceiling on a federated view is a storage
+  layout dictating how a person may read, and OSMIC's own branch ordinals already refused that shape
+  of limit — a branch is not one letter, it spells past `z` into `aa` and is a full `uint32_t`. The
+  split between space and index is now a policy of the arena (default 21: 1,023 spaces of 2,097,151
+  cells), with overflow refused loudly by number and no re-splitting of a live arena. Whatever the
+  split, a view addresses 2³¹ cells, which is 68 GB of slots — memory binds first, so the ceiling is
+  out of reach rather than out of existence. Widening `CellRef` to 64 bits was then tried against a
+  real build: `CompactOpNode` survives at 64 bytes (its fields are explicit fixed-width and never
+  name `CellRef`), but `DimLink` doubles and `DirectedDim` breaks both its size and alignment
+  asserts, per-cell memory rises 65% at three dimensions, and — the finding — 586 errors across 52
+  files are four distinct problems, because `CellSlot::birthOp`, `UniversalLinkEnd::targetId` and
+  165 `static_cast<std::uint32_t>` sites are typed for the old width and there is no `-Wconversion`.
+  The compiler stops at the sizes and waves through the truncations.
+- **2.8** — Plan for the then-numbered 5.10.1, now §5.10, written: **arena federation**, the
+  composition substrate overlays ask for and do not specify. It is owed before overlays because
+  `MultiStoreCoordinator::addStore()` already renders a space of slices by copying every cell of
+  every store into one arena — and discarding their identity, so a composite cell cannot be linked
+  to, cited or promoted. The mechanism is half-built (`ArenaManifold`'s reads already fall through
+  to `base_`, which is one foreign space); what is missing is a space field in the ref, and four
+  bits are free because the operation ceiling is 27 of the 31 a non-ephemeral ref has. Ephemeral by
+  necessity per R4, with `isEphemeral()` keeping its existing meaning, and `promote()` gaining one
+  case that joins it to §5.6. Promotes §5.9 to a prerequisite: a bound dimension across documents is
+  a set, and a published vocabulary is what makes that set an address rather than a string match.
+  Also records that progressive loading is per *space* for shape and per cell for content — there is
+  no folding a suffix — with the bound dimensions crossed with the view radius driving both.
 - **2.7** — Plan for 5.8 written, and two of the section's claims fail against the code. **A rank is
   the wrong unit**: a keymap is ten dimensions per setting, so rank-by-rank quoting is one quotation
   per setting per dimension and a Vortex module is not expressible at all — while the obvious fix,
