@@ -71,9 +71,10 @@ items from manifold content, manages the drag guide, and has zone hit-testing.
 
 Minor work: the pouch has no persistent item model (items are RAM-only while every drop appends an
 `Insert` and a `VersionAnnotation` forever). See
-[`structure-hyperop/5.3-pouch-staging.md`](../structure-hyperop/5.3-pouch-staging.md) §4 for the
-real defect and its dependency chain (gated on §5.6 for cross-store references). The bidirectional
-callbacks (document ↔ cell navigation) are wired via the existing drag guide and forge slots.
+[`structure-hyperop/5.8-pouch-items.md`](structure-hyperop/5.8-pouch-items.md) §4 for the real
+defect and its dependency chain (gated on §5.5 for persistent cross-store references and §5.6 to
+publish them). The bidirectional callbacks (document ↔ cell navigation) are wired via the existing
+drag guide and forge slots.
 
 ### 4. Make discovery and staging production-grade
 
