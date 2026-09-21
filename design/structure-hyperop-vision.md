@@ -126,7 +126,7 @@ currently throws rather than corrupts). Ingestion resolves every name through `i
 and asserts `refusedOps() == 0` and `equivalentTo()` the original.**
 
 Two further items were listed here in draft and did not survive the code review in
-[`structure-hyperop/5.6-compact-binary-v4.md`](structure-hyperop/5.6-compact-binary-v4.md) §2. The
+[`structure-hyperop/5.06-compact-binary-v4.md`](structure-hyperop/5.06-compact-binary-v4.md) §2. The
 wire kind field is **not** full: `CompactBinaryV3` already widened it to four bits, so
 `BinStructure = 7` is the eighth of sixteen values with eight free after it — the claim was true of
 version 2 and was carried forward stale. What *is* full is the tag byte, four kind bits plus four
@@ -176,13 +176,15 @@ source of truth.
 
 ### 5.1 `d.hist`: a cell's own past as a rank
 
-**Depends on:** the existing R7 operation chain. **Provides to 5.2 and 5.3:** a read-only history
-walk and reconstruction of a cell at an earlier operation. **Appends nothing. No wire change.**
+**Depends on:** the existing R7 operation chain and `Manifold`'s existing non-owning store
+association. **Provides to 5.2 and 5.3:** `Manifold::historyOf()`, a store-backed history walk, and
+reconstruction of a cell at an earlier operation. **Appends nothing. No wire change.**
 
 `byRef` answers which cell an operation belongs to; it does not store the chain. The chain walk
-therefore follows `sourceOpIndex` through the ops spool and needs a `Store`. Rendering an earlier
-state is a mini-replay because `Splice` is a delta. Nothing is persisted, so R8 is untouched.
-**Plan:** [`5.1-cell-history.md`](structure-hyperop/5.1-cell-history.md).
+therefore follows `sourceOpIndex` through the associated store's ops spool, starting at the folded
+slot's `lastOp`. Rendering an earlier state is a mini-replay because `Splice` is a delta. Nothing is
+persisted, so R8 is untouched. **Plan:**
+[`5.01-cell-history.md`](structure-hyperop/5.01-cell-history.md).
 
 ### 5.2 Operation handle cells
 
@@ -194,7 +196,7 @@ A handle is an ordinary `MakeCell` with `ValueKind::OpHandle`; its local target 
 `MicroversionId`, because a local op index renumbers on ingestion. Handles make edits, link-making
 acts and explicit breaks addressable without changing what `sourceOpIndex` means. Link cells are not
 minted merely for addressability here; 5.4 later mints them for hypertime identity. **Plan:**
-[`5.2-operation-handles.md`](structure-hyperop/5.2-operation-handles.md).
+[`5.02-operation-handles.md`](structure-hyperop/5.02-operation-handles.md).
 
 ### 5.3 The editions rank
 
@@ -206,7 +208,7 @@ ordinary cells, and branches may designate different heads without sharing one m
 `currentVersions` remains only as a transitional compatibility cache until 5.4 removes the table; no
 separate table-format bump lands in this step. System stores retain their one-edition policy as a
 consumer concession, not a restriction in the model. **Plan:**
-[`5.3-editions-rank.md`](structure-hyperop/5.3-editions-rank.md).
+[`5.03-editions-rank.md`](structure-hyperop/5.03-editions-rank.md).
 
 ### 5.4 The store's tables as cells
 
@@ -221,7 +223,7 @@ derived replay index and is never persisted as identity. Many references to one 
 per-scroll `d.scroll-refs` rank, because a degree-two ZigZag dimension cannot connect every
 placeholder directly to the same registry cell. Fast lookup is a replay product rather than a
 mutable source of truth. This lands before extern refs so no temporary `externals` table is built.
-**Plan:** [`5.4-tables-as-cells.md`](structure-hyperop/5.4-tables-as-cells.md).
+**Plan:** [`5.04-tables-as-cells.md`](structure-hyperop/5.04-tables-as-cells.md).
 
 ### 5.5 Persistent references to cells in other stores
 
@@ -234,7 +236,7 @@ in the 64-bit `value` field. A replay index interns `(ScrollId, MicroversionId)`
 directions. The fold records unresolved placeholders but never performs I/O; resolution above the
 fold may load and fold a foreign store. Missing bytes are `NotFetched` or `Absent`, not malformed
 operations. `GlobalDocumentState{scroll, version}` separately names a whole snapshot for pouch and
-overlay provenance. **Plan:** [`5.5-extern-refs.md`](structure-hyperop/5.5-extern-refs.md).
+overlay provenance. **Plan:** [`5.05-extern-refs.md`](structure-hyperop/5.05-extern-refs.md).
 
 ### 5.6 `CompactBinaryV4`: carry every Structure address by name
 
@@ -247,7 +249,7 @@ the `MicroversionId` of `source`, `SetLink` dimension and target, and an `OpHand
 writes `Splice`'s `at` and `length`. `OpRecord` carries wire-only names and ingestion resolves all
 of them through `indexOf()` before `putOp`. Version 3 is refused by number. The text OSMIC form
 remains a local/debug encoding, not a portable publication path. **Plan:**
-[`5.6-compact-binary-v4.md`](structure-hyperop/5.6-compact-binary-v4.md).
+[`5.06-compact-binary-v4.md`](structure-hyperop/5.06-compact-binary-v4.md).
 
 ### 5.7 Arena federation: the composition substrate
 
@@ -262,7 +264,7 @@ an ephemeral ref. `EdgeScope::Explicit` plus `permitEdge()` lets a consumer expo
 subgraph without traversal escaping into the whole foreign store. Bound dimensions record their
 provenance: explicit and `NameMatch` modes are generic here; 5.11 later supplies `SharedIdentity`
 evidence without becoming a prerequisite of federation. **Plan:**
-[`5.7-arena-federation.md`](structure-hyperop/5.7-arena-federation.md).
+[`5.07-arena-federation.md`](structure-hyperop/5.07-arena-federation.md).
 
 ### 5.8 Pouch items as cells
 
@@ -274,7 +276,7 @@ contents are RAM-only while drops emit annotations nobody reconstructs, and a dr
 stores a bare foreign index. Each item therefore becomes a cell on its zone's `d.items` rank, with
 optional `GlobalDocumentState` and `GlobalOpRef` origin descriptors. Preview text is derived;
 dismissal moves the item to `d.dismissed` rather than erasing its authorship. **Plan:**
-[`5.8-pouch-items.md`](structure-hyperop/5.8-pouch-items.md).
+[`5.08-pouch-items.md`](structure-hyperop/5.08-pouch-items.md).
 
 ### 5.9 Cross-store ranks: the anthology
 
@@ -286,7 +288,7 @@ each referenced store and uses its federation proxy; it never copies the member 
 A member pins a state. Refresh is an authored repoint whose previous value remains in history, never
 an automatic move to another author's latest state. `d.stores` remains an ephemeral federation
 workspace and is not the persistent anthology model. **Plan:**
-[`5.9-anthology-ranks.md`](structure-hyperop/5.9-anthology-ranks.md).
+[`5.09-anthology-ranks.md`](structure-hyperop/5.09-anthology-ranks.md).
 
 ### 5.10 Quoted structure: adopting somebody else's shape
 
