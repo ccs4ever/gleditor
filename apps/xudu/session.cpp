@@ -414,7 +414,7 @@ std::string Session::publishedDir(const std::size_t storeIndex) const {
 namespace {
 
 std::string authorPath(const std::string &storePath) {
-  return (std::filesystem::path(storePath) / "author.yaml").string();
+  return (std::filesystem::path(storePath) / "author.tsv").string();
 }
 
 /// Where a store's SealState lives -- what makes the next publishDocument()
@@ -452,7 +452,7 @@ void Session::setAuthor(Author aWho) {
   record.author = *who;
   std::filesystem::create_directories(path(0));
   std::ofstream out(authorPath(path(0)), std::ios::trunc);
-  out << record.toYaml();
+  out << record.toTsv();
 }
 
 const Config &Session::settings() {
@@ -468,7 +468,7 @@ Author Session::author() {
     if (std::ifstream in(authorPath(path(0))); in) {
       const std::string text{std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>()};
-      if (const auto record = Config::fromYaml(text); record) {
+      if (const auto record = Config::fromTsv(text); record) {
         who = record->author;
       }
     }
@@ -547,17 +547,20 @@ std::string Session::publishDocument(const MicroversionId &version,
         "what they published, so say who once, in " +
         configPath() +
         ":\n"
-        "  author: \"Your Name\"\n"
-        "  email: \"you@example.org\"\n"
+        "  author\\tYour Name\n"
+        "  email\\tyou@example.org\n"
         "or for this store alone with --author-name and --author-email.");
   }
 
   Provenance record;
-  record.author        = who;
-  record.salt          = request.salt;
-  record.title         = request.title;
-  record.extra         = request.extra;
-  record.publisher     = mine.publicKey.hex();
+  record.author    = who;
+  record.salt      = request.salt;
+  record.title     = request.title;
+  record.extra     = request.extra;
+  record.publisher = mine.publicKey.hex();
+  if (st.userPermascrollPtr()) {
+    record.permascroll = st.userPermascroll().globalScrollKey();
+  }
   record.version       = version.str();
   record.published     = now;
   record.contentLength = st.primedia().bytes().size();

@@ -87,7 +87,7 @@ xudu::SignedProvenance signedBy(const std::string &name) {
   xudu::Provenance record;
   record.author.name  = name;
   record.author.email = name + "@example.org";
-  return {record.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"};
+  return {record.toTsv(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"};
 }
 
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {

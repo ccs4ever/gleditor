@@ -5,11 +5,11 @@
 #include "provenance.hpp" // IWYU pragma: associated
 
 #include "windows_quoting.hpp"
-#include "yaml.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -350,7 +350,7 @@ private:
 
 } // namespace
 
-std::string Provenance::toYaml() const {
+std::string Provenance::toTsv() const {
   auto esc = [](std::string_view value) {
     std::string out;
     for (char c : value) {
@@ -376,6 +376,7 @@ std::string Provenance::toYaml() const {
   put("title", title);
   put("salt", salt);
   put("publisher", publisher);
+  put("permascroll", permascroll);
   put("version", version);
   if (published) put("published", std::to_string(published));
   put("content_length", std::to_string(contentLength));
@@ -551,9 +552,9 @@ SignedProvenance signProvenance(const Provenance &record,
   }
 
   SignedProvenance out;
-  out.yaml = record.toYaml();
+  out.tsv = record.toTsv();
 
-  const Scratch document(".tsv", out.yaml);
+  const Scratch document(".tsv", out.tsv);
   const Scratch signature(".tsv.asc", "");
 
   std::vector<std::string> argv{"gpg", "--batch", "--yes", "--armor"};
@@ -602,7 +603,7 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
     return check;
   }
 
-  const Scratch document(".tsv", signed_.yaml);
+  const Scratch document(".tsv", signed_.tsv);
   const Scratch signature(".tsv.asc", signed_.signature);
 
   // --status-fd is the machine-readable channel; the human text on stderr says
@@ -659,114 +660,101 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
 }
 
 std::optional<Provenance> parseProvenance(const std::string_view text) {
-  // Published records are deterministic TSV. Decode escapes before mapping
-  // fields; retaining the legacy YAML fallback keeps old stores readable.
-  if (text.find('\t') != std::string_view::npos) {
-    Provenance out;
-    bool sawAuthor = false;
-    auto unescape  = [](std::string value) {
-      std::string out;
-      out.reserve(value.size());
-      bool slash = false;
-      for (char c : value) {
-        if (slash) {
-          out.push_back(c == 't'   ? '\t'
-                        : c == 'n' ? '\n'
-                        : c == 'r' ? '\r'
-                                   : c);
-          slash = false;
-        } else if (c == '\\')
-          slash = true;
-        else
-          out.push_back(c);
-      }
-      if (slash) out.push_back('\\');
-      return out;
-    };
-    std::istringstream lines{std::string(text)};
-    std::string line;
-    while (std::getline(lines, line)) {
-      const auto tab = line.find('\t');
-      if (tab == std::string::npos) continue;
-      const auto key   = line.substr(0, tab);
-      const auto value = unescape(line.substr(tab + 1));
-      if (key == "author") {
-        out.author.name = value;
-        sawAuthor       = true;
-      } else if (key == "email")
-        out.author.email = value;
-      else if (key == "gpg_key")
-        out.author.gpgKey = value;
-      else if (key == "title")
-        out.title = value;
-      else if (key == "salt")
-        out.salt = value;
-      else if (key == "publisher")
-        out.publisher = value;
-      else if (key == "version")
-        out.version = value;
-      else if (key == "published")
-        out.published = std::strtoull(value.c_str(), nullptr, 10);
-      else if (key == "content_length")
-        out.contentLength = std::strtoull(value.c_str(), nullptr, 10);
-      else if (key == "content_sha256")
-        out.contentDigest = value;
-      else if (key == "ops_length")
-        out.opsLength = std::strtoull(value.c_str(), nullptr, 10);
-      else if (key == "ops_sha256")
-        out.opsDigest = value;
-      else if (key == "quotes")
-        out.quotes.push_back(value);
-      else
-        out.extra.emplace_back(key, value);
-    }
-    if (sawAuthor) return out;
-  }
-  const auto entries = yaml::read(text);
-  if (!entries) {
-    return std::nullopt;
-  }
-
   Provenance out;
   bool sawAuthor = false;
-  for (const auto &[key, value, listItem] : *entries) {
-    if (listItem) {
-      if ("quotes" == key) {
-        out.quotes.push_back(value);
+  auto unescape =
+      [](const std::string_view escaped) -> std::optional<std::string> {
+    std::string value;
+    value.reserve(escaped.size());
+    for (std::size_t i = 0; i < escaped.size(); ++i) {
+      if ('\\' != escaped[i]) {
+        value.push_back(escaped[i]);
+        continue;
       }
+      if (++i == escaped.size()) {
+        return std::nullopt;
+      }
+      switch (escaped[i]) {
+      case 't':
+        value.push_back('\t');
+        break;
+      case 'n':
+        value.push_back('\n');
+        break;
+      case 'r':
+        value.push_back('\r');
+        break;
+      case '\\':
+        value.push_back('\\');
+        break;
+      default:
+        return std::nullopt;
+      }
+    }
+    return value;
+  };
+  auto number = [](const std::string_view value, std::uint64_t &into) -> bool {
+    const auto [end, error] =
+        std::from_chars(value.data(), value.data() + value.size(), into);
+    return std::errc{} == error && end == value.data() + value.size();
+  };
+
+  std::istringstream lines{std::string{text}};
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.empty()) {
       continue;
     }
+    const auto tab = line.find('\t');
+    if (std::string::npos == tab || 0 == tab) {
+      return std::nullopt;
+    }
+    const auto key   = std::string_view{line}.substr(0, tab);
+    const auto value = unescape(std::string_view{line}.substr(tab + 1));
+    if (!value) {
+      return std::nullopt;
+    }
     if ("author" == key) {
-      out.author.name = value;
+      out.author.name = *value;
       sawAuthor       = true;
     } else if ("email" == key) {
-      out.author.email = value;
+      out.author.email = *value;
     } else if ("gpg_key" == key) {
-      out.author.gpgKey = value;
+      out.author.gpgKey = *value;
     } else if ("title" == key) {
-      out.title = value;
+      out.title = *value;
     } else if ("salt" == key) {
-      out.salt = value;
+      out.salt = *value;
     } else if ("publisher" == key) {
-      out.publisher = value;
+      out.publisher = *value;
+    } else if ("permascroll" == key) {
+      out.permascroll = *value;
     } else if ("version" == key) {
-      out.version = value;
+      out.version = *value;
     } else if ("published" == key) {
-      out.published = std::strtoull(value.c_str(), nullptr, 10);
+      if (!number(*value, out.published)) {
+        return std::nullopt;
+      }
     } else if ("content_length" == key) {
-      out.contentLength = std::strtoull(value.c_str(), nullptr, 10);
+      if (!number(*value, out.contentLength)) {
+        return std::nullopt;
+      }
     } else if ("content_sha256" == key) {
-      out.contentDigest = value;
+      out.contentDigest = *value;
     } else if ("ops_length" == key) {
-      out.opsLength = std::strtoull(value.c_str(), nullptr, 10);
+      if (!number(*value, out.opsLength)) {
+        return std::nullopt;
+      }
     } else if ("ops_sha256" == key) {
-      out.opsDigest = value;
-    } else if ("quotes" != key) {
+      out.opsDigest = *value;
+    } else if ("quotes" == key) {
+      out.quotes.push_back(*value);
+    } else {
       // Anything this version does not know about is kept rather than
       // dropped: a record written by a later one still says what it said, and
       // a reader that quietly discarded half of it would be showing somebody
       // a claim that is not the claim that was signed.
-      out.extra.emplace_back(key, value);
+      out.extra.emplace_back(key, *value);
     }
   }
   if (!sawAuthor) {
@@ -777,7 +765,7 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
 
 void AuthorCatalog::recordWork(std::string infoHash,
                                const SignedProvenance &signedProv) {
-  const auto prov = parseProvenance(signedProv.yaml);
+  const auto prov = parseProvenance(signedProv.tsv);
   if (!prov) {
     return;
   }

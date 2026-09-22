@@ -11,19 +11,19 @@
 #include <stdexcept>
 #include <utility>
 
+#include "common/tsv.hpp"
 #include "identity/pgp_verify.hpp"
 #include "publication.hpp"
-#include "yaml.hpp"
 
 namespace xanadu {
 
 namespace {
 
-inline constexpr std::string_view kYamlMasterFingerprint = "master_fingerprint";
-inline constexpr std::string_view kYamlDevicePublicKey   = "device_public_key";
-inline constexpr std::string_view kYamlDeviceName        = "device_name";
-inline constexpr std::string_view kYamlIssuedTimestamp   = "issued_timestamp";
-inline constexpr std::string_view kYamlGpgSignature      = "gpg_signature";
+inline constexpr std::string_view kMasterFingerprint = "master_fingerprint";
+inline constexpr std::string_view kDevicePublicKey   = "device_public_key";
+inline constexpr std::string_view kDeviceName        = "device_name";
+inline constexpr std::string_view kIssuedTimestamp   = "issued_timestamp";
+inline constexpr std::string_view kGpgSignature      = "gpg_signature";
 
 std::filesystem::path resolveDefaultStorageDir(std::string_view subDir) {
   const char *xdgData = std::getenv("XDG_DATA_HOME");
@@ -80,42 +80,42 @@ bool DeviceDelegation::verify(
                                        gpgSignatureArmored);
 }
 
-std::string DeviceDelegation::toYaml() const {
+std::string DeviceDelegation::toTsv() const {
   std::string out;
-  yaml::write(out, kYamlMasterFingerprint, masterFingerprint.toString());
-  yaml::write(out, kYamlDevicePublicKey, devicePublicKey.hex());
-  yaml::write(out, kYamlDeviceName, deviceName);
-  yaml::write(out, kYamlIssuedTimestamp, std::to_string(issuedTimestamp));
-  yaml::write(out, kYamlGpgSignature, gpgSignatureArmored);
+  common::tsv::write(out, kMasterFingerprint, masterFingerprint.toString());
+  common::tsv::write(out, kDevicePublicKey, devicePublicKey.hex());
+  common::tsv::write(out, kDeviceName, deviceName);
+  common::tsv::write(out, kIssuedTimestamp, std::to_string(issuedTimestamp));
+  common::tsv::write(out, kGpgSignature, gpgSignatureArmored);
   return out;
 }
 
 std::optional<DeviceDelegation>
-DeviceDelegation::fromYaml(const std::string_view yamlText) {
-  const auto entries = yaml::read(yamlText);
+DeviceDelegation::fromTsv(const std::string_view tsv) {
+  const auto entries = common::tsv::read(tsv);
   if (!entries) {
     return std::nullopt;
   }
 
   DeviceDelegation cert;
   for (const auto &entry : *entries) {
-    if (entry.key == kYamlMasterFingerprint) {
+    if (entry.key == kMasterFingerprint) {
       const auto fp = identity::Fingerprint::fromString(entry.value);
       if (!fp) {
         return std::nullopt;
       }
       cert.masterFingerprint = *fp;
-    } else if (entry.key == kYamlDevicePublicKey) {
+    } else if (entry.key == kDevicePublicKey) {
       cert.devicePublicKey = PublicKey::fromHex(entry.value);
-    } else if (entry.key == kYamlDeviceName) {
+    } else if (entry.key == kDeviceName) {
       cert.deviceName = entry.value;
-    } else if (entry.key == kYamlIssuedTimestamp) {
+    } else if (entry.key == kIssuedTimestamp) {
       try {
         cert.issuedTimestamp = std::stoull(entry.value);
       } catch (...) {
         return std::nullopt;
       }
-    } else if (entry.key == kYamlGpgSignature) {
+    } else if (entry.key == kGpgSignature) {
       cert.gpgSignatureArmored = entry.value;
     }
   }
@@ -275,9 +275,9 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
   std::vector<TorrentContent> files;
   files.push_back(
       TorrentContent{.path = sealedContentName, .data = wirePayload});
-  if (!provenance.yaml.empty()) {
+  if (!provenance.tsv.empty()) {
     files.push_back(
-        TorrentContent{.path = provenanceFileName, .data = provenance.yaml});
+        TorrentContent{.path = provenanceFileName, .data = provenance.tsv});
   }
   if (!provenance.signature.empty()) {
     files.push_back(TorrentContent{.path = provenanceSigName,

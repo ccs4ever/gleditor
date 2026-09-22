@@ -51,6 +51,7 @@ Provenance sample() {
   record.title         = "Notes: on the Analytical Engine";
   record.salt          = "notes";
   record.publisher     = std::string(64, 'a');
+  record.permascroll   = "btpk:" + std::string(64, 'a') + ":permascroll";
   record.version       = "2a4";
   record.published     = 1700000000;
   record.contentLength = 4096;
@@ -122,25 +123,26 @@ private:
 
 // The record is deterministic TSV so it can be signed and compared bytewise.
 TEST(ProvenanceTest, theRecordExplainsItselfAndNamesTheAuthor) {
-  const auto yaml = sample().toYaml();
-  EXPECT_TRUE(yaml.contains("author\tAda Lovelace\n"));
-  EXPECT_TRUE(yaml.contains("email\tada@example.org\n"));
+  const auto tsv = sample().toTsv();
+  EXPECT_TRUE(tsv.contains("author\tAda Lovelace\n"));
+  EXPECT_TRUE(tsv.contains("email\tada@example.org\n"));
   // And what it covers, so a reader with the bytes can tell whether the record
   // is about what arrived with it.
-  EXPECT_TRUE(yaml.contains("content_length\t4096\n"));
-  EXPECT_TRUE(yaml.contains("content_sha256\t"));
+  EXPECT_TRUE(tsv.contains("content_length\t4096\n"));
+  EXPECT_TRUE(tsv.contains("content_sha256\t"));
 }
 
 TEST(ProvenanceTest, everyFieldComesBackOutAgain) {
   const auto record = sample();
-  const auto read   = xudu::parseProvenance(record.toYaml());
+  const auto read   = xudu::parseProvenance(record.toTsv());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author, record.author);
-  // A title with a colon in it is ordinary and would end a plain YAML scalar
-  // in the wrong place, which is why every value is quoted.
+  // A title with a colon in it is ordinary and has no structural meaning in
+  // TSV.
   EXPECT_EQ(read->title, record.title);
   EXPECT_EQ(read->salt, record.salt);
   EXPECT_EQ(read->publisher, record.publisher);
+  EXPECT_EQ(read->permascroll, record.permascroll);
   EXPECT_EQ(read->version, record.version);
   EXPECT_EQ(read->published, record.published);
   EXPECT_EQ(read->contentLength, record.contentLength);
@@ -152,16 +154,16 @@ TEST(ProvenanceTest, aNameWithQuotesAndNewlinesInItSurvives) {
   Provenance record   = sample();
   record.author.name  = "A \"quoted\" name\nwith a line break";
   record.author.email = "odd@example.org";
-  const auto read     = xudu::parseProvenance(record.toYaml());
+  const auto read     = xudu::parseProvenance(record.toTsv());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author.name, record.author.name);
 }
 
 TEST(ProvenanceTest, textThatIsNotARecordIsNotReadAsOne) {
   EXPECT_FALSE(xudu::parseProvenance("").has_value());
-  EXPECT_FALSE(xudu::parseProvenance("# only a comment\n").has_value());
+  EXPECT_FALSE(xudu::parseProvenance("# not TSV\n").has_value());
   // A record with no author names nobody, whatever else it says.
-  EXPECT_FALSE(xudu::parseProvenance("title: \"Something\"\n").has_value());
+  EXPECT_FALSE(xudu::parseProvenance("title\tSomething\n").has_value());
 }
 
 TEST(ProvenanceTest, signingRefusesForAnAuthorWithNoNameOrEmail) {
@@ -186,7 +188,7 @@ TEST(ProvenanceTest, gpgSignsTheRecordAndAcceptsItAgain) {
 
   const auto record  = signable();
   const auto signed_ = xudu::signProvenance(record);
-  EXPECT_EQ(signed_.yaml, record.toYaml());
+  EXPECT_EQ(signed_.tsv, record.toTsv());
   EXPECT_TRUE(signed_.signature.starts_with("-----BEGIN PGP SIGNATURE-----"));
 
   const auto check = xudu::verifyProvenance(signed_);
@@ -209,8 +211,8 @@ TEST(ProvenanceTest, anAlteredRecordDoesNotVerify) {
   ASSERT_TRUE(xudu::verifyProvenance(signed_).signatureValid);
 
   auto forged = signed_;
-  forged.yaml = std::string{forged.yaml}.replace(
-      forged.yaml.find("Ada Lovelace"), std::string("Ada Lovelace").size(),
+  forged.tsv  = std::string{forged.tsv}.replace(
+      forged.tsv.find("Ada Lovelace"), std::string("Ada Lovelace").size(),
       "Someone Else");
   const auto check = xudu::verifyProvenance(forged);
   EXPECT_FALSE(check.signatureValid);
@@ -267,11 +269,10 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
 
   // And the record travels with it, under the same hash.
   EXPECT_EQ(meta.files()[2].path, xudu::provenanceFileName);
-  EXPECT_EQ(meta.files()[2].length, signed_.yaml.size());
+  EXPECT_EQ(meta.files()[2].length, signed_.tsv.size());
   EXPECT_EQ(meta.files()[3].path, xudu::provenanceSigName);
   EXPECT_EQ(meta.files()[3].length, signed_.signature.size());
-  EXPECT_EQ(meta.totalLength(), bytes.size() + ops.size() +
-                                    signed_.yaml.size() +
+  EXPECT_EQ(meta.totalLength(), bytes.size() + ops.size() + signed_.tsv.size() +
                                     signed_.signature.size());
 
   // Sealing the same content with a different record is a different address:
@@ -299,8 +300,7 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
 
   const auto signed1 = xudu::signProvenance(signable());
   const auto mine    = xudu::createMutableKeys();
-  const auto first =
-      xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto firstPrimediaLength = store.primedia().bytes().size();
   const auto firstOpCount        = store.opCount();
@@ -357,8 +357,7 @@ TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
 
   const auto signed1 = xudu::signProvenance(signable());
   const auto mine    = xudu::createMutableKeys();
-  const auto first =
-      xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto signed2 = xudu::signProvenance(signable());
   const auto second =
@@ -636,7 +635,7 @@ TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
   // Half of one is no better: a record with no signature over it is a claim
   // anybody could have written.
   SignedProvenance halfway;
-  halfway.yaml = sample().toYaml();
+  halfway.tsv = sample().toTsv();
   EXPECT_THROW(static_cast<void>(
                    xudu::sealLocalSpool(store, mine, "primedia", "", halfway)),
                std::runtime_error);

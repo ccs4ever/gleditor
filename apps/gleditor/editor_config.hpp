@@ -1,6 +1,6 @@
 /**
  * @file editor_config.hpp
- * @brief Plain YAML configuration reader and schema for apps/gleditor.
+ * @brief Plain TSV configuration reader and schema for apps/gleditor.
  */
 #ifndef GLEDITOR_EDITOR_CONFIG_HPP
 #define GLEDITOR_EDITOR_CONFIG_HPP
@@ -35,9 +35,9 @@ struct EditorConfig {
   std::string userNotes;
 };
 
-[[nodiscard]] EditorConfig parseEditorConfig(std::string_view yamlText);
+[[nodiscard]] EditorConfig parseEditorConfig(std::string_view tsv);
 [[nodiscard]] EditorConfig loadEditorConfig(const std::string &path = "");
-[[nodiscard]] std::string defaultEditorConfigYaml();
+[[nodiscard]] std::string defaultEditorConfigTsv();
 
 } // namespace gleditor
 

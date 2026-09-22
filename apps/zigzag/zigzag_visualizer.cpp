@@ -541,10 +541,6 @@ bool ZigzagVisualizer::saveStore(const std::string &filePath) const {
   }
 }
 
-bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
-  return saveStore(filePath);
-}
-
 std::size_t ZigzagVisualizer::operationCount() const {
   return engine_ ? engine_->store().opCount() : 0;
 }

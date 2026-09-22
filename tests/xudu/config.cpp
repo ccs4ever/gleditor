@@ -77,18 +77,17 @@ TEST(ConfigTest, everythingSetComesBackOut) {
   config.author.gpgKey = "0xDEADBEEF";
   config.gpgHome       = "/home/ada/.gnupg-publishing";
 
-  const auto read = Config::fromYaml(config.toYaml());
+  const auto read = Config::fromTsv(config.toTsv());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author, config.author);
   EXPECT_EQ(read->gpgHome, config.gpgHome);
   EXPECT_TRUE(read->complete());
 }
 
-TEST(ConfigTest, aFileSaysWhatItIsForBeforeItSaysAnything) {
-  // The audience is somebody opening it in an editor to change their name.
-  const auto text = Config{}.toYaml();
-  EXPECT_TRUE(text.starts_with("#"));
-  EXPECT_TRUE(text.contains("publishes"));
+TEST(ConfigTest, aFileNamesItsFieldsEvenWhenTheyAreEmpty) {
+  const auto text = Config{}.toTsv();
+  EXPECT_TRUE(text.starts_with("author\t"));
+  EXPECT_TRUE(text.contains("gpg_key\t"));
 }
 
 TEST(ConfigTest, halfAnIdentityIsNotEnoughToSignWith) {
@@ -103,9 +102,9 @@ TEST(ConfigTest, halfAnIdentityIsNotEnoughToSignWith) {
 // Settings a later version knows about are left alone rather than complained
 // at: an old binary reading a new file should still find the author in it.
 TEST(ConfigTest, unknownSettingsAreIgnoredAndTheRestIsRead) {
-  const auto read = Config::fromYaml("author: \"Ada Lovelace\"\n"
-                                     "email: \"ada@example.org\"\n"
-                                     "future_setting: \"whatever\"\n");
+  const auto read = Config::fromTsv("author\tAda Lovelace\n"
+                                    "email\tada@example.org\n"
+                                    "future_setting\twhatever\n");
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author.name, "Ada Lovelace");
   EXPECT_EQ(read->author.email, "ada@example.org");
@@ -115,7 +114,7 @@ TEST(ConfigTest, somethingThatIsNotAConfigurationIsRefused) {
   // Not read as an empty configuration: the file was written by somebody who
   // meant something by it, and quietly publishing as nobody is the failure
   // this is trying to avoid.
-  EXPECT_FALSE(Config::fromYaml("this is not a configuration").has_value());
+  EXPECT_FALSE(Config::fromTsv("this is not a configuration").has_value());
 }
 
 TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
@@ -123,23 +122,23 @@ TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
   Environment::clear("XUDU_CONFIG");
 
   Environment::set("XDG_CONFIG_HOME", "/somewhere/config");
-  EXPECT_EQ(xudu::configPath(), "/somewhere/config/xudu/config.yaml");
+  EXPECT_EQ(xudu::configPath(), "/somewhere/config/xudu/config.tsv");
 
   // Without it, the fallback the specification names.
   Environment::clear("XDG_CONFIG_HOME");
   Environment::set("HOME", "/home/ada");
-  EXPECT_EQ(xudu::configPath(), "/home/ada/.config/xudu/config.yaml");
+  EXPECT_EQ(xudu::configPath(), "/home/ada/.config/xudu/config.tsv");
 
   // And a file named outright wins over both, which is what lets somebody with
   // two identities keep two.
-  Environment::set("XUDU_CONFIG", "/tmp/other.yaml");
-  EXPECT_EQ(xudu::configPath(), "/tmp/other.yaml");
+  Environment::set("XUDU_CONFIG", "/tmp/other.tsv");
+  EXPECT_EQ(xudu::configPath(), "/tmp/other.tsv");
 }
 
 TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
   const Environment environment;
   const auto path = std::filesystem::temp_directory_path() /
-                    ("xudu-config-" + std::to_string(getpid())) / "config.yaml";
+                    ("xudu-config-" + std::to_string(getpid())) / "config.tsv";
   std::filesystem::remove_all(path.parent_path());
 
   Config config;
@@ -165,7 +164,7 @@ TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
 
 TEST(ConfigTest, noFileIsAnEmptyConfigurationRatherThanAnError) {
   const auto missing = std::filesystem::temp_directory_path() /
-                       "xudu-config-that-is-not-there.yaml";
+                       "xudu-config-that-is-not-there.tsv";
   std::filesystem::remove(missing);
   const auto config = xudu::loadConfig(missing.string());
   EXPECT_FALSE(config.complete());
@@ -174,7 +173,7 @@ TEST(ConfigTest, noFileIsAnEmptyConfigurationRatherThanAnError) {
 
 TEST(ConfigTest, aFileThatCannotBeUnderstoodIsAnError) {
   const auto path = std::filesystem::temp_directory_path() /
-                    ("xudu-bad-config-" + std::to_string(getpid()) + ".yaml");
+                    ("xudu-bad-config-" + std::to_string(getpid()) + ".tsv");
   {
     std::ofstream out(path);
     out << "not a configuration at all\n";

@@ -17,7 +17,6 @@
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/mutable_link.hpp>
 #include <xudu/core/publication.hpp>
-#include <xudu/core/yaml.hpp>
 
 namespace {
 
@@ -160,7 +159,7 @@ TEST(FuzzTest, mutableLinkAndHexParsersNeverCrashOnRandomStrings) {
   }
 }
 
-TEST(FuzzTest, microversionAndYamlParsersNeverCrashOnRandomStrings) {
+TEST(FuzzTest, microversionParserNeverCrashesOnRandomStrings) {
   std::mt19937 rng(2026);
   for (int iter = 0; iter < 5000; iter++) {
     const auto str = generateRandomString(rng, 256);
@@ -171,9 +170,6 @@ TEST(FuzzTest, microversionAndYamlParsersNeverCrashOnRandomStrings) {
     } catch (const std::exception &) {
       // Graceful exception expected
     }
-
-    // 2. xudu::yaml::read
-    static_cast<void>(xudu::yaml::read(str));
   }
 }
 

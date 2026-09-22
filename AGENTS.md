@@ -242,7 +242,7 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   `Link` records, designated current versions, version annotations. None has a hypertime name.
 - `publication.hpp/.cpp` — publish/adopt, `GlobalSpan` ↔ `PrimediaSpan` (`globalise`/`localise`),
   `GlobalOpRef` ↔ op index (`opRefOf`/`localiseOpRef`), `historyFromSeal`. `provenance.hpp` — the
-  GPG-signed `AUTHORSHIP.yaml` sealed into a torrent. `merkle_ledger`, `managed_torrent`,
+  GPG-signed `AUTHORSHIP.tsv` sealed into a torrent. `merkle_ledger`, `managed_torrent`,
   `transcopyright_*`, `swarm*` — identity and swarm.
 - `zigzag/manifold.{hpp,cpp}` — **the slice model**: cells folded from Structure operations, a
   `CellRef` is an ops index, links are per-cell CSR runs keyed by a dimension *cell*, a cell's

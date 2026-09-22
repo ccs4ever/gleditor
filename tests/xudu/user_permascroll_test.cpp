@@ -111,7 +111,7 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append("First segment content.");
 
   SignedProvenance prov1;
-  prov1.yaml = "title: \"Permascroll Seg 1\"\n";
+  prov1.tsv = "title\tPermascroll Seg 1\n";
   prov1.signature =
       "-----BEGIN PGP SIGNATURE-----\ntest\n-----END PGP SIGNATURE-----\n";
 
@@ -124,7 +124,7 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append(" Second segment content.");
 
   SignedProvenance prov2;
-  prov2.yaml = "title: \"Permascroll Seg 2\"\n";
+  prov2.tsv = "title\tPermascroll Seg 2\n";
   prov2.signature =
       "-----BEGIN PGP SIGNATURE-----\ntest2\n-----END PGP SIGNATURE-----\n";
 
@@ -201,10 +201,10 @@ xudu::DeviceDelegation fixtureDelegation() {
 TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
   const auto cert = fixtureDelegation();
 
-  const auto yaml = cert.toYaml();
-  EXPECT_NE(yaml.find("thinkpad-laptop"), std::string::npos);
+  const auto tsv = cert.toTsv();
+  EXPECT_NE(tsv.find("thinkpad-laptop"), std::string::npos);
 
-  const auto decoded = xudu::DeviceDelegation::fromYaml(yaml);
+  const auto decoded = xudu::DeviceDelegation::fromTsv(tsv);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, cert);
 }
@@ -213,9 +213,9 @@ TEST(UserPermascrollTest, DeviceDelegationVerifiesAgainstItsMasterKey) {
   const auto cert = fixtureDelegation();
   EXPECT_TRUE(cert.verify(xudu::testing::kAuthorPublicKey));
 
-  // Survives a round trip through YAML, which is how it reaches another
+  // Survives a round trip through TSV, which is how it reaches another
   // machine.
-  const auto decoded = xudu::DeviceDelegation::fromYaml(cert.toYaml());
+  const auto decoded = xudu::DeviceDelegation::fromTsv(cert.toTsv());
   ASSERT_TRUE(decoded.has_value());
   EXPECT_TRUE(decoded->verify(xudu::testing::kAuthorPublicKey));
 }

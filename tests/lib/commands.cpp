@@ -168,11 +168,10 @@ TEST(CommandTableTest, rebindFromText) {
   table.bind(SDL_SCANCODE_O, Mod::Ctrl, "open-doc", "",
              [&openDocRan] { openDocRan++; });
 
-  const std::string keymapYaml = "# Custom keymap\n"
-                                 "new-doc: \"Ctrl+Shift+N\"\n"
-                                 "open-doc: \"Ctrl+Alt+O\"\n";
+  const std::string keymapTsv = "new-doc\tCtrl+Shift+N\n"
+                                "open-doc\tCtrl+Alt+O\n";
 
-  EXPECT_TRUE(table.rebindFromText(keymapYaml));
+  EXPECT_TRUE(table.rebindFromText(keymapTsv));
 
   EXPECT_FALSE(table.dispatch(SDL_SCANCODE_N, Mod::Ctrl));
   EXPECT_FALSE(table.dispatch(SDL_SCANCODE_O, Mod::Ctrl));

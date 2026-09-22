@@ -426,7 +426,7 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
                             const Scroll &priorScroll,
                             const std::uint32_t opsAlreadySealed,
                             const std::vector<PublishedHoleRecord> &holes) {
-  if (provenance.yaml.empty() || provenance.signature.empty()) {
+  if (provenance.tsv.empty() || provenance.signature.empty()) {
     throw std::runtime_error(
         "cannot seal without a signed authorship record. The record is signed "
         "before the seal and sealed in with the content, so that the info hash "
@@ -491,7 +491,7 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
     files.push_back(TorrentContent{.path = sealedOpsName, .data = newOps});
   }
   files.push_back(
-      TorrentContent{.path = provenanceFileName, .data = provenance.yaml});
+      TorrentContent{.path = provenanceFileName, .data = provenance.tsv});
   files.push_back(
       TorrentContent{.path = provenanceSigName, .data = provenance.signature});
   auto made = makeTorrent(files, name);
@@ -557,7 +557,7 @@ sealCompound(const Store &store, const MutableKeys &keys,
   auto mainSeal = sealLocalSpool(store, keys, salt, into, provenance,
                                  priorScroll, opsAlreadySealed);
 
-  const auto parentProv = parseProvenance(provenance.yaml);
+  const auto parentProv = parseProvenance(provenance.tsv);
 
   std::vector<StagedMediaTorrent> mediaTorrents;
   for (const auto &mediaFile : stagedMediaFiles) {
@@ -612,13 +612,13 @@ sealCompound(const Store &store, const MutableKeys &keys,
         "xanadocs with attribution.");
 
     SignedProvenance signedMediaProv;
-    signedMediaProv.yaml      = mediaProv.toYaml();
+    signedMediaProv.tsv       = mediaProv.toTsv();
     signedMediaProv.signature = provenance.signature;
 
     std::vector<TorrentContent> files;
     files.push_back(TorrentContent{.path = name, .data = data});
     files.push_back(TorrentContent{.path = provenanceFileName,
-                                   .data = signedMediaProv.yaml});
+                                   .data = signedMediaProv.tsv});
     files.push_back(TorrentContent{.path = provenanceSigName,
                                    .data = signedMediaProv.signature});
 
@@ -638,7 +638,7 @@ sealCompound(const Store &store, const MutableKeys &keys,
       }
       {
         std::ofstream out(dir / provenanceFileName, std::ios::binary);
-        out << signedMediaProv.yaml;
+        out << signedMediaProv.tsv;
       }
       {
         std::ofstream out(dir / provenanceSigName, std::ios::binary);

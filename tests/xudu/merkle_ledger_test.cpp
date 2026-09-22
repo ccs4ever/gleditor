@@ -126,10 +126,10 @@ TEST(MerkleLedgerTest, ProofSerializationRoundTrip) {
   }
 
   const auto originalProof = ledger.generateProof(2);
-  const std::string yaml   = originalProof.toYaml();
-  EXPECT_FALSE(yaml.empty());
+  const std::string tsv    = originalProof.toTsv();
+  EXPECT_FALSE(tsv.empty());
 
-  const auto deserialized = MerkleProof::fromYaml(yaml);
+  const auto deserialized = MerkleProof::fromTsv(tsv);
   ASSERT_TRUE(deserialized.has_value());
   EXPECT_THAT(deserialized->leafIndex, Eq(originalProof.leafIndex));
   EXPECT_THAT(deserialized->maxIndex, Eq(originalProof.maxIndex));
@@ -139,7 +139,7 @@ TEST(MerkleLedgerTest, ProofSerializationRoundTrip) {
   EXPECT_TRUE(deserialized->verify(ledger.root()));
 }
 
-TEST(MerkleLedgerTest, LedgerYamlSerializationAndLookup) {
+TEST(MerkleLedgerTest, LedgerTsvSerializationAndLookup) {
   MerkleLedger ledger;
 
   GpgKeyLink link1;
@@ -175,10 +175,10 @@ TEST(MerkleLedgerTest, LedgerYamlSerializationAndLookup) {
   const auto aliceKeys = ledger.findByEmail("alice@wonderland.org");
   EXPECT_THAT(aliceKeys.size(), Eq(2U));
 
-  const std::string yaml = ledger.toYaml();
-  EXPECT_FALSE(yaml.empty());
+  const std::string tsv = ledger.toTsv();
+  EXPECT_FALSE(tsv.empty());
 
-  const MerkleLedger restored = MerkleLedger::fromYaml(yaml);
+  const MerkleLedger restored = MerkleLedger::fromTsv(tsv);
   EXPECT_THAT(restored.size(), Eq(ledger.size()));
   EXPECT_THAT(restored.root(), Eq(ledger.root()));
   EXPECT_THAT(restored.rootHex(), Eq(ledger.rootHex()));
@@ -202,8 +202,8 @@ TEST(MerkleLedgerTest, SealToTorrent) {
 
   const Metainfo meta = Metainfo::parse(made.file);
   EXPECT_THAT(meta.hash(), Eq(made.hash));
-  EXPECT_THAT(meta.files().size(), Eq(3U)); // LEDGER.yaml, ROOT.hex, KEYS.pub
-  EXPECT_THAT(meta.files()[0].path, Eq("LEDGER.yaml"));
+  EXPECT_THAT(meta.files().size(), Eq(3U)); // LEDGER.tsv, ROOT.hex, KEYS.pub
+  EXPECT_THAT(meta.files()[0].path, Eq("LEDGER.tsv"));
   EXPECT_THAT(meta.files()[1].path, Eq("ROOT.hex"));
   EXPECT_THAT(meta.files()[2].path, Eq("KEYS.pub"));
 }

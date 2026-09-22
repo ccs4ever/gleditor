@@ -162,14 +162,14 @@ int checkAuthorship(const std::string &where) {
     return std::string{std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>()};
   };
-  xudu::SignedProvenance sealed{.yaml = slurp(record), .signature = slurp(sig)};
-  if (sealed.yaml.empty()) {
+  xudu::SignedProvenance sealed{.tsv = slurp(record), .signature = slurp(sig)};
+  if (sealed.tsv.empty()) {
     std::cerr << "no authorship record at " << record << "\n";
     return 1;
   }
 
   const auto check = xudu::verifyProvenance(sealed);
-  std::cout << sealed.yaml;
+  std::cout << sealed.tsv;
   if (!check.signatureValid) {
     std::cout << "\nxudu: this record is NOT vouched for -- " << check.detail
               << "\n";
@@ -185,7 +185,7 @@ int checkAuthorship(const std::string &where) {
                       "only their say-so")
             << "\n";
 
-  if (const auto said = xudu::parseProvenance(sealed.yaml); said) {
+  if (const auto said = xudu::parseProvenance(sealed.tsv); said) {
     const auto content = record.parent_path() / xudu::sealedContentName;
     if (const auto bytes = slurp(content); !bytes.empty()) {
       const auto matches = xudu::sha256Hex(bytes) == said->contentDigest &&
@@ -2036,8 +2036,8 @@ int main(const int argc, char **argv) {
       .help("fingerprint of the secret key to sign authorship records with")
       .default_value(std::string{});
   hiddenUnlessDetailed(parser.add_argument("--author-here"))
-      .help("keep the --author-* settings in this store (author.yaml) rather "
-            "than in the per-user configuration (~/.config/xudu/config.yaml)")
+      .help("keep the --author-* settings in this store (author.tsv) rather "
+            "than in the per-user configuration (~/.config/xudu/config.tsv)")
       .default_value(false)
       .implicit_value(true);
   hiddenUnlessDetailed(parser.add_argument("--show-config"))
@@ -2155,7 +2155,7 @@ int main(const int argc, char **argv) {
     parser.parse_args(argc, argv);
     if (parser["--show-config"] == true) {
       std::cout << "# " << xudu::configPath() << "\n"
-                << xudu::loadConfig().toYaml();
+                << xudu::loadConfig().toTsv();
       return 0;
     }
     if (const auto where = parser.get<std::string>("--check-authorship");

@@ -421,29 +421,20 @@ bool CommandTable::rebind(const std::string_view name, const int scancode,
   return true;
 }
 
-bool CommandTable::rebindFromText(const std::string_view yamlText) {
+bool CommandTable::rebindFromText(const std::string_view tsv) {
   bool anyRebound   = false;
   std::size_t start = 0;
-  while (start < yamlText.size()) {
-    auto end = yamlText.find('\n', start);
+  while (start < tsv.size()) {
+    auto end = tsv.find('\n', start);
     if (end == std::string_view::npos) {
-      end = yamlText.size();
+      end = tsv.size();
     }
-    auto line = yamlText.substr(start, end - start);
-    start     = end + 1;
-    if (const auto hash = line.find('#'); hash != std::string_view::npos) {
-      line = line.substr(0, hash);
-    }
-    const auto colon = line.find(':');
-    if (colon != std::string_view::npos) {
-      auto act = line.substr(0, colon);
-      auto key = line.substr(colon + 1);
-      while (!act.empty() && (act.front() == ' ' || act.front() == '\t')) {
-        act.remove_prefix(1);
-      }
-      while (!act.empty() && (act.back() == ' ' || act.back() == '\t')) {
-        act.remove_suffix(1);
-      }
+    const auto line = tsv.substr(start, end - start);
+    start           = end + 1;
+    const auto tab  = line.find('\t');
+    if (tab != std::string_view::npos) {
+      const auto act = line.substr(0, tab);
+      const auto key = line.substr(tab + 1);
       if (const auto combo = parseKeyCombo(key)) {
         if (rebind(act, combo->first, combo->second)) {
           anyRebound = true;

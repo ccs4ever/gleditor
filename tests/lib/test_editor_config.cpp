@@ -1,6 +1,6 @@
 /**
  * @file test_editor_config.cpp
- * @brief Unit tests for YAML configuration parsing in apps/gleditor.
+ * @brief Unit tests for TSV configuration parsing in apps/gleditor.
  */
 #include <gtest/gtest.h>
 
@@ -9,8 +9,8 @@
 namespace {
 
 TEST(EditorConfigTest, ParseDefaultConfig) {
-  const std::string yaml = gleditor::defaultEditorConfigYaml();
-  const auto cfg         = gleditor::parseEditorConfig(yaml);
+  const std::string tsv = gleditor::defaultEditorConfigTsv();
+  const auto cfg        = gleditor::parseEditorConfig(tsv);
 
   EXPECT_FLOAT_EQ(cfg.settings.fontSize, 16.0F);
   EXPECT_EQ(cfg.settings.fontFamily, "Monospace");
@@ -35,29 +35,21 @@ TEST(EditorConfigTest, ParseDefaultConfig) {
 }
 
 TEST(EditorConfigTest, ParseCustomConfigOverrides) {
-  const std::string customYaml = R"(
-settings:
-  fontSize: 20
-  fontFamily: "Fira Code"
-  lineHeight: 1.6
-  autoSaveSeconds: 15
-  theme: "dark"
+  const std::string customTsv =
+      "settings.fontSize\t20\n"
+      "settings.fontFamily\tFira Code\n"
+      "settings.lineHeight\t1.6\n"
+      "settings.autoSaveSeconds\t15\n"
+      "settings.theme\tdark\n"
+      "spatial.documentSpacingX\t85.0\n"
+      "spatial.depthZ\t-60.0\n"
+      "spatial.docArrivalSeconds\t0.15\n"
+      "spatial.backgroundOpacity\t0.50\n"
+      "keymap.new\tCtrl+T\n"
+      "keymap.save\tCtrl+S\n"
+      "user_notes.notes\tMy personal editor configuration\n";
 
-spatial:
-  documentSpacingX: 85.0
-  depthZ: -60.0
-  docArrivalSeconds: 0.15
-  backgroundOpacity: 0.50
-
-keymap:
-  new: "Ctrl+T"
-  save: "Ctrl+S"
-
-user_notes:
-  notes: "My personal editor configuration"
-)";
-
-  const auto cfg = gleditor::parseEditorConfig(customYaml);
+  const auto cfg = gleditor::parseEditorConfig(customTsv);
 
   EXPECT_FLOAT_EQ(cfg.settings.fontSize, 20.0F);
   EXPECT_EQ(cfg.settings.fontFamily, "Fira Code");
@@ -79,9 +71,9 @@ user_notes:
   EXPECT_EQ(cfg.userNotes, "My personal editor configuration");
 }
 
-TEST(EditorConfigTest, InvalidYamlFallsBackGracefully) {
-  const std::string invalidYaml = ": this is not valid yaml :::";
-  const auto cfg                = gleditor::parseEditorConfig(invalidYaml);
+TEST(EditorConfigTest, InvalidTsvFallsBackGracefully) {
+  const std::string invalidTsv = "this has no tab";
+  const auto cfg               = gleditor::parseEditorConfig(invalidTsv);
 
   // Should retain default struct values
   EXPECT_FLOAT_EQ(cfg.settings.fontSize, 16.0F);
@@ -91,7 +83,7 @@ TEST(EditorConfigTest, InvalidYamlFallsBackGracefully) {
 }
 
 TEST(EditorConfigTest, LoadAssetsConfig) {
-  const auto cfg = gleditor::loadEditorConfig("assets/gleditor/config.yaml");
+  const auto cfg = gleditor::loadEditorConfig("assets/gleditor/config.tsv");
 
   EXPECT_FLOAT_EQ(cfg.settings.fontSize, 16.0F);
   EXPECT_EQ(cfg.settings.fontFamily, "Monospace");

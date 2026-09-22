@@ -9,12 +9,12 @@
  *
  * A person's OpenPGP key is bound to a person -- by an identity in the key, by
  * whoever has signed it, by however long it has been in use. So provenance here
- * is a plain YAML record naming the author, detached-signed with GnuPG, and
+ * is a plain TSV record naming the author, detached-signed with GnuPG, and
  * sealed into the torrent alongside the content it is about. Three properties
  * follow, and each is the reason for one of those decisions:
  *
  *   - It is checkable by anything, not only by this program. `gpg --verify`
- *     against a record a person can read is the whole procedure, and YAML is
+ *     against a record a person can read is the whole procedure, and TSV is
  *     chosen over the bencode everything else here uses for exactly that
  *     reason: it is meant to be read by whoever is deciding whether to believe
  *     it.
@@ -64,7 +64,7 @@ struct Author {
 /**
  * @brief What is being claimed, before it is signed.
  *
- * Everything here goes into the YAML. Fields a caller leaves empty are left
+ * Everything here goes into the TSV. Fields a caller leaves empty are left
  * out rather than written blank, so a record says only what somebody meant to
  * say.
  */
@@ -78,6 +78,11 @@ struct Provenance {
   /// vouches that this publishing name is theirs", which is the join between
   /// an identity people already have and a name this program made up.
   std::string publisher;
+  /// The global key of the author's sovereign permascroll. This is the
+  /// publication bootstrap for spans that were local scroll 0 while authored;
+  /// it is deliberately distinct from publisher + salt, which names this
+  /// document publication.
+  std::string permascroll;
   /// Which state of the document, as the store names it.
   std::string version;
   /// Seconds since the epoch.
@@ -99,12 +104,12 @@ struct Provenance {
   /// Global keys of scrolls the document quotes, so the record says what it
   /// was built out of as well as who built it.
   std::vector<std::string> quotes;
-  /// Anything else worth recording, as `key: value`. Written after the fields
-  /// above, in the order given.
+  /// Anything else worth recording, as a key/value row. Written after the
+  /// fields above, in the order given.
   std::vector<std::pair<std::string, std::string>> extra;
 
-  /// The YAML this record is, which is what gets signed.
-  [[nodiscard]] std::string toYaml() const;
+  /// The canonical TSV this record is, which is what gets signed.
+  [[nodiscard]] std::string toTsv() const;
 };
 
 /// SHA-256 of @p data in lowercase hex. Not the SHA-1 a torrent addresses by:
@@ -114,10 +119,10 @@ struct Provenance {
 
 /// A record and the detached OpenPGP signature over it.
 struct SignedProvenance {
-  /// The YAML exactly as it was signed. Kept as text rather than rebuilt,
+  /// The TSV exactly as it was signed. Kept as text rather than rebuilt,
   /// because a signature is over bytes and a re-rendering is only probably the
   /// same bytes.
-  std::string yaml;
+  std::string tsv;
   /// The detached signature, ASCII-armoured.
   std::string signature;
 };
@@ -217,12 +222,11 @@ verifyProvenance(const SignedProvenance &signed_,
                  const SigningOptions &where = {});
 
 /**
- * @brief Read the fields back out of a record's YAML.
+ * @brief Read the fields back out of a record's TSV.
  *
- * A deliberately small reader for the deliberately small YAML written above:
- * top-level `key: value` scalars and one list of plain strings. It is not a
- * YAML parser and does not pretend to be -- what it is for is showing a reader
- * who signed something, after gpg has said the signature is good.
+ * Each non-empty line is one escaped key/value pair separated by a tab.
+ * Repeated `quotes` rows preserve the only repeated field. No other syntax is
+ * accepted.
  *
  * @return Nothing when the text is not of that shape.
  */

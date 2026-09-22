@@ -499,12 +499,12 @@ ifneq ($(shell pkg-config --exists giflib && echo 1),1)
 LIBS += -lgif
 endif
 endif
-GLEDITOR_LIBS := -lryml
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
+GLEDITOR_LIBS :=
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
 ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.

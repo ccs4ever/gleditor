@@ -978,7 +978,7 @@ somebody's claim to have published what they did not.
 ```
 $ xudu store --author-name 'Ada Lovelace' --author-email ada@example.org \
              --import essay.txt --publish essay
-xudu: publishing as Ada Lovelace <ada@example.org> (kept in ~/.config/xudu/config.yaml)
+xudu: publishing as Ada Lovelace <ada@example.org> (kept in ~/.config/xudu/config.tsv)
 xudu: minted this machine's name e8a417cb...
 xudu: published 1 as store/published/essay.xanadoc
 ```
@@ -1007,29 +1007,26 @@ The ed25519 key a publication is signed with answers "the same publisher as last
 well and answers "who is this" not at all. It was minted by this program, means nothing outside it,
 and is bound to no person.
 
-So before anything is sealed, publishing writes a YAML record naming the author and has GnuPG sign
+So before anything is sealed, publishing writes a TSV record naming the author and has GnuPG sign
 it:
 
-```yaml
-# Authorship of a xanadoc, signed with OpenPGP before the content was
-# sealed into a torrent, and sealed into it alongside the content. The
-# signature is in AUTHORSHIP.yaml.asc; check it with:
-#   gpg --verify AUTHORSHIP.yaml.asc AUTHORSHIP.yaml
-author: "Ada Lovelace"
-email: "ada@example.org"
-title: "essay"
-salt: "essay"
-publisher: "e8a417cbfd100d73ea604c176aafebf78591070eb32f1415cfd953bc358398b2"
-version: "1"
-published: 1786617153
-content_length: 205
-content_sha256: "1ff7117d4101e3b14d5d3e8db1c251ddf4375772691d8917cb8455cb0b124031"
+```text
+author	Ada Lovelace
+email	ada@example.org
+title	essay
+salt	essay
+publisher	e8a417cbfd100d73ea604c176aafebf78591070eb32f1415cfd953bc358398b2
+permascroll	btpk:e8a417cbfd100d73ea604c176aafebf78591070eb32f1415cfd953bc358398b2:permascroll
+version	1
+published	1786617153
+content_length	205
+content_sha256	1ff7117d4101e3b14d5d3e8db1c251ddf4375772691d8917cb8455cb0b124031
 ```
 
 Three decisions, each earning its keep:
 
-*YAML, not the bencode everything else uses.* The audience is a person deciding whether to believe
-it, and `gpg --verify AUTHORSHIP.yaml.asc AUTHORSHIP.yaml` is the whole procedure -- no part of it
+*TSV, not the bencode everything else uses.* The audience is a person deciding whether to believe
+it, and `gpg --verify AUTHORSHIP.tsv.asc AUTHORSHIP.tsv` is the whole procedure -- no part of it
 needs this program.
 
 *Signed before the seal, and sealed in.* The torrent carries three files: the content, the record,
@@ -1073,16 +1070,17 @@ onto the command line, which is readable by every other process on the machine.
 
 Identity belongs to a person, not to a document. Being asked to state it again per store is how it
 ends up spelled three ways, or omitted -- and an omitted author is an unsigned document. So it lives
-in the per-user configuration directory, in the same small YAML the authorship record is written in:
+in the per-user configuration directory, in the same small TSV the authorship record is written in:
 
-```yaml
-# ~/.config/xudu/config.yaml  ($XDG_CONFIG_HOME is honoured; $XUDU_CONFIG
-# names a file outright, which is what lets somebody keep two identities)
-author: "Ada Lovelace"
-email: "ada@example.org"
-gpg_key: "ada@example.org"       # which key in the keyring, when it holds several
-gpg_home: "/media/key/.gnupg"    # optional: a keyring other than the usual one
+```text
+author	Ada Lovelace
+email	ada@example.org
+gpg_key	ada@example.org
+gpg_home	/media/key/.gnupg
 ```
+
+The default path is `~/.config/xudu/config.tsv` (`$XDG_CONFIG_HOME` is honoured); `$XUDU_CONFIG`
+names a file outright, which is what lets somebody keep two identities.
 
 `--author-name`, `--author-email` and `--gpg-key` write it; `--show-config` prints where it is and
 what it says. Values are merged rather than replaced, so setting only a key does not blank the name
@@ -1094,9 +1092,9 @@ says is *which* of them -- a fingerprint, a key id, an email address, anything g
 case, and means the key gpg would reach for on its own: whatever `default-key` names, or failing
 that the first key that can sign.
 
-Three places can say who publishes, and the nearest wins: this file is who somebody is;
-`author.yaml` in a store, written by `--author-here`, is who they are for that store -- a pen name,
-a work identity; and the publish dialog is who they are for one publication.
+Three places can say who publishes, and the nearest wins: this file is who somebody is; `author.tsv`
+in a store, written by `--author-here`, is who they are for that store -- a pen name, a work
+identity; and the publish dialog is who they are for one publication.
 
 #### The publish dialog
 

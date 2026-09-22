@@ -78,10 +78,10 @@ glyph.)
 documents and cells), Layoutfilade, Chronofilade with the `EdlTransform` monoid, Holefilade,
 Arrayfilade — are ephemeral replay products that mint no operations (R8; their banners say so). The
 butterfly `Link` records (type, tier, owner, curator, left and right spans) live in `store.tables`;
-an `OpKind::Link` operation carries only the link id. GPG-signed `AUTHORSHIP.yaml`
-(`provenance.hpp`) with a scroll-level `quotes` list. `GlobalSpan`/`globalise`/`localise` for
-content and `GlobalOpRef{scroll, produces}`/`opRefOf()`/`localiseOpRef()` for operations
-(`publication.hpp`). Identity, the Merkle ledger, transcopyright holes.
+an `OpKind::Link` operation carries only the link id. GPG-signed `AUTHORSHIP.tsv` (`provenance.hpp`)
+with a scroll-level `quotes` list. `GlobalSpan`/`globalise`/`localise` for content and
+`GlobalOpRef{scroll, produces}`/`opRefOf()`/`localiseOpRef()` for operations (`publication.hpp`).
+Identity, the Merkle ledger, transcopyright holes.
 
 **Refused already.** R8: only a user-generated update persists; navigation, cursors and view state
 never earn a hypertime name; no persistent-side GC. R6 and Non-Goal 2: no canonical scroll of
@@ -157,10 +157,12 @@ a link target; here the one thing you cannot point at is an edit.
 registry, local segment locations, link records, designated current versions and version
 annotations. Four are document facts or authorial decisions with no hypertime name; §5.4 moves them
 to cells after §5.2–§5.3 define their final shapes. Only `localSegments` stays a table, because it
-says where this copy's bytes live rather than what the document is. Scroll lookup bootstraps from
-local scroll 0 and becomes a replay index, so name resolution remains fast without making the
-rewritten table a source of truth. Under branching the flat `currentVersions` vector is already
-wrong: two futures of one document share one list of heads.
+says where this copy's bytes live rather than what the document is. A published store bootstraps
+scroll lookup from the signed `AUTHORSHIP.tsv` link to the author's globalized permascroll, while an
+unpublished local store may use its attached scroll 0 directly. The registry becomes a replay index,
+so name resolution remains fast without making the rewritten table a source of truth. Under
+branching the flat `currentVersions` vector is already wrong: two futures of one document share one
+list of heads.
 
 **A link to a document you do not have yet is normal, not corruption.** A docuverse is mostly
 elsewhere. Today the fold has one response to a target it cannot resolve — `refusedOps_++`, whose
@@ -222,8 +224,11 @@ whose endpoint cells retain their spans. A scroll cell contains its global key; 
 derived replay index and is never persisted as identity. Many references to one scroll live on a
 per-scroll `d.scroll-refs` rank, because a degree-two ZigZag dimension cannot connect every
 placeholder directly to the same registry cell. Fast lookup is a replay product rather than a
-mutable source of truth. This lands before extern refs so no temporary `externals` table is built.
-**Plan:** [`5.04-tables-as-cells.md`](structure-hyperop/5.04-tables-as-cells.md).
+mutable source of truth. A publication's signed `AUTHORSHIP.tsv` is the authenticated registry root,
+and its provenance is projected as ephemeral cells when an `ArenaManifold` is created from the
+opened store; neither action mints an operation. This lands before extern refs so no temporary
+`externals` table is built. **Plan:**
+[`5.04-tables-as-cells.md`](structure-hyperop/5.04-tables-as-cells.md).
 
 ### 5.5 Persistent references to cells in other stores
 

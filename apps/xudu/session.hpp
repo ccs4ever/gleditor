@@ -354,7 +354,7 @@ public:
    * @brief Who publishes from this store, and what signs for them.
    *
    * Three places say, and the nearest wins: the per-user configuration file,
-   * which is who somebody is; `author.yaml` beside the spools, which is who
+   * which is who somebody is; `author.tsv` beside the spools, which is who
    * they are for this store -- a pen name, a work identity; and whatever a
    * caller passes to publishDocument(), which is who they are for one
    * publication. Layered rather than merged into one setting because each

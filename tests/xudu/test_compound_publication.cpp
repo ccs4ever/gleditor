@@ -48,7 +48,7 @@ TEST(CompoundPublicationTest, StageAndSealCompoundTorrents) {
 
   const auto keys = xudu::createMutableKeys();
   xudu::SignedProvenance prov{
-      .yaml      = "author: Test Author\n",
+      .tsv       = "author\tTest Author\n",
       .signature = std::string(64, '0'),
   };
 
@@ -61,7 +61,7 @@ TEST(CompoundPublicationTest, StageAndSealCompoundTorrents) {
   ASSERT_EQ(compound.mediaTorrents.size(), 1U);
   EXPECT_FALSE(compound.mediaTorrents[0].hash.isZero());
   EXPECT_EQ(compound.mediaTorrents[0].mimeType, "image/png");
-  EXPECT_FALSE(compound.mediaTorrents[0].provenance.yaml.empty());
+  EXPECT_FALSE(compound.mediaTorrents[0].provenance.tsv.empty());
   EXPECT_FALSE(compound.mediaTorrents[0].provenance.signature.empty());
 
   // Verify .torrent and files were written to publish directory

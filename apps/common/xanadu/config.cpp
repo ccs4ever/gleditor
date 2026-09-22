@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <system_error>
 
-#include "yaml.hpp"
+#include "common/tsv.hpp"
 
 #include <gleditor/paths.hpp>
 
@@ -28,29 +28,22 @@ std::string environment(const char *const name) {
 
 } // namespace
 
-std::string Config::toYaml() const {
-
-  std::string out =
-      "# Who this machine publishes xanadocs as. The name and email go into\n"
-      "# the authorship record sealed with every document; the key is what\n"
-      "# GnuPG signs that record with, before the content is sealed.\n";
-  yaml::write(out, "author", author.name);
-  yaml::write(out, "email", author.email);
-  yaml::write(out, "gpg_key", author.gpgKey);
-  yaml::write(out, "gpg_home", gpgHome);
+std::string Config::toTsv() const {
+  std::string out;
+  common::tsv::write(out, "author", author.name);
+  common::tsv::write(out, "email", author.email);
+  common::tsv::write(out, "gpg_key", author.gpgKey);
+  common::tsv::write(out, "gpg_home", gpgHome);
   return out;
 }
 
-std::optional<Config> Config::fromYaml(const std::string_view text) {
-  const auto entries = yaml::read(text);
+std::optional<Config> Config::fromTsv(const std::string_view text) {
+  const auto entries = common::tsv::read(text);
   if (!entries) {
     return std::nullopt;
   }
   Config out;
-  for (const auto &[key, value, listItem] : *entries) {
-    if (listItem) {
-      continue;
-    }
+  for (const auto &[key, value] : *entries) {
     if ("author" == key) {
       out.author.name = value;
     } else if ("email" == key) {
@@ -71,7 +64,7 @@ std::string configPath() {
   if (const auto named = environment("XUDU_CONFIG"); !named.empty()) {
     return named;
   }
-  return gleditor::paths::configPath("xudu", "config.yaml");
+  return gleditor::paths::configPath("xudu", "config.tsv");
 }
 
 Config loadConfig(const std::string &path) {
@@ -81,12 +74,11 @@ Config loadConfig(const std::string &path) {
   }
   const std::string text{std::istreambuf_iterator<char>(in),
                          std::istreambuf_iterator<char>()};
-  auto read = Config::fromYaml(text);
+  auto read = Config::fromTsv(text);
   if (!read) {
     throw std::runtime_error(
-        path + " is not a xudu configuration file. It should be lines of "
-               "`key: \"value\"`; see the comment at the top of one this "
-               "program wrote.");
+        path + " is not a xudu configuration file. It should contain escaped "
+               "tab-separated key/value rows.");
   }
   return *read;
 }
@@ -98,7 +90,7 @@ void saveConfig(const Config &config, const std::string &path) {
   }
   {
     std::ofstream out(file, std::ios::trunc);
-    out << config.toYaml();
+    out << config.toTsv();
   }
   std::error_code ignored;
   std::filesystem::permissions(file,

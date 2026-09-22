@@ -188,7 +188,7 @@ InfoHash SystemTorrentManager::registerLedger(
   }
 
   // Write ledger payload files inside the cache directory
-  writeBufferToFile(saveDir + "/LEDGER.yaml", ledger.toYaml());
+  writeBufferToFile(saveDir + "/LEDGER.tsv", ledger.toTsv());
   writeBufferToFile(saveDir + "/ROOT.hex", ledger.rootHex() + "\n");
   std::string keysPub;
   for (const auto &entry : ledger.entries()) {

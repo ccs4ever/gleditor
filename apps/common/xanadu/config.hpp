@@ -9,7 +9,7 @@
  * unsigned document is one nobody has put their name to.
  *
  * So it lives in the per-user configuration directory, under whatever XDG says
- * that is, in the same small YAML the authorship record is written in. A store
+ * that is, in the same small TSV the authorship record is written in. A store
  * may still override it -- one might publish under a pen name -- and the
  * publish dialog may override that for a single publication, which is what the
  * layering is for: the file is what somebody is by default, not a rule.
@@ -42,10 +42,10 @@ struct Config {
   /// Whether there is enough here to sign with.
   [[nodiscard]] bool complete() const { return author.named(); }
 
-  [[nodiscard]] std::string toYaml() const;
+  [[nodiscard]] std::string toTsv() const;
   /// Read one back. Nothing when the text is not of that shape; a Config with
   /// empty fields is a different answer and means the file said nothing.
-  [[nodiscard]] static std::optional<Config> fromYaml(std::string_view text);
+  [[nodiscard]] static std::optional<Config> fromTsv(std::string_view text);
 
   /**
    * @brief How this record asks to be signed.
@@ -63,7 +63,7 @@ struct Config {
 /**
  * @brief Where the configuration file is.
  *
- * `$XDG_CONFIG_HOME/xudu/config.yaml`, falling back to `~/.config/xudu` as the
+ * `$XDG_CONFIG_HOME/xudu/config.tsv`, falling back to `~/.config/xudu` as the
  * specification says to. `$XUDU_CONFIG` names a file directly, which is what
  * lets a test -- or somebody with two identities -- point at another one
  * without touching what is in the home directory.

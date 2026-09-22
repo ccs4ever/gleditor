@@ -338,7 +338,6 @@ public:
   bool deleteFocusCell();
   void updateFocusCellText(const std::string &text);
   bool saveStore(const std::string &filePath = {}) const;
-  bool saveStructureYaml(const std::string &filePath) const;
 
   [[nodiscard]] bool isProtected(CellRef id) const;
 

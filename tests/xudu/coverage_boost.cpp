@@ -28,7 +28,6 @@
 #include <xudu/core/torrent.hpp>
 #include <xudu/core/version.hpp>
 #include <xudu/core/windows_quoting.hpp>
-#include <xudu/core/yaml.hpp>
 
 namespace {
 

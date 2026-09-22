@@ -121,8 +121,8 @@ TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
 
   setenv("XDG_CONFIG_HOME", "/custom/config", 1);
   EXPECT_EQ(gleditor::paths::configDir("xudu"), "/custom/config/xudu");
-  EXPECT_EQ(gleditor::paths::configPath("xudu", "config.yaml"),
-            "/custom/config/xudu/config.yaml");
+  EXPECT_EQ(gleditor::paths::configPath("xudu", "config.tsv"),
+            "/custom/config/xudu/config.tsv");
 
   unsetenv("XDG_CONFIG_HOME");
   setenv("HOME", "/home/testuser", 1);

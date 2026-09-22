@@ -71,7 +71,7 @@ TEST_F(ManagedTorrentTest, RegisterAndSeedMerkleLedger) {
 
   // Verify created files in cache directory
   const std::string savePath = manager.cacheDirFor(hash);
-  EXPECT_TRUE(fs::exists(savePath + "/LEDGER.yaml"));
+  EXPECT_TRUE(fs::exists(savePath + "/LEDGER.tsv"));
   EXPECT_TRUE(fs::exists(savePath + "/ROOT.hex"));
 }
 
@@ -98,16 +98,15 @@ TEST_F(ManagedTorrentTest, RegisterSpoolAndSlice) {
   EXPECT_FALSE(spoolHash.isZero());
   EXPECT_TRUE(error.empty());
 
-  // 2. Create a dummy slice YAML file
-  const fs::path sliceFile = testDir / "slice.yaml";
+  // 2. Create a dummy slice metadata file.
+  const fs::path sliceFile = testDir / "slice.tsv";
   {
     std::ofstream out(sliceFile);
-    out << "meta:\n  name: TestSlice\n  author: Ada\ncells:\n  1:\n    text: "
-           "Hello\n";
+    out << "name\tTestSlice\nauthor\tAda\ncell.1.text\tHello\n";
   }
 
   const InfoHash sliceHash =
-      manager.registerSlice(sliceFile.string(), "slice.yaml", &error);
+      manager.registerSlice(sliceFile.string(), "slice.tsv", &error);
   EXPECT_FALSE(sliceHash.isZero());
   EXPECT_TRUE(error.empty());
 

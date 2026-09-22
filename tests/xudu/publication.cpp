@@ -186,7 +186,7 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
   who.author.email  = "ada@example.org";
   const auto sealed = xudu::sealLocalSpool(
       store, keys, "permascroll", "",
-      {who.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
+      {who.toTsv(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
   EXPECT_EQ(sealed.scroll.length(), store.primedia().bytes().size());
   EXPECT_TRUE(sealed.scroll.isNamed());
   // A real torrent: it parses, and its info hash is the one sealing reported.

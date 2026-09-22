@@ -7,8 +7,6 @@
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
 
-#include "yaml.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -366,7 +364,7 @@ PublicationLedger::findByAuthor(std::string_view authorFingerprint) const {
   return out;
 }
 
-std::string PublicationLedger::toYaml() const {
+std::string PublicationLedger::toTsv() const {
   std::ostringstream ss;
   ss << "info_hash\tbep46_uri\ttitle\tauthor_name\tauthor_"
         "fingerprint\tabstract\ttimestamp\tsequence\ttotal_"
@@ -390,130 +388,53 @@ std::string PublicationLedger::toYaml() const {
   return ss.str();
 }
 
-PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
+PublicationLedger PublicationLedger::fromTsv(const std::string_view tsv) {
   PublicationLedger ledger;
-  if (yaml.find('\t') != std::string_view::npos) {
-    std::istringstream lines{std::string(yaml)};
-    std::string line;
-    std::getline(lines, line);
-    while (std::getline(lines, line)) {
-      std::vector<std::string> f;
-      std::size_t p = 0;
-      while (p <= line.size()) {
-        auto q = line.find('\t', p);
-        f.push_back(line.substr(p, q == std::string::npos ? q : q - p));
-        if (q == std::string::npos) break;
-        p = q + 1;
-      }
-      if (f.size() < 15) continue;
-      try {
-        PublicationEntry e;
-        e.infoHash            = tsvUnescape(f[0]);
-        e.bep46Uri            = tsvUnescape(f[1]);
-        e.title               = tsvUnescape(f[2]);
-        e.authorName          = tsvUnescape(f[3]);
-        e.authorFingerprint   = tsvUnescape(f[4]);
-        e.abstractText        = tsvUnescape(f[5]);
-        e.timestamp           = std::stoull(f[6]);
-        e.sequence            = std::stoull(f[7]);
-        e.totalBytes          = std::stoull(f[8]);
-        e.microversions       = static_cast<std::uint32_t>(std::stoul(f[9]));
-        e.hasTranscopyright   = f[10] == "true";
-        e.transcopyrightTerms = tsvUnescape(f[11]);
-        e.merkleRoot          = parseHex32(f[12]);
-        e.signature           = tsvUnescape(f[13]);
-        e.topics              = splitTopics(f[14]);
-        ledger.appendPublication(std::move(e));
-      } catch (const std::exception &) {
-        continue;
-      }
-    }
+  std::istringstream stream{std::string(tsv)};
+  std::string line;
+  if (!std::getline(stream, line) || !line.starts_with("info_hash\t")) {
     return ledger;
   }
-  // Parse entries simply line by line or minimal YAML scanner
-  std::istringstream stream{std::string(yaml)};
-  std::string line;
-  PublicationEntry cur;
-  bool inEntry  = false;
-  bool inTopics = false;
-
   while (std::getline(stream, line)) {
-    const auto trimmed = line.find_first_not_of(" \t\r\n");
-    if (trimmed == std::string::npos) {
+    if (line.empty()) {
       continue;
     }
-    const auto content = line.substr(trimmed);
-
-    if (content.starts_with("- info_hash:")) {
-      if (inEntry) {
-        ledger.appendPublication(std::move(cur));
-        cur = PublicationEntry{};
+    std::vector<std::string> fields;
+    std::size_t start = 0;
+    while (start <= line.size()) {
+      const auto tab = line.find('\t', start);
+      fields.push_back(
+          line.substr(start, std::string::npos == tab ? tab : tab - start));
+      if (std::string::npos == tab) {
+        break;
       }
-      inEntry       = true;
-      inTopics      = false;
-      const auto q1 = content.find('"');
-      const auto q2 = content.rfind('"');
-      if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-        cur.infoHash = content.substr(q1 + 1, q2 - q1 - 1);
-      }
-    } else if (inEntry) {
-      auto extractQuoted = [&](std::string_view prefix) -> std::string {
-        if (content.starts_with(prefix)) {
-          const auto q1 = content.find('"');
-          const auto q2 = content.rfind('"');
-          if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-            return content.substr(q1 + 1, q2 - q1 - 1);
-          }
-        }
-        return {};
-      };
-
-      if (content.starts_with("bep46_uri:")) {
-        cur.bep46Uri = extractQuoted("bep46_uri:");
-      } else if (content.starts_with("title:")) {
-        cur.title = extractQuoted("title:");
-      } else if (content.starts_with("author_name:")) {
-        cur.authorName = extractQuoted("author_name:");
-      } else if (content.starts_with("author_fingerprint:")) {
-        cur.authorFingerprint = extractQuoted("author_fingerprint:");
-      } else if (content.starts_with("abstract:")) {
-        cur.abstractText = extractQuoted("abstract:");
-      } else if (content.starts_with("timestamp:")) {
-        cur.timestamp = std::strtoull(content.substr(10).c_str(), nullptr, 10);
-      } else if (content.starts_with("sequence:")) {
-        cur.sequence = std::strtoull(content.substr(9).c_str(), nullptr, 10);
-      } else if (content.starts_with("total_bytes:")) {
-        cur.totalBytes = std::strtoull(content.substr(12).c_str(), nullptr, 10);
-      } else if (content.starts_with("microversions:")) {
-        cur.microversions = static_cast<std::uint32_t>(
-            std::strtoul(content.substr(14).c_str(), nullptr, 10));
-      } else if (content.starts_with("has_transcopyright:")) {
-        cur.hasTranscopyright = (content.contains("true"));
-      } else if (content.starts_with("transcopyright_terms:")) {
-        cur.transcopyrightTerms = extractQuoted("transcopyright_terms:");
-      } else if (content.starts_with("merkle_root:")) {
-        const auto hex = extractQuoted("merkle_root:");
-        if (const auto opt = fromHex32(hex)) {
-          cur.merkleRoot = *opt;
-        }
-      } else if (content.starts_with("signature:")) {
-        cur.signature = extractQuoted("signature:");
-      } else if (content.starts_with("topics:")) {
-        inTopics = true;
-      } else if (inTopics && content.starts_with("- \"")) {
-        const auto q1 = content.find('"');
-        const auto q2 = content.rfind('"');
-        if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-          cur.topics.push_back(content.substr(q1 + 1, q2 - q1 - 1));
-        }
-      }
+      start = tab + 1;
+    }
+    if (15 != fields.size()) {
+      continue;
+    }
+    try {
+      PublicationEntry entry;
+      entry.infoHash          = tsvUnescape(fields[0]);
+      entry.bep46Uri          = tsvUnescape(fields[1]);
+      entry.title             = tsvUnescape(fields[2]);
+      entry.authorName        = tsvUnescape(fields[3]);
+      entry.authorFingerprint = tsvUnescape(fields[4]);
+      entry.abstractText      = tsvUnescape(fields[5]);
+      entry.timestamp         = std::stoull(fields[6]);
+      entry.sequence          = std::stoull(fields[7]);
+      entry.totalBytes        = std::stoull(fields[8]);
+      entry.microversions = static_cast<std::uint32_t>(std::stoul(fields[9]));
+      entry.hasTranscopyright   = "true" == fields[10];
+      entry.transcopyrightTerms = tsvUnescape(fields[11]);
+      entry.merkleRoot          = parseHex32(fields[12]);
+      entry.signature           = tsvUnescape(fields[13]);
+      entry.topics              = splitTopics(fields[14]);
+      ledger.appendPublication(std::move(entry));
+    } catch (const std::exception &) {
+      continue;
     }
   }
-
-  if (inEntry) {
-    ledger.appendPublication(std::move(cur));
-  }
-
   return ledger;
 }
 
@@ -522,7 +443,7 @@ bool PublicationLedger::saveToFile(const std::string &path) const {
   if (!out.is_open()) {
     return false;
   }
-  out << toYaml();
+  out << toTsv();
   return out.good();
 }
 
@@ -534,15 +455,15 @@ PublicationLedger::loadFromFile(const std::string &path) {
   }
   std::string content((std::istreambuf_iterator<char>(in)),
                       std::istreambuf_iterator<char>());
-  return fromYaml(content);
+  return fromTsv(content);
 }
 
 MadeTorrent PublicationLedger::sealToTorrent(std::string_view name,
                                              std::uint64_t pieceLength) const {
   std::vector<TorrentContent> files;
-  const auto yamlStr = toYaml();
+  const auto tsv = toTsv();
   files.push_back(
-      TorrentContent{.path = "PUBLICATION_LEDGER.tsv", .data = yamlStr});
+      TorrentContent{.path = "PUBLICATION_LEDGER.tsv", .data = tsv});
 
   const auto rootStr = rootHex() + "\n";
   files.push_back(TorrentContent{.path = "ROOT.hex", .data = rootStr});

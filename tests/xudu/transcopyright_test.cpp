@@ -199,7 +199,7 @@ TEST(TranscopyrightStorageTest, userPermascrollSealsHolesAsZeroFillOnWire) {
   hole.reason = HoleReason::Withheld;
 
   SignedProvenance prov;
-  prov.yaml      = "author: Test Author\n";
+  prov.tsv       = "author\tTest Author\n";
   prov.signature = "-----BEGIN PGP SIGNATURE-----\ntest\n";
 
   const auto segment = scroll.sealIncremental(tempDir, prov, {hole});

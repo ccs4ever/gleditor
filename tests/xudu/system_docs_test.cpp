@@ -45,7 +45,7 @@ using xudu::UserPermascroll;
 
 SignedProvenance makeTestProvenance() {
   SignedProvenance prov;
-  prov.yaml      = "title: \"System Doc Test\"\nauthor: \"Nelson\"\n";
+  prov.tsv       = "title\tSystem Doc Test\nauthor\tNelson\n";
   prov.signature = "-----BEGIN PGP SIGNATURE-----\ntest-signature\n-----END "
                    "PGP SIGNATURE-----\n";
   return prov;

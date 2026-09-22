@@ -136,15 +136,15 @@ TEST(PublicationLedgerTest, TamperDetection) {
   EXPECT_FALSE(PublicationLedger::verifyInclusion(e1, proof, badRoot));
 }
 
-TEST(PublicationLedgerTest, YamlSerializationRoundTrip) {
+TEST(PublicationLedgerTest, TsvSerializationRoundTrip) {
   PublicationLedger original;
   original.appendPublication(makeSampleEntry("Doc Alpha", "Author Alpha", 1));
   original.appendPublication(makeSampleEntry("Doc Beta", "Author Beta", 2));
 
-  const std::string yamlStr = original.toYaml();
-  EXPECT_THAT(yamlStr, Not(IsEmpty()));
+  const std::string tsv = original.toTsv();
+  EXPECT_THAT(tsv, Not(IsEmpty()));
 
-  const auto restored = PublicationLedger::fromYaml(yamlStr);
+  const auto restored = PublicationLedger::fromTsv(tsv);
   EXPECT_THAT(restored.size(), Eq(original.size()));
   EXPECT_THAT(restored.root(), Eq(original.root()));
   EXPECT_THAT(restored.rootHex(), Eq(original.rootHex()));
@@ -152,7 +152,7 @@ TEST(PublicationLedgerTest, YamlSerializationRoundTrip) {
   // File save/load
   namespace fs = std::filesystem;
   const fs::path tempPath =
-      fs::temp_directory_path() / "test_publication_ledger.yaml";
+      fs::temp_directory_path() / "test_publication_ledger.tsv";
   EXPECT_TRUE(original.saveToFile(tempPath.string()));
 
   const auto fromFile = PublicationLedger::loadFromFile(tempPath.string());
