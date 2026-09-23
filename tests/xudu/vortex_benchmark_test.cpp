@@ -108,8 +108,8 @@ TEST(VortexBenchmarkTest, VMInstructionExecutionRate) {
   CellRef loopTarget = arena.makeScalarCell(static_cast<std::int64_t>(addOp));
   core.bindInput(branchOp, loopTarget);
 
-  arena.link(addOp, core.dims().spin, false, subOp);
-  arena.link(subOp, core.dims().spin, false, branchOp);
+  EXPECT_TRUE(arena.link(addOp, core.dims().spin, false, subOp));
+  EXPECT_TRUE(arena.link(subOp, core.dims().spin, false, branchOp));
 
   CellRef cursor = vm.spawnCursor(addOp, "perf_loop");
 

@@ -72,7 +72,7 @@ TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
   EXPECT_EQ(reg.get(manifold, "d.coord_x"), dimX);
 
   // Lookup unknown dimension returns noCell
-  EXPECT_EQ(reg.get(store, "d.does_not_exist"), noCell);
+  EXPECT_EQ(reg.get(store, "d.does_not_exist"), std::nullopt);
 }
 
 TEST(DimensionRegistryTest, GetOrCreateGivenOnlyManifold) {
@@ -148,5 +148,5 @@ TEST(DimensionRegistryTest, StoreDestructionUnregisters) {
   }
 
   // After scopedStore is destructed, storeDims_ entry must be removed
-  EXPECT_EQ(reg.get(*storePtr, "d.temp_dim"), noCell);
+  EXPECT_EQ(reg.get(*storePtr, "d.temp_dim"), std::nullopt);
 }

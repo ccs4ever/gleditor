@@ -212,7 +212,8 @@ public:
    * @brief The clone master of @p cell along @p cloneDim. Resolves ephemeral
    *        d.meta-dims clone cells to their real dimension cells on d.dims.
    */
-  [[nodiscard]] CellRef cloneMaster(CellRef cell, DimRef cloneDim) const;
+  [[nodiscard]] std::optional<CellRef> cloneMaster(CellRef cell,
+                                                   DimRef cloneDim) const;
 
   /**
    * @brief Whether @p cell is protected from deletion (e.g. home, d.dims,

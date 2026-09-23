@@ -96,7 +96,8 @@ public:
   /// Resolves the '##NAME' shorthand: ##/d.stores>[d.name = "NAME"].
   /// Returns the named slice's home cell (the clone master), or noCell if not
   /// found.
-  [[nodiscard]] CellRef resolveNamedStore(std::string_view name) const;
+  [[nodiscard]] std::optional<CellRef>
+  resolveNamedStore(std::string_view name) const;
 
   /// Multi-store coordinator genesis origin cell.
   [[nodiscard]] CellRef coordinatorHome() const noexcept {

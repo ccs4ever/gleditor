@@ -9,8 +9,11 @@
 #include <iostream>
 #include <map>
 #include <queue>
+#include <ranges>
 #include <sstream>
 #include <unordered_set>
+
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vql {
 
@@ -26,14 +29,16 @@ std::string formatCellBrief(const zigzag::ArenaManifold &manifold,
   std::ostringstream oss;
   oss << "#" << (cell & ~zigzag::ephemeralBit);
 
-  zigzag::CellRef master = cell;
-  for (const auto &dl : manifold.dimensionsOf(cell)) {
-    std::string dname = manifold.textOf(dl.dim);
-    if (dname == "d.clone" || dname == "clone") {
-      master = manifold.cloneMaster(cell, dl.dim);
-      break;
-    }
-  }
+  auto cloneDims = zigzag::dimensionRefsOf(manifold, cell) |
+                   std::views::filter([&](const zigzag::DimRef dim) {
+                     const auto name = manifold.textOf(dim);
+                     return name == "d.clone" || name == "clone";
+                   });
+  const zigzag::CellRef master = zigzag::firstOf(cloneDims)
+                                     .and_then([&](const zigzag::DimRef clone) {
+                                       return manifold.cloneMaster(cell, clone);
+                                     })
+                                     .value_or(cell);
 
   auto kind = manifold.valueKindOf(master);
   if (kind == xanadu::ValueKind::Int64) {

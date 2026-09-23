@@ -1007,12 +1007,11 @@ Adopted adopt(Store &store, const Publication &pub) {
     // A link this store already holds is the same link arriving again --
     // through a second publication that carries it, or through this one being
     // read twice -- and it is one link either way.
-    const auto same = [&link](const auto &entry) {
-      return entry.second.type == link.type &&
-             entry.second.owner == link.owner &&
-             entry.second.left == link.left && entry.second.right == link.right;
+    const auto same = [&link](const Link &held) {
+      return held.type == link.type && held.owner == link.owner &&
+             held.left == link.left && held.right == link.right;
     };
-    if (std::ranges::any_of(store.links(), same)) {
+    if (std::ranges::any_of(store.linkView(), same)) {
       continue;
     }
     taken.version = store.addLink(taken.version, std::move(link));
@@ -1068,10 +1067,10 @@ Publication publish(const Store &store, const MicroversionId &version,
   // about anything; what a publication carries are the ones that say something
   // about what it published.
   for (const auto &piece : document.pieces()) {
-    for (const auto *link : store.linksTouching(piece)) {
+    for (const auto &link : store.linksTouching(piece)) {
       GlobalLink out;
-      out.type               = link->type;
-      out.owner              = link->owner;
+      out.type               = link.type;
+      out.owner              = link.owner;
       bool addressable       = true;
       const auto sayGlobally = [&](const std::vector<PrimediaSpan> &side,
                                    std::vector<GlobalSpan> &into) {
@@ -1089,8 +1088,8 @@ Publication publish(const Store &store, const MicroversionId &version,
           into.push_back(*global);
         }
       };
-      sayGlobally(link->left, out.left);
-      sayGlobally(link->right, out.right);
+      sayGlobally(link.left, out.left);
+      sayGlobally(link.right, out.right);
       if (!addressable) {
         continue;
       }

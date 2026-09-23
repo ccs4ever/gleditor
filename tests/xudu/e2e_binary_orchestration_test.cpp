@@ -1300,8 +1300,8 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
 
   std::set<xudu::FormatAttribute> found;
   for (const auto &span : typedSpans) {
-    for (const auto *const link : reloaded.linksTouching(span)) {
-      if (const auto attribute = reloaded.formatAttributeOf(*link)) {
+    for (const auto &link : reloaded.linksTouching(span)) {
+      if (const auto attribute = reloaded.formatAttributeOf(link)) {
         found.insert(*attribute);
       }
     }
@@ -1353,15 +1353,15 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_FALSE(leftSpans.empty());
   ASSERT_FALSE(rightSpans.empty());
 
-  const auto touchingLeft = reloaded.linksTouching(leftSpans.front());
+  auto touchingLeft = reloaded.linksTouching(leftSpans.front());
   ASSERT_FALSE(touchingLeft.empty())
       << "forge-clasp should have forged a link touching the homestead span";
-  EXPECT_EQ(touchingLeft.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingLeft.front().type, LinkType::Comment);
 
-  const auto touchingRight = reloaded.linksTouching(rightSpans.front());
+  auto touchingRight = reloaded.linksTouching(rightSpans.front());
   ASSERT_FALSE(touchingRight.empty())
       << "forge-clasp should have forged a link touching the toward span";
-  EXPECT_EQ(touchingRight.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingRight.front().type, LinkType::Comment);
 }
 
 // Gap E, named in the multimedia pipeline plan: a media fragment transcluded

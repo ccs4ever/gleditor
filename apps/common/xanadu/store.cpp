@@ -1169,27 +1169,15 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   return apply(parent, op);
 }
 
-std::vector<const Link *> Store::linksTouching(const PrimediaSpan &span) const {
-  std::vector<const Link *> found;
-  for (const auto &[id, link] : linkTable) {
-    if (link.touches(span)) {
-      found.push_back(&link);
-    }
-  }
-  return found;
-}
-
 std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
   if (LinkType::Format != link.type || link.right.empty()) {
     return std::nullopt;
   }
   const auto &named = link.right.front();
-  for (const auto attribute : allFormatAttributes) {
-    if (named == vocabularySpanFor(attribute)) {
-      return attribute;
-    }
-  }
-  return std::nullopt;
+  return firstOf(allFormatAttributes |
+                 std::views::filter([&named](const FormatAttribute attribute) {
+                   return named == vocabularySpanFor(attribute);
+                 }));
 }
 
 std::vector<MicroversionId> Store::children(const MicroversionId &id) const {

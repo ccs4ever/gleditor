@@ -531,19 +531,24 @@ public:
       for (std::size_t docIdx = 0; docIdx < session.views().size(); ++docIdx) {
         const auto &vInfo = session.views()[docIdx];
         const auto &st    = session.store(vInfo.storeIndex);
-        for (const auto &[linkId, link] : st.links()) {
-          for (const auto &lSpan : link.left) {
-            const auto occs = st.rebuild(vInfo.version).occurrencesOf(lSpan);
-            if (!occs.empty()) {
-              auto *const caret = renderer->editCaret();
-              if (caret) {
-                caret->placeAt(static_cast<std::uint32_t>(docIdx),
-                               occs.front().start);
-                caret->extendTo(occs.front().end);
-              }
-              return;
-            }
+        const auto shown  = st.rebuild(vInfo.version);
+        // The first left end of any link that this view shows.
+        auto shownEnds =
+            st.linkView() | std::views::transform(&xudu::Link::left) |
+            std::views::join |
+            std::views::transform([&](const xudu::PrimediaSpan &end) {
+              return shown.occurrencesOf(end);
+            }) |
+            std::views::filter(
+                [](const auto &occurrences) { return !occurrences.empty(); });
+        if (const auto occs = xanadu::firstOf(shownEnds)) {
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(static_cast<std::uint32_t>(docIdx),
+                           occs->front().start);
+            caret->extendTo(occs->front().end);
           }
+          return;
         }
       }
     });

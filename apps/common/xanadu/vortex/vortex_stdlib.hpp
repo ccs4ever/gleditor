@@ -33,6 +33,7 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
+#include "common/xanadu/zigzag/vlog.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace xanadu {
@@ -58,7 +59,9 @@ public:
   // -- Spatial Symbol Resolution (import) -------------------------------------
   /// Resolves "std:<module>/<symbol>" to its entry opcode or "std:<module>" to
   /// module cell.
-  [[nodiscard]] CellRef resolve(std::string_view path) const;
+  /// The cell @p path names -- a module ("std:list") or the entry op of one of
+  /// its symbols ("std:list/map") -- or nullopt.
+  [[nodiscard]] std::optional<CellRef> resolve(std::string_view path) const;
 
   /// Checks whether a module or symbol path exists in the manifold.
   [[nodiscard]] bool has(std::string_view path) const;
@@ -175,7 +178,7 @@ public:
   CellRef makeList(std::span<const CellRef> elements);
   [[nodiscard]] bool isVar(CellRef cell) const;
   [[nodiscard]] CellRef deref(CellRef cell) const;
-  bool unify(CellRef a, CellRef b);
+  zigzag::UnifyResult unify(CellRef a, CellRef b);
   [[nodiscard]] std::vector<CellRef> argumentsOf(CellRef term) const;
   [[nodiscard]] std::string functorOf(CellRef term) const;
   [[nodiscard]] std::string renderTerm(CellRef term) const;
@@ -308,6 +311,24 @@ public:
   CellRef importModuleFromStore(const xanadu::Store &srcStore);
 
 private:
+  /// The texts of the cells on @p from's rank along @p dim, after @p from.
+  [[nodiscard]] std::vector<std::string> namesAfter(CellRef from,
+                                                    DimRef dim) const;
+  /// A fresh arena cell holding @p val.
+  CellRef valueCell(const CellValue &val);
+  /// A fresh cell with @p source's value: its typed bits when it has them,
+  /// its rendering otherwise.
+  CellRef copyValueCell(CellRef source);
+  /// @p dim, or d.step when a list builtin was handed no dimension.
+  [[nodiscard]] DimRef listDim(DimRef dim) const noexcept;
+  /// The key cell on @p mapRoot's d.vars rank reading @p key.
+  [[nodiscard]] std::optional<CellRef> mapKeyCell(CellRef mapRoot,
+                                                  std::string_view key) const;
+  /// The cell @p r hops along @p dRow then @p c along @p dCol from the root.
+  [[nodiscard]] std::optional<CellRef> gridCell(CellRef gridRoot, std::size_t r,
+                                                std::size_t c, DimRef dRow,
+                                                DimRef dCol) const;
+
   CellRef getOrCreateModule(std::string_view modulePath);
   void exportSymbol(CellRef moduleCell, std::string_view symbolName,
                     CellRef entryOp);
