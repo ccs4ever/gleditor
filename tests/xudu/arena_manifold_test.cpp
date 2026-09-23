@@ -176,7 +176,7 @@ TEST(ArenaManifoldTest, bindingAVariableToAVariableThenToATermPropagates) {
   ASSERT_TRUE(arena.m.link(foo, arena.clone, DimVector::POS, y));
 
   EXPECT_EQ(arena.m.cloneMaster(x, arena.clone), foo);
-  EXPECT_EQ(arena.m.textOf(arena.m.cloneMaster(x, arena.clone)), "foo");
+  EXPECT_EQ(arena.m.textOf(arena.m.cloneMaster(x, arena.clone).value()), "foo");
 }
 
 // -- choice points ----------------------------------------------------------
@@ -407,9 +407,10 @@ TEST(ArenaManifoldTest, theFoldRefusesAScratchSpanByNumber) {
   node.setSpan(
       PrimediaSpan{.scroll = xudu::scratchScroll, .start = 0, .length = 4});
 
-  // The fold cannot throw, so a refusal is a count -- the same mechanism an
-  // ephemeral link target gets.
-  manifold.applyStructure(400U, node);
+  // The fold cannot throw, so a refusal is a count and a named reason -- the
+  // same mechanism an ephemeral link target gets.
+  EXPECT_EQ(manifold.applyStructure(400U, node).error(),
+            zigzag::FoldRefusal::ScratchAddress);
   EXPECT_EQ(manifold.refusedOps(), 1U);
   EXPECT_EQ(manifold.cellCount(), before);
 }

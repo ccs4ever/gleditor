@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <vector>
 
+#include "common/xanadu/zigzag/cell_views.hpp"
+
 namespace zigzag {
 
 Vlog Vlog::over(ArenaManifold &arena) {
@@ -15,15 +17,7 @@ Vlog Vlog::over(ArenaManifold &arena) {
 
 CellRef Vlog::endOfRank(const CellRef from, const DimRef dim,
                         const DimVector dir) const noexcept {
-  CellRef walk = from;
-  for (std::size_t steps = 0; steps <= m.cellCount(); steps++) {
-    const CellRef next = m.linked(walk, dim, dir);
-    if (noCell == next || next == from) {
-      return walk;
-    }
-    walk = next;
-  }
-  return walk;
+  return rankTail(m, from, dim, dir);
 }
 
 CellRef Vlog::makeVar() {
@@ -31,7 +25,8 @@ CellRef Vlog::makeVar() {
   // Onto the tail of the d.vars rank: variablehood is membership of a rank,
   // not a flag bit, following R12's precedent for dimensions. A rank is
   // already something the manifold can answer questions about; a bit is not.
-  m.link(endOfRank(vars, vars, DimVector::POS), vars, DimVector::POS, var);
+  zigzag::expectWritten(
+      m.link(endOfRank(vars, vars, DimVector::POS), vars, DimVector::POS, var));
   return var;
 }
 
@@ -42,19 +37,19 @@ CellRef Vlog::makeTerm(const std::string_view functor,
   std::vector<CellRef> seen;
   for (const CellRef arg : args) {
     CellRef actualArg = arg;
-    if (noCell != arg && (std::ranges::find(seen, arg) != seen.end() ||
+    if (noCell != arg && (std::ranges::contains(seen, arg) ||
                           noCell != m.linked(arg, grab, DimVector::NEG) ||
                           noCell != m.linked(arg, step, DimVector::NEG) ||
                           noCell != m.linked(arg, step, DimVector::POS))) {
       actualArg = m.makeCell();
-      m.link(endOfRank(arg, clone, DimVector::POS), clone, DimVector::POS,
-             actualArg);
+      zigzag::expectWritten(m.link(endOfRank(arg, clone, DimVector::POS), clone,
+                                   DimVector::POS, actualArg));
     }
     seen.push_back(actualArg);
     if (noCell == previous) {
-      m.link(term, grab, DimVector::POS, actualArg);
+      zigzag::expectWritten(m.link(term, grab, DimVector::POS, actualArg));
     } else {
-      m.link(previous, step, DimVector::POS, actualArg);
+      zigzag::expectWritten(m.link(previous, step, DimVector::POS, actualArg));
     }
     previous = actualArg;
   }
@@ -68,15 +63,14 @@ CellRef Vlog::makeTerm(const std::string_view functor,
 
 std::vector<CellRef> Vlog::argumentsOf(const CellRef ref) const {
   std::vector<CellRef> args;
-  const CellRef actual = deref(ref);
-  CellRef arg          = m.linked(actual, grab, DimVector::POS);
-  for (std::size_t steps = 0; noCell != arg && steps <= m.cellCount();
-       steps++) {
-    if (std::ranges::find(args, arg) != args.end()) {
+  // A term's arguments are the d.step rank off its d.grab head. The rank
+  // stops on a ring by itself; the contains() check stops a lasso at its
+  // first repeat rather than at the traversal bound.
+  for (const auto arg : rank(m, m.linked(deref(ref), grab), step)) {
+    if (std::ranges::contains(args, arg)) {
       break;
     }
     args.push_back(arg);
-    arg = m.linked(arg, step, DimVector::POS);
   }
   return args;
 }
@@ -94,23 +88,24 @@ void Vlog::bind(const CellRef v, const CellRef t) {
   // setting it maintains both -- is what makes this the whole edit rather than
   // three edits and a repair, and a rank tail has no posward neighbour to
   // evict, so there is nothing else to fix up.
-  m.link(endOfRank(t, clone, DimVector::POS), clone, DimVector::POS,
-         endOfRank(v, clone, DimVector::NEG));
+  zigzag::expectWritten(m.link(endOfRank(t, clone, DimVector::POS), clone,
+                               DimVector::POS,
+                               endOfRank(v, clone, DimVector::NEG)));
 }
 
-bool Vlog::unify(const CellRef a, const CellRef b) {
+UnifyResult Vlog::unify(const CellRef a, const CellRef b) {
   const auto x = deref(a);
   const auto y = deref(b);
   if (x == y) {
-    return true; // already the same rank
+    return {}; // already the same rank
   }
   if (isUnbound(x)) {
     bind(x, y);
-    return true;
+    return {};
   }
   if (isUnbound(y)) {
     bind(y, x);
-    return true;
+    return {};
   }
 
   // Both bound. Numbers compare as bits and never as text: R6 put the
@@ -120,25 +115,28 @@ bool Vlog::unify(const CellRef a, const CellRef b) {
   const auto kind = m.valueKindOf(x);
   if (xanadu::ValueKind::None != kind ||
       xanadu::ValueKind::None != m.valueKindOf(y)) {
-    return kind == m.valueKindOf(y) &&
-           m.slot(x)->valueBits == m.slot(y)->valueBits;
+    if (kind == m.valueKindOf(y) &&
+        m.slot(x)->valueBits == m.slot(y)->valueBits) {
+      return {};
+    }
+    return std::unexpected{UnifyFailure::ValueMismatch};
   }
 
   if (m.textOf(x) != m.textOf(y)) {
-    return false; // functor or atom mismatch
+    return std::unexpected{UnifyFailure::FunctorMismatch};
   }
 
   const auto left  = argumentsOf(x);
   const auto right = argumentsOf(y);
   if (left.size() != right.size()) {
-    return false; // arity mismatch
+    return std::unexpected{UnifyFailure::ArityMismatch};
   }
-  for (std::size_t i = 0; i < left.size(); i++) {
-    if (!unify(left[i], right[i])) {
-      return false;
+  for (const auto [l, r] : std::views::zip(left, right)) {
+    if (auto unified = unify(l, r); !unified) {
+      return unified;
     }
   }
-  return true;
+  return {};
 }
 
 } // namespace zigzag

@@ -35,7 +35,7 @@ TEST(VQLVisualizerTest, RenderCellInspection) {
   zigzag::CellRef neighbor = arena.makeCell("Neighbor");
   zigzag::DimRef testDim   = arena.makeCell("d.test");
 
-  arena.link(cell, testDim, false /*posward*/, neighbor);
+  EXPECT_TRUE(arena.link(cell, testDim, false /*posward*/, neighbor));
 
   std::string card = AsciiVisualizer::renderCellInspection(arena, cell);
   EXPECT_THAT(card, testing::HasSubstr("Cell: #"));
@@ -53,8 +53,8 @@ TEST(VQLVisualizerTest, RenderRankGrid) {
   zigzag::CellRef c10 = arena.makeCell("right");
   zigzag::CellRef c01 = arena.makeCell("down");
 
-  arena.link(c00, dimX, false /*posward*/, c10);
-  arena.link(c00, dimY, false /*posward*/, c01);
+  EXPECT_TRUE(arena.link(c00, dimX, false /*posward*/, c10));
+  EXPECT_TRUE(arena.link(c00, dimY, false /*posward*/, c01));
 
   std::string grid =
       AsciiVisualizer::renderRankGrid(arena, c00, dimX, dimY, "dx", "dy", 1);
@@ -90,11 +90,11 @@ TEST(VQLVisualizerTest, RenderCellConnections) {
   zigzag::CellRef c4 = arena.makeCell("bar");
 
   // c1 -(d.1)-> c2
-  arena.link(c1, dim1, false /*posward*/, c2);
+  EXPECT_TRUE(arena.link(c1, dim1, false /*posward*/, c2));
   // c1 -(d.2)-> c3
-  arena.link(c1, dim2, false /*posward*/, c3);
+  EXPECT_TRUE(arena.link(c1, dim2, false /*posward*/, c3));
   // c2 -(d.2)-> c4
-  arena.link(c2, dim2, false /*posward*/, c4);
+  EXPECT_TRUE(arena.link(c2, dim2, false /*posward*/, c4));
 
   std::vector<ViewDimension> dims = {
       {"d.1", dim1},

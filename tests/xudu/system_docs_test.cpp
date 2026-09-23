@@ -113,16 +113,20 @@ TEST(SystemDocsTest, SystemStoreGenesisTopology) {
   EXPECT_EQ(manifold.home(), store.homeCell());
 
   // 10 Dimensions registered
-  const auto dDims       = manifold.dimensionNamed(xudu::kDimDims, store);
-  const auto dVars       = manifold.dimensionNamed(xudu::kDimVars, store);
-  const auto dValues     = manifold.dimensionNamed(xudu::kDimValues, store);
-  const auto dGroups     = manifold.dimensionNamed(xudu::kDimGroups, store);
-  const auto dSubgroups  = manifold.dimensionNamed(xudu::kDimSubgroups, store);
-  const auto dClone      = manifold.dimensionNamed(xudu::kDimClone, store);
-  const auto dNotes      = manifold.dimensionNamed(xudu::kDimNotes, store);
-  const auto dSchemas    = manifold.dimensionNamed(xudu::kDimSchemas, store);
-  const auto dAlternates = manifold.dimensionNamed(xudu::kDimAlternates, store);
-  const auto dDefault    = manifold.dimensionNamed(xudu::kDimDefault, store);
+  const auto dDims   = manifold.dimensionNamed(xudu::kDimDims, store).value();
+  const auto dVars   = manifold.dimensionNamed(xudu::kDimVars, store).value();
+  const auto dValues = manifold.dimensionNamed(xudu::kDimValues, store).value();
+  const auto dGroups = manifold.dimensionNamed(xudu::kDimGroups, store).value();
+  const auto dSubgroups =
+      manifold.dimensionNamed(xudu::kDimSubgroups, store).value();
+  const auto dClone = manifold.dimensionNamed(xudu::kDimClone, store).value();
+  const auto dNotes = manifold.dimensionNamed(xudu::kDimNotes, store).value();
+  const auto dSchemas =
+      manifold.dimensionNamed(xudu::kDimSchemas, store).value();
+  const auto dAlternates =
+      manifold.dimensionNamed(xudu::kDimAlternates, store).value();
+  const auto dDefault =
+      manifold.dimensionNamed(xudu::kDimDefault, store).value();
 
   EXPECT_NE(dDims, 0U);
   EXPECT_NE(dVars, 0U);
@@ -172,11 +176,12 @@ TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
   hierSpec.schemas.push_back({{"double"}, {0.0}});
   head = xudu::ensureSetting(store, head, hierSpec);
   store.repointCurrentVersion(head);
-  const auto manifold   = store.rebuildManifold(head);
-  const auto dVars      = manifold.dimensionNamed(xudu::kDimVars, store);
-  const auto dGroups    = manifold.dimensionNamed(xudu::kDimGroups, store);
-  const auto dSubgroups = manifold.dimensionNamed(xudu::kDimSubgroups, store);
-  const auto dClone     = manifold.dimensionNamed(xudu::kDimClone, store);
+  const auto manifold = store.rebuildManifold(head);
+  const auto dVars    = manifold.dimensionNamed(xudu::kDimVars, store).value();
+  const auto dGroups = manifold.dimensionNamed(xudu::kDimGroups, store).value();
+  const auto dSubgroups =
+      manifold.dimensionNamed(xudu::kDimSubgroups, store).value();
+  const auto dClone = manifold.dimensionNamed(xudu::kDimClone, store).value();
 
   // Blank group cell off home
   const auto blankCell = manifold.linked(manifold.home(), dGroups);
@@ -486,8 +491,8 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   xudu::initializeSystemStore(store, SystemDocKind::Layout);
 
   const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
-  const auto vars     = manifold.dimensionNamed("d.vars", store);
-  const auto values   = manifold.dimensionNamed("d.values", store);
+  const auto vars     = manifold.dimensionNamed("d.vars", store).value();
+  const auto values   = manifold.dimensionNamed("d.values", store).value();
   ASSERT_NE(vars, 0U);
   ASSERT_NE(values, 0U);
 

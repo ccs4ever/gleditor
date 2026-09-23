@@ -22,12 +22,24 @@
 #ifndef ZIGZAG_VLOG_HPP
 #define ZIGZAG_VLOG_HPP
 
+#include <cstdint>
+#include <expected>
 #include <span>
 #include <string_view>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace zigzag {
+
+/// Why two terms did not unify. The comments in unify() used to be the only
+/// record of which of these it was; a caller tracing a failed goal needs it.
+enum class UnifyFailure : std::uint8_t {
+  ValueMismatch,   ///< both carry typed values, and the kinds or bits differ
+  FunctorMismatch, ///< different functors, or different atoms
+  ArityMismatch,   ///< same functor, different argument counts
+};
+
+using UnifyResult = std::expected<void, UnifyFailure>;
 
 /**
  * @brief The four dimensions unification walks, and the arena it walks in.
@@ -62,9 +74,11 @@ struct Vlog {
 
   // -- the two questions §3 turns on -----------------------------------------
 
-  /// Vlog's `deref`, which is cloneMaster and was already there.
+  /// Vlog's `deref`, which is cloneMaster and was already there. Total: a
+  /// cell the arena cannot reach dereferences to itself, as a term with no
+  /// bindings does.
   [[nodiscard]] CellRef deref(CellRef ref) const noexcept {
-    return m.cloneMaster(ref, clone);
+    return m.cloneMaster(ref, clone).value_or(ref);
   }
 
   /// Whether @p ref is an unbound variable.
@@ -90,13 +104,14 @@ struct Vlog {
    * being refused, because a zzstructure is happy with one and cloneMaster()
    * already guards the walk.
    */
-  bool unify(CellRef a, CellRef b);
+  UnifyResult unify(CellRef a, CellRef b);
 
   /// Bind the unbound variable @p v to @p t: splice v's clone rank onto the
   /// posward tail of t's, so the combined rank's master is t's master.
   void bind(CellRef v, CellRef t);
 
-  /// The far end of @p from's rank along @p dim, cycle-bounded.
+  /// The far end of @p from's rank along @p dim, cycle-bounded: on a ring,
+  /// the cell before @p from.
   [[nodiscard]] CellRef
   endOfRank(CellRef from, DimRef dim,
             DimVector dir = DimVector::POS) const noexcept;

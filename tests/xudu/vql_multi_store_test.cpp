@@ -59,7 +59,7 @@ TEST(VQLMultiStoreTest, SingleSliceRegistration) {
 
   // Resolves via ##NAME shorthand
   EXPECT_EQ(coord.resolveNamedStore("primary_slice"), mySliceHome);
-  EXPECT_EQ(coord.resolveNamedStore("non_existent"), noCell);
+  EXPECT_EQ(coord.resolveNamedStore("non_existent"), std::nullopt);
 }
 
 TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
@@ -114,7 +114,7 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(coord.resolveNamedStore("users"), homeUsers);
   EXPECT_EQ(coord.resolveNamedStore("math"), homeMath);
   EXPECT_EQ(coord.resolveNamedStore("geo"), homeGeo);
-  EXPECT_EQ(coord.resolveNamedStore("missing"), noCell);
+  EXPECT_EQ(coord.resolveNamedStore("missing"), std::nullopt);
 }
 
 TEST(VQLMultiStoreTest, UniversalCloneMasterDereferenceChain) {
@@ -127,12 +127,12 @@ TEST(VQLMultiStoreTest, UniversalCloneMasterDereferenceChain) {
   CellRef cellC = arena.makeCell();
 
   // Link B to A along d.clone: A pos to B, B neg to A
-  arena.link(cellA, coord.dimClone(), DimVector::POS, cellB);
-  arena.link(cellB, coord.dimClone(), DimVector::NEG, cellA);
+  EXPECT_TRUE(arena.link(cellA, coord.dimClone(), DimVector::POS, cellB));
+  EXPECT_TRUE(arena.link(cellB, coord.dimClone(), DimVector::NEG, cellA));
 
   // Link C to B along d.clone: B pos to C, C neg to B
-  arena.link(cellB, coord.dimClone(), DimVector::POS, cellC);
-  arena.link(cellC, coord.dimClone(), DimVector::NEG, cellB);
+  EXPECT_TRUE(arena.link(cellB, coord.dimClone(), DimVector::POS, cellC));
+  EXPECT_TRUE(arena.link(cellC, coord.dimClone(), DimVector::NEG, cellB));
 
   // Dereferencing any cell in the chain via '>' lands on Master A
   EXPECT_EQ(coord.derefCloneMaster(cellA), cellA);
@@ -168,11 +168,12 @@ TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
 
   EXPECT_EQ(coord.storeCount(), 2u);
 
-  CellRef resolvedA = coord.resolveNamedStore("docA");
-  CellRef resolvedB = coord.resolveNamedStore("docB");
-
-  EXPECT_NE(resolvedA, noCell);
-  EXPECT_NE(resolvedB, noCell);
+  const auto namedA = coord.resolveNamedStore("docA");
+  const auto namedB = coord.resolveNamedStore("docB");
+  ASSERT_TRUE(namedA.has_value());
+  ASSERT_TRUE(namedB.has_value());
+  const CellRef resolvedA = *namedA;
+  const CellRef resolvedB = *namedB;
   EXPECT_NE(resolvedA, resolvedB);
 
   // Verify that Store A's structure is preserved in the composite arena

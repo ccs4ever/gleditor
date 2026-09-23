@@ -51,21 +51,17 @@ std::vector<Extent> findOccurrences(const std::span<const PrimediaSpan> spans,
 } // namespace
 
 FormatResolver::FormatResolver(const Store &store) noexcept {
-  for (const auto &[linkId, link] : store.links()) {
-    if (LinkType::Format != link.type) {
-      continue;
-    }
-    const auto attrOpt = store.formatAttributeOf(link);
-    if (!attrOpt) {
-      continue;
-    }
-    formatLinks_.push_back(CachedFormatLink{
-        .attribute  = *attrOpt,
-        .targets    = link.left,
-        .decoration = decorationFromFormatAttribute(*attrOpt),
-        .align      = textAlignFromFormatAttribute(*attrOpt),
-    });
-  }
+  formatLinks_ = store.formatLinks() |
+                 std::views::transform([](const auto &named) {
+                   const auto &[link, attribute] = named;
+                   return CachedFormatLink{
+                       .attribute  = attribute,
+                       .targets    = link.left,
+                       .decoration = decorationFromFormatAttribute(attribute),
+                       .align      = textAlignFromFormatAttribute(attribute),
+                   };
+                 }) |
+                 std::ranges::to<std::vector>();
 }
 
 FormatResolver::FormattingResult

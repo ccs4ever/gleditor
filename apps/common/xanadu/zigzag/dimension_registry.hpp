@@ -12,6 +12,7 @@
 #include <format>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -107,21 +108,21 @@ public:
 
   /**
    * @brief Lookup an existing dimension cell in the given store without
-   * creating.
-   *        Returns noCell if it does not exist.
+   * creating; nullopt if this registry has not seen one.
    */
-  [[nodiscard]] DimRef get(const xanadu::Store &store,
-                           std::string_view name) const;
-  [[nodiscard]] DimRef get(const xanadu::Store &store,
-                           InternedDimName dimName) const;
+  [[nodiscard]] std::optional<DimRef> get(const xanadu::Store &store,
+                                          std::string_view name) const;
+  [[nodiscard]] std::optional<DimRef> get(const xanadu::Store &store,
+                                          InternedDimName dimName) const;
 
   /**
-   * @brief Lookup an existing dimension cell in the manifold.
+   * @brief Lookup an existing dimension cell in the manifold; nullopt when it
+   * holds none by that name.
    */
-  [[nodiscard]] DimRef get(const Manifold &manifold,
-                           std::string_view name) const;
-  [[nodiscard]] DimRef get(const Manifold &manifold,
-                           InternedDimName dimName) const;
+  [[nodiscard]] std::optional<DimRef> get(const Manifold &manifold,
+                                          std::string_view name) const;
+  [[nodiscard]] std::optional<DimRef> get(const Manifold &manifold,
+                                          InternedDimName dimName) const;
 
   /**
    * @brief Register or update the mapping for a store and dimension.
@@ -143,6 +144,11 @@ public:
   void clear() noexcept;
 
 private:
+  /// The dimension @p manifold holds under @p dimName: cached if the cache
+  /// entry is still held, else found on d.dims and cached.
+  std::optional<DimRef> held(const xanadu::Store &store,
+                             const Manifold &manifold, InternedDimName dimName);
+
   DimensionRegistry()  = default;
   ~DimensionRegistry() = default;
 

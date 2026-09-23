@@ -23,8 +23,8 @@ TEST(VQLEngineTest, BarePathNavigation) {
   zigzag::CellRef alice  = arena.makeCell("Alice");
   zigzag::CellRef bob    = arena.makeCell("Bob");
 
-  arena.link(core.home(), dPeople, DimVector::POS, alice);
-  arena.link(alice, dPeople, DimVector::POS, bob);
+  EXPECT_TRUE(arena.link(core.home(), dPeople, DimVector::POS, alice));
+  EXPECT_TRUE(arena.link(alice, dPeople, DimVector::POS, bob));
 
   auto results = engine.execute("##/d.people");
   ASSERT_EQ(results.size(), 2u);
@@ -40,13 +40,13 @@ TEST(VQLEngineTest, MultiStoreAndNamedStoreSugar) {
   zigzag::CellRef usersHome = arena.makeCell("users_home");
   zigzag::CellRef uAlice    = arena.makeCell("Alice");
   zigzag::DimRef dUsers     = coordinator.core().mintDimension("d.users");
-  arena.link(usersHome, dUsers, DimVector::POS, uAlice);
+  EXPECT_TRUE(arena.link(usersHome, dUsers, DimVector::POS, uAlice));
 
   // Mint slice 2: products
   zigzag::CellRef prodHome = arena.makeCell("prod_home");
   zigzag::CellRef pBook    = arena.makeCell("HypertextBook");
   zigzag::DimRef dProds    = coordinator.core().mintDimension("d.items");
-  arena.link(prodHome, dProds, DimVector::POS, pBook);
+  EXPECT_TRUE(arena.link(prodHome, dProds, DimVector::POS, pBook));
 
   coordinator.addSlice("users", "data", usersHome);
   coordinator.addSlice("products", "catalog", prodHome);
@@ -74,11 +74,11 @@ TEST(VQLEngineTest, UniversalDerefMaster) {
   zigzag::CellRef clone1 = arena.makeCell("Clone1");
   zigzag::CellRef clone2 = arena.makeCell("Clone2");
 
-  arena.link(master, dClone, DimVector::POS, clone1);
-  arena.link(clone1, dClone, DimVector::NEG, master);
+  EXPECT_TRUE(arena.link(master, dClone, DimVector::POS, clone1));
+  EXPECT_TRUE(arena.link(clone1, dClone, DimVector::NEG, master));
 
-  arena.link(clone1, dClone, DimVector::POS, clone2);
-  arena.link(clone2, dClone, DimVector::NEG, clone1);
+  EXPECT_TRUE(arena.link(clone1, dClone, DimVector::POS, clone2));
+  EXPECT_TRUE(arena.link(clone2, dClone, DimVector::NEG, clone1));
 
   engine.setVariable("c2", clone2);
 
@@ -129,10 +129,10 @@ TEST(VQLEngineTest, PredicatesAndQuantifiers) {
   zigzag::CellRef c40 = arena.makeScalarCell(static_cast<std::int64_t>(40));
   zigzag::CellRef c50 = arena.makeScalarCell(static_cast<std::int64_t>(50));
 
-  arena.link(core.home(), dNums, DimVector::POS, c10);
-  arena.link(c10, dNums, DimVector::POS, c25);
-  arena.link(c25, dNums, DimVector::POS, c40);
-  arena.link(c40, dNums, DimVector::POS, c50);
+  EXPECT_TRUE(arena.link(core.home(), dNums, DimVector::POS, c10));
+  EXPECT_TRUE(arena.link(c10, dNums, DimVector::POS, c25));
+  EXPECT_TRUE(arena.link(c25, dNums, DimVector::POS, c40));
+  EXPECT_TRUE(arena.link(c40, dNums, DimVector::POS, c50));
 
   // Filter: [. > 20 and . < 45]
   auto results = engine.execute("##/d.numbers[. > 20 and . < 45]");
@@ -157,10 +157,10 @@ TEST(VQLEngineTest, RangeClamps) {
   zigzag::CellRef c     = arena.makeCell("C");
   zigzag::CellRef d     = arena.makeCell("D");
 
-  arena.link(core.home(), dItems, DimVector::POS, a);
-  arena.link(a, dItems, DimVector::POS, b);
-  arena.link(b, dItems, DimVector::POS, c);
-  arena.link(c, dItems, DimVector::POS, d);
+  EXPECT_TRUE(arena.link(core.home(), dItems, DimVector::POS, a));
+  EXPECT_TRUE(arena.link(a, dItems, DimVector::POS, b));
+  EXPECT_TRUE(arena.link(b, dItems, DimVector::POS, c));
+  EXPECT_TRUE(arena.link(c, dItems, DimVector::POS, d));
 
   // [1]: First
   auto rFirst = engine.execute("##/d.items[1]");
@@ -192,26 +192,26 @@ TEST(VQLEngineTest, FLWORQueryExecution) {
   zigzag::CellRef p1  = arena.makeCell("person1");
   zigzag::CellRef p1a = arena.makeScalarCell(static_cast<std::int64_t>(30));
   zigzag::CellRef p1n = arena.makeCell("Alice");
-  arena.link(p1, dAge, DimVector::POS, p1a);
-  arena.link(p1, dName, DimVector::POS, p1n);
+  EXPECT_TRUE(arena.link(p1, dAge, DimVector::POS, p1a));
+  EXPECT_TRUE(arena.link(p1, dName, DimVector::POS, p1n));
 
   // Person 2: Bob, 17
   zigzag::CellRef p2  = arena.makeCell("person2");
   zigzag::CellRef p2a = arena.makeScalarCell(static_cast<std::int64_t>(17));
   zigzag::CellRef p2n = arena.makeCell("Bob");
-  arena.link(p2, dAge, DimVector::POS, p2a);
-  arena.link(p2, dName, DimVector::POS, p2n);
+  EXPECT_TRUE(arena.link(p2, dAge, DimVector::POS, p2a));
+  EXPECT_TRUE(arena.link(p2, dName, DimVector::POS, p2n));
 
   // Person 3: Charlie, 45
   zigzag::CellRef p3  = arena.makeCell("person3");
   zigzag::CellRef p3a = arena.makeScalarCell(static_cast<std::int64_t>(45));
   zigzag::CellRef p3n = arena.makeCell("Charlie");
-  arena.link(p3, dAge, DimVector::POS, p3a);
-  arena.link(p3, dName, DimVector::POS, p3n);
+  EXPECT_TRUE(arena.link(p3, dAge, DimVector::POS, p3a));
+  EXPECT_TRUE(arena.link(p3, dName, DimVector::POS, p3n));
 
-  arena.link(core.home(), dPeople, DimVector::POS, p1);
-  arena.link(p1, dPeople, DimVector::POS, p2);
-  arena.link(p2, dPeople, DimVector::POS, p3);
+  EXPECT_TRUE(arena.link(core.home(), dPeople, DimVector::POS, p1));
+  EXPECT_TRUE(arena.link(p1, dPeople, DimVector::POS, p2));
+  EXPECT_TRUE(arena.link(p2, dPeople, DimVector::POS, p3));
 
   // for $p in ##/d.people where $p/d.age >= 18 return $p/d.name
   auto results = engine.execute(

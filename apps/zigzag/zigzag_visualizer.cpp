@@ -3,6 +3,7 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "core/format_resolver.hpp"
 #include "core/zzcore.hpp"
 
@@ -11,6 +12,8 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <optional>
+#include <ranges>
 #include <utility>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -391,11 +394,12 @@ bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
   if (!engine_->findCell(focus) || isEphemeral(focus)) {
     return false;
   }
-  const auto dimRef =
+  const auto named =
       engine_->manifold().dimensionNamed(dimension, engine_->store());
-  if (dimRef == zigzag::noCell) {
+  if (!named) {
     return false;
   }
+  const DimRef dimRef = *named;
   // Protection against system instability: d.dims links cannot be unlinked
   if (dimRef == engine_->manifold().dimsDimension() || dimension == "d.dims") {
     return false;
@@ -428,10 +432,11 @@ bool ZigzagVisualizer::deleteFocusCell() {
                                          current_view_.y_dimension,
                                          current_view_.z_dimension};
   for (const auto &dimId : viewDims) {
-    const auto dimRef = dimensionRef(dimId);
-    if (dimRef == zigzag::noCell) {
+    const auto named = dimensionRef(dimId);
+    if (!named) {
       continue;
     }
+    const DimRef dimRef = *named;
     const auto posNeighbor =
         engine_->manifold().linked(focus, dimRef, DimVector::POS);
     if (posNeighbor != zigzag::noCell && posNeighbor != focus &&
@@ -513,12 +518,12 @@ void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if (!engine_->findCell(focus)) {
     return;
   }
-  CellRef targetCell = focus;
-  const auto cloneDim =
-      engine_->manifold().dimensionNamed("d.clone", engine_->store());
-  if (cloneDim != zigzag::noCell) {
-    targetCell = engine_->cloneMaster(focus, cloneDim);
-  }
+  const CellRef targetCell = engine_->manifold()
+                                 .dimensionNamed("d.clone", engine_->store())
+                                 .and_then([&](const DimRef clone) {
+                                   return engine_->cloneMaster(focus, clone);
+                                 })
+                                 .value_or(focus);
   if ((targetCell == engine_->manifold().home() ||
        targetCell == engine_->manifold().dimsDimension()) &&
       text.empty()) {
@@ -546,9 +551,9 @@ std::size_t ZigzagVisualizer::operationCount() const {
   return engine_ ? engine_->store().opCount() : 0;
 }
 
-DimRef ZigzagVisualizer::dimensionRef(const DimID &name) const {
+std::optional<DimRef> ZigzagVisualizer::dimensionRef(const DimID &name) const {
   if (!engine_) {
-    return zigzag::noCell;
+    return std::nullopt;
   }
   // d.meta-dims is derived and is stored in no operation (R12), so it is a
   // sentinel rather than something to look up or mint.
@@ -584,31 +589,33 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
     info.role = "home";
   } else if (id == manifold.dimsDimension()) {
     info.role = "dimension";
-  } else {
-    for (const auto dim : manifold.dimensions()) {
-      if (id == dim) {
-        info.role = "dimension";
-        break;
-      }
-    }
+  } else if (std::ranges::contains(manifold.dimensions(), id)) {
+    info.role = "dimension";
   }
 
+  const auto cloneDim = manifold.dimensionNamed("d.clone", store);
+
+  // An ephemeral cell is a d.meta-dims clone of the dimension it stands for;
+  // the engine answers that without needing d.clone.
   if (isEphemeral(id)) {
     info.role            = "dimension";
     info.is_clone        = true;
-    const auto cloneDim  = manifold.dimensionNamed("d.clone", store);
-    info.clone_master_id = engine_->cloneMaster(id, cloneDim);
+    info.clone_master_id = engine_->cloneMaster(id, cloneDim.value_or(noCell))
+                               .value_or(zigzag::noCell);
   }
 
-  const auto roleDim  = manifold.dimensionNamed("d.role", store);
-  const auto mimeDim  = manifold.dimensionNamed("d.mime", store);
-  const auto mediaDim = manifold.dimensionNamed("d.media", store);
+  // The text of the cell @p id links to posward along the dimension named
+  // @p dimName: how role, MIME type and media path hang off a cell.
+  const auto attribute = [&](const std::string_view dimName) {
+    return manifold.dimensionNamed(dimName, store)
+        .and_then(
+            [&](const DimRef dim) { return zigzag::step(manifold, id, dim); })
+        .transform(
+            [&](const CellRef held) { return manifold.textOf(held, store); });
+  };
 
-  if (info.role.empty() && roleDim != zigzag::noCell && !isEphemeral(id)) {
-    const auto held = manifold.linked(id, roleDim, DimVector::POS);
-    if (held != zigzag::noCell) {
-      info.role = manifold.textOf(held, store);
-    }
+  if (info.role.empty() && !isEphemeral(id)) {
+    info.role = attribute("d.role").value_or(std::string{});
   }
   if (info.role.empty()) {
     if (const auto *cold = engine_->coldOf(id)) {
@@ -617,19 +624,8 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
   }
 
   if (!isEphemeral(id)) {
-    if (mimeDim != zigzag::noCell) {
-      const auto held = manifold.linked(id, mimeDim, DimVector::POS);
-      if (held != zigzag::noCell) {
-        info.mime_type = manifold.textOf(held, store);
-      }
-    }
-
-    if (mediaDim != zigzag::noCell) {
-      const auto held = manifold.linked(id, mediaDim, DimVector::POS);
-      if (held != zigzag::noCell) {
-        info.media_path = manifold.textOf(held, store);
-      }
-    }
+    info.mime_type  = attribute("d.mime").value_or(std::string{});
+    info.media_path = attribute("d.media").value_or(std::string{});
   }
 
   info.is_image =
@@ -643,15 +639,17 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
                                     info.media_path.ends_with(".bmp")));
 
   if (!isEphemeral(id)) {
-    info.is_clone        = false;
-    info.clone_master_id = id;
-    const auto cloneDim  = manifold.dimensionNamed("d.clone", store);
-    if (cloneDim != zigzag::noCell) {
-      if (manifold.linked(id, cloneDim, DimVector::NEG) != zigzag::noCell) {
-        info.is_clone        = true;
-        info.clone_master_id = manifold.cloneMaster(id, cloneDim);
-      }
-    }
+    // A clone is a cell with a negward neighbour on d.clone; its master is
+    // the far end of that rank.
+    const auto master =
+        cloneDim.and_then([&](const DimRef clone) -> std::optional<CellRef> {
+          if (!zigzag::step(manifold, id, clone, zigzag::Negward)) {
+            return std::nullopt;
+          }
+          return manifold.cloneMaster(id, clone);
+        });
+    info.is_clone        = master.has_value();
+    info.clone_master_id = master.value_or(id);
   }
 
   return info;
@@ -1070,10 +1068,11 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
   auto mapAxis = [&](const DimID &dim, const glm::vec3 &unitDir,
                      const DimensionVisual &visual, const float spacing) {
-    const auto dimRef = dimensionRef(dim);
-    if (dimRef == zigzag::noCell) {
+    const auto named = dimensionRef(dim);
+    if (!named) {
       return;
     }
+    const DimRef dimRef = *named;
 
     std::unordered_set<CellRef> visitedPos;
     visitedPos.insert(focusRef);
@@ -1146,12 +1145,12 @@ void ZigzagVisualizer::navigateFocus(const DimID &dimension,
   if (!engine_ || accursed_cell_focus_ == 0) {
     return;
   }
-  const auto focus  = static_cast<CellRef>(accursed_cell_focus_);
-  const auto dimRef = dimensionRef(dimension);
-  if (dimRef == zigzag::noCell) {
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  const auto named = dimensionRef(dimension);
+  if (!named) {
     return;
   }
-  const CellRef next = engine_->linked(focus, dimRef, dir);
+  const CellRef next = engine_->linked(focus, *named, dir);
   if (next == zigzag::noCell) {
     return;
   }
@@ -1306,13 +1305,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     // the SpanReader -- a std::string per dimension per call. Sixty visible
     // cells times three axes times a dozen dimensions was a couple of thousand
     // allocations a frame, in the one path that exists to stage without them.
+    const auto axisOf = [this](const DimID &name) {
+      return std::pair{name, dimensionRef(name).value_or(zigzag::noCell)};
+    };
     const std::array<std::pair<DimID, DimRef>, 3> viewAxes{
-        std::pair{current_view_.x_dimension,
-                  dimensionRef(current_view_.x_dimension)},
-        std::pair{current_view_.y_dimension,
-                  dimensionRef(current_view_.y_dimension)},
-        std::pair{current_view_.z_dimension,
-                  dimensionRef(current_view_.z_dimension)},
+        axisOf(current_view_.x_dimension),
+        axisOf(current_view_.y_dimension),
+        axisOf(current_view_.z_dimension),
     };
 
     for (const auto &[id, cell] : visible_cells_) {

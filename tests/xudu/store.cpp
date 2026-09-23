@@ -392,10 +392,10 @@ TEST(StoreTest, linksAttachToContentRatherThanToPositions) {
   link.left.push_back(span);
   store.addLink(source, link);
 
-  const auto found = store.linksTouching(span);
-  ASSERT_EQ(found.size(), 1U);
-  EXPECT_EQ(found.front()->owner, "a reader");
-  EXPECT_EQ(found.front()->type, LinkType::Comment);
+  auto found = store.linksTouching(span);
+  ASSERT_EQ(std::ranges::distance(found), 1);
+  EXPECT_EQ(found.front().owner, "a reader");
+  EXPECT_EQ(found.front().type, LinkType::Comment);
 }
 
 TEST(StoreTest, aLinkIsPresentOnEveryDocumentQuotingTheContent) {
@@ -412,7 +412,7 @@ TEST(StoreTest, aLinkIsPresentOnEveryDocumentQuotingTheContent) {
   const auto quoted      = store.transclude(MicroversionId{}, 0, source, 4, 5);
   const auto quotedPiece = store.rebuild(quoted).pieces().front();
 
-  EXPECT_THAT(store.linksTouching(quotedPiece), testing::SizeIs(1));
+  EXPECT_EQ(std::ranges::distance(store.linksTouching(quotedPiece)), 1);
 }
 
 TEST(StoreTest, aLinkChangesNoText) {

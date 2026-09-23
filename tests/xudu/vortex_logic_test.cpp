@@ -177,10 +177,11 @@ TEST(VortexLogicTest, ChoiceAndFailBacktracking) {
   CellRef opHalt   = h.vm.mintOpcode(OpcodeKind::Halt);
 
   // Link spin: opChoice -> opUnify1 -> opFail
-  h.core.arena().link(opChoice, h.core.dims().spin, false, opUnify1);
-  h.core.arena().link(opUnify1, h.core.dims().spin, false, opFail);
+  EXPECT_TRUE(
+      h.core.arena().link(opChoice, h.core.dims().spin, false, opUnify1));
+  EXPECT_TRUE(h.core.arena().link(opUnify1, h.core.dims().spin, false, opFail));
   // alt branch: opAlt -> opHalt
-  h.core.arena().link(opAlt, h.core.dims().spin, false, opHalt);
+  EXPECT_TRUE(h.core.arena().link(opAlt, h.core.dims().spin, false, opHalt));
 
   // Bind inputs
   CellRef altTarget =
@@ -418,7 +419,7 @@ TEST(VortexLogicTest, HighThroughputResolutionBenchmark) {
     CellRef v2        = h.stdlib.makeVar();
     CellRef queryTerm = h.stdlib.makeTerm("pred", {v1, v2});
 
-    bool ok = h.stdlib.unify(queryTerm, termTemplate);
+    const bool ok = h.stdlib.unify(queryTerm, termTemplate).has_value();
     EXPECT_TRUE(ok);
 
     // Rollback instantly
@@ -486,7 +487,7 @@ TEST(VortexLogicTest, HypermediaManifoldPredicates) {
   CellRef c2 = h.core.arena().makeScalarCell(static_cast<std::int64_t>(200));
   DimRef d1  = h.core.arena().makeCell("d.test");
 
-  h.core.arena().link(c1, d1, zigzag::DimVector::POS, c2);
+  EXPECT_TRUE(h.core.arena().link(c1, d1, zigzag::DimVector::POS, c2));
 
   // 1. Query cell_value(CellId, Val) for c1
   CellRef c1Ref  = h.core.arena().makeScalarCell(static_cast<std::int64_t>(c1));

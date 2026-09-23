@@ -365,7 +365,8 @@ TEST(VortexCoreTest, ControlFlowCallAndReturnOnDStack) {
   h.core.bindOutput(subOp, outCell);
 
   CellRef retOp = h.vm.mintOpcode(OpcodeKind::Return, "#RETURN");
-  h.core.arena().link(subOp, h.core.dims().spin, DimVector::POS, retOp);
+  EXPECT_TRUE(
+      h.core.arena().link(subOp, h.core.dims().spin, DimVector::POS, retOp));
 
   // Caller: #CALL subOp, then #MUL outCell * 2
   CellRef callOp    = h.vm.mintOpcode(OpcodeKind::Call, "#CALL");
@@ -378,7 +379,8 @@ TEST(VortexCoreTest, ControlFlowCallAndReturnOnDStack) {
   h.core.bindInput(afterCall, two);
   h.core.bindOutput(afterCall, outCell);
 
-  h.core.arena().link(callOp, h.core.dims().spin, DimVector::POS, afterCall);
+  EXPECT_TRUE(h.core.arena().link(callOp, h.core.dims().spin, DimVector::POS,
+                                  afterCall));
 
   CellRef cursor = h.vm.spawnCursor(callOp, "main_thread");
   auto res       = h.vm.run(cursor, 10);
@@ -402,7 +404,8 @@ TEST(VortexCoreTest, CursorAssociativeScopes) {
   CellRef outCell = h.arena.makeCell();
   h.core.bindOutput(resolveOp, outCell);
 
-  h.core.arena().link(bindOp, h.core.dims().spin, DimVector::POS, resolveOp);
+  EXPECT_TRUE(h.core.arena().link(bindOp, h.core.dims().spin, DimVector::POS,
+                                  resolveOp));
 
   CellRef cursor = h.vm.spawnCursor(bindOp, "scope_test");
   auto res       = h.vm.run(cursor, 5);

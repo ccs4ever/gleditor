@@ -6,11 +6,13 @@
 
 #include <cstdio>
 #include <iomanip>
+#include <ranges>
 #include <sstream>
 #include <unordered_set>
 
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace xanadu::vql {
@@ -132,7 +134,8 @@ CellRef VQLCompiler::emitOp(OpcodeKind kind, std::string_view label) {
     entryOp_ = op;
   }
   if (currentOp_ != noCell) {
-    core_.arena().link(currentOp_, core_.dims().spin, false, op);
+    zigzag::expectWritten(
+        core_.arena().link(currentOp_, core_.dims().spin, false, op));
   }
   currentOp_ = op;
   allOps_.push_back(op);
@@ -217,17 +220,7 @@ DimRef VQLCompiler::resolveDimension(std::string_view name) {
   if (name == "d.stdlib") return dims.stdlib;
   if (name == "d.clause") return dims.clause;
 
-  // Walk dims.dims to see if dimension was previously minted
-  CellRef curr = dims.dims;
-  std::unordered_set<CellRef> visited;
-  while (curr != noCell && visited.insert(curr).second) {
-    if (core_.arena().textOf(curr) == name) {
-      return curr;
-    }
-    curr = core_.arena().linked(curr, dims.dims, DimVector::POS);
-  }
-
-  return core_.mintDimension(name);
+  return core_.findOrMintDimension(name);
 }
 
 CompilationResult VQLCompiler::compile(std::string_view queryString,
@@ -847,7 +840,8 @@ CellRef VQLCompiler::compileValueExpr(const ValueExpr &expr, CellRef ctxCell) {
 void VQLCompiler::linkAsExecutable(CellRef entryOp) {
   if (entryOp == noCell) return;
   // Link posward off home along +d.spin
-  core_.arena().link(core_.home(), core_.dims().spin, false, entryOp);
+  zigzag::expectWritten(
+      core_.arena().link(core_.home(), core_.dims().spin, false, entryOp));
   // Spawn main execution cursor
   vm_.spawnCursor(entryOp, "main");
 }
@@ -856,48 +850,7 @@ void VQLCompiler::linkAsLibrary(CellRef entryOp, std::string_view moduleName,
                                 std::string_view symbolName) {
   if (entryOp == noCell) return;
 
-  // Find or create module along +d.stdlib
-  CellRef cur  = core_.arena().linked(core_.home(), core_.dims().stdlib, false);
-  CellRef prev = core_.home();
-  CellRef modCell   = noCell;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    if (core_.arena().textOf(cur) == moduleName) {
-      modCell = cur;
-      break;
-    }
-    prev = cur;
-    cur  = core_.arena().linked(cur, core_.dims().stdlib, false);
-  }
-
-  if (modCell == noCell) {
-    modCell = core_.arena().makeCell(moduleName);
-    if (prev == core_.home()) {
-      core_.arena().link(core_.home(), core_.dims().stdlib, false, modCell);
-    } else {
-      core_.arena().link(prev, core_.dims().stdlib, false, modCell);
-    }
-  }
-
-  // Export symbol under module along +d.vars with entry opcode on +d.values
-  CellRef symCell = core_.arena().makeCell(symbolName);
-  core_.arena().link(symCell, core_.dims().values, false, entryOp);
-
-  CellRef firstVar = core_.arena().linked(modCell, core_.dims().vars, false);
-  if (firstVar == noCell) {
-    core_.arena().link(modCell, core_.dims().vars, false, symCell);
-  } else {
-    CellRef curVar       = firstVar;
-    std::size_t varLimit = core_.arena().cellCount() + 1;
-    while (varLimit-- > 0) {
-      CellRef next = core_.arena().linked(curVar, core_.dims().vars, false);
-      if (next == noCell) {
-        core_.arena().link(curVar, core_.dims().vars, false, symCell);
-        break;
-      }
-      curVar = next;
-    }
-  }
+  core_.exportSymbol(core_.getOrCreateModule(moduleName), symbolName, entryOp);
 }
 
 std::string VQLCompiler::disassemble(CellRef entryOp,
