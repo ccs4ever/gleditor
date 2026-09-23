@@ -1177,19 +1177,20 @@ TEST(E2EBinaryOrchestrationTest,
   // opened alongside it at the same depth, so each starts out part of the
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
-  std::string cmd =
-      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
-      " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  std::string cmd = "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
+                    permascrollFlag(testRoot / "permascroll") + " --backend " +
+                    activeBackend() + " --profile --fov 15 --coarse-below 0" +
+                    " --version-id " + vLinked.str() + " --background " +
+                    vCorpus.str() + " --background " + vPageTop.str() +
+                    " --background " + vPageBottom.str() + " --screenshot " +
+                    ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath)) << "Fly-in screenshot missing";
-  // LinkBeams::align()'s trace: proof the two pages actually flew forward
-  // rather than merely being linked.
-  EXPECT_NE(res.output.find("aligns centroid"), std::string::npos)
+  // LinkBeams::align()'s opt-in diagnostic records the actual move. A stored
+  // link alone would not prove that a background page flew forward.
+  EXPECT_NE(res.output.find("aligns doc"), std::string::npos)
       << "background flyin never brought a linked page forward:\n"
       << res.output;
 

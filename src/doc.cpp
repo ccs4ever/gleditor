@@ -7,15 +7,16 @@
 #include <gleditor/animation.hpp>         // for docArrival, docArrivalDepth
 #include <gleditor/doc.hpp>               // IWYU pragma: associated
 #include <gleditor/document_observer.hpp> // for DocumentObserver
-#include <gleditor/render/constants.hpp>  // for kPageBuildFrameBudget
-#include <gleditor/render/device.hpp>     // for RenderDevice
-#include <gleditor/render_state.hpp>      // for RenderState
-#include <gleditor/renderer.hpp>          // for Renderer, RendererRef
-#include <gleditor/text_source.hpp>       // for TextSource
-#include <gleditor/utf8.hpp>              // for alignToCharacterStart
-#include <glm/detail/qualifier.hpp>       // for qualifier
-#include <glm/ext/matrix_float4x4.hpp>    // for mat4
-#include <glm/ext/vector_float3.hpp>      // for vec3
+#include <gleditor/logging.hpp>
+#include <gleditor/render/constants.hpp> // for kPageBuildFrameBudget
+#include <gleditor/render/device.hpp>    // for RenderDevice
+#include <gleditor/render_state.hpp>     // for RenderState
+#include <gleditor/renderer.hpp>         // for Renderer, RendererRef
+#include <gleditor/text_source.hpp>      // for TextSource
+#include <gleditor/utf8.hpp>             // for alignToCharacterStart
+#include <glm/detail/qualifier.hpp>      // for qualifier
+#include <glm/ext/matrix_float4x4.hpp>   // for mat4
+#include <glm/ext/vector_float3.hpp>     // for vec3
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream> // for basic_ostream, operator<<
 #include <limits>
@@ -1296,9 +1297,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
 
   reflowScope = scope;
   reflowPages = rebuilt.size();
-  std::cout << std::format("reflow: scope {} pages rebuilt {} of {}\n",
-                           reflowScopeName(scope), rebuilt.size(),
-                           pages.size());
+  GLEDITOR_LOG_DEBUG("text.layout", "reflow: scope {} pages rebuilt {} of {}",
+                     reflowScopeName(scope), rebuilt.size(), pages.size());
 }
 
 Doc::Doc(RendererRef renderer, render::RenderDevice *device,
@@ -1321,8 +1321,9 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
          [[maybe_unused]] const Private _priv)
     : Doc(renderer, device, model, _priv) {
   docName = source.name();
-  std::cout << "NEW DOC: " << this << " " << docName << " "
-            << glm::to_string(model) << "\n";
+  GLEDITOR_LOG_DEBUG("text.layout", "new document {} {} {}",
+                     static_cast<const void *>(this), docName,
+                     glm::to_string(model));
   text            = source.text();
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
@@ -1335,8 +1336,8 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   // somebody else wrote, or from a program that assembled them out of pieces.
   std::size_t badOffset = 0;
   if (!gleditor::validateUtf8(text, badOffset)) {
-    std::cout << "invalid utf-8 in " << docName
-              << ", first bad offset: " << badOffset << "\n";
+    GLEDITOR_LOG_WARN("text.layout", "invalid UTF-8 in {}, first bad offset {}",
+                      docName, badOffset);
     text = gleditor::makeValidUtf8(text);
   }
 
@@ -1392,7 +1393,8 @@ void Doc::load(const gleditor::TextSource &source) {
 void Doc::makePages([[maybe_unused]] RenderState &state) { makePages(); }
 
 void Doc::makePages() {
-  std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
+  GLEDITOR_LOG_DEBUG("text.layout", "making pages for {} {}",
+                     static_cast<const void *>(this), glm::to_string(model));
   auto tSize = 0UL;
   while (tSize < text.size()) {
     auto shaping        = layoutFrom(static_cast<std::uint32_t>(tSize));

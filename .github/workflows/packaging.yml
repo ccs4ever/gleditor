@@ -38,7 +38,7 @@ jobs:
           libfreetype-dev libharfbuzz-dev libfribidi-dev \
           libunibreak-dev libfontconfig-dev \
           libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
-          libvulkan-dev libtorrent-rasterbar-dev libssl-dev liblmdb-dev glslang-tools
+          libvulkan-dev libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev glslang-tools
 
     # dpkg-buildpackage wants debian/ at the root of the tree it is building.
     # It lives under packaging/ in the repository so that four packaging
@@ -172,7 +172,7 @@ jobs:
         pacman -Syu --noconfirm --needed \
           git pkgconf make gcc freetype2 harfbuzz fribidi libunibreak fontconfig \
           sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-          openssl lmdb libtorrent-rasterbar boost glslang python
+          openssl lmdb libtorrent-rasterbar boost spdlog glslang python
 
     - uses: actions/checkout@v7
       with:
@@ -306,6 +306,7 @@ jobs:
           mingw-w64-ucrt-x86_64-gcc
           mingw-w64-ucrt-x86_64-pkgconf
           mingw-w64-ucrt-x86_64-glm
+          mingw-w64-ucrt-x86_64-spdlog
           mingw-w64-ucrt-x86_64-glslang
           mingw-w64-ucrt-x86_64-vulkan-headers
           mingw-w64-ucrt-x86_64-vulkan-loader
@@ -596,7 +597,7 @@ jobs:
       run: |
         brew install make freetype harfbuzz fribidi libunibreak fontconfig \
           sdl3 sdl3_image glm libtorrent-rasterbar lmdb boost openssl@3 pkgconf googletest \
-          vulkan-loader molten-vk glslang
+          vulkan-loader molten-vk glslang spdlog
 
     # AccessKit is what reports the user interface to screen readers --
     # NSAccessibility here. Its C bindings are published as one archive

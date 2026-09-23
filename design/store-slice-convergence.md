@@ -1892,7 +1892,9 @@ came back byte-identical across every regenerated fixture.
      accounting turns on.
    - **`promote()` mints only what the evaluation invented.** A ref without `ephemeralBit` already
      has a name in this document, so it maps to itself. Promoting an answer that quotes half a
-     document writes one operation per new cell, not per reachable cell.
+     document writes one operation per new cell, not per reachable cell. The graph walk stops at
+     unmodified base cells and treats dimension refs as edge names unless they are also reached by
+     an ordinary link; otherwise one answer can pull in the Vortex library behind `d.clone`.
 
    Not covered: promoting a shadow's *content* change back (its links are written, a restatement of
    its text is not), and an arena whose base is mutated underneath it — a shadow copies a cell, not

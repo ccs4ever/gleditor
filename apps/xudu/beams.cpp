@@ -20,6 +20,7 @@
 #include <gleditor/animation.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
@@ -940,11 +941,11 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
 
   if (glm::distance(target, farPos) >= alreadyAligned) {
     if (linkId) {
-      std::cout << "xudu: link " << *linkId << " aligns centroid of doc "
-                << toDocIdx << " with doc " << fromDocIdx << "\n";
+      GLEDITOR_LOG_DEBUG("xudu.links", "link {} aligns doc {} with doc {}",
+                         *linkId, toDocIdx, fromDocIdx);
     } else {
-      std::cout << "xudu: transclusion aligns centroid of doc " << toDocIdx
-                << " with doc " << fromDocIdx << "\n";
+      GLEDITOR_LOG_DEBUG("xudu.links", "transclusion aligns doc {} with doc {}",
+                         toDocIdx, fromDocIdx);
     }
     // The document being brought over is the subject of the move, so it is the
     // one that takes longest and starts first. Everything else in this
@@ -1253,8 +1254,8 @@ bool LinkBeams::openDangling(RenderState &state) {
     if (!showing) {
       continue;
     }
-    std::cout << "xudu: link " << waiting.link.link << " reaches "
-              << showing->str() << ", opening it\n";
+    GLEDITOR_LOG_DEBUG("xudu.links", "link {} reaches {}, opening it",
+                       waiting.link.link, showing->str());
     opener(*showing);
     // One a frame. Opening a document is a load and a page build, and the
     // strands are worked out again when it lands, which is when the next one
@@ -1277,8 +1278,8 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
                       caret->documentIndex() == strand.from.doc;
   const auto &there = atFrom ? strand.to : strand.from;
   if (there.isCell()) {
-    std::cout << "xudu: follow link " << strand.link << " to cell #"
-              << there.cell() << "\n";
+    GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to cell #{}", strand.link,
+                       there.cell());
     if (satelloidOverlay_ != nullptr) {
       satelloidOverlay_->triggerPulse(there.cell());
     }
@@ -1289,8 +1290,8 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
     return;
   }
   caret->placeAt(there.doc, there.start);
-  std::cout << "xudu: follow link " << strand.link << " to doc " << there.doc
-            << " [" << there.start << "," << there.end << ")\n";
+  GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to doc {} [{}, {})",
+                     strand.link, there.doc, there.start, there.end);
 }
 
 bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {

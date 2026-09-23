@@ -584,17 +584,34 @@ std::optional<Promoted> promote(xanadu::Store &store,
   // The reachable subgraph, in discovery order. Reachability from the answer is
   // what makes "promote the answer, not the search" a graph walk: a failed
   // branch's cells are not reachable from a cell the answer names.
-  std::vector<CellRef> order;
-  std::unordered_set<CellRef> seen;
-  order.push_back(root);
-  seen.insert(root);
-  for (std::size_t i = 0; i < order.size(); i++) {
-    for (const auto &edge : from.dimensionsOf(order[i])) {
-      for (const CellRef next : {edge.dim, edge.pos, edge.neg}) {
-        if (noCell != next && from.contains(next) && seen.insert(next).second) {
+  std::vector<CellRef> order{root};
+  std::vector<CellRef> frontier{root};
+  std::unordered_set<CellRef> seen{root};
+  std::unordered_set<CellRef> queued{root};
+  for (std::size_t i = 0; i < frontier.size(); i++) {
+    const CellRef current = frontier[i];
+    // A base cell only read through the overlay is an existing endpoint, not
+    // a request to copy the document reachable beyond it. A dimension names
+    // an edge; its own ranks are likewise outside this answer unless a link
+    // also reaches it as a cell.
+    if (!from.holdsOwn(current)) {
+      continue;
+    }
+    for (const auto &edge : from.dimensionsOf(current)) {
+      auto discover = [&](const CellRef next, const bool expand) {
+        if (noCell == next || !from.contains(next)) {
+          return;
+        }
+        if (seen.insert(next).second) {
           order.push_back(next);
         }
-      }
+        if (expand && queued.insert(next).second) {
+          frontier.push_back(next);
+        }
+      };
+      discover(edge.dim, false);
+      discover(edge.pos, true);
+      discover(edge.neg, true);
     }
     if (order.size() > budget.maxOps) {
       return std::nullopt;

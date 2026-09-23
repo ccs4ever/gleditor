@@ -26,6 +26,7 @@
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/animation.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/shader_source.hpp>
@@ -261,8 +262,8 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   }
   slot.z                    = depthZ;
   const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
-  std::cout << "doc pos: " << state.docs.size() << " "
-            << glm::to_string(newDocPosition) << "\n";
+  GLEDITOR_LOG_DEBUG("render.scene", "doc pos: {} {}", state.docs.size(),
+                     glm::to_string(newDocPosition));
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   // A document opened behind the row settles dimmer than one in it. It is

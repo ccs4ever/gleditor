@@ -1582,6 +1582,7 @@ What SDL does have, this program uses:
     cannot find it)
   - Vulkan (only with `GLEDITOR_ENABLE_VULKAN=1`)
   - GLM (headers)
+  - spdlog (`spdlog`; categorized diagnostics on stderr)
   - The OpenGL and OpenGL ES entry points are resolved at run time through `SDL_GL_GetProcAddress`,
     so no GL library is linked. `GL/glcorearb.h` is still needed for its typedefs and enum values.
   - accesskit-c (optional; what reports the user interface to screen readers. See "Accessibility"
@@ -1612,7 +1613,7 @@ sudo apt-get update && sudo apt-get install \
   libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev \
-  libtorrent-rasterbar-dev libssl-dev liblmdb-dev gnupg
+  libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev gnupg
 ```
 
 `libtorrent-rasterbar-dev` is required, not optional: it is where the ed25519 that signs a
@@ -1640,7 +1641,11 @@ Notes:
   one.
 - The default `LDFLAGS` include `-rtlib=compiler-rt`, which needs the LLVM runtime package
   (`libclang-rt-dev` on Debian/Ubuntu).
-- spdlog is not used at present (it was removed due to libc++ linking issues).
+- spdlog is linked through pkg-config, including its fmt dependency. The earlier clang/libc++ link
+  issue should be rechecked before enabling that toolchain.
+- Set `SPDLOG_LEVEL='warn,text.layout=debug,xudu.links=trace'` to enable selected diagnostic
+  categories. Messages go to stderr; see `design/logging-migration.md` for the remaining conversion
+  plan and stdout contracts.
 - For coverage (`make profile`), install `llvm-profdata` and `llvm-cov` (e.g., `llvm-14-tools` or
   similar on Ubuntu).
 - Headless testing works with Mesa's software drivers: `llvmpipe` for OpenGL and OpenGL ES,

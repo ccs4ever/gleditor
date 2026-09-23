@@ -8,6 +8,8 @@
 #include <format>
 #include <iostream>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
@@ -287,10 +289,18 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
       auto promoted =
           zigzag::promote(*boundStore_, boundStore_->primaryCurrentVersion(),
                           arena_, newFocusOut, budget);
-      if (promoted && !promoted->cells.empty()) {
-        boundStore_->repointCurrentVersion(promoted->version);
-        newFocusOut = promoted->cells.back();
+      if (!promoted || promoted->cells.empty()) {
+        GLEDITOR_LOG_WARN("vortex.edit",
+                          "duplicate promotion refused for arena cell {}",
+                          newFocusOut);
+        newFocusOut = noCell;
+        return false;
       }
+      boundStore_->repointCurrentVersion(promoted->version);
+      // promote() lists newly minted cells in discovery order, root first.
+      newFocusOut = promoted->cells.front();
+      GLEDITOR_LOG_DEBUG("vortex.edit", "duplicate promoted to {}",
+                         newFocusOut);
     }
     return true;
   }

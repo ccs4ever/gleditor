@@ -8,6 +8,7 @@
   fribidi,
   libunibreak,
   fontconfig,
+  spdlog,
   poppler,
   file,
   sdl3,
@@ -66,6 +67,7 @@ stdenv.mkDerivation {
     fribidi
     libunibreak
     fontconfig
+    spdlog
     poppler
     file
     sdl3

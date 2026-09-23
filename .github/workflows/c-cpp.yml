@@ -134,7 +134,7 @@ jobs:
           libvulkan-dev glslang-tools \
           mesa-vulkan-drivers vulkan-validationlayers \
           libgmock-dev libgtest-dev \
-          libtorrent-rasterbar-dev libssl-dev liblmdb-dev gnupg \
+          libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev gnupg \
           xvfb \
           clang libclang-rt-dev make
 
@@ -194,7 +194,7 @@ jobs:
           libfribidi-dev libunibreak-dev libfontconfig-dev \
           libsdl2-dev libsdl2-image-dev \
           libgl-dev libgmock-dev pkg-config \
-          libtorrent-rasterbar-dev libssl-dev liblmdb-dev iproute2
+          libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev iproute2
     - name: build
       run: make -j$(nproc) GLEDITOR_SDL=2 xudu_test xudu-swarm-peer
     # Fails rather than skips if libtorrent went missing: this job exists to

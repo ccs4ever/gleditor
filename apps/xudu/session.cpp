@@ -24,6 +24,7 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/decode_index.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
@@ -1793,8 +1794,8 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           // whoever typed the line first. Storage economy is a real goal, but
           // it belongs below the address layer, not at it.
           curVersion = st.insert(curVersion, op.at, op.text);
-          std::cout << "xudu: " << curVersion.str() << " insert "
-                    << op.text.size() << " bytes at " << op.at << "\n";
+          GLEDITOR_LOG_DEBUG("xudu.edit", "{} insert {} bytes at {}",
+                             curVersion.str(), op.text.size(), op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
               broadcastLiveOp(
@@ -1807,8 +1808,8 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
           curVersion = st.erase(curVersion, op.at, op.length);
-          std::cout << "xudu: " << curVersion.str() << " delete " << op.length
-                    << " bytes at " << op.at << "\n";
+          GLEDITOR_LOG_DEBUG("xudu.edit", "{} delete {} bytes at {}",
+                             curVersion.str(), op.length, op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
               broadcastLiveOp(static_cast<std::uint32_t>(which), *appliedOp,
@@ -1938,9 +1939,9 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     link.left  = content;
     link.right.push_back(xudu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
-    std::cout << "xudu: " << version.str() << " format "
-              << xudu::formatAttributeName(*attribute) << " [" << start << ", "
-              << (start + effLen) << ")\n";
+    GLEDITOR_LOG_DEBUG("xudu.edit", "{} format {} [{}, {})", version.str(),
+                       xudu::formatAttributeName(*attribute), start,
+                       start + effLen);
   }
   save(sIdx);
   refresh(docIndex, version);
@@ -1996,9 +1997,9 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   link.left  = content;
   link.right.push_back(xudu::vocabularySpanFor(*attribute));
   auto version = st.addLink(open[docIndex].version, link);
-  std::cout << "xudu: " << version.str() << " align "
-            << xudu::formatAttributeName(*attribute) << " [" << start << ", "
-            << (start + effLen) << ")\n";
+  GLEDITOR_LOG_DEBUG("xudu.edit", "{} align {} [{}, {})", version.str(),
+                     xudu::formatAttributeName(*attribute), start,
+                     start + effLen);
   save(sIdx);
   refresh(docIndex, version);
 }

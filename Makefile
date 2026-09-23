@@ -101,7 +101,6 @@ CKSUM = cksum
 # cocmd builtin mkdir is sufficient for our needs
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
-# removed spdlog
 # SDL major version. SDL3 is what the code is written against and what is used
 # when it is installed; SDL2 is still what most distributions ship, so it is
 # the fallback rather than an error. Set GLEDITOR_SDL=2 or 3 to choose
@@ -147,7 +146,7 @@ GL_CFLAGS :=
 # the PDF figure extraction in text_source.cpp needs, live in libpoppler
 # itself. Listed separately so pkg-config contributes -lpoppler too, not to
 # add new cflags on top of what poppler-cpp already provides.
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler libmagic libvlc openssl $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler libmagic libvlc openssl spdlog $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -285,7 +284,7 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -503,7 +502,7 @@ GLEDITOR_LIBS :=
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which

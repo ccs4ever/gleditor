@@ -17,6 +17,7 @@
 #include <glm/ext/matrix_transform.hpp>
 
 #include <gleditor/color.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
@@ -2068,10 +2069,19 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
         if (engine_) {
           engine_->syncIncremental();
         }
+        GLEDITOR_LOG_DEBUG("zigzag.action",
+                           "action {} focus {} -> {} (visible={})", actionName,
+                           accursed_cell_focus_, newFocus,
+                           engine_ && engine_->findCell(newFocus) != nullptr);
         if (oldView != current_view_) {
           dimension_bundle_ = DimensionBundle::Custom;
           rebuildActiveViewTopology();
           invalidateAccessibility();
+        }
+        if (actionName == "duplicate-focus-cell" &&
+            (newFocus == zigzag::noCell || !engine_ ||
+             !engine_->findCell(newFocus))) {
+          return false;
         }
         if (newFocus != zigzag::noCell &&
             newFocus != static_cast<CellRef>(accursed_cell_focus_)) {
@@ -2081,6 +2091,9 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
           invalidateAccessibility();
         }
         return true;
+      }
+      if (actionName == "duplicate-focus-cell") {
+        return false;
       }
     }
   }
@@ -2258,8 +2271,20 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
       if (vortex_host_->dispatchAction(
               actionName, static_cast<CellRef>(accursed_cell_focus_),
               current_view_, newFocus)) {
-        if (newFocus != zigzag::noCell) {
+        // Duplication is a user edit promoted from Vortex's arena into the
+        // store. Replay it before validating the new focus against the view.
+        if (engine_) {
+          engine_->syncIncremental();
+        }
+        GLEDITOR_LOG_DEBUG("zigzag.edit",
+                           "duplicate focus {} -> {} (visible={})",
+                           accursed_cell_focus_, newFocus,
+                           engine_ && engine_->findCell(newFocus) != nullptr);
+        if (newFocus != zigzag::noCell && engine_ &&
+            engine_->findCell(newFocus)) {
           navigateFocusTo(static_cast<CellID>(newFocus));
+          GLEDITOR_LOG_DEBUG("zigzag.edit", "focus after duplicate: {}",
+                             accursed_cell_focus_);
           return true;
         }
       }
