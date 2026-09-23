@@ -6,10 +6,13 @@
 #define GLEDITOR_COLOR_H
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -75,6 +78,20 @@ constexpr Color4 unpackRgba(const std::uint32_t packed) {
   };
 }
 
+/// The value of one hex digit, or nullopt for anything else.
+[[nodiscard]] constexpr std::optional<int> hexDigit(const char chr) noexcept {
+  if (chr >= '0' && chr <= '9') {
+    return chr - '0';
+  }
+  if (chr >= 'a' && chr <= 'f') {
+    return (chr - 'a') + 10;
+  }
+  if (chr >= 'A' && chr <= 'F') {
+    return (chr - 'A') + 10;
+  }
+  return std::nullopt;
+}
+
 /**
  * @brief Parse a 6-digit (or optionally 3-digit) hex RGB string (e.g.
  *        "#RRGGBB" or "RRGGBB", and if @p allow3Digit is true, "#RGB" or
@@ -86,46 +103,25 @@ inline std::optional<Color3> parseHexColor(const std::string_view text,
   if (!hex.empty() && hex.front() == '#') {
     hex.remove_prefix(1);
   }
-
-  const auto nibble = [](const char c) -> unsigned {
-    if (c >= '0' && c <= '9') {
-      return static_cast<unsigned>(c - '0');
-    }
-    return static_cast<unsigned>(std::tolower(static_cast<unsigned char>(c)) -
-                                 'a') +
-           10U;
-  };
-
-  if (hex.size() == 3) {
-    if (!allow3Digit) {
-      return std::nullopt;
-    }
-    if (!std::ranges::all_of(hex, [](const char c) {
-          return std::isxdigit(static_cast<unsigned char>(c)) != 0;
-        })) {
-      return std::nullopt;
-    }
-    const auto channel3 = [&](const std::size_t i) {
-      return static_cast<float>(nibble(hex[i]) * 17U) / 255.0F;
-    };
-    return Color3{.r = channel3(0), .g = channel3(1), .b = channel3(2)};
-  }
-
-  if (hex.size() != 6) {
-    return std::nullopt;
-  }
-  if (!std::ranges::all_of(hex, [](const char c) {
-        return std::isxdigit(static_cast<unsigned char>(c)) != 0;
-      })) {
+  const bool shortForm = 3 == hex.size();
+  if (!(6 == hex.size() || (shortForm && allow3Digit))) {
     return std::nullopt;
   }
 
-  const auto channel6 = [&](const std::size_t i) {
-    return static_cast<float>(nibble(hex[i]) * 16U + nibble(hex[i + 1])) /
-           255.0F;
+  std::array<std::optional<int>, 6> digits{};
+  std::ranges::transform(hex, digits.begin(), hexDigit);
+  if (!std::ranges::all_of(digits | std::views::take(hex.size()),
+                           &std::optional<int>::has_value)) {
+    return std::nullopt;
+  }
+  // "#RGB" is "#RRGGBB" with each digit doubled: 0xF is 0xFF, i.e. 15 * 17.
+  const auto channel = [&](const std::size_t i) {
+    const int value = shortForm
+                          ? (*digits[i] * 17)
+                          : ((*digits[2 * i] << 4) | *digits[(2 * i) + 1]);
+    return static_cast<float>(value) / 255.0F;
   };
-
-  return Color3{.r = channel6(0), .g = channel6(2), .b = channel6(4)};
+  return Color3{.r = channel(0), .g = channel(1), .b = channel(2)};
 }
 
 /**
@@ -156,39 +152,44 @@ inline std::string toHex(const std::string_view bytes) {
   return out;
 }
 
+/// Why a hex string did not decode.
+enum class HexError : std::uint8_t {
+  OddLength,   ///< two digits make a byte, and there was one left over
+  NonHexDigit, ///< a character outside [0-9a-fA-F]
+};
+
+/// Decode a lowercase or uppercase hex string into binary bytes, or say why
+/// it is not one.
+[[nodiscard]] inline std::expected<std::string, HexError>
+decodeHex(const std::string_view text) {
+  if (0 != text.size() % 2) {
+    return std::unexpected{HexError::OddLength};
+  }
+  std::string out;
+  out.reserve(text.size() / 2);
+  for (const auto pair : text | std::views::chunk(2)) {
+    const auto high = hexDigit(pair[0]);
+    const auto low  = hexDigit(pair[1]);
+    if (!high || !low) {
+      return std::unexpected{HexError::NonHexDigit};
+    }
+    out.push_back(static_cast<char>((*high << 4) | *low));
+  }
+  return out;
+}
+
 /**
- * @brief Decode a lowercase or uppercase hex string into binary bytes.
+ * @brief decodeHex() for callers with no use for the reason.
  * @throws std::runtime_error on an odd number of digits or non-hex characters.
  */
 inline std::string fromHex(const std::string_view text) {
-  if (0 != text.size() % 2) {
-    throw std::runtime_error("fromHex: odd length");
+  auto decoded = decodeHex(text);
+  if (!decoded) {
+    throw std::runtime_error(HexError::OddLength == decoded.error()
+                                 ? "fromHex: odd length"
+                                 : "fromHex: non-hex digit");
   }
-
-  const auto hexValue = [](const char chr) -> int {
-    if (chr >= '0' && chr <= '9') {
-      return chr - '0';
-    }
-    if (chr >= 'a' && chr <= 'f') {
-      return (chr - 'a') + 10;
-    }
-    if (chr >= 'A' && chr <= 'F') {
-      return (chr - 'A') + 10;
-    }
-    return -1;
-  };
-
-  std::string out;
-  out.reserve(text.size() / 2);
-  for (std::size_t i = 0; i < text.size(); i += 2) {
-    const int high = hexValue(text[i]);
-    const int low  = hexValue(text[i + 1]);
-    if (high < 0 || low < 0) {
-      throw std::runtime_error("fromHex: non-hex digit");
-    }
-    out.push_back(static_cast<char>((high << 4) | low));
-  }
-  return out;
+  return *std::move(decoded);
 }
 
 } // namespace gleditor::color

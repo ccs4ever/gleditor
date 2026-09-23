@@ -19,7 +19,8 @@ namespace gleditor {
 TEST(ImageCacheTest, DecodeInvalidBufferReturnsEmpty) {
   const std::vector<std::uint8_t> empty;
   const auto decoded = decodeImageBuffer(empty);
-  EXPECT_FALSE(decoded.valid());
+  ASSERT_FALSE(decoded.has_value());
+  EXPECT_EQ(decoded.error(), DecodeError::Empty);
 }
 
 TEST(ImageCacheTest, ImageResourceAspectRatio) {

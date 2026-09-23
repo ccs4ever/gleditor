@@ -13,6 +13,8 @@
 
 #include <compare>
 #include <cstddef>
+#include <cstdint>
+#include <expected>
 #include <functional>
 #include <memory>
 
@@ -133,6 +135,27 @@ template <> struct std::hash<gleditor::FontMapKeyAdapter> {
 
 namespace gleditor {
 
+/// Why GlyphCache::put() could not hand back a glyph.
+enum class GlyphError : std::uint8_t {
+  /// The cluster is longer than GlyphCache::maxClusterBytes: a pathological
+  /// run rather than a real ligature or emoji sequence.
+  ClusterTooLong,
+  /// Neither the layer size nor the layer count can grow any further, or the
+  /// glyph is bigger than the largest layer the hardware allows.
+  AtlasFull,
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const GlyphError error) noexcept {
+  switch (error) {
+  case GlyphError::ClusterTooLong:
+    return "cluster too long";
+  case GlyphError::AtlasFull:
+    return "atlas full";
+  }
+  return "unknown glyph error";
+}
+
 /**
  * @class GlyphCache
  * @brief Caches rendered glyphs into a device array texture and returns UVs.
@@ -215,11 +238,15 @@ public:
    *            requests for the same cluster and font with the same
    *            decorations (usually both empty) share one cache entry, and
    *            different decorations get their own.
-   * @return Sizes with texel coordinates and pixel dimensions.
-   * @throws std::invalid_argument if the cluster exceeds maxClusterBytes.
+   * @return Sizes with texel coordinates and pixel dimensions, or the
+   *         GlyphError saying why this glyph cannot be drawn. A refusal is
+   *         per glyph: the cache is unchanged by it and the next glyph packs.
+   *         Called once per glyph while building a page, which is why this
+   *         answers rather than throws.
    */
-  Sizes put(const std::string_view &chr, const FontPtr &font,
-            const std::unordered_set<Decoration> &decorations = {});
+  [[nodiscard]] std::expected<Sizes, GlyphError>
+  put(const std::string_view &chr, const FontPtr &font,
+      const std::unordered_set<Decoration> &decorations = {});
 
   /// Handle of the array texture holding every cached glyph.
   [[nodiscard]] render::TextureHandle textureHandle() const { return texture; }
@@ -275,8 +302,8 @@ private:
   /// where it was.
   void reallocate(int newSize, int newLayers);
   /// Make room for a padded glyph box, growing the atlas if that is what it
-  /// takes. Throws when neither the size nor the layer count can grow further.
-  void makeRoomFor(const Rect &padded);
+  /// takes. AtlasFull when neither the size nor the layer count can grow.
+  std::expected<void, GlyphError> makeRoomFor(const Rect &padded);
   /**
    * @brief The key for @p font, worked out once per font rather than per
    *        lookup.
@@ -336,8 +363,9 @@ private:
   /**
    * @brief Rasterize and pack a new glyph into the cache.
    */
-  Sizes addToCache(const std::string &chr, const FontPtr &font,
-                   const std::unordered_set<Decoration> &decorations);
+  std::expected<Sizes, GlyphError>
+  addToCache(const std::string &chr, const FontPtr &font,
+             const std::unordered_set<Decoration> &decorations);
 };
 
 } // namespace gleditor

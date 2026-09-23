@@ -282,10 +282,14 @@ TEST(ClickableRegistryTest, MultiKindSeparation) {
   EXPECT_EQ(1, glyphHits);
 
   // 4. Kind controls filtering
-  EXPECT_EQ(1U, registry.controlsForKind(render::tagKindOverlay).size());
-  EXPECT_EQ(1U, registry.controlsForKind(render::tagKindPage).size());
-  EXPECT_EQ(1U, registry.controlsForKind(render::tagKindGlyph).size());
-  EXPECT_EQ(0U, registry.controlsForKind(render::tagKindBeam).size());
+  EXPECT_EQ(1, std::ranges::distance(
+                   registry.controlsForKind(render::tagKindOverlay)));
+  EXPECT_EQ(
+      1, std::ranges::distance(registry.controlsForKind(render::tagKindPage)));
+  EXPECT_EQ(
+      1, std::ranges::distance(registry.controlsForKind(render::tagKindGlyph)));
+  EXPECT_EQ(
+      0, std::ranges::distance(registry.controlsForKind(render::tagKindBeam)));
 }
 
 } // namespace

@@ -8,6 +8,8 @@
 #include <cstring>
 #include <format>
 #include <optional>
+
+#include <gleditor/logging.hpp>
 #include <queue>
 #include <set>
 #include <utility>
@@ -59,7 +61,12 @@ void UnifiedTransclusionEngine::syncIncremental() {
   const auto total = static_cast<std::uint32_t>(ops.size());
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
     if (const auto *const node = ops.get(idx); nullptr != node) {
-      manifold_.applyStructure(idx, *node);
+      // A refused operation is counted by the manifold (refusedOps()) and
+      // leaves it unchanged; the render sync has nothing more to do about it.
+      if (const auto folded = manifold_.applyStructure(idx, *node); !folded) {
+        GLEDITOR_LOG_DEBUG("zigzag.sync", "fold refused op {}: {}", idx,
+                           zigzag::toString(folded.error()));
+      }
       if (node->kind == xanadu::OpKind::Structure) {
         dirtyFormatCells_.insert(idx);
         if (node->sourceOpIndex != zigzag::noCell && node->sourceOpIndex != 0) {
@@ -677,8 +684,16 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
 
     for (const auto &glyph : shaping.glyphs) {
-      const auto sizes = glyphCache.put(
+      const auto sizesPlaced = glyphCache.put(
           glyph.chr, font, gleditor::decorationSetFor(glyph.decorations));
+      if (!sizesPlaced) {
+        // One glyph the atlas cannot take is one glyph not drawn; the rest of
+        // the cell still is.
+        GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
+                           toString(sizesPlaced.error()));
+        continue;
+      }
+      const auto &sizes = *sizesPlaced;
       Doc::VBORow row{};
       row.pos = {glyph.clusterLeft, glyph.clusterTop};
       row.foreground =

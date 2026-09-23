@@ -8,6 +8,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+
+#include <gleditor/decode_error.hpp>
 #include <memory>
 #include <optional>
 #include <span>
@@ -42,9 +45,9 @@ public:
 
   /**
    * @brief Decode an in-memory GIF buffer.
-   * @return Decoded GifDecoder instance, or nullptr on parse/decode failure.
+   * @return Decoded GifDecoder instance, or why the bytes did not decode.
    */
-  [[nodiscard]] static std::unique_ptr<GifDecoder>
+  [[nodiscard]] static std::expected<std::unique_ptr<GifDecoder>, DecodeError>
   decode(std::span<const std::uint8_t> bytes);
 
   /**
