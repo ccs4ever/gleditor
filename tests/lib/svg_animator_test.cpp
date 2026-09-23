@@ -49,7 +49,9 @@ TEST(SvgAnimatorTest, StaticSvgReturnsNullOnLoad) {
   auto animator = SvgAnimator::load(
       {reinterpret_cast<const std::uint8_t *>(staticSvg.data()),
        staticSvg.size()});
-  EXPECT_EQ(animator, nullptr);
+  // A valid document with nothing to animate is told apart from a broken one.
+  ASSERT_FALSE(animator.has_value());
+  EXPECT_EQ(animator.error(), DecodeError::NotAnimated);
 }
 
 TEST(SvgAnimatorTest, RenderAnimatedRectMovement) {
@@ -59,9 +61,11 @@ TEST(SvgAnimatorTest, RenderAnimatedRectMovement) {
              <animate attributeName="x" from="0" to="80" dur="2s" repeatCount="indefinite"/>
            </rect>
          </svg>)";
-  auto animator = SvgAnimator::load(
-      {reinterpret_cast<const std::uint8_t *>(animatedSvg.data()),
-       animatedSvg.size()});
+  auto animator =
+      SvgAnimator::load(
+          {reinterpret_cast<const std::uint8_t *>(animatedSvg.data()),
+           animatedSvg.size()})
+          .value_or(nullptr);
   ASSERT_NE(animator, nullptr);
 
   EXPECT_EQ(animator->width(), 100);
@@ -94,9 +98,11 @@ TEST(SvgAnimatorTest, RenderAnimatedTransformRotation) {
              <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="4s"/>
            </rect>
          </svg>)";
-  auto animator = SvgAnimator::load(
-      {reinterpret_cast<const std::uint8_t *>(transformSvg.data()),
-       transformSvg.size()});
+  auto animator =
+      SvgAnimator::load(
+          {reinterpret_cast<const std::uint8_t *>(transformSvg.data()),
+           transformSvg.size()})
+          .value_or(nullptr);
   ASSERT_NE(animator, nullptr);
   EXPECT_FLOAT_EQ(animator->duration(), 4.0F);
 
@@ -116,9 +122,11 @@ TEST(SvgAnimatorTest, DetectLottieViaThorvgAnimationContext) {
       {reinterpret_cast<const std::uint8_t *>(lottieJson.data()),
        lottieJson.size()}));
 
-  auto animator = SvgAnimator::load(
-      {reinterpret_cast<const std::uint8_t *>(lottieJson.data()),
-       lottieJson.size()});
+  auto animator =
+      SvgAnimator::load(
+          {reinterpret_cast<const std::uint8_t *>(lottieJson.data()),
+           lottieJson.size()})
+          .value_or(nullptr);
   ASSERT_NE(animator, nullptr);
   EXPECT_FLOAT_EQ(animator->duration(), 2.0F);
   EXPECT_EQ(animator->width(), 100);

@@ -37,24 +37,27 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
 // a category is disabled. Do not use spdlog's compile-time DEBUG/TRACE macros:
 // their default build level removes those calls even when SPDLOG_LEVEL enables
 // the category at runtime.
-#define GLEDITOR_LOG_AT(category_name, level_name, ...)                        \
+// spdlog names the error level `err` and its logging method `error`, so the
+// level and the method are passed separately; one name for both is why
+// GLEDITOR_LOG_ERROR once expanded to a level that does not exist.
+#define GLEDITOR_LOG_AT(category_name, level_enum, method, ...)                \
   do {                                                                         \
     static const auto gleditorCategoryLogger =                                 \
         ::gleditor::logging::category(category_name);                          \
-    if (gleditorCategoryLogger->should_log(::spdlog::level::level_name)) {     \
-      gleditorCategoryLogger->level_name(__VA_ARGS__);                         \
+    if (gleditorCategoryLogger->should_log(::spdlog::level::level_enum)) {     \
+      gleditorCategoryLogger->method(__VA_ARGS__);                             \
     }                                                                          \
   } while (false)
 
 #define GLEDITOR_LOG_TRACE(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, trace, __VA_ARGS__)
+  GLEDITOR_LOG_AT(category_name, trace, trace, __VA_ARGS__)
 #define GLEDITOR_LOG_DEBUG(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, debug, __VA_ARGS__)
+  GLEDITOR_LOG_AT(category_name, debug, debug, __VA_ARGS__)
 #define GLEDITOR_LOG_INFO(category_name, ...)                                  \
-  GLEDITOR_LOG_AT(category_name, info, __VA_ARGS__)
+  GLEDITOR_LOG_AT(category_name, info, info, __VA_ARGS__)
 #define GLEDITOR_LOG_WARN(category_name, ...)                                  \
-  GLEDITOR_LOG_AT(category_name, warn, __VA_ARGS__)
+  GLEDITOR_LOG_AT(category_name, warn, warn, __VA_ARGS__)
 #define GLEDITOR_LOG_ERROR(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, error, __VA_ARGS__)
+  GLEDITOR_LOG_AT(category_name, err, error, __VA_ARGS__)
 
 #endif // GLEDITOR_LOGGING_HPP

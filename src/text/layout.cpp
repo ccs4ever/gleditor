@@ -7,6 +7,7 @@
 #include <iostream>
 #include <linebreak.h>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -77,12 +78,12 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
       }
       if (cp > 32) {
         auto fallback = FontManager::instance().getFallbackFont(font, cp);
-        if (fallback && fallback->hbFont()) {
+        if (fallback && (*fallback)->hbFont()) {
           hb_buffer_t *fbuf = hb_buffer_create();
           hb_buffer_add_utf8(fbuf, text.data() + glyphInfo[i].cluster, -1, 0,
                              -1);
           hb_buffer_guess_segment_properties(fbuf);
-          hb_shape(fallback->hbFont(), fbuf, nullptr, 0);
+          hb_shape((*fallback)->hbFont(), fbuf, nullptr, 0);
           unsigned int fCount    = 0;
           hb_glyph_info_t *fInfo = hb_buffer_get_glyph_infos(fbuf, &fCount);
           hb_glyph_position_t *fPos =
@@ -114,13 +115,10 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
 }
 
 std::size_t countUtf8Chars(std::string_view str) {
-  std::size_t count = 0;
-  for (const unsigned char c : str) {
-    if ((c & 0xC0) != 0x80) {
-      count++;
-    }
-  }
-  return count;
+  // A character starts at every byte that is not a continuation byte.
+  return static_cast<std::size_t>(std::ranges::count_if(str, [](const char c) {
+    return (static_cast<unsigned char>(c) & 0xC0) != 0x80;
+  }));
 }
 
 /// Every decoration named by a range covering @p byteOffset, combined.
@@ -131,13 +129,15 @@ std::size_t countUtf8Chars(std::string_view str) {
 gleditor::DecorationMask
 decorationsAt(const std::size_t byteOffset,
               const std::vector<gleditor::DecoratedRange> &ranges) {
-  gleditor::DecorationMask mask = 0;
-  for (const auto &range : ranges) {
-    if (byteOffset >= range.start && byteOffset < range.end) {
-      mask = static_cast<gleditor::DecorationMask>(mask | range.decorations);
-    }
-  }
-  return mask;
+  return std::ranges::fold_left(
+      ranges | std::views::filter([byteOffset](const auto &range) {
+        return byteOffset >= range.start && byteOffset < range.end;
+      }) | std::views::transform(&gleditor::DecoratedRange::decorations),
+      gleditor::DecorationMask{0},
+      [](const gleditor::DecorationMask mask,
+         const gleditor::DecorationMask more) {
+        return static_cast<gleditor::DecorationMask>(mask | more);
+      });
 }
 
 /// The box anchored exactly at @p byteOffset, if any -- nullptr for a byte
@@ -145,12 +145,10 @@ decorationsAt(const std::size_t byteOffset,
 const gleditor::LayoutBox *
 boxAnchoredAt(const std::size_t byteOffset,
               const std::vector<gleditor::LayoutBox> &boxes) {
-  for (const auto &box : boxes) {
-    if (static_cast<std::size_t>(box.anchor) == byteOffset) {
-      return &box;
-    }
-  }
-  return nullptr;
+  const auto box = std::ranges::find_if(boxes, [byteOffset](const auto &b) {
+    return static_cast<std::size_t>(b.anchor) == byteOffset;
+  });
+  return box == boxes.end() ? nullptr : &*box;
 }
 
 /// The paragraph style covering @p byteOffset, or TextAlign::Left with no
@@ -162,12 +160,11 @@ boxAnchoredAt(const std::size_t byteOffset,
 gleditor::BlockStyleRange
 blockStyleAt(const std::size_t byteOffset,
              const std::vector<gleditor::BlockStyleRange> &ranges) {
-  for (const auto &range : ranges) {
-    if (byteOffset >= range.start && byteOffset < range.end) {
-      return range;
-    }
-  }
-  return gleditor::BlockStyleRange{};
+  const auto covering =
+      std::ranges::find_if(ranges, [byteOffset](const auto &range) {
+        return byteOffset >= range.start && byteOffset < range.end;
+      });
+  return covering == ranges.end() ? gleditor::BlockStyleRange{} : *covering;
 }
 
 /// A FloatLeft/FloatRight box already placed on the page, holding just
@@ -184,6 +181,21 @@ struct FloatSpan {
   /// compare against the edge nearer its own side.
   float edge{};
 };
+
+/// The nearest bottom edge among the floats active at height @p y -- where a
+/// line or a float blocked at @p y should try next -- or nullopt when nothing
+/// there is blocking.
+std::optional<float> nearestBlockingBottom(const std::vector<FloatSpan> &floats,
+                                           const float y) {
+  auto bottoms = floats | std::views::filter([y](const FloatSpan &f) {
+                   return f.top <= y && f.bottom > y;
+                 }) |
+                 std::views::transform(&FloatSpan::bottom);
+  if (bottoms.begin() == bottoms.end()) {
+    return std::nullopt;
+  }
+  return std::ranges::min(bottoms);
+}
 
 /// The horizontal band still open for something spanning [y, y+height), once
 /// every float active over that span has narrowed it from its own side.
@@ -237,14 +249,8 @@ FloatPlacement placeFloat(const float startY, const float rawWidth,
     }
     // Doesn't fit beside what's already here -- find the nearest bottom
     // among floats blocking this exact y and try again just past it.
-    float nextBottom = -1.0F;
-    for (const auto &f : floats) {
-      if (f.top <= candidateTop && f.bottom > candidateTop) {
-        nextBottom =
-            nextBottom < 0.0F ? f.bottom : std::min(nextBottom, f.bottom);
-      }
-    }
-    if (nextBottom < 0.0F) {
+    const auto nextBottom = nearestBlockingBottom(floats, candidateTop);
+    if (!nextBottom) {
       // Nothing at this y is actually blocking -- width alone must exceed
       // maxWidth, which should not happen since it is already clamped to
       // it. Place anyway rather than loop forever.
@@ -254,7 +260,7 @@ FloatPlacement placeFloat(const float startY, const float rawWidth,
           .width = width,
       };
     }
-    candidateTop = nextBottom;
+    candidateTop = *nextBottom;
   }
 }
 
@@ -629,19 +635,13 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       if (band.right - band.left > 0.0F) {
         break;
       }
-      float nextBottom = -1.0F;
-      for (const auto &f : floats) {
-        if (f.top <= currentY && f.bottom > currentY) {
-          nextBottom =
-              nextBottom < 0.0F ? f.bottom : std::min(nextBottom, f.bottom);
-        }
-      }
-      if (nextBottom < 0.0F) {
+      const auto nextBottom = nearestBlockingBottom(floats, currentY);
+      if (!nextBottom) {
         // Nothing here is actually blocking -- maxWidth itself must be zero,
         // which should not happen. Stop rather than spin in place.
         break;
       }
-      currentY = nextBottom;
+      currentY = *nextBottom;
       if (!lines.empty() && currentY + lineHeight > maxHeight) {
         pageFull = true;
         break;
@@ -877,9 +877,12 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   // glyphs of its own for the scan above to see either. left + width rather
   // than width alone, so a right-aligned or right-floated box still widens
   // the page to reach its own right edge rather than just its own size.
-  for (const auto &placed : shaping.boxes) {
-    maxSeenWidth = std::max(maxSeenWidth, placed.left + placed.width);
-  }
+  maxSeenWidth = std::ranges::fold_left(
+      shaping.boxes | std::views::transform([](const auto &placed) {
+        return placed.left + placed.width;
+      }),
+      maxSeenWidth,
+      [](const float a, const float b) { return std::max(a, b); });
 
   shaping.textWidthPx = static_cast<int>(std::ceil(maxSeenWidth));
   return shaping;

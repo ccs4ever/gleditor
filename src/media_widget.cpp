@@ -177,30 +177,33 @@ void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   revision_++;
 }
 
-bool MediaWidget::load(const MediaResourcePtr &resource) {
-  if (player_ != nullptr && resource != nullptr) {
-    if (title_.empty()) {
-      title_ = resource->name();
-    }
-    revision_++;
-    return player_->load(resource);
+MediaLoad MediaWidget::load(const MediaResourcePtr &resource) {
+  if (nullptr == player_) {
+    return std::unexpected{MediaError::NoPlayer};
   }
-  return false;
+  if (nullptr == resource) {
+    return std::unexpected{MediaError::InvalidResource};
+  }
+  if (title_.empty()) {
+    title_ = resource->name();
+  }
+  revision_++;
+  return player_->load(resource);
 }
 
-bool MediaWidget::loadFragment(const MediaResourcePtr &resource,
-                               const ByteRange &fragment,
-                               const std::uint64_t containerLength) {
+MediaLoad MediaWidget::loadFragment(const MediaResourcePtr &resource,
+                                    const ByteRange &fragment,
+                                    const std::uint64_t containerLength) {
   pendingFragment_.reset();
-  if (!load(resource)) {
-    return false;
+  if (auto loaded = load(resource); !loaded) {
+    return loaded;
   }
   if (containerLength > 0 && fragment.length < containerLength) {
     pendingFragment_        = fragment;
     pendingContainerLength_ = containerLength;
     applyPendingFragment();
   }
-  return true;
+  return {};
 }
 
 void MediaWidget::applyPendingFragment() {

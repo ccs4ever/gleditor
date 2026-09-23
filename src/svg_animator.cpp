@@ -730,11 +730,11 @@ bool SvgAnimator::isAnimated(std::span<const std::uint8_t> bytes) {
   return false;
 }
 
-std::unique_ptr<SvgAnimator>
+std::expected<std::unique_ptr<SvgAnimator>, DecodeError>
 SvgAnimator::load(std::span<const std::uint8_t> bytes) {
 #ifdef GLEDITOR_HAVE_SVG_THORVG
   if (bytes.empty()) {
-    return nullptr;
+    return std::unexpected{DecodeError::Empty};
   }
 
   // 1. ThorVG Animation context strategy
@@ -776,7 +776,7 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
   // SMIL SVG path
   auto root = parseXml(sv);
   if (!root) {
-    return nullptr;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   std::unordered_map<std::string, SvgNode *> idMap;
@@ -786,7 +786,7 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
   collectAnimations(root.get(), animations, idMap);
 
   if (animations.empty()) {
-    return nullptr;
+    return std::unexpected{DecodeError::NotAnimated};
   }
 
   float maxDur = 0.0F;
@@ -848,7 +848,7 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
                                            maxDur, std::move(animations));
 #else
   (void)bytes;
-  return nullptr;
+  return std::unexpected{DecodeError::NoCodec};
 #endif
 }
 

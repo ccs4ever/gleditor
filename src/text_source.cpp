@@ -437,7 +437,7 @@ void extractPdfDocument(const poppler::document &doc, PDFDoc *coreDoc,
 
 namespace gleditor {
 
-std::string stripByteOrderMark(std::string bytes) {
+std::expected<std::string, SourceError> stripByteOrderMark(std::string bytes) {
   if (startsWith(bytes, {0xEF, 0xBB, 0xBF})) {
     return bytes.substr(3);
   }
@@ -446,10 +446,10 @@ std::string stripByteOrderMark(std::string bytes) {
   // report every UTF-32LE file as UTF-16LE.
   if (startsWith(bytes, {0x00, 0x00, 0xFE, 0xFF}) ||
       startsWith(bytes, {0xFF, 0xFE, 0x00, 0x00})) {
-    throw std::logic_error("utf32 not supported yet");
+    return std::unexpected{SourceError::Utf32Unsupported};
   }
   if (startsWith(bytes, {0xFE, 0xFF}) || startsWith(bytes, {0xFF, 0xFE})) {
-    throw std::logic_error("utf16 not supported yet");
+    return std::unexpected{SourceError::Utf16Unsupported};
   }
   return bytes;
 }
@@ -457,24 +457,40 @@ std::string stripByteOrderMark(std::string bytes) {
 FileTextSource::FileTextSource(std::string path) : filePath(std::move(path)) {}
 
 void FileTextSource::ensureLoaded() const {
+  if (const auto read = load(); !read) {
+    throw SourceLoadError(read.error(), filePath);
+  }
+}
+
+std::expected<void, SourceError> FileTextSource::load() const {
   if (loaded) {
-    return;
+    return {};
   }
   std::ifstream file(filePath, std::ios::binary);
   if (!file.is_open()) {
-    throw std::runtime_error("failed to open file: " + filePath);
+    return std::unexpected{SourceError::NotFound};
   }
   std::ostringstream ss;
   ss << file.rdbuf();
   const std::string raw = ss.str();
 
   if (isPdfFile(filePath, raw)) {
-    PdfTextSource pdf(filePath);
-    content     = pdf.text();
-    breaks      = pdf.forcedBreaks();
-    piecesCache = pdf.pieces();
+    // PdfTextSource answers through its constructor, so its refusal arrives as
+    // the SourceLoadError it throws and leaves here as a value again.
+    try {
+      PdfTextSource pdf(filePath);
+      content     = pdf.text();
+      breaks      = pdf.forcedBreaks();
+      piecesCache = pdf.pieces();
+    } catch (const SourceLoadError &refused) {
+      return std::unexpected{refused.error()};
+    }
   } else {
-    content = stripByteOrderMark(raw);
+    auto stripped = stripByteOrderMark(raw);
+    if (!stripped) {
+      return std::unexpected{stripped.error()};
+    }
+    content = *std::move(stripped);
     breaks.clear();
     // A whole file that is itself media (an image, audio, or video import,
     // as opposed to a PDF's embedded figure, tagged above) gets the same
@@ -494,6 +510,7 @@ void FileTextSource::ensureLoaded() const {
         .pageBreakAfter = false}};
   }
   loaded = true;
+  return {};
 }
 
 std::string FileTextSource::text() const {
@@ -525,10 +542,10 @@ void PdfTextSource::loadPdfFile(const std::string &path) {
   std::unique_ptr<poppler::document> doc(
       poppler::document::load_from_file(path));
   if (!doc) {
-    throw std::runtime_error("failed to open PDF file: " + path);
+    throw SourceLoadError(SourceError::PdfUnreadable, path);
   }
   if (doc->is_locked()) {
-    throw std::runtime_error("PDF is password-protected: " + path);
+    throw SourceLoadError(SourceError::PdfLocked, path);
   }
   numPages = static_cast<std::size_t>(doc->pages());
 
@@ -549,10 +566,10 @@ void PdfTextSource::loadPdfData(const char *data, const std::size_t size) {
   std::unique_ptr<poppler::document> doc(
       poppler::document::load_from_raw_data(data, static_cast<int>(size)));
   if (!doc) {
-    throw std::runtime_error("failed to open PDF data: " + label);
+    throw SourceLoadError(SourceError::PdfUnreadable, label);
   }
   if (doc->is_locked()) {
-    throw std::runtime_error("PDF is password-protected: " + label);
+    throw SourceLoadError(SourceError::PdfLocked, label);
   }
   numPages = static_cast<std::size_t>(doc->pages());
 

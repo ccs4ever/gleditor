@@ -121,7 +121,7 @@ TEST_F(GlyphCacheTest, growsTheLayerBeforeAddingAnother) {
   const auto start = cache->atlasSize();
 
   for (const auto &chr : alphabet(12)) {
-    cache->put(chr, face);
+    EXPECT_TRUE(cache->put(chr, face).has_value());
   }
 
   EXPECT_GT(cache->atlasSize(), start)
@@ -138,7 +138,7 @@ TEST_F(GlyphCacheTest, addsLayersOnceTheLayerCannotGrow) {
   const auto face  = font("Serif 150");
 
   for (const auto &chr : alphabet(16)) {
-    cache->put(chr, face);
+    EXPECT_TRUE(cache->put(chr, face).has_value());
   }
 
   EXPECT_EQ(cache->atlasSize(), 512);
@@ -151,7 +151,7 @@ TEST_F(GlyphCacheTest, everyAllocationStaysWithinTheReportedLimits) {
   const auto face  = font("Serif 150");
 
   for (const auto &chr : alphabet(30)) {
-    cache->put(chr, face);
+    EXPECT_TRUE(cache->put(chr, face).has_value());
   }
 
   for (const auto &[size, layers] : allocations) {
@@ -167,15 +167,15 @@ TEST_F(GlyphCacheTest, growingLeavesEarlierGlyphsWhereTheyWere) {
   const auto cache = makeCache(4096, 8);
   const auto face  = font("Serif 150");
 
-  const auto first      = cache->put("A", face);
+  const auto first      = cache->put("A", face).value();
   const auto sizeBefore = cache->atlasSize();
 
   for (const auto &chr : alphabet(20)) {
-    cache->put(chr, face);
+    EXPECT_TRUE(cache->put(chr, face).has_value());
   }
   ASSERT_GT(cache->atlasSize(), sizeBefore) << "the atlas did not grow";
 
-  const auto again = cache->put("A", face);
+  const auto again = cache->put("A", face).value();
   EXPECT_EQ(again.texCoords.topLeft.x, first.texCoords.topLeft.x);
   EXPECT_EQ(again.texCoords.topLeft.y, first.texCoords.topLeft.y);
   EXPECT_EQ(again.texCoords.box.width, first.texCoords.box.width);
@@ -191,7 +191,7 @@ TEST_F(GlyphCacheTest, growingWritesEveryGlyphIntoTheNewTexture) {
 
   const auto glyphs = alphabet(12);
   for (const auto &chr : glyphs) {
-    cache->put(chr, face);
+    EXPECT_TRUE(cache->put(chr, face).has_value());
   }
 
   ASSERT_GT(allocations.size(), 1U) << "the atlas did not grow";
@@ -201,7 +201,7 @@ TEST_F(GlyphCacheTest, growingWritesEveryGlyphIntoTheNewTexture) {
 
 TEST_F(GlyphCacheTest, refusesAGlyphNoAtlasCouldEverHold) {
   const auto cache = makeCache(64, 2);
-  EXPECT_THROW(cache->put("W", font("Serif 400")), std::overflow_error);
+  EXPECT_EQ(cache->put("W", font("Serif 400")).error(), GlyphError::AtlasFull);
 }
 
 // Failing to place one glyph must not take the cache with it: the atlas is
@@ -210,8 +210,8 @@ TEST_F(GlyphCacheTest, survivesAGlyphItCannotHold) {
   const auto cache = makeCache(256, 2);
   const auto small = font("Serif 12");
 
-  EXPECT_THROW(cache->put("W", font("Serif 400")), std::overflow_error);
-  EXPECT_NO_THROW(cache->put("a", small));
+  EXPECT_EQ(cache->put("W", font("Serif 400")).error(), GlyphError::AtlasFull);
+  EXPECT_TRUE(cache->put("a", small).has_value());
   EXPECT_LE(cache->atlasSize(), 256);
 }
 
@@ -219,11 +219,11 @@ TEST_F(GlyphCacheTest, noDecorationsIsTheDefaultAndItsOwnEntry) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 40");
 
-  const auto plain    = cache->put("a", face);
+  const auto plain    = cache->put("a", face).value();
   const auto uploaded = uploads;
   // The two-argument call and an explicit empty set both mean "no
   // decorations", so this is the same entry: no second rasterisation.
-  const auto again = cache->put("a", face, {});
+  const auto again = cache->put("a", face, {}).value();
 
   EXPECT_EQ(uploads, uploaded) << "an explicit empty set should hit the same "
                                   "entry the two-argument call made";
@@ -236,9 +236,9 @@ TEST_F(GlyphCacheTest, theSameDecorationsAreOneCacheEntry) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 40");
 
-  cache->put("a", face, {Decoration::Bold});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Bold}).has_value());
   const auto uploaded = uploads;
-  cache->put("a", face, {Decoration::Bold});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Bold}).has_value());
 
   EXPECT_EQ(uploads, uploaded)
       << "asking for the same cluster, font and decorations twice must not "
@@ -253,10 +253,10 @@ TEST_F(GlyphCacheTest, decorationSetMembershipOrderDoesNotMatter) {
   const auto face  = font("Serif 40");
 
   const auto first =
-      cache->put("a", face, {Decoration::Bold, Decoration::Italic});
+      cache->put("a", face, {Decoration::Bold, Decoration::Italic}).value();
   const auto uploaded = uploads;
   const auto second =
-      cache->put("a", face, {Decoration::Italic, Decoration::Bold});
+      cache->put("a", face, {Decoration::Italic, Decoration::Bold}).value();
 
   EXPECT_EQ(uploads, uploaded);
   EXPECT_EQ(first.layer, second.layer);
@@ -267,11 +267,11 @@ TEST_F(GlyphCacheTest, differentDecorationsAreDifferentCacheEntries) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 40");
 
-  cache->put("a", face);
+  EXPECT_TRUE(cache->put("a", face).has_value());
   const auto afterPlain = uploads;
-  cache->put("a", face, {Decoration::Bold});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Bold}).has_value());
   const auto afterBold = uploads;
-  cache->put("a", face, {Decoration::Italic});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Italic}).has_value());
   const auto afterItalic = uploads;
 
   EXPECT_GT(afterBold, afterPlain)
@@ -286,9 +286,10 @@ TEST_F(GlyphCacheTest, aSupersetOfDecorationsIsAnotherEntry) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 40");
 
-  cache->put("a", face, {Decoration::Bold});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Bold}).has_value());
   const auto afterBold = uploads;
-  cache->put("a", face, {Decoration::Bold, Decoration::Underline});
+  EXPECT_TRUE(cache->put("a", face, {Decoration::Bold, Decoration::Underline})
+                  .has_value());
 
   EXPECT_GT(uploads, afterBold);
 }
@@ -301,8 +302,8 @@ TEST_F(GlyphCacheTest, boldHasMoreInkThanPlain) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain = cache->put("A", face);
-  const auto bold  = cache->put("A", face, {Decoration::Bold});
+  const auto plain = cache->put("A", face).value();
+  const auto bold  = cache->put("A", face, {Decoration::Bold}).value();
 
   EXPECT_GT(bold.ink, plain.ink)
       << "FT_GlyphSlot_Embolden thickens the outline, which should ink more "
@@ -313,8 +314,8 @@ TEST_F(GlyphCacheTest, italicChangesTheGlyphsFootprint) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain  = cache->put("A", face);
-  const auto italic = cache->put("A", face, {Decoration::Italic});
+  const auto plain  = cache->put("A", face).value();
+  const auto italic = cache->put("A", face, {Decoration::Italic}).value();
 
   EXPECT_NE(std::to_underlying(italic.dims.width),
             std::to_underlying(plain.dims.width))
@@ -326,8 +327,9 @@ TEST_F(GlyphCacheTest, underlineAddsInkBelowTheGlyph) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain      = cache->put("A", face);
-  const auto underlined = cache->put("A", face, {Decoration::Underline});
+  const auto plain = cache->put("A", face).value();
+  const auto underlined =
+      cache->put("A", face, {Decoration::Underline}).value();
 
   EXPECT_GT(underlined.ink, plain.ink);
 }
@@ -336,8 +338,8 @@ TEST_F(GlyphCacheTest, overlineAddsInkAboveTheGlyph) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain     = cache->put("A", face);
-  const auto overlined = cache->put("A", face, {Decoration::Overline});
+  const auto plain     = cache->put("A", face).value();
+  const auto overlined = cache->put("A", face, {Decoration::Overline}).value();
 
   EXPECT_GT(overlined.ink, plain.ink);
 }
@@ -346,8 +348,9 @@ TEST_F(GlyphCacheTest, strikethroughAddsInkThroughTheGlyph) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain  = cache->put("A", face);
-  const auto struck = cache->put("A", face, {Decoration::Strikethrough});
+  const auto plain = cache->put("A", face).value();
+  const auto struck =
+      cache->put("A", face, {Decoration::Strikethrough}).value();
 
   EXPECT_GT(struck.ink, plain.ink);
 }
@@ -361,11 +364,11 @@ TEST_F(GlyphCacheTest, eachLineDecorationLandsAtADifferentHeight) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  cache->put("A", face, {Decoration::Underline});
+  EXPECT_TRUE(cache->put("A", face, {Decoration::Underline}).has_value());
   const auto underlined = lastUpload;
-  cache->put("A", face, {Decoration::Overline});
+  EXPECT_TRUE(cache->put("A", face, {Decoration::Overline}).has_value());
   const auto overlined = lastUpload;
-  cache->put("A", face, {Decoration::Strikethrough});
+  EXPECT_TRUE(cache->put("A", face, {Decoration::Strikethrough}).has_value());
   const auto struckThrough = lastUpload;
 
   ASSERT_FALSE(underlined.empty());
@@ -406,8 +409,8 @@ TEST_F(GlyphCacheTest, boldStillIncreasesInkWhenARealBoldFileExists) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain = cache->put("A", face);
-  const auto bold  = cache->put("A", face, {Decoration::Bold});
+  const auto plain = cache->put("A", face).value();
+  const auto bold  = cache->put("A", face, {Decoration::Bold}).value();
 
   EXPECT_GT(bold.ink, plain.ink);
 }
@@ -419,8 +422,8 @@ TEST_F(GlyphCacheTest, boldStillIncreasesInkWithNoRealBoldFile) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Z003 60");
 
-  const auto plain = cache->put("A", face);
-  const auto bold  = cache->put("A", face, {Decoration::Bold});
+  const auto plain = cache->put("A", face).value();
+  const auto bold  = cache->put("A", face, {Decoration::Bold}).value();
 
   EXPECT_GT(bold.ink, plain.ink)
       << "a family with no real bold file must still fall back to "
@@ -431,9 +434,9 @@ TEST_F(GlyphCacheTest, aFamilyWithNoBoldFileStillCachesSeparately) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Z003 60");
 
-  cache->put("A", face);
+  EXPECT_TRUE(cache->put("A", face).has_value());
   const auto afterPlain = uploads;
-  cache->put("A", face, {Decoration::Bold});
+  EXPECT_TRUE(cache->put("A", face, {Decoration::Bold}).has_value());
 
   EXPECT_GT(uploads, afterPlain);
 }
@@ -443,7 +446,7 @@ TEST_F(GlyphCacheTest, fallbackFontRasterizesInkForMissingGlyphs) {
   const auto face  = font("Monospace 32");
 
   // CJK glyph not in Monospace face must fall back and produce non-zero ink.
-  const auto cjk = cache->put("世", face);
+  const auto cjk = cache->put("世", face).value();
   EXPECT_GT(cjk.ink, 0.0F);
   EXPECT_GT(cjk.dims.width, Length{0});
   EXPECT_GT(cjk.dims.height, Length{0});

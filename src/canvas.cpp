@@ -3,6 +3,7 @@
  * @brief Implementation of the rectangle-and-text drawing surface.
  */
 #include <gleditor/canvas.hpp> // IWYU pragma: associated
+#include <gleditor/logging.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -300,8 +301,16 @@ Canvas::addText(RenderState &state, const float left, const float top,
   }
 
   for (const auto &g : shaping.glyphs) {
-    const auto glyph = state.glyphCache.put(
+    const auto glyphPlaced = state.glyphCache.put(
         g.chr, font, gleditor::decorationSetFor(g.decorations));
+    if (!glyphPlaced) {
+      // One glyph the atlas cannot take is one glyph not drawn; the rest of
+      // the label still is.
+      GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
+                         toString(glyphPlaced.error()));
+      continue;
+    }
+    const auto &glyph = *glyphPlaced;
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
     const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
     if (0.0F == width || 0.0F == height) {
