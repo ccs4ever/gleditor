@@ -45,10 +45,12 @@ struct StoreInfo {
   std::string role;
   std::string path;
   std::shared_ptr<xanadu::Store> store{nullptr};
+  std::shared_ptr<zigzag::Manifold> manifold{nullptr};
   CellRef homeCell{
       noCell}; ///< Slice's home cell (clone master carrying metadata)
   CellRef storeCell{
       noCell}; ///< Representative cell on coordinator's d.stores rank
+  std::uint32_t spaceId{0};
 };
 
 /**
