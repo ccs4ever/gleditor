@@ -17,6 +17,7 @@
  * and TIFF's strip/tile offset tags are both part of each format's own
  * spec, and libFLAC++/libtiff implement reading and writing them directly.
  */
+#include <gleditor/cpp26_span.hpp>
 #include <gleditor/decode_index.hpp>
 
 #include <algorithm>
@@ -1353,10 +1354,12 @@ peekGifSize(const std::span<const std::uint8_t> gifBytes) {
   if (sig != "GIF87a" && sig != "GIF89a") {
     return std::nullopt;
   }
-  const auto w = static_cast<std::uint32_t>(gifBytes[6]) |
-                 (static_cast<std::uint32_t>(gifBytes[7]) << 8U);
-  const auto h = static_cast<std::uint32_t>(gifBytes[8]) |
-                 (static_cast<std::uint32_t>(gifBytes[9]) << 8U);
+  const auto w =
+      static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 6)) |
+      (static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 7)) << 8U);
+  const auto h =
+      static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 8)) |
+      (static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 9)) << 8U);
   if (0 == w || 0 == h) {
     return std::nullopt;
   }
@@ -1374,7 +1377,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
   }
 
   // Check Logical Screen Descriptor for Global Color Table
-  const std::uint8_t packed = gifBytes[10];
+  const std::uint8_t packed = cpp26::span_at(gifBytes, 10);
   std::size_t offset        = 13;
   if ((packed & 0x80U) != 0) {
     const std::size_t gctEntries = 1U << ((packed & 0x07U) + 1U);
@@ -1383,7 +1386,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
 
   std::size_t imageCount = 0;
   while (offset < gifBytes.size()) {
-    const std::uint8_t blockType = gifBytes[offset++];
+    const std::uint8_t blockType = cpp26::span_at(gifBytes, offset++);
     if (0x3BU == blockType) { // Trailer ';'
       break;
     }
@@ -1395,7 +1398,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       if (offset + 9 > gifBytes.size()) {
         break;
       }
-      const std::uint8_t imgPacked = gifBytes[offset + 8];
+      const std::uint8_t imgPacked = cpp26::span_at(gifBytes, offset + 8);
       offset += 9;
       if ((imgPacked & 0x80U) != 0) {
         const std::size_t lctEntries = 1U << ((imgPacked & 0x07U) + 1U);
@@ -1408,7 +1411,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       ++offset;
       // Skip sub-blocks
       while (offset < gifBytes.size()) {
-        const std::size_t blockSize = gifBytes[offset++];
+        const std::size_t blockSize = cpp26::span_at(gifBytes, offset++);
         if (0 == blockSize) {
           break;
         }
@@ -1422,7 +1425,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       ++offset;
       // Skip sub-blocks
       while (offset < gifBytes.size()) {
-        const std::size_t blockSize = gifBytes[offset++];
+        const std::size_t blockSize = cpp26::span_at(gifBytes, offset++);
         if (0 == blockSize) {
           break;
         }

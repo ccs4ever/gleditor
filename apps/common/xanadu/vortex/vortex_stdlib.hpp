@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/cpp26.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
@@ -102,16 +103,17 @@ public:
 
   // -- Module 4: std:functional -----------------------------------------------
   CellRef map(CellRef head, DimRef inDim, DimRef outDim,
-              const std::function<CellValue(const CellValue &)> &fn);
+              common::cpp26::function_ref<CellValue(const CellValue &)> fn);
   CellRef map(CellRef head, DimRef inDim, DimRef outDim, CellRef fnOp);
 
   CellRef filter(CellRef head, DimRef inDim, DimRef outDim,
-                 const std::function<bool(const CellValue &)> &pred);
+                 common::cpp26::function_ref<bool(const CellValue &)> pred);
   CellRef filter(CellRef head, DimRef inDim, DimRef outDim, CellRef predOp);
 
-  CellValue fold(
-      CellRef head, DimRef inDim, CellValue initial,
-      const std::function<CellValue(const CellValue &, const CellValue &)> &fn);
+  CellValue fold(CellRef head, DimRef inDim, CellValue initial,
+                 common::cpp26::function_ref<CellValue(const CellValue &,
+                                                       const CellValue &)>
+                     fn);
   CellValue fold(CellRef head, DimRef inDim, CellValue initial, CellRef fnOp);
 
   CellRef zip(CellRef headA, CellRef headB, DimRef dimA, DimRef dimB,

@@ -2248,9 +2248,9 @@ CellRef VortexStdLib::createFormatCurrencyPipeline() {
 }
 
 // -- Module 4: std:functional -------------------------------------------------
-CellRef
-VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
-                  const std::function<CellValue(const CellValue &)> &fn) {
+CellRef VortexStdLib::map(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<CellValue(const CellValue &)> fn) {
   if (head == noCell) return noCell;
   CellRef resHead = noCell;
   CellRef resTail = noCell;
@@ -2282,9 +2282,9 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
   });
 }
 
-CellRef
-VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
-                     const std::function<bool(const CellValue &)> &pred) {
+CellRef VortexStdLib::filter(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<bool(const CellValue &)> pred) {
   if (head == noCell) return noCell;
   CellRef resHead = noCell;
   CellRef resTail = noCell;
@@ -2320,7 +2320,8 @@ CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
 
 CellValue VortexStdLib::fold(
     CellRef head, DimRef inDim, CellValue initial,
-    const std::function<CellValue(const CellValue &, const CellValue &)> &fn) {
+    common::cpp26::function_ref<CellValue(const CellValue &, const CellValue &)>
+        fn) {
   CellValue acc     = std::move(initial);
   CellRef cur       = head;
   std::size_t limit = core_.arena().cellCount() + 1;
