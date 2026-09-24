@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <common/xanadu/zigzag/arena_manifold.hpp>
+#include <xudu/core/link_layout.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/provenance.hpp>
@@ -34,10 +35,13 @@
 
 namespace {
 
+using xudu::Link;
+using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::Op;
 using xudu::OpKind;
 using xudu::PrimediaSpan;
+using xudu::ProminenceTier;
 using xudu::Store;
 using xudu::StructureVerb;
 using xudu::ValueKind;
@@ -67,8 +71,8 @@ struct Slice {
   DimRef dimension(const std::string_view name) {
     const auto manifold = store.rebuildManifold(at);
     const auto existing = manifold.dimensionNamed(name, store);
-    if (existing != zigzag::noCell) {
-      return existing;
+    if (existing) {
+      return *existing;
     }
     const auto minted = store.makeDimension(at, name);
     at                = minted.version;
@@ -1729,4 +1733,165 @@ TEST(ManifoldTest, tamperedAuthorshipIsNotProjected) {
 
   EXPECT_EQ(arena.dimensionNamed("d.authorship"), zigzag::noCell);
   EXPECT_EQ(arena.authorshipRoot(), zigzag::noCell);
+}
+
+TEST(ManifoldTest, aLinkIsACellWithAnAddress) {
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Store store(perma);
+  auto at = store.sliceGenesis(MicroversionId{});
+
+  const auto spanA = perma->append("Theodor Holm Nelson");
+  const auto spanB = perma->append("Literary Machines");
+
+  Link link;
+  link.type  = LinkType::Comment;
+  link.tier  = ProminenceTier::Author;
+  link.owner = "Ted";
+  link.left  = {spanA};
+  link.right = {spanB};
+
+  at = store.addLink(at, link);
+
+  const auto links = store.links();
+  ASSERT_EQ(links.size(), 1U);
+  const auto &[id, stored] = *links.begin();
+
+  EXPECT_NE(id, zigzag::noCell);
+  EXPECT_EQ(stored.id, id);
+  EXPECT_EQ(stored.type, LinkType::Comment);
+  EXPECT_EQ(stored.tier, ProminenceTier::Author);
+  EXPECT_EQ(stored.owner, "Ted");
+  EXPECT_EQ(stored.left, link.left);
+  EXPECT_EQ(stored.right, link.right);
+
+  const auto manifold = store.rebuildManifold(at);
+  EXPECT_TRUE(manifold.contains(id));
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
+
+  const auto dimLinks = manifold.dimensionNamed("d.links", store);
+  ASSERT_TRUE(dimLinks.has_value());
+  const auto dimFrom = manifold.dimensionNamed("d.from", store);
+  ASSERT_TRUE(dimFrom.has_value());
+  const auto dimTo = manifold.dimensionNamed("d.to", store);
+  ASSERT_TRUE(dimTo.has_value());
+
+  // Link cell is linked on d.links posward from home
+  EXPECT_EQ(manifold.linked(manifold.home(), *dimLinks, zigzag::DimVector::POS),
+            id);
+
+  // Link cell has endpoints on d.from and d.to
+  const auto fromCell = manifold.linked(id, *dimFrom, zigzag::DimVector::POS);
+  EXPECT_NE(fromCell, zigzag::noCell);
+  EXPECT_EQ(manifold.contentOf(fromCell).size(), 1U);
+  EXPECT_EQ(manifold.contentOf(fromCell).front(), spanA);
+
+  const auto toCell = manifold.linked(id, *dimTo, zigzag::DimVector::POS);
+  EXPECT_NE(toCell, zigzag::noCell);
+  EXPECT_EQ(manifold.contentOf(toCell).size(), 1U);
+  EXPECT_EQ(manifold.contentOf(toCell).front(), spanB);
+}
+
+TEST(ManifoldTest, aMultiSpanLinkSurvivesPublicationAndTransclusion) {
+  const auto dir =
+      std::filesystem::temp_directory_path() /
+      ("multispan-link-test-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(dir);
+
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Link originalLink;
+  {
+    Store store(perma);
+    auto at = store.sliceGenesis(MicroversionId{});
+
+    const auto spanA1 = perma->append("Multi-span left end piece 1. ");
+    perma->append(
+        "Filler separating left pieces so R9 does not coalesce them.");
+    const auto spanA2 = perma->append("Multi-span left end piece 2.");
+    const auto spanB1 = perma->append("Multi-span right end piece 1. ");
+    perma->append(
+        "Filler separating right pieces so R9 does not coalesce them.");
+    const auto spanB2 = perma->append("Multi-span right end piece 2.");
+
+    originalLink.type    = LinkType::Quotation;
+    originalLink.tier    = ProminenceTier::Curated;
+    originalLink.owner   = "Theodor_Holm_Nelson";
+    originalLink.curator = "btpk:" + std::string(64, 'e');
+    originalLink.left    = {spanA1, spanA2};
+    originalLink.right   = {spanB1, spanB2};
+
+    at = store.addLink(at, originalLink);
+    store.save(dir.string());
+  }
+
+  // Reload store from disk
+  Store reloaded(perma);
+  reloaded.load(dir.string());
+
+  const auto &links = reloaded.links();
+  ASSERT_EQ(links.size(), 1U);
+  const auto &[id, loaded] = *links.begin();
+
+  EXPECT_NE(id, zigzag::noCell);
+  EXPECT_EQ(loaded.id, id);
+  EXPECT_EQ(loaded.type, LinkType::Quotation);
+  EXPECT_EQ(loaded.tier, ProminenceTier::Curated);
+  EXPECT_EQ(loaded.owner, "Theodor_Holm_Nelson");
+  EXPECT_EQ(loaded.curator, "btpk:" + std::string(64, 'e'));
+  EXPECT_EQ(loaded.left.size(), 2U);
+  EXPECT_EQ(loaded.right.size(), 2U);
+  EXPECT_EQ(loaded.left, originalLink.left);
+  EXPECT_EQ(loaded.right, originalLink.right);
+
+  const auto manifold = reloaded.rebuildManifold(reloaded.latest());
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(reloaded));
+}
+
+TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+
+  Store storeMine(perma);
+  auto atMine          = storeMine.sliceGenesis(MicroversionId{});
+  const auto spanMineA = perma->append("My text on side A");
+  const auto spanMineB = perma->append("My text on side B");
+
+  Link linkMine;
+  linkMine.type  = LinkType::Comment;
+  linkMine.tier  = ProminenceTier::Author;
+  linkMine.owner = "AuthorMine";
+  linkMine.left  = {spanMineA};
+  linkMine.right = {spanMineB};
+  atMine         = storeMine.addLink(atMine, linkMine);
+
+  // Author Theirs receives Author Mine's document, and authors links over it
+  Store storeTheirs(perma);
+  storeTheirs.adoptOpRecords(storeMine.opRecords());
+  auto atTheirs          = atMine;
+  const auto spanTheirsA = perma->append("Their commentary on side A");
+  const auto spanTheirsB = perma->append("Their response on side B");
+
+  Link linkTheirs;
+  linkTheirs.type  = LinkType::Disagreement;
+  linkTheirs.tier  = ProminenceTier::Curated;
+  linkTheirs.owner = "AuthorTheirs";
+  linkTheirs.left  = {spanTheirsA};
+  linkTheirs.right = {spanTheirsB};
+  atTheirs         = storeTheirs.addLink(atTheirs, linkTheirs);
+
+  // Adopt Author Theirs op records into storeMine
+  storeMine.adoptOpRecords(storeTheirs.opRecords());
+
+  const auto allLinks = storeMine.links();
+  ASSERT_EQ(allLinks.size(), 2U);
+
+  std::vector<std::string> owners;
+  for (const auto &[id, l] : allLinks) {
+    owners.push_back(l.owner);
+  }
+  EXPECT_THAT(owners,
+              testing::UnorderedElementsAre("AuthorMine", "AuthorTheirs"));
+
+  const auto manifold = storeMine.rebuildManifold(storeMine.latest());
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(storeMine));
 }

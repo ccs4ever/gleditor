@@ -107,8 +107,6 @@ struct StoreTables {
   /// The local spool's own segments. Not a Scroll: scroll zero is this
   /// machine's permascroll and has no entry in the registry to hold them.
   std::vector<ScrollSegment> localSegments;
-  /// Links by id.
-  std::map<std::uint64_t, Link> links;
 };
 
 /// Write @p tables to @p path, header and all.

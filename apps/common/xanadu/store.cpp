@@ -16,6 +16,7 @@
 
 #include "binary_ops.hpp"
 #include "common/xanadu/osmic_walker.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "publication.hpp"
 #include "store_tables.hpp"
@@ -1256,14 +1257,152 @@ MicroversionId Store::transclude(const MicroversionId &parent,
   return apply(parent, op);
 }
 
-MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
-  link.id = nextLinkId++;
-  linkTable.emplace(link.id, std::move(link));
+MicroversionId Store::addLink(const MicroversionId &parent, Link link,
+                              const zigzag::Manifold *const known) {
+  std::optional<zigzag::Manifold> folded;
+  const zigzag::Manifold *currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
 
-  Op op;
-  op.kind = OpKind::Link;
-  op.link = nextLinkId - 1;
-  return apply(parent, op);
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimLinks   = ensureDim("d.links");
+  const auto dimFrom    = ensureDim("d.from");
+  const auto dimTo      = ensureDim("d.to");
+  const auto dimType    = ensureDim("d.linktype");
+  const auto dimTier    = ensureDim("d.linktier");
+  const auto dimOwner   = ensureDim("d.owner");
+  const auto dimCurator = ensureDim("d.curator");
+
+  // Mint the link cell itself.
+  curHead             = makeCell(curHead, PrimediaSpan{});
+  const auto linkCell = cellRefOf(curHead);
+  link.id             = linkCell;
+  folded              = rebuildManifold(curHead);
+  currentFold         = &folded.value();
+
+  // Link onto d.links rank off homeCell_
+  const auto tailLinks = zigzag::rankTail(*currentFold, homeCell_, dimLinks,
+                                          zigzag::DimVector::POS);
+  curHead     = setLink(curHead, tailLinks, dimLinks, zigzag::DimVector::POS,
+                        linkCell, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // From endpoint (d.from)
+  if (!link.left.empty()) {
+    curHead             = makeCell(curHead, link.left.front());
+    const auto fromCell = cellRefOf(curHead);
+    std::uint64_t at    = link.left.front().length;
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    for (std::size_t i = 1; i < link.left.size(); ++i) {
+      curHead =
+          spliceCellSpan(curHead, fromCell, at, 0, link.left[i], currentFold);
+      at += link.left[i].length;
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+    curHead     = setLink(curHead, linkCell, dimFrom, zigzag::DimVector::POS,
+                          fromCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // To endpoint (d.to)
+  if (!link.right.empty()) {
+    curHead           = makeCell(curHead, link.right.front());
+    const auto toCell = cellRefOf(curHead);
+    std::uint64_t at  = link.right.front().length;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+    for (std::size_t i = 1; i < link.right.size(); ++i) {
+      curHead =
+          spliceCellSpan(curHead, toCell, at, 0, link.right[i], currentFold);
+      at += link.right[i].length;
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+    curHead = setLink(curHead, linkCell, dimTo, zigzag::DimVector::POS, toCell,
+                      currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Link type (d.linktype)
+  {
+    curHead             = makeCell(curHead, linkTypeName(link.type));
+    const auto typeCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead     = setLink(curHead, linkCell, dimType, zigzag::DimVector::POS,
+                          typeCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Link tier (d.linktier)
+  {
+    curHead             = makeCell(curHead, prominenceTierName(link.tier));
+    const auto tierCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead     = setLink(curHead, linkCell, dimTier, zigzag::DimVector::POS,
+                          tierCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Owner (d.owner)
+  if (!link.owner.empty()) {
+    curHead              = makeCell(curHead, link.owner);
+    const auto ownerCell = cellRefOf(curHead);
+    folded               = rebuildManifold(curHead);
+    currentFold          = &folded.value();
+    curHead     = setLink(curHead, linkCell, dimOwner, zigzag::DimVector::POS,
+                          ownerCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Curator (d.curator)
+  if (!link.curator.empty()) {
+    curHead                = makeCell(curHead, link.curator);
+    const auto curatorCell = cellRefOf(curHead);
+    folded                 = rebuildManifold(curHead);
+    currentFold            = &folded.value();
+    curHead     = setLink(curHead, linkCell, dimCurator, zigzag::DimVector::POS,
+                          curatorCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  syncLinksFromRank(*currentFold);
+  return curHead;
 }
 
 std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
@@ -1331,14 +1470,58 @@ MicroversionId Store::latest() const {
   return newest;
 }
 
+std::vector<MicroversionId> Store::structureHeads() const {
+  if (zigzag::noCell == homeCell_ || opsSpool.empty()) {
+    return {};
+  }
+  std::vector<MicroversionId> result;
+  for (std::uint32_t idx = 1; idx <= opsSpool.size(); ++idx) {
+    if (!opsSpool.childrenOf(idx).empty()) {
+      continue;
+    }
+    auto curr      = idx;
+    bool foundHome = false;
+    while (curr > 0 && curr <= opsSpool.size()) {
+      if (curr == homeCell_) {
+        foundHome = true;
+        break;
+      }
+      const auto *const node = opsSpool.get(curr);
+      if (nullptr == node || 0 == node->parentIndex) {
+        break;
+      }
+      curr = node->parentIndex;
+    }
+    if (foundHome) {
+      result.push_back(opsSpool.idOf(idx));
+    }
+  }
+  return result;
+}
+
+MicroversionId Store::structureHead() const {
+  const auto heads = structureHeads();
+  if (heads.empty()) {
+    return MicroversionId{};
+  }
+  MicroversionId best;
+  for (const auto &id : heads) {
+    if (best.isZero() || best < id) {
+      best = id;
+    }
+  }
+  return best;
+}
+
 const std::vector<MicroversionId> &Store::currentVersions() const {
   if (currentVersions_.empty()) {
-    const auto lat = latest();
-    if (!lat.isZero()) {
-      const auto manifold = rebuildManifold(lat);
+    const auto sHead  = structureHead();
+    const auto target = !sHead.isZero() ? sHead : latest();
+    if (!target.isZero()) {
+      const auto manifold = rebuildManifold(target);
       const_cast<Store *>(this)->syncCurrentVersionsFromRank(manifold);
       if (currentVersions_.empty()) {
-        currentVersionsFallback_ = {lat};
+        currentVersionsFallback_ = {target};
         return currentVersionsFallback_;
       }
     }
@@ -1396,27 +1579,27 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
   }
 
-  // 1. Ensure dimension d.editions exists
-  auto dimEditions = currentFold->dimensionNamed("d.editions", *this);
-  if (zigzag::noCell == dimEditions) {
-    const auto minted = makeDimension(curHead, "d.editions", currentFold);
-    curHead           = minted.version;
-    dimEditions       = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
 
-  // 2. Ensure dimension d.edition-of exists
-  auto dimEditionOf = currentFold->dimensionNamed("d.edition-of", *this);
-  if (zigzag::noCell == dimEditionOf) {
-    const auto minted = makeDimension(curHead, "d.edition-of", currentFold);
-    curHead           = minted.version;
-    dimEditionOf      = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  // 1. Ensure dimensions d.editions and d.edition-of exist
+  const auto dimEditions  = ensureDim("d.editions");
+  const auto dimEditionOf = ensureDim("d.edition-of");
 
   // 3. Mint or find the handle cell for targetOp
   zigzag::CellRef handleCell = zigzag::noCell;
@@ -1432,19 +1615,15 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
 
   // 4. Check if an edition cell named `name` already exists on d.editions rank
   zigzag::CellRef existingEditionCell = zigzag::noCell;
-  auto tail                           = homeCell_;
-
-  currentFold->walkRank(homeCell_, dimEditions, zigzag::DimVector::POS,
-                        [&](const zigzag::CellRef cell) {
-                          if (cell != homeCell_) {
-                            tail = cell;
-                            if (!allowDuplicateName &&
-                                currentFold->textOf(cell, *this) == name) {
-                              existingEditionCell = cell;
-                            }
-                          }
-                          return true;
-                        });
+  if (!allowDuplicateName) {
+    for (const auto cell :
+         zigzag::rankAfter(*currentFold, homeCell_, dimEditions)) {
+      if (currentFold->textOf(cell, *this) == name) {
+        existingEditionCell = cell;
+        break;
+      }
+    }
+  }
 
   if (zigzag::noCell != existingEditionCell) {
     // Repoint existing edition cell to the new handle
@@ -1458,6 +1637,8 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
     currentFold            = &folded.value();
 
     // Link onto tail of d.editions rank
+    const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimEditions,
+                                       zigzag::DimVector::POS);
     curHead     = setLink(curHead, tail, dimEditions, zigzag::DimVector::POS,
                           editionCell, currentFold);
     folded      = rebuildManifold(curHead);
@@ -1572,6 +1753,11 @@ void Store::syncScrollsFromRank(const zigzag::Manifold &manifold) {
   }
 }
 
+void Store::syncLinksFromRank(const zigzag::Manifold &manifold) {
+  const auto mlinks = manifold.links(*this);
+  linkTable.insert(mlinks.begin(), mlinks.end());
+}
+
 MicroversionId Store::registerScroll(const MicroversionId &parent,
                                      const std::string_view globalKey,
                                      const zigzag::Manifold *known) {
@@ -1591,33 +1777,31 @@ MicroversionId Store::registerScroll(const MicroversionId &parent,
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
   }
 
-  auto dimScrolls = currentFold->dimensionNamed("d.scrolls", *this);
-  if (zigzag::noCell == dimScrolls) {
-    const auto minted = makeDimension(curHead, "d.scrolls", currentFold);
-    curHead           = minted.version;
-    dimScrolls        = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
 
-  zigzag::CellRef existingScrollCell = zigzag::noCell;
-  auto tail                          = homeCell_;
+  const auto dimScrolls = ensureDim("d.scrolls");
 
-  currentFold->walkRank(homeCell_, dimScrolls, zigzag::DimVector::POS,
-                        [&](const zigzag::CellRef cell) {
-                          if (cell != homeCell_) {
-                            tail = cell;
-                            if (currentFold->textOf(cell, *this) == globalKey) {
-                              existingScrollCell = cell;
-                            }
-                          }
-                          return true;
-                        });
-
-  if (zigzag::noCell != existingScrollCell) {
-    return curHead;
+  for (const auto cell :
+       zigzag::rankAfter(*currentFold, homeCell_, dimScrolls)) {
+    if (currentFold->textOf(cell, *this) == globalKey) {
+      return curHead;
+    }
   }
 
   curHead               = makeCell(curHead, globalKey);
@@ -1625,10 +1809,12 @@ MicroversionId Store::registerScroll(const MicroversionId &parent,
   folded                = rebuildManifold(curHead);
   currentFold           = &folded.value();
 
-  curHead     = setLink(curHead, tail, dimScrolls, zigzag::DimVector::POS,
-                        scrollCell, currentFold);
-  folded      = rebuildManifold(curHead);
-  currentFold = &folded.value();
+  const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimScrolls,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimScrolls, zigzag::DimVector::POS,
+                            scrollCell, currentFold);
+  folded          = rebuildManifold(curHead);
+  currentFold     = &folded.value();
 
   syncScrollsFromRank(*currentFold);
   return curHead;
@@ -1654,25 +1840,27 @@ MicroversionId Store::linkScrollRef(const MicroversionId &parent,
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
   }
 
-  auto dimScrollRefs = currentFold->dimensionNamed("d.scroll-refs", *this);
-  if (zigzag::noCell == dimScrollRefs) {
-    const auto minted = makeDimension(curHead, "d.scroll-refs", currentFold);
-    curHead           = minted.version;
-    dimScrollRefs     = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
 
-  auto tail = scrollCell;
-  currentFold->walkRank(scrollCell, dimScrollRefs, zigzag::DimVector::POS,
-                        [&](const zigzag::CellRef cell) {
-                          if (cell != scrollCell) {
-                            tail = cell;
-                          }
-                          return true;
-                        });
+  const auto dimScrollRefs = ensureDim("d.scroll-refs");
+  const auto tail = zigzag::rankTail(*currentFold, scrollCell, dimScrollRefs,
+                                     zigzag::DimVector::POS);
 
   curHead     = setLink(curHead, tail, dimScrollRefs, zigzag::DimVector::POS,
                         placeholderCell, currentFold);
@@ -1735,44 +1923,28 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
     curHead     = sliceGenesis(curHead);
     folded      = rebuildManifold(curHead);
     currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
   }
 
-  // Ensure standard annotation dimensions exist
-  auto dimNotes = currentFold->dimensionNamed("d.notes", *this);
-  if (zigzag::noCell == dimNotes) {
-    const auto minted = makeDimension(curHead, "d.notes", currentFold);
-    curHead           = minted.version;
-    dimNotes          = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
 
-  auto dimTag = currentFold->dimensionNamed("d.tag", *this);
-  if (zigzag::noCell == dimTag) {
-    const auto minted = makeDimension(curHead, "d.tag", currentFold);
-    curHead           = minted.version;
-    dimTag            = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
-
-  auto dimAlias = currentFold->dimensionNamed("d.alias", *this);
-  if (zigzag::noCell == dimAlias) {
-    const auto minted = makeDimension(curHead, "d.alias", currentFold);
-    curHead           = minted.version;
-    dimAlias          = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
-
-  auto dimCreated = currentFold->dimensionNamed("d.created", *this);
-  if (zigzag::noCell == dimCreated) {
-    const auto minted = makeDimension(curHead, "d.created", currentFold);
-    curHead           = minted.version;
-    dimCreated        = minted.dim;
-    folded            = rebuildManifold(curHead);
-    currentFold       = &folded.value();
-  }
+  const auto dimNotes   = ensureDim("d.notes");
+  const auto dimTag     = ensureDim("d.tag");
+  const auto dimAlias   = ensureDim("d.alias");
+  const auto dimCreated = ensureDim("d.created");
 
   // Mint or find OpHandle for targetOp
   zigzag::CellRef handleCell = zigzag::noCell;
@@ -1944,6 +2116,23 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
       putOp(record.produces, record.op);
     }
   }
+  indexGenesisCells();
+  const auto sHeads = structureHeads();
+  if (!sHeads.empty()) {
+    for (const auto &sh : sHeads) {
+      const auto manifold = rebuildManifold(sh);
+      syncCurrentVersionsFromRank(manifold);
+      syncAliasesFromRank(manifold);
+      syncScrollsFromRank(manifold);
+      syncLinksFromRank(manifold);
+    }
+  } else if (!latest().isZero()) {
+    const auto manifold = rebuildManifold(latest());
+    syncCurrentVersionsFromRank(manifold);
+    syncAliasesFromRank(manifold);
+    syncScrollsFromRank(manifold);
+    syncLinksFromRank(manifold);
+  }
 }
 
 void Store::sealPendingMetadataAsCells() const {
@@ -1955,8 +2144,11 @@ void Store::sealPendingMetadataAsCells() const {
     return;
   }
   auto *mutableStore = const_cast<Store *>(this);
-  auto curHead       = latest();
-  auto manifold      = rebuildManifold(curHead);
+  auto curHead = (zigzag::noCell != homeCell_) ? structureHead() : latest();
+  if (curHead.isZero()) {
+    curHead = latest();
+  }
+  auto manifold = rebuildManifold(curHead);
 
   const auto pendingAnnotations = versionAnnotations_;
   for (const auto &[id, ann] : pendingAnnotations) {
@@ -2071,8 +2263,7 @@ void Store::save(const std::string &directory) const {
     }
     writeStoreTables(dir / storeTablesName,
                      StoreTables{.documentId    = documentId_,
-                                 .localSegments = deploymentSegments,
-                                 .links         = linkTable});
+                                 .localSegments = deploymentSegments});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -2122,8 +2313,7 @@ void Store::saveOsmicText(const std::string &directory) const {
     }
     writeStoreTables(dir / storeTablesName,
                      StoreTables{.documentId    = documentId_,
-                                 .localSegments = deploymentSegments,
-                                 .links         = linkTable});
+                                 .localSegments = deploymentSegments});
   }
 }
 
@@ -2177,7 +2367,6 @@ void Store::load(const std::string &directory) {
   externals.clear();
   scrollRegistry_ = {};
   localSegments   = Scroll{};
-  nextLinkId      = 1;
   currentVersions_.clear();
   versionAnnotations_.clear();
   aliasIndex_.clear();
@@ -2229,10 +2418,6 @@ void Store::load(const std::string &directory) {
     documentId_            = tables.documentId;
     localSegments          = Scroll{};
     localSegments.segments = std::move(tables.localSegments);
-    linkTable              = std::move(tables.links);
-    for (const auto &[id, link] : linkTable) {
-      nextLinkId = std::max(nextLinkId, id + 1);
-    }
   }
 
   // The nodes above arrived as a mapped segment rather than through putOp(),
@@ -2241,11 +2426,21 @@ void Store::load(const std::string &directory) {
   // refs are derived rather than written into the side tables: a store's own
   // operations already say what they are.
   indexGenesisCells();
-  if (!latest().isZero()) {
+  const auto sHeads = structureHeads();
+  if (!sHeads.empty()) {
+    for (const auto &sh : sHeads) {
+      const auto manifold = rebuildManifold(sh);
+      syncCurrentVersionsFromRank(manifold);
+      syncAliasesFromRank(manifold);
+      syncScrollsFromRank(manifold);
+      syncLinksFromRank(manifold);
+    }
+  } else if (!latest().isZero()) {
     const auto manifold = rebuildManifold(latest());
     syncCurrentVersionsFromRank(manifold);
     syncAliasesFromRank(manifold);
     syncScrollsFromRank(manifold);
+    syncLinksFromRank(manifold);
   }
   if (zigzag::noCell == homeCell_) {
     for (const auto &seg : localSegments.segments) {

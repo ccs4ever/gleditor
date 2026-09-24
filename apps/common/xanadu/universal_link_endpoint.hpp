@@ -227,13 +227,15 @@ static_assert(alignof(CompactTransclusionPair) == 8);
  * @brief A link whose two ends landed in open views: one connection to draw.
  */
 struct UniversalLinkedPair {
-  std::uint64_t link{0};
+  zigzag::CellRef link{zigzag::noCell};
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   UniversalLinkEnd from; ///< Left end list.
   UniversalLinkEnd to;   ///< Right end list.
 
-  [[nodiscard]] constexpr std::uint64_t linkId() const noexcept { return link; }
+  [[nodiscard]] constexpr zigzag::CellRef linkId() const noexcept {
+    return link;
+  }
   bool operator==(const UniversalLinkedPair &) const = default;
 };
 
@@ -242,13 +244,15 @@ struct UniversalLinkedPair {
  * @brief A link with one end in an open view and the other in none.
  */
 struct UniversalHalfLink {
-  std::uint64_t link{0};
+  zigzag::CellRef link{zigzag::noCell};
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   UniversalLinkEnd here;
   std::vector<PrimediaSpan> elsewhere;
 
-  [[nodiscard]] constexpr std::uint64_t linkId() const noexcept { return link; }
+  [[nodiscard]] constexpr zigzag::CellRef linkId() const noexcept {
+    return link;
+  }
   bool operator==(const UniversalHalfLink &) const = default;
 };
 

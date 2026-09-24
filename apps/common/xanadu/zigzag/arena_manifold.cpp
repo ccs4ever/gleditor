@@ -8,11 +8,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <gleditor/logging.hpp>
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/logging.hpp>
 
 namespace zigzag {
 
@@ -30,7 +30,7 @@ CellRef ArenaManifold::home() const noexcept {
 DimRef ArenaManifold::dimensionNamed(const std::string_view name,
                                      const xanadu::SpanReader *reader) const {
   if (base_ != nullptr) {
-    DimRef baseDim = noCell;
+    std::optional<DimRef> baseDim;
     if (reader != nullptr) {
       baseDim = base_->dimensionNamed(name, *reader);
     } else if (store_ != nullptr) {
@@ -38,8 +38,8 @@ DimRef ArenaManifold::dimensionNamed(const std::string_view name,
     } else if (base_->store() != nullptr) {
       baseDim = base_->dimensionNamed(name);
     }
-    if (noCell != baseDim) {
-      return baseDim;
+    if (baseDim.has_value()) {
+      return *baseDim;
     }
   }
   const auto it = arenaDims_.find(std::string(name));

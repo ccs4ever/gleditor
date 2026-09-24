@@ -319,7 +319,7 @@ TEST(StoreTest, advancingCarriesForcedBreaksAndLinksLikeAReplayDoes) {
   auto carried = store.rebuild(one);
   ASSERT_TRUE(store.advance(carried, one, two));
   EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
-  ASSERT_TRUE(store.advance(carried, two, three));
+  ASSERT_TRUE(store.advanceTo(carried, two, three));
   EXPECT_EQ(carried.pieces(), store.rebuild(three).pieces());
   EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
 }
@@ -425,7 +425,8 @@ TEST(StoreTest, aLinkChangesNoText) {
   EXPECT_EQ(store.textOf(two), "text");
   // Recorded as an operation all the same, so that a reader can go back to
   // before it was made.
-  EXPECT_EQ(two.str(), "2");
+  EXPECT_NE(two, one);
+  EXPECT_FALSE(two.isZero());
 }
 
 TEST(StoreTest, theHypertimeMapReportsEveryFuture) {

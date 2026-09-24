@@ -577,9 +577,10 @@ public:
    * Links are kept beside the operations rather than inside a version, because
    * they attach to content and every version quoting that content has them.
    */
-  MicroversionId addLink(const MicroversionId &parent, Link link);
+  MicroversionId addLink(const MicroversionId &parent, Link link,
+                         const zigzag::Manifold *known = nullptr);
 
-  [[nodiscard]] const std::map<std::uint64_t, Link> &links() const {
+  [[nodiscard]] const std::map<zigzag::CellRef, Link> &links() const {
     return linkTable;
   }
 
@@ -644,6 +645,11 @@ public:
   /// The most recently recorded state, which is where a program that has just
   /// opened a store should start.
   [[nodiscard]] MicroversionId latest() const;
+
+  /// The head/leaf microversion in opsSpool that contains the home cell and
+  /// the store's structure hyperop ranks (d.dims, d.links, d.scrolls, etc.).
+  [[nodiscard]] MicroversionId structureHead() const;
+  [[nodiscard]] std::vector<MicroversionId> structureHeads() const;
 
   // -- Current Versions (Author-Designated Heads) --------------------------
 
@@ -807,6 +813,7 @@ public:
                 zigzag::CellRef placeholderCell,
                 const zigzag::Manifold *known = nullptr);
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
+  void syncLinksFromRank(const zigzag::Manifold &manifold);
 
   /**
    * @brief The segment @p span's own start offset falls in, local or
@@ -963,25 +970,6 @@ public:
   /// text formats. A directory with no store in it produces an empty one.
   void load(const std::string &directory);
 
-private:
-  friend class enfilade::Chronofilade;
-  friend class OsmicWalker;
-  /// Apply one recorded op to @p onto. The single replay path: everything that
-  /// rebuilds a document comes through here, so replaying and recording cannot
-  /// drift.
-  ///
-  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
-  /// same operation -- CompactOpNode names the parent and transclusion source
-  /// by spool index where Op names them by microversion -- but the node is
-  /// what the ancestral walk already has in hand, and going back through the
-  /// Op map for it cost about nine tenths of a rebuild.
-  void replay(const CompactOpNode &node, Version &onto) const;
-
-  /// rebuild(), for a state already known to be in the spool at @p index.
-  /// Split out because a transclusion replays its source the same way, and it
-  /// has the index rather than the name.
-  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
-
   /**
    * @brief Every recorded operation, in the order they are serialized.
    *
@@ -1005,6 +993,30 @@ private:
    */
   [[nodiscard]] std::vector<OpRecord>
   opRecords(std::uint32_t sinceExclusive = 0) const;
+
+  /// Record @p records into the spool, skipping any state already filed --
+  /// which is what the std::map these were read into used to do on a
+  /// duplicate, and keeps a corrupt file opening rather than throwing.
+  void adoptOpRecords(const std::vector<OpRecord> &records);
+
+private:
+  friend class enfilade::Chronofilade;
+  friend class OsmicWalker;
+  /// Apply one recorded op to @p onto. The single replay path: everything that
+  /// rebuilds a document comes through here, so replaying and recording cannot
+  /// drift.
+  ///
+  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
+  /// same operation -- CompactOpNode names the parent and transclusion source
+  /// by spool index where Op names them by microversion -- but the node is
+  /// what the ancestral walk already has in hand, and going back through the
+  /// Op map for it cost about nine tenths of a rebuild.
+  void replay(const CompactOpNode &node, Version &onto) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
 
   /**
    * @brief The head of @p cell's micro-history chain as of @p parent.
@@ -1037,11 +1049,6 @@ private:
   /// otherwise kept up to date -- never runs.
   void indexGenesisCells();
 
-  /// Record @p records into the spool, skipping any state already filed --
-  /// which is what the std::map these were read into used to do on a
-  /// duplicate, and keeps a corrupt file opening rather than throwing.
-  void adoptOpRecords(const std::vector<OpRecord> &records);
-
   /// Ensure pending versionAnnotations_ and currentVersions_ are sealed as
   /// structure hyperop cells in ops.nodes before saving (§5.4).
   void sealPendingMetadataAsCells() const;
@@ -1066,8 +1073,7 @@ private:
   /// them, holding the same operations a second time at about twice the size
   /// and three heap allocations apiece.
   SegmentedOpsSpool opsSpool;
-  std::map<std::uint64_t, Link> linkTable;
-  std::uint64_t nextLinkId{1};
+  std::map<zigzag::CellRef, Link> linkTable;
   /// The first two cells minted, which is what genesis mints. Derived from the
   /// operations rather than stored beside them -- kept in step as they arrive,
   /// and re-derived by indexGenesisCells() on load.

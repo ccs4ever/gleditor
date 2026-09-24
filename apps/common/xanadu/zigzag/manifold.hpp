@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -458,6 +459,18 @@ public:
   [[nodiscard]] std::vector<ScrollRecord> scrolls() const;
 
   /**
+   * @brief Replay product index of links (§5.4).
+   *
+   * Walks d.links off home, decoding endpoints on d.from and d.to,
+   * link type on d.linktype, tier on d.linktier, owner on d.owner,
+   * and curator on d.curator.
+   */
+  [[nodiscard]] std::map<CellRef, xanadu::Link>
+  links(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] std::map<CellRef, xanadu::Link> links() const;
+
+  /**
    * @brief Collect all cells within @p radius hops from @p start along any
    *        dimension link.
    *
@@ -588,7 +601,7 @@ private:
   /// assertion, and spending four of them on a capacity would have made the
   /// run design cost exactly what the fixed array it replaced cost (R12's
   /// 108 bytes per cell against 112), which is most of why the run won.
-  std::vector<DimLink> links;
+  std::vector<DimLink> links_;
   /// The content arena, run per cell, grown and compacted exactly as @ref links
   /// is. Separate from the links because the two grow independently: a cell
   /// gains dimensions and gains text at different times, and interleaving them

@@ -194,8 +194,10 @@ TEST(StoreFormatTest, aFormatLinkMadeInOneStoreIsRecognisedInAnother) {
 
 struct StoreFormatRoundTripTest : testing::Test {
   std::filesystem::path dir;
+  std::shared_ptr<xanadu::UserPermascroll> perma;
 
   void SetUp() override {
+    perma = std::make_shared<xanadu::UserPermascroll>();
     dir =
         std::filesystem::temp_directory_path() /
         ("xudu-format-test-" +
@@ -210,7 +212,7 @@ TEST_F(StoreFormatRoundTripTest,
        aFormatLinkIsStillRecognisedAfterSaveAndReload) {
   MicroversionId version;
   {
-    Store store;
+    Store store(perma);
     version            = store.insert(MicroversionId{}, 0, "hello world");
     const auto content = store.rebuild(version).spansFor(0, 5);
 
@@ -222,7 +224,7 @@ TEST_F(StoreFormatRoundTripTest,
     store.save(dir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   ASSERT_EQ(reloaded.links().size(), 1U);
   const auto &stored = reloaded.links().begin()->second;

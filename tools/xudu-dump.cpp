@@ -308,30 +308,11 @@ std::string segmentFields(const xudu::ScrollSegment &segment) {
 /// The side tables, from the one container they live in. Rendered in the same
 /// shape the plaintext files were rendered in, so that migration step 11's
 /// conversion is a diff of this output rather than a claim about it.
-void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
-                bool wantLinks) {
+void dumpTables(const xudu::StoreTables &tables, bool wantScrolls) {
   std::cout << "document  " << tables.documentId.str() << '\n';
   if (wantScrolls) {
     for (const auto &segment : tables.localSegments) {
       std::cout << "localsegment  " << segmentFields(segment) << '\n';
-    }
-  }
-  if (wantLinks) {
-    for (const auto &[id, link] : tables.links) {
-      std::ostringstream out;
-      out << "link " << id << "  type=" << xudu::linkTypeName(link.type)
-          << " tier=" << xudu::prominenceTierName(link.tier)
-          << " owner=" << (link.owner.empty() ? "-" : link.owner)
-          << " curator=" << (link.curator.empty() ? "-" : link.curator);
-      for (const auto &span : link.left) {
-        out << " left=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      for (const auto &span : link.right) {
-        out << " right=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      std::cout << out.str() << '\n';
     }
   }
 }
@@ -471,7 +452,7 @@ int main(int argc, char **argv) {
     if (exists("store.tables")) {
       try {
         const auto tables = xudu::readStoreTables(target / "store.tables");
-        dumpTables(tables, wants("scrolls"), wants("links"));
+        dumpTables(tables, wants("scrolls"));
         if (wants("versions")) {
           dumpVersions(tables);
         }

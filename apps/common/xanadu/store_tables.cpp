@@ -21,7 +21,6 @@ namespace {
 /// Keys of the container's dictionary, written once here so that the reader
 /// and the writer cannot disagree about them.
 constexpr auto keyLocalSegments = "local";
-constexpr auto keyLinks         = "links";
 constexpr auto keyDocumentId    = "document";
 
 std::string rawBytes(const std::array<std::uint8_t, 32> &bytes) {
@@ -56,113 +55,6 @@ decodeRegistrySegment(const bencode::Value &value) {
   return segment;
 }
 
-/// A span in this store's own coordinates: a ScrollId rather than a global
-/// key, which is what makes it a *local* table and not a publishable one.
-bencode::Value encodeLocalSpan(const PrimediaSpan &span) {
-  return bencode::Value::dict({
-      {"len", bencode::Value::integer(static_cast<std::int64_t>(span.length))},
-      {"scroll",
-       bencode::Value::integer(static_cast<std::int64_t>(span.scroll))},
-      {"start", bencode::Value::integer(static_cast<std::int64_t>(span.start))},
-  });
-}
-
-std::optional<PrimediaSpan> decodeLocalSpan(const bencode::Value &value) {
-  if (!value.isDict()) {
-    return std::nullopt;
-  }
-  const auto *scroll = value.find("scroll");
-  const auto *start  = value.find("start");
-  const auto *length = value.find("len");
-  if (nullptr == scroll || !scroll->isInteger() || nullptr == start ||
-      !start->isInteger() || nullptr == length || !length->isInteger() ||
-      start->asInteger() < 0 || length->asInteger() < 0 ||
-      scroll->asInteger() < 0) {
-    return std::nullopt;
-  }
-  return PrimediaSpan{.scroll = static_cast<ScrollId>(scroll->asInteger()),
-                      .start  = static_cast<std::uint64_t>(start->asInteger()),
-                      .length =
-                          static_cast<std::uint64_t>(length->asInteger())};
-}
-
-bencode::List encodeLocalSpans(const std::vector<PrimediaSpan> &spans) {
-  bencode::List out;
-  out.reserve(spans.size());
-  for (const auto &span : spans) {
-    out.push_back(encodeLocalSpan(span));
-  }
-  return out;
-}
-
-bool decodeLocalSpans(const bencode::Value &value,
-                      std::vector<PrimediaSpan> &into) {
-  if (!value.isList()) {
-    return false;
-  }
-  for (const auto &item : value.asList()) {
-    const auto span = decodeLocalSpan(item);
-    if (!span.has_value()) {
-      return false;
-    }
-    into.push_back(*span);
-  }
-  return true;
-}
-
-/// Carries `tier` and `curator`, which the plaintext table did not: a link
-/// adopted from a third-party package came back as the reader's own
-/// author-tier link with no curator, every time a store was saved and
-/// reopened. Nothing had to change for that to be fixed except writing the
-/// fields down.
-bencode::Value encodeLink(const Link &link) {
-  return bencode::Value::dict({
-      {"curator", bencode::Value::string(link.curator)},
-      {"id", bencode::Value::integer(static_cast<std::int64_t>(link.id))},
-      {"left", bencode::Value::list(encodeLocalSpans(link.left))},
-      {"owner", bencode::Value::string(link.owner)},
-      {"right", bencode::Value::list(encodeLocalSpans(link.right))},
-      {"tier",
-       bencode::Value::string(std::string{prominenceTierName(link.tier)})},
-      {"type", bencode::Value::string(std::string{linkTypeName(link.type)})},
-  });
-}
-
-std::optional<Link> decodeLink(const bencode::Value &value) {
-  if (!value.isDict()) {
-    return std::nullopt;
-  }
-  const auto *id    = value.find("id");
-  const auto *type  = value.find("type");
-  const auto *left  = value.find("left");
-  const auto *right = value.find("right");
-  if (nullptr == id || !id->isInteger() || id->asInteger() < 0 ||
-      nullptr == type || !type->isString() || nullptr == left ||
-      nullptr == right) {
-    return std::nullopt;
-  }
-  Link link;
-  link.id   = static_cast<std::uint64_t>(id->asInteger());
-  link.type = linkTypeFromName(type->asString());
-  if (const auto *owner = value.find("owner");
-      nullptr != owner && owner->isString()) {
-    link.owner = owner->asString();
-  }
-  if (const auto *curator = value.find("curator");
-      nullptr != curator && curator->isString()) {
-    link.curator = curator->asString();
-  }
-  if (const auto *tier = value.find("tier");
-      nullptr != tier && tier->isString()) {
-    link.tier = prominenceTierFromName(tier->asString());
-  }
-  if (!decodeLocalSpans(*left, link.left) ||
-      !decodeLocalSpans(*right, link.right)) {
-    return std::nullopt;
-  }
-  return link;
-}
-
 } // namespace
 
 void writeStoreTables(const std::filesystem::path &path,
@@ -172,11 +64,6 @@ void writeStoreTables(const std::filesystem::path &path,
   for (const auto &segment : tables.localSegments) {
     local.push_back(encodeRegistrySegment(segment));
   }
-  bencode::List links;
-  links.reserve(tables.links.size());
-  for (const auto &[id, link] : tables.links) {
-    links.push_back(encodeLink(link));
-  }
 
   const auto body =
       bencode::Value::dict(
@@ -185,7 +72,6 @@ void writeStoreTables(const std::filesystem::path &path,
                                   reinterpret_cast<const char *>(
                                       tables.documentId.bytes().data()),
                                   tables.documentId.bytes().size()})},
-              {keyLinks, bencode::Value::list(std::move(links))},
               {keyLocalSegments, bencode::Value::list(std::move(local))},
           })
           .encode();
@@ -263,17 +149,6 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
                                     " has a local segment it cannot read");
       }
       tables.localSegments.push_back(*segment);
-    }
-  }
-  if (const auto *links = decoded.find(keyLinks);
-      nullptr != links && links->isList()) {
-    for (const auto &item : links->asList()) {
-      auto link = decodeLink(item);
-      if (!link.has_value()) {
-        throw StoreTablesUnreadable(path.string() +
-                                    " has a link it cannot read");
-      }
-      tables.links.emplace(link->id, std::move(*link));
     }
   }
 

@@ -248,7 +248,7 @@ ProminenceTier prominenceTierFromName(const std::string &name);
  * read by nothing here that decides what may be done.
  */
 struct Link {
-  std::uint64_t id{};
+  zigzag::CellRef id{zigzag::noCell};
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.
@@ -260,6 +260,8 @@ struct Link {
 
   /// Whether either end covers any of @p span.
   [[nodiscard]] bool touches(const PrimediaSpan &span) const;
+
+  bool operator==(const Link &) const = default;
 };
 
 /**

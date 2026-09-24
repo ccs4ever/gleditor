@@ -53,16 +53,6 @@ StoreTables everything() {
   local.mimeType = "image/png";
   tables.localSegments.push_back(local);
 
-  Link curated;
-  curated.id      = 7;
-  curated.type    = LinkType::Quotation;
-  curated.tier    = ProminenceTier::Curated;
-  curated.owner   = "Theodor_Holm_Nelson";
-  curated.curator = "btpk:" + std::string(64, 'e');
-  curated.left    = {PrimediaSpan{0, 10, 20}};
-  curated.right   = {PrimediaSpan{1, 30, 40}, PrimediaSpan{2, 0, 5}};
-  tables.links.emplace(curated.id, curated);
-
   return tables;
 }
 
@@ -79,17 +69,6 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   EXPECT_EQ(back.localSegments.front().mimeType, "image/png")
       << "a local segment's MIME type is the one thing the shared segment "
          "encoding has no key for, so the registry adds it";
-
-  ASSERT_EQ(back.links.size(), 1U);
-  const auto &link = back.links.at(7);
-  EXPECT_EQ(link.type, LinkType::Quotation);
-  EXPECT_EQ(link.tier, ProminenceTier::Curated) << "tier was dropped before";
-  EXPECT_EQ(link.owner, "Theodor_Holm_Nelson");
-  EXPECT_EQ(link.curator, "btpk:" + std::string(64, 'e'))
-      << "curator was dropped before";
-  EXPECT_EQ(link.left, (std::vector<PrimediaSpan>{PrimediaSpan{0, 10, 20}}));
-  EXPECT_EQ(link.right, (std::vector<PrimediaSpan>{PrimediaSpan{1, 30, 40},
-                                                   PrimediaSpan{2, 0, 5}}));
 }
 
 TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
