@@ -20,6 +20,16 @@ The README is the source of truth for anything not covered here (rendering archi
 accessibility, xudu's data model, zigzag's space, SDL2/SDL3 differences); read the relevant section
 before a non-trivial change in that area.
 
+## Xuzz navigation workflow
+
+For changes to Xuzz link selection, many-to-many endpoint browsing, activation, or movement between
+xanadoc text and ZigZag cell content, use
+[`xuzz-link-navigation`](.claude/skills/xuzz-link-navigation/SKILL.md). Its interaction contract and
+acceptance criteria are in
+[`design/ui_workflow_xuzz_navigation.md`](design/ui_workflow_xuzz_navigation.md). Keep one link
+identity and both endsets in view while the reader explores either side; navigation must not append
+operations.
+
 ## Setup: submodules
 
 `thirdparty/argparse`, `Choreograph`, `merklecpp`, `SDL`, `zstd`, `nontype_functional`,

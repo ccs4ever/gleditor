@@ -16,6 +16,10 @@
   tension physics, and intertwingle layout
 - [`ui_workflow_zigzag_multiview.md`](ui_workflow_zigzag_multiview.md) — Multidimensional cell
   projections, Cell Content View, and Topology View
+- [`ui_workflow_xuzz_navigation.md`](ui_workflow_xuzz_navigation.md) — Link selection, independent
+  endset browsing, and document/cell navigation
+- [`xuzz-unified-link-traversal-vision.md`](xuzz-unified-link-traversal-vision.md) — Reader journey,
+  UI concepts, and roadmap for one document/cell link experience
 - [`system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
   — Dynamic runtime configuration and system doc schemas
 
