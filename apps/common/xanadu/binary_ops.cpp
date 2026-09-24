@@ -130,7 +130,9 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
             static_cast<std::streamsize>(binaryOpsMagic.size()));
 
   MicroversionId lastProduces{};
-  for (const auto &[produces, op] : ops) {
+  for (const auto &record : ops) {
+    const auto &produces    = record.produces;
+    const auto &op          = record.op;
     std::uint8_t tag        = 0;
     const bool isSequential = (produces == lastProduces.next());
     if (isSequential) {
@@ -233,39 +235,33 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       writeVarint(out, op.at);
       break;
 
-    case OpKind::Structure:
-      // A splice carries `at` and `length` -- an offset inside the cell's own
-      // content and how much of it to replace -- and this encoding has no room
-      // for either: `at` is deliberately not written, because it is zero for
-      // every other verb and that is what makes FLAG_AT_EQUALS_START meaningful
-      // across the family. Published as-is, a splice would arrive as a splice
-      // at offset zero removing nothing, which is not a failure to load but a
-      // change of meaning -- the failure R14 exists to make impossible. So it
-      // is refused by name until CompactBinaryV4 widens the family. See U3.4.
-      if (StructureVerb::Splice == structureVerbOf(op.flags)) {
-        throw std::runtime_error(
-            "a Splice operation cannot be published: this wire format has no "
-            "field for its offset or its length, so it would arrive meaning "
-            "something else. See U3.4 in design/store-slice-convergence.md.");
-      }
-      // Every field a Structure verb might read, in one shape rather than one
-      // per verb: which one it is lives in `flags`, and the fields a given
-      // verb does not use are zero, exactly as they are for every other kind
-      // here. `at` is not written -- it is zero for all of these, which is
-      // what makes FLAG_AT_EQUALS_START meaningful across the family.
+    case OpKind::Structure: {
       tag |= BinStructure;
       out.put(static_cast<char>(tag));
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
       out.put(static_cast<char>(op.flags));
-      writeVarint(out, op.to);
-      writeVarint(out, op.link);
       writeVarint(out, op.span.scroll);
       writeVarint(out, op.span.start);
       writeVarint(out, op.span.length);
       writeVarint(out, op.value);
+      writeMicroversionId(out, op.source);
+
+      const auto verb = structureVerbOf(op.flags);
+      if (StructureVerb::SetLink == verb) {
+        writeMicroversionId(out, record.structureDimension);
+        writeMicroversionId(out, record.structureTarget);
+      } else if (StructureVerb::Splice == verb) {
+        writeVarint(out, op.at);
+        writeVarint(out, op.length);
+      }
+
+      if (ValueKind::OpHandle == valueKindOf(op.flags)) {
+        writeMicroversionId(out, record.structureValueTarget);
+      }
       break;
+    }
     }
 
     lastProduces = produces;
@@ -299,6 +295,9 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     std::uint64_t v2 = 0;
     std::uint64_t v3 = 0;
     std::uint64_t v4 = 0;
+    MicroversionId structureDimension{};
+    MicroversionId structureTarget{};
+    MicroversionId structureValueTarget{};
 
     switch (kindCode) {
     case BinInsert:
@@ -410,21 +409,49 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
       op.kind        = OpKind::Structure;
       const int verb = in.get();
       if (verb == std::char_traits<char>::eof()) {
-        return;
+        throw std::runtime_error(
+            "malformed binary structure op: missing flags");
       }
       op.flags        = static_cast<std::uint8_t>(verb);
       std::uint64_t v = 0;
       if (!readVarint(in, v)) {
-        return;
-      }
-      op.to = static_cast<std::uint32_t>(v);
-      if (!readVarint(in, op.link) || !readVarint(in, v)) {
-        return;
+        throw std::runtime_error(
+            "malformed binary structure op: missing scroll");
       }
       op.span.scroll = static_cast<ScrollId>(v);
       if (!readVarint(in, op.span.start) || !readVarint(in, op.span.length) ||
           !readVarint(in, op.value)) {
-        return;
+        throw std::runtime_error(
+            "malformed binary structure op: missing span or value");
+      }
+      if (!readMicroversionId(in, op.source)) {
+        throw std::runtime_error(
+            "malformed binary structure op: missing source");
+      }
+
+      const auto verbKind = structureVerbOf(op.flags);
+      if (StructureVerb::SetLink == verbKind) {
+        if (!readMicroversionId(in, structureDimension) ||
+            !readMicroversionId(in, structureTarget)) {
+          throw std::runtime_error("malformed binary structure op: missing "
+                                   "SetLink dimension or target");
+        }
+      } else if (StructureVerb::Splice == verbKind) {
+        std::uint64_t atVal  = 0;
+        std::uint64_t lenVal = 0;
+        if (!readVarint(in, atVal) || !readVarint(in, lenVal)) {
+          throw std::runtime_error(
+              "malformed binary structure op: missing Splice at or length");
+        }
+        op.at     = static_cast<std::uint32_t>(atVal);
+        op.length = static_cast<std::uint32_t>(lenVal);
+      }
+
+      if (ValueKind::OpHandle == valueKindOf(op.flags)) {
+        if (!readMicroversionId(in, structureValueTarget)) {
+          throw std::runtime_error(
+              "malformed binary structure op: missing OpHandle value target");
+        }
       }
       break;
     }
@@ -434,14 +461,22 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
                                std::to_string(tag));
     }
 
-    ops.push_back(OpRecord{.produces = produces, .op = op});
+    ops.push_back(OpRecord{
+        .produces             = produces,
+        .op                   = op,
+        .structureDimension   = structureDimension,
+        .structureTarget      = structureTarget,
+        .structureValueTarget = structureValueTarget,
+    });
     lastProduces = produces;
   }
 }
 
 void writeOsmicTextOpsSpool(std::ostream &out,
                             const std::vector<OpRecord> &ops) {
-  for (const auto &[id, op] : ops) {
+  for (const auto &record : ops) {
+    const auto &id = record.produces;
+    const auto &op = record.op;
     out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
         << op.length << ' ' << op.to << ' ' << op.span.start << ' '
         << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
@@ -509,7 +544,13 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }
-    ops.push_back(OpRecord{.produces = produces, .op = op});
+    ops.push_back(OpRecord{
+        .produces             = produces,
+        .op                   = op,
+        .structureDimension   = MicroversionId{},
+        .structureTarget      = MicroversionId{},
+        .structureValueTarget = MicroversionId{},
+    });
   }
 }
 
@@ -517,8 +558,8 @@ const char *opsSpoolVersionName(const OpsSpoolVersion version) {
   switch (version) {
   case OpsSpoolVersion::StandardOsmicText:
     return "OSMIC text (v0)";
-  case OpsSpoolVersion::CompactBinaryV3:
-    return "Compact binary (v3)";
+  case OpsSpoolVersion::CompactBinaryV4:
+    return "Compact binary (v4)";
   }
   return "unknown";
 }
@@ -535,16 +576,16 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
       throw std::runtime_error(
           "truncated binary ops spool header: missing version");
     }
-    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV3)) {
-      return OpsSpoolVersion::CompactBinaryV3;
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV4)) {
+      return OpsSpoolVersion::CompactBinaryV4;
     }
-    // Both numbers, so that a version 1 or 2 file -- which this build
+    // Both numbers, so that versions 1, 2, and 3 -- which this build
     // deliberately no longer reads, see OpsSpoolVersion -- says what it is
     // rather than only that it is not wanted.
     throw std::runtime_error(
         "binary ops spool is version " + std::to_string(ver) +
         " and this build reads version " +
-        std::to_string(static_cast<int>(OpsSpoolVersion::CompactBinaryV3)));
+        std::to_string(static_cast<int>(OpsSpoolVersion::CompactBinaryV4)));
   }
   in.clear();
   in.seekg(0, std::ios::beg);
@@ -554,7 +595,7 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
 void readOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   const auto version = detectOpsSpoolVersion(in);
   switch (version) {
-  case OpsSpoolVersion::CompactBinaryV3:
+  case OpsSpoolVersion::CompactBinaryV4:
     readBinaryOpsSpool(in, ops);
     break;
   case OpsSpoolVersion::StandardOsmicText:

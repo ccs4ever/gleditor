@@ -901,17 +901,14 @@ TEST(ManifoldTest, splicingFoldsTheSameIncrementallyAsCold) {
             slice.store.rebuildManifold(slice.at).textOf(cell, slice.store));
 }
 
-TEST(ManifoldTest, aSpliceRefusesToBePublishedRatherThanArriveWrong) {
+TEST(ManifoldTest, aSplicePublishesSuccessfullyInCompactBinaryV4) {
   Slice slice;
   const auto cell = slice.cell("the quick brown fox");
   slice.at        = slice.store.spliceCell(slice.at, cell, 4, 5, "slow");
 
-  // The wire encoding has no field for a splice's offset or length, so it would
-  // arrive as a splice at offset zero removing nothing -- a change of meaning,
-  // not a failure to load. Refused by name until CompactBinaryV4. A store that
-  // has never been spliced still publishes.
-  EXPECT_THROW(static_cast<void>(slice.store.exportBinaryOps()),
-               std::runtime_error);
+  // In CompactBinaryV4, splice offset and length are carried on the wire, so
+  // publishing a spliced slice succeeds.
+  EXPECT_NO_THROW(static_cast<void>(slice.store.exportBinaryOps()));
 
   Slice plain;
   static_cast<void>(plain.cell("unspliced"));

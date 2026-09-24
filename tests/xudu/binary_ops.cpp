@@ -13,10 +13,14 @@
 #include <xudu/core/binary_ops.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
+#include <xudu/core/publication.hpp>
 #include <xudu/core/spool.hpp>
+#include <xudu/core/store.hpp>
+#include <zigzag/core/manifold.hpp>
 
 namespace {
 
+using xudu::historyFromSeal;
 using xudu::localScroll;
 using xudu::MicroversionId;
 using xudu::Op;
@@ -27,6 +31,10 @@ using xudu::readMicroversionId;
 using xudu::readOpsSpool;
 using xudu::readOsmicTextOpsSpool;
 using xudu::readVarint;
+using xudu::Scroll;
+using xudu::sealableOps;
+using xudu::Store;
+using xudu::ValueKind;
 using xudu::writeBinaryOpsSpool;
 using xudu::writeMicroversionId;
 using xudu::writeOsmicTextOpsSpool;
@@ -300,7 +308,7 @@ TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
   // What matters is that they are refused *by number*. A stream this build
   // cannot read must say which version it is, or the next person reading the
   // error has to go and find out what "cannot read" meant.
-  for (const char version : {'\x01', '\x02'}) {
+  for (const char version : {'\x01', '\x02', '\x03'}) {
     std::string bytes;
     bytes += "\x7fXOP";
     bytes.push_back(version);
@@ -319,7 +327,7 @@ TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
       EXPECT_THAT(std::string{e.what()},
                   testing::HasSubstr(
                       "version " + std::to_string(static_cast<int>(version))));
-      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("version 3"));
+      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("version 4"));
     }
     EXPECT_TRUE(decoded.empty())
         << "nothing may be read out of a refused spool";
@@ -360,18 +368,18 @@ TEST(BinaryOpsTest, versioningAndDetection) {
 
   EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::StandardOsmicText),
                "OSMIC text (v0)");
-  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV3),
-               "Compact binary (v3)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV4),
+               "Compact binary (v4)");
 
   // Standard OSMIC text is Version 0
   std::stringstream textStream("1 insert 0 5 0 0 5 0 0 0 0 0\n");
   EXPECT_EQ(detectOpsSpoolVersion(textStream),
             OpsSpoolVersion::StandardOsmicText);
 
-  // Binary stream is Version 3 -- what is written now.
-  std::stringstream binStreamV3("\x7fXOP\x03\x00\x00\x00\x00");
-  EXPECT_EQ(detectOpsSpoolVersion(binStreamV3),
-            OpsSpoolVersion::CompactBinaryV3);
+  // Binary stream is Version 4 -- what is written now.
+  std::stringstream binStreamV4("\x7fXOP\x04\x00\x00\x00\x00");
+  EXPECT_EQ(detectOpsSpoolVersion(binStreamV4),
+            OpsSpoolVersion::CompactBinaryV4);
 
   // Truncated magic header throws
   std::stringstream truncMagic("\x7fXOP");
@@ -381,63 +389,320 @@ TEST(BinaryOpsTest, versioningAndDetection) {
   // refused the same way, because "I do not read this" is the whole of what
   // this build has to say about any of them.
   for (const char *const bytes :
-       {"\x7fXOP\x01", "\x7fXOP\x02", "\x7fXOP\x09"}) {
+       {"\x7fXOP\x01", "\x7fXOP\x02", "\x7fXOP\x03", "\x7fXOP\x09"}) {
     std::stringstream stream(bytes);
     EXPECT_THROW(detectOpsSpoolVersion(stream), std::runtime_error) << bytes;
   }
 }
 
 TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
-  // Nothing emits one yet -- migration step 12 adds the kind and leaves the
-  // manifold that will use it for step 13 -- but the encodings have to carry
-  // it before anything can, and a field that is never written down is a field
-  // that will be found missing later. So: every field a Structure verb reads,
-  // through the binary encoding and the OSMIC text one.
+  // Structure operations carry their fields through binary encoding
+  // (CompactBinaryV4) and OSMIC text. In V4 binary encoding, addresses (source,
+  // dimension, target) travel as MicroversionIds; in OSMIC text, local indices
+  // and source travel.
   Op setLink;
-  setLink.kind = OpKind::Structure;
-  // A SetLink pointing negward along dimension cell 9 at cell 41, whose
-  // content span is two permascroll bytes and whose typed value is 42.0.
-  setLink.flags = xudu::structureFlags(xudu::StructureVerb::SetLink, true,
-                                       xudu::ValueKind::Double);
-  setLink.to    = 41;
-  setLink.link  = 9;
-  setLink.span  = PrimediaSpan{localScroll, 100, 2};
-  setLink.value = 0x4045000000000000ULL; // the bits of 42.0
+  setLink.kind   = OpKind::Structure;
+  setLink.flags  = xudu::structureFlags(xudu::StructureVerb::SetLink, true,
+                                        xudu::ValueKind::Double);
+  setLink.to     = 41;
+  setLink.link   = 9;
+  setLink.source = MicroversionId::parse("1a1");
+  setLink.span   = PrimediaSpan{localScroll, 100, 2};
+  setLink.value  = 0x4045000000000000ULL; // the bits of 42.0
 
-  const std::map<MicroversionId, Op> original{
-      {MicroversionId::parse("1"), setLink}};
+  Op splice;
+  splice.kind   = OpKind::Structure;
+  splice.flags  = xudu::structureFlags(xudu::StructureVerb::Splice);
+  splice.at     = 5;
+  splice.length = 10;
+  splice.source = MicroversionId::parse("1a2");
+  splice.span   = PrimediaSpan{localScroll, 200, 4};
 
-  const auto check = [&](const Op &decoded) {
-    EXPECT_EQ(decoded.kind, OpKind::Structure);
-    EXPECT_EQ(decoded.flags, setLink.flags);
-    EXPECT_EQ(xudu::structureVerbOf(decoded.flags),
-              xudu::StructureVerb::SetLink);
-    EXPECT_TRUE(xudu::structureIsNegward(decoded.flags));
-    EXPECT_EQ(xudu::valueKindOf(decoded.flags), xudu::ValueKind::Double);
-    EXPECT_EQ(decoded.to, 41U);
-    EXPECT_EQ(decoded.link, 9U);
-    EXPECT_EQ(decoded.span, setLink.span);
-    EXPECT_EQ(decoded.value, setLink.value);
+  const auto dimId    = MicroversionId::parse("1a10");
+  const auto targetId = MicroversionId::parse("1a20");
+
+  const std::vector<xudu::OpRecord> original = {
+      xudu::OpRecord{.produces             = MicroversionId::parse("1a3"),
+                     .op                   = setLink,
+                     .structureDimension   = dimId,
+                     .structureTarget      = targetId,
+                     .structureValueTarget = MicroversionId{}},
+      xudu::OpRecord{.produces             = MicroversionId::parse("1a4"),
+                     .op                   = splice,
+                     .structureDimension   = MicroversionId{},
+                     .structureTarget      = MicroversionId{},
+                     .structureValueTarget = MicroversionId{}},
   };
 
   {
     std::stringstream binary;
-    writeBinaryOpsSpool(binary, asRecords(original));
+    writeBinaryOpsSpool(binary, original);
     std::vector<xudu::OpRecord> decoded;
     readOpsSpool(binary, decoded);
-    ASSERT_EQ(decoded.size(), 1U);
-    EXPECT_EQ(decoded.front().produces.str(), "1");
-    check(decoded.front().op);
+    ASSERT_EQ(decoded.size(), 2U);
+
+    EXPECT_EQ(decoded[0].produces.str(), "1a3");
+    EXPECT_EQ(decoded[0].op.kind, OpKind::Structure);
+    EXPECT_EQ(decoded[0].op.flags, setLink.flags);
+    EXPECT_EQ(xudu::structureVerbOf(decoded[0].op.flags),
+              xudu::StructureVerb::SetLink);
+    EXPECT_TRUE(xudu::structureIsNegward(decoded[0].op.flags));
+    EXPECT_EQ(xudu::valueKindOf(decoded[0].op.flags), xudu::ValueKind::Double);
+    EXPECT_EQ(decoded[0].op.source, setLink.source);
+    EXPECT_EQ(decoded[0].structureDimension, dimId);
+    EXPECT_EQ(decoded[0].structureTarget, targetId);
+    EXPECT_EQ(decoded[0].op.span, setLink.span);
+    EXPECT_EQ(decoded[0].op.value, setLink.value);
+
+    EXPECT_EQ(decoded[1].produces.str(), "1a4");
+    EXPECT_EQ(decoded[1].op.kind, OpKind::Structure);
+    EXPECT_EQ(decoded[1].op.flags, splice.flags);
+    EXPECT_EQ(xudu::structureVerbOf(decoded[1].op.flags),
+              xudu::StructureVerb::Splice);
+    EXPECT_EQ(decoded[1].op.at, 5U);
+    EXPECT_EQ(decoded[1].op.length, 10U);
+    EXPECT_EQ(decoded[1].op.source, splice.source);
+    EXPECT_EQ(decoded[1].op.span, splice.span);
   }
   {
     std::stringstream text;
-    writeOsmicTextOpsSpool(text, asRecords(original));
+    writeOsmicTextOpsSpool(text, original);
     EXPECT_THAT(text.str(), testing::HasSubstr(" structure "));
     std::vector<xudu::OpRecord> decoded;
     readOsmicTextOpsSpool(text, decoded);
-    ASSERT_EQ(decoded.size(), 1U);
-    check(decoded.front().op);
+    ASSERT_EQ(decoded.size(), 2U);
+
+    EXPECT_EQ(decoded[0].produces.str(), "1a3");
+    EXPECT_EQ(decoded[0].op.kind, OpKind::Structure);
+    EXPECT_EQ(decoded[0].op.flags, setLink.flags);
+    EXPECT_EQ(decoded[0].op.to, 41U);
+    EXPECT_EQ(decoded[0].op.link, 9U);
+    EXPECT_EQ(decoded[0].op.source, setLink.source);
+    EXPECT_EQ(decoded[0].op.span, setLink.span);
+    EXPECT_EQ(decoded[0].op.value, setLink.value);
+
+    EXPECT_EQ(decoded[1].produces.str(), "1a4");
+    EXPECT_EQ(decoded[1].op.kind, OpKind::Structure);
+    EXPECT_EQ(decoded[1].op.flags, splice.flags);
+    EXPECT_EQ(decoded[1].op.at, 5U);
+    EXPECT_EQ(decoded[1].op.length, 10U);
+    EXPECT_EQ(decoded[1].op.source, splice.source);
+    EXPECT_EQ(decoded[1].op.span, splice.span);
   }
+}
+
+TEST(BinaryOpsTest, aPublishedSliceFoldsWithItsLinksIntact) {
+  Store publisher;
+  auto at           = publisher.sliceGenesis(MicroversionId{});
+  const auto dimRes = publisher.makeDimension(at, "d.test");
+  at                = dimRes.version;
+  const auto dim    = dimRes.dim;
+
+  at            = publisher.makeCell(at, "first");
+  const auto c1 = publisher.cellRefOf(at);
+
+  at            = publisher.makeCell(at, "second");
+  const auto c2 = publisher.cellRefOf(at);
+
+  at = publisher.setLink(at, c1, dim, zigzag::DimVector::POS, c2);
+  at = publisher.setCellText(at, c1, "first modified");
+  at = publisher.spliceCell(at, c2, 1, 3, "pl"); // "second" -> "splnd"
+
+  const auto pubManifold = publisher.rebuildManifold(at);
+  EXPECT_EQ(pubManifold.refusedOps(), 0U);
+  EXPECT_EQ(pubManifold.linked(c1, dim, zigzag::DimVector::POS), c2);
+  EXPECT_EQ(pubManifold.textOf(c1, publisher), "first modified");
+  EXPECT_EQ(pubManifold.textOf(c2, publisher), "splnd");
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "slice";
+
+  const auto sealed  = xudu::sealableOps(publisher);
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
+
+  const auto histManifold = history->rebuildManifold(at);
+  EXPECT_EQ(histManifold.refusedOps(), 0U);
+  EXPECT_EQ(histManifold.linked(c1, dim, zigzag::DimVector::POS), c2);
+  EXPECT_EQ(histManifold.textOf(c1, *history), "first modified");
+  EXPECT_EQ(histManifold.textOf(c2, *history), "splnd");
+}
+
+TEST(BinaryOpsTest, aSpliceOperationSurvivesPublication) {
+  Store publisher;
+  auto at         = publisher.sliceGenesis(MicroversionId{});
+  at              = publisher.makeCell(at, "abcdefghij");
+  const auto cell = publisher.cellRefOf(at);
+  at              = publisher.spliceCell(at, cell, 2, 4, "XYZ");
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "splice-test";
+
+  const auto sealed  = xudu::sealableOps(publisher);
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
+
+  const auto histManifold = history->rebuildManifold(at);
+  EXPECT_EQ(histManifold.refusedOps(), 0U);
+  EXPECT_EQ(histManifold.textOf(cell, *history), "abXYZghij");
+}
+
+TEST(BinaryOpsTest, structureAddressesSurviveBranchDrivenReordering) {
+  Store publisher;
+  const auto one   = publisher.insert(MicroversionId{}, 0, "root");
+  const auto two   = publisher.insert(one, 4, " more");
+  const auto three = publisher.insert(two, 9, " end");
+
+  auto at           = publisher.sliceGenesis(one);
+  const auto dimRes = publisher.makeDimension(at, "d.rank");
+  at                = dimRes.version;
+  const auto dim    = dimRes.dim;
+
+  at                    = publisher.makeCell(at, "target_cell");
+  const auto targetCell = publisher.cellRefOf(at);
+
+  at                     = publisher.makeCell(at, "subject_cell");
+  const auto subjectCell = publisher.cellRefOf(at);
+
+  at = publisher.setLink(at, subjectCell, dim, zigzag::DimVector::POS,
+                         targetCell);
+  at = publisher.makeOpHandle(at, targetCell, "handle");
+  const auto handleCell = publisher.cellRefOf(at);
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "reorder";
+
+  const auto sealed  = xudu::sealableOps(publisher);
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto histManifold = history->rebuildManifold(at);
+  EXPECT_EQ(histManifold.refusedOps(), 0U);
+
+  const auto targetInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(targetCell));
+  const auto subjectInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(subjectCell));
+  const auto dimInHist = history->cellRefOf(publisher.segmentedOps().idOf(dim));
+  const auto handleInHist =
+      history->cellRefOf(publisher.segmentedOps().idOf(handleCell));
+
+  EXPECT_EQ(
+      histManifold.linked(subjectInHist, dimInHist, zigzag::DimVector::POS),
+      targetInHist);
+  EXPECT_EQ(histManifold.handleTarget(handleInHist), targetInHist);
+}
+
+TEST(BinaryOpsTest, aHandleMayTargetALexicallyLaterBranch) {
+  Store publisher;
+  const auto root     = publisher.insert(MicroversionId{}, 0, "root");
+  const auto targetId = publisher.insert(root, 4, "target");
+  const auto targetOp = publisher.segmentedOps().indexOf(targetId);
+
+  auto at = publisher.sliceGenesis(root);
+  ASSERT_LT(at, targetId);
+
+  at = publisher.makeOpHandle(at, targetOp, "handle to target");
+  ASSERT_LT(at, targetId);
+  const auto handleCell = publisher.cellRefOf(at);
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "handle-dep";
+
+  const auto sealed  = xudu::sealableOps(publisher);
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto histManifold = history->rebuildManifold(at);
+  EXPECT_EQ(histManifold.refusedOps(), 0U);
+  const auto histTargetOp = history->segmentedOps().indexOf(targetId);
+  ASSERT_NE(histTargetOp, 0U);
+  EXPECT_EQ(histManifold.handleTarget(handleCell), histTargetOp);
+}
+
+TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
+  Store publisher;
+  const auto one   = publisher.insert(MicroversionId{}, 0, "root");
+  const auto two   = publisher.insert(one, 4, " more");
+  const auto three = publisher.insert(two, 9, " end");
+
+  auto at           = publisher.sliceGenesis(one);
+  const auto dimRes = publisher.makeDimension(at, "d.sealed");
+  at                = dimRes.version;
+  const auto dim    = dimRes.dim;
+
+  at            = publisher.makeCell(at, "cell_a");
+  const auto cA = publisher.cellRefOf(at);
+
+  at            = publisher.makeCell(at, "cell_b");
+  const auto cB = publisher.cellRefOf(at);
+
+  at = publisher.setLink(at, cA, dim, zigzag::DimVector::POS, cB);
+  at = publisher.setCellText(at, cB, "cell_b updated");
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "sealed-loc";
+
+  const auto sealed  = xudu::sealableOps(publisher);
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
+  history->setExternalLiveBytes(key, 0, publisher.userPermascroll().bytes());
+
+  const auto histManifold = history->rebuildManifold(at);
+  EXPECT_EQ(histManifold.refusedOps(), 0U);
+
+  const auto cAInHist  = history->cellRefOf(publisher.segmentedOps().idOf(cA));
+  const auto cBInHist  = history->cellRefOf(publisher.segmentedOps().idOf(cB));
+  const auto dimInHist = history->cellRefOf(publisher.segmentedOps().idOf(dim));
+
+  EXPECT_NE(cAInHist, cA);
+  EXPECT_NE(cBInHist, cB);
+  EXPECT_NE(dimInHist, dim);
+
+  EXPECT_EQ(histManifold.linked(cAInHist, dimInHist, zigzag::DimVector::POS),
+            cBInHist);
+  EXPECT_EQ(histManifold.textOf(cBInHist, *history), "cell_b updated");
+
+  // Verify source chain matches the localized indices
+  const auto pubOpIdx        = publisher.segmentedOps().indexOf(at);
+  const auto histOpIdx       = history->segmentedOps().indexOf(at);
+  const auto *const pubNode  = publisher.segmentedOps().get(pubOpIdx);
+  const auto *const histNode = history->segmentedOps().get(histOpIdx);
+  ASSERT_NE(pubNode, nullptr);
+  ASSERT_NE(histNode, nullptr);
+  EXPECT_EQ(pubNode->sourceOpIndex, cB);
+  EXPECT_EQ(histNode->sourceOpIndex, cBInHist);
+  EXPECT_NE(histNode->sourceOpIndex, pubNode->sourceOpIndex);
+
+  // An unresolved nonzero source must report an import error, not silently
+  // become zero
+  Op badOp;
+  badOp.kind   = OpKind::Structure;
+  badOp.flags  = xudu::structureFlags(xudu::StructureVerb::SetValue);
+  badOp.source = MicroversionId::parse("9999");
+  EXPECT_THROW(history->putOp(at.next(), badOp), std::invalid_argument);
+
+  xudu::OpRecord badRecord{
+      .produces             = MicroversionId::parse("8888"),
+      .op                   = badOp,
+      .structureDimension   = MicroversionId{},
+      .structureTarget      = MicroversionId{},
+      .structureValueTarget = MicroversionId{},
+  };
+  EXPECT_THROW(history->adoptOpRecords({badRecord}), std::invalid_argument);
 }
 
 TEST(BinaryOpsTest, anOsmicTextLineWithoutItsOptionalColumnsStillReads) {

@@ -24,12 +24,11 @@ worth watching or using for this repository:
 
 The pinned sources are
 [nontype_functional](https://github.com/zhihaoy/nontype_functional/tree/57854ce32506ec526347637e8fcc226624466bbf)
-(`57854ce32506ec526347637e8fcc226624466bbf`, BSD-2-Clause) and
-[Beman optional](https://github.com/bemanproject/optional/tree/b239e587c3ecd9ae9a3bd01f6318d825241afefe)
+(`57854ce32506ec526347637e8fcc226624466bbf`, BSD-2-Clause) and [Beman optional][opt-pin]
 (`b239e587c3ecd9ae9a3bd01f6318d825241afefe`, Apache-2.0 WITH LLVM-exception), and
-[Beman inplace_vector](https://github.com/bemanproject/inplace_vector/tree/c7fe76da307f0d6fda5023b2d2ebef7e3f7b18d1)
-(`c7fe76da307f0d6fda5023b2d2ebef7e3f7b18d1`, Apache-2.0 WITH LLVM-exception). They are Git
-submodules under `thirdparty/`; do not edit them locally. Their upstream build systems are not used.
+[Beman inplace_vector][ipv-pin] (`c7fe76da307f0d6fda5023b2d2ebef7e3f7b18d1`, Apache-2.0 WITH
+LLVM-exception). They are Git submodules under `thirdparty/`; do not edit them locally. Their
+upstream build systems are not used.
 
 ## Feature-by-feature effort
 
@@ -146,9 +145,12 @@ separate review before moving into `include/gleditor/`.
 
 Standards context:
 [function_ref P0792R14](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p0792r14.html),
-[constant-wrapper constructor update P3948R1](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p3948r1.html),
+[P3948R1 constant_wrapper](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2026/p3948r1.html),
 [optional references P2988R9](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2025/p2988r9.pdf),
 [optional ranges P3168R2](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p3168r2.html),
 [inplace_vector P0843R14](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p0843r14.html),
 [span::at P2821R5](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2023/p2821r5.html), and
 [execution P2300R10](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2024/p2300r10.html).
+
+[ipv-pin]: https://github.com/bemanproject/inplace_vector/tree/c7fe76d
+[opt-pin]: https://github.com/bemanproject/optional/tree/b239e58

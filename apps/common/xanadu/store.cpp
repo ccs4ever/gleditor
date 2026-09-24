@@ -7,6 +7,9 @@
 #include <iterator>
 #include <limits>
 #include <locale>
+#include <map>
+#include <queue>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -125,7 +128,16 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   }
 
   const auto parentIdx = opsSpool.indexOf(op.parent);
+  if (!op.parent.isZero() && 0 == parentIdx) {
+    throw std::invalid_argument("operation filed under " + produces.str() +
+                                " names unknown parent " + op.parent.str());
+  }
+
   const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+  if (!op.source.isZero() && 0 == sourceIdx && OpKind::Structure == op.kind) {
+    throw std::invalid_argument("operation filed under " + produces.str() +
+                                " names unknown source " + op.source.str());
+  }
   // The ordinal is what makes the name recoverable from the tree, which is
   // how a sealed segment -- a file of nodes and nothing else -- gets indexed.
   const auto node = CompactOpNode::fromOp(
@@ -1841,6 +1853,80 @@ MicroversionId Store::linkScrollRef(const MicroversionId &parent,
   return curHead;
 }
 
+MicroversionId Store::makeExternRef(const MicroversionId &parent,
+                                    const ExternOpRef &target,
+                                    const zigzag::Manifold *const known) {
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  const auto registry  = currentFold->scrollRegistry(*this);
+  const auto scrollRec = registry.findRecord(target.scroll);
+  if (!scrollRec || zigzag::noCell == scrollRec->cell) {
+    throw std::invalid_argument("scroll " + std::to_string(target.scroll) +
+                                " is not registered in scroll registry");
+  }
+
+  if (const auto existing = registry.placeholderForExtern(target); existing) {
+    return parent;
+  }
+
+  const auto descriptorText = target.produces.str();
+  const auto span           = userPermascroll_->append(descriptorText);
+
+  Op op;
+  op.kind = OpKind::Structure;
+  op.flags =
+      structureFlags(StructureVerb::MakeCell, false, ValueKind::ExternRef);
+  op.span  = span;
+  op.value = 0;
+
+  auto curHead           = apply(parent, op);
+  const auto placeholder = cellRefOf(curHead);
+
+  curHead = linkScrollRef(curHead, scrollRec->cell, placeholder, nullptr);
+  return curHead;
+}
+
+std::optional<ExternOpRef>
+Store::externTarget(const zigzag::CellRef placeholder,
+                    const SpanReader &reader) const {
+  if (zigzag::noCell == placeholder) {
+    return std::nullopt;
+  }
+  const auto scrollIdOpt = scrollRegistry_.scrollIdForCell(placeholder);
+  if (!scrollIdOpt.has_value()) {
+    return std::nullopt;
+  }
+
+  if (const auto indexed =
+          scrollRegistry_.findExternForPlaceholder(placeholder);
+      indexed) {
+    return *indexed;
+  }
+
+  const auto manifold = rebuildManifold(latest());
+  const auto text     = manifold.textOf(placeholder, reader);
+  if (text.empty()) {
+    return std::nullopt;
+  }
+
+  try {
+    const auto produces = MicroversionId::parse(text);
+    return ExternOpRef{.scroll = *scrollIdOpt, .produces = produces};
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+std::optional<ExternOpRef>
+Store::externTarget(const zigzag::CellRef placeholder) const {
+  return externTarget(placeholder, *this);
+}
+
 std::vector<Store::EditionInfo>
 Store::editions(const MicroversionId &version) const {
   const auto manifold = rebuildManifold(version);
@@ -2064,10 +2150,32 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
     if (nullptr == node) {
       continue;
     }
+    MicroversionId dimId{};
+    MicroversionId targetId{};
+    MicroversionId valTargetId{};
+    if (OpKind::Structure == node->kind) {
+      const auto verb = structureVerbOf(node->flags);
+      if (StructureVerb::SetLink == verb) {
+        if (node->linkId > 0) {
+          dimId = opsSpool.idOf(node->linkId);
+        }
+        if (node->to > 0) {
+          targetId = opsSpool.idOf(node->to);
+        }
+      }
+      if (ValueKind::OpHandle == valueKindOf(node->flags)) {
+        if (node->value > 0) {
+          valTargetId = opsSpool.idOf(static_cast<std::uint32_t>(node->value));
+        }
+      }
+    }
     records.push_back(
         OpRecord{.produces = opsSpool.idOf(idx),
                  .op       = node->toOp(opsSpool.idOf(node->parentIndex),
-                                        opsSpool.idOf(node->sourceOpIndex))});
+                                        opsSpool.idOf(node->sourceOpIndex)),
+                 .structureDimension   = dimId,
+                 .structureTarget      = targetId,
+                 .structureValueTarget = valTargetId});
   }
   std::ranges::sort(records, [](const OpRecord &lhs, const OpRecord &rhs) {
     return lhs.produces < rhs.produces;
@@ -2076,16 +2184,149 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
 }
 
 void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
+  std::vector<OpRecord> pending;
+  std::set<MicroversionId> seen;
   for (const auto &record : records) {
-    // Sorted by name, so a parent is always read before the state it produced
-    // -- which putOp() needs, since it resolves the parent to a spool index.
-    // A repeated name is dropped rather than thrown over: the std::map these
-    // used to be read into kept the first of a duplicate and said nothing,
-    // and a store that opened before must not stop opening now.
-    if (!opsSpool.contains(record.produces)) {
-      putOp(record.produces, record.op);
+    if (record.produces.isZero() || opsSpool.contains(record.produces)) {
+      continue;
+    }
+    if (seen.insert(record.produces).second) {
+      pending.push_back(record);
     }
   }
+
+  if (!pending.empty()) {
+    auto getDeps = [](const OpRecord &rec) {
+      std::vector<MicroversionId> deps;
+      if (!rec.op.parent.isZero()) {
+        deps.push_back(rec.op.parent);
+      }
+      if (!rec.op.source.isZero()) {
+        deps.push_back(rec.op.source);
+      }
+      if (OpKind::Structure == rec.op.kind) {
+        const auto verb = structureVerbOf(rec.op.flags);
+        if (StructureVerb::SetLink == verb) {
+          if (!rec.structureDimension.isZero()) {
+            deps.push_back(rec.structureDimension);
+          }
+          if (!rec.structureTarget.isZero()) {
+            deps.push_back(rec.structureTarget);
+          }
+        }
+        if (ValueKind::OpHandle == valueKindOf(rec.op.flags)) {
+          if (!rec.structureValueTarget.isZero()) {
+            deps.push_back(rec.structureValueTarget);
+          }
+        }
+      }
+      return deps;
+    };
+
+    std::map<MicroversionId, std::size_t> pendingIndices;
+    for (std::size_t i = 0; i < pending.size(); ++i) {
+      pendingIndices.emplace(pending[i].produces, i);
+    }
+
+    std::vector<std::size_t> inDegree(pending.size(), 0);
+    std::vector<std::vector<std::size_t>> dependents(pending.size());
+
+    for (std::size_t i = 0; i < pending.size(); ++i) {
+      auto deps = getDeps(pending[i]);
+      std::ranges::sort(deps);
+      const auto [first, last] = std::ranges::unique(deps);
+      deps.erase(first, last);
+
+      for (const auto &dep : deps) {
+        if (opsSpool.contains(dep)) {
+          continue;
+        }
+        const auto it = pendingIndices.find(dep);
+        if (it == pendingIndices.end()) {
+          throw std::invalid_argument(
+              "operation filed under " + pending[i].produces.str() +
+              " has unresolved dependency " + dep.str());
+        }
+        dependents[it->second].push_back(i);
+        inDegree[i]++;
+      }
+    }
+
+    auto cmp = [&](std::size_t lhs, std::size_t rhs) {
+      return pending[lhs].produces > pending[rhs].produces;
+    };
+    std::priority_queue<std::size_t, std::vector<std::size_t>, decltype(cmp)>
+        ready(cmp);
+
+    for (std::size_t i = 0; i < pending.size(); ++i) {
+      if (0 == inDegree[i]) {
+        ready.push(i);
+      }
+    }
+
+    std::vector<std::size_t> scheduled;
+    scheduled.reserve(pending.size());
+
+    while (!ready.empty()) {
+      const auto u = ready.top();
+      ready.pop();
+      scheduled.push_back(u);
+
+      for (const auto v : dependents[u]) {
+        if (--inDegree[v] == 0) {
+          ready.push(v);
+        }
+      }
+    }
+
+    if (scheduled.size() < pending.size()) {
+      throw std::invalid_argument("cyclic dependency among operations");
+    }
+
+    for (const auto idx : scheduled) {
+      const auto &record = pending[idx];
+      Op op              = record.op;
+
+      if (OpKind::Structure == op.kind) {
+        const auto verb = structureVerbOf(op.flags);
+        if (StructureVerb::SetLink == verb) {
+          if (!record.structureDimension.isZero()) {
+            const auto dimIdx = opsSpool.indexOf(record.structureDimension);
+            if (0 == dimIdx) {
+              throw std::invalid_argument("unresolved SetLink dimension " +
+                                          record.structureDimension.str());
+            }
+            op.link = dimIdx;
+          }
+          if (!record.structureTarget.isZero()) {
+            const auto targetIdx = opsSpool.indexOf(record.structureTarget);
+            if (0 == targetIdx) {
+              throw std::invalid_argument("unresolved SetLink target " +
+                                          record.structureTarget.str());
+            }
+            op.to = targetIdx;
+          } else if (!record.structureDimension.isZero()) {
+            op.to = 0;
+          }
+        }
+
+        if (ValueKind::OpHandle == valueKindOf(op.flags)) {
+          if (!record.structureValueTarget.isZero()) {
+            const auto valTargetIdx =
+                opsSpool.indexOf(record.structureValueTarget);
+            if (0 == valTargetIdx) {
+              throw std::invalid_argument("unresolved OpHandle target " +
+                                          record.structureValueTarget.str());
+            }
+            op.value = valTargetIdx;
+          }
+        }
+      }
+
+      putOp(record.produces, op);
+    }
+  }
+
   indexGenesisCells();
   const auto sHeads = structureHeads();
   if (!sHeads.empty()) {

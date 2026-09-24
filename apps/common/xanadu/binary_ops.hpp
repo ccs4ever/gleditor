@@ -23,54 +23,41 @@ inline constexpr std::string_view binaryOpsMagicPrefix = "\x7fXOP";
 /**
  * @brief Operations spool format version.
  *
- * Versions 1 and 2 existed and are gone. Under R11 a format here is free to
+ * Versions 1, 2, and 3 existed and are gone. Under R11 a format here is free to
  * change shape on the condition that the version is bumped and **the old
  * reader is deleted** -- keeping one only so that a file already on disk still
  * parses is a permanent tax paid to protect data nobody has. Version 1 wrote a
  * branch as a literal ASCII letter, which is why a branch could only ever have
- * one; version 2 wrote the ordinal instead. Both are refused now, by number,
- * rather than read.
+ * one; version 2 wrote the ordinal instead; version 3 wrote Structure
+ * operations with local spool indices for link endpoints and source. All three
+ * are refused now, by number, rather than read.
  */
 enum class OpsSpoolVersion : std::uint8_t {
   StandardOsmicText =
       0, ///< Standard human-readable OSMIC text format (version 0).
   /**
-   * Version 3: the operation tag byte's kind field is four bits wide rather
-   * than three, and every flag above it moved up one place to make room.
-   *
-   * Three bits held eight kinds and seven were spoken for, so OSMIC's sixth
-   * hyperop -- OpKind::Structure, which migration step 12 adds as
-   * BinStructure = 7 -- would have filled the field exactly and left nothing
-   * for whatever comes after it. Widening now costs one version bump; leaving
-   * it would have cost one anyway, later, with a kind already wedged into the
-   * last slot.
-   *
-   * The whole byte is now spoken for: four bits of kind and four flags. A
-   * further flag needs another version or a second byte, which is the price
-   * of the room and is recorded rather than regretted -- the three flags that
-   * exist are all read by Insert and Delete only, so it is kinds that this
-   * format has ever run out of, not flags.
-   *
-   * Nothing else about the encoding moves. Varints, the branch-ordinal
-   * escape, the field order after the tag: all unchanged from version 2.
+   * Version 4: Structure addresses (source, SetLink dimension and target, and
+   * OpHandle value target) travel by microversion name rather than local spool
+   * index, surviving publication and foreign branch renumbering. Splice
+   * carries at and length offsets.
    */
-  CompactBinaryV3 = 3,
+  CompactBinaryV4 = 4,
 };
 
 /// 4-byte magic prefix + 1-byte version for compact binary ops spools. What is
 /// written now, and the only binary version that is read.
-inline constexpr std::string_view binaryOpsMagicV3 = "\x7fXOP\x03";
+inline constexpr std::string_view binaryOpsMagicV4 = "\x7fXOP\x04";
 
 /// The magic a new store is written with.
-inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV3;
+inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV4;
 
 /// Human-readable name for an operations spool version.
 const char *opsSpoolVersionName(OpsSpoolVersion version);
 
 /// Detect the operations spool format version from a stream: version 0 is the
-/// OSMIC text format, version 3 the compact binary one.
+/// OSMIC text format, version 4 the compact binary one.
 /// @throws std::runtime_error naming the version, for a binary spool this
-///         build does not read -- which includes every version 1 and 2 file.
+///         build does not read -- which includes versions 1, 2, and 3.
 OpsSpoolVersion detectOpsSpoolVersion(std::istream &in);
 
 /// Variable-length unsigned integer (LEB128) encoding.
@@ -97,12 +84,17 @@ bool readMicroversionId(std::istream &in, MicroversionId &id);
 struct OpRecord {
   MicroversionId produces;
   Op op;
+  MicroversionId structureDimension;
+  MicroversionId structureTarget;
+  MicroversionId structureValueTarget;
+
+  bool operator==(const OpRecord &) const = default;
 };
 
-/// Write operations in compact binary format (version 3).
+/// Write operations in compact binary format (version 4).
 void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops);
 
-/// Read operations from compact binary format, version 3, in the order the
+/// Read operations from compact binary format, version 4, in the order the
 /// file holds them -- which the caller needs, since a record may name its
 /// state only relative to the one before it.
 void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops);

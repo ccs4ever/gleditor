@@ -695,6 +695,10 @@ AsciiVisualizer::renderCellInspection(const zigzag::ArenaManifold &manifold,
         << ")\n";
     break;
   }
+  case xanadu::ValueKind::ExternRef: {
+    oss << "ExternRef\n";
+    break;
+  }
   }
 
   std::string text = manifold.textOf(cell);

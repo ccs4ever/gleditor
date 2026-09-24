@@ -2164,12 +2164,9 @@ a 122× rank-hop penalty for. So: `Version`'s algorithm, the arena's layout.
   only two kinds and would publish a framed operation with its frame erased. Nothing here is blocked
   on it: a splice *is* an insert, a delete or a replacement, recorded as the sixth hyperop rather
   than as one of the five.
-- **`Splice` does not travel.** The wire encoder writes a Structure operation's `flags`, `to`,
-  `link`, span and `value`, and a splice also needs `at` and `length`. Publishing one today drops
-  both, so it would arrive as a splice at offset zero removing nothing. That is the same silent
-  change of meaning U3.2 found for framed operations, and it lands with the same fix: the Structure
-  encoder must carry `at` and `length`, which is `CompactBinaryV4`. **Until then a slice with edited
-  cells must not be published**, and the export path should refuse one rather than corrupt it.
+- **`Splice` travels via `CompactBinaryV4`.** The wire encoder now carries `at` and `length` for
+  `Splice` operations in `CompactBinaryV4`, so publishing a sliced store with spliced cell edits
+  round-trips without corruption (see `design/structure-hyperop/5.06-compact-binary-v4.md`).
 - **`resolveLocalCellView()` answers nothing for an edited cell.** A zero-copy view needs contiguous
   memory and an edited cell's content is several spans, so it returns empty and the caller falls
   back to `resolveCellText()`. Correct, but it means the zero-copy path quietly stops applying to

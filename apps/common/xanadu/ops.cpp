@@ -56,6 +56,8 @@ const char *valueKindName(const ValueKind kind) {
     return "int64";
   case ValueKind::OpHandle:
     return "op_handle";
+  case ValueKind::ExternRef:
+    return "extern_ref";
   }
   return "unknown";
 }

@@ -218,6 +218,10 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   A green `format-check` therefore means the same thing everywhere. `dollarmath` keeps `$...$` and
   `$$...$$` opaque; `frontmatter` keeps `.agents/skills/*.md`'s YAML header from being parsed as a
   heading (`mdl -i` is the lint-side half).
+- If a linting or formatting tool is missing, install it locally when possible and rerun the gate; a
+  skipped tool is not a passing check. For a user-installed Ruby `mdl`, `make`'s redirected
+  `XDG_DATA_HOME` may hide the gem, so pass `GEM_HOME=$(ruby -e 'print Gem.user_dir')` to
+  `make lint`.
 - `--wrap 100` matches `MD013`'s limit. An inline code span or `$...$` near column 100 is atomic to
   mdformat and can still overflow: shorten the prose, or promote `$$...$$` to a ```` ```math ````
   fence (exempt from `MD013`). A `$$...$$` block directly under a list item needs blank lines on
@@ -347,7 +351,7 @@ A store directory is exactly:
 | -------------- | -------------------------------------------------------------------------------------------------------------- |
 | `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse, records `nodeSize`) then a run of `CompactOpNode`                          |
 | `store.tables` | `\x89XUDUTBL` + version 3 + bencode: scrolls, local segments, links, current versions, annotations             |
-| `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV3`) |
+| `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV4`) |
 
 **A store holds no primedia**, so it is not portable alone: it needs the permascroll it was written
 against (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia` or `--permascroll`). The retired
@@ -371,11 +375,6 @@ Rules:
   `Session::systemStoreIndex()` moves an unreadable one aside and writes a default, catching every
   typed refusal *by name* — add a format, add it there, or an old config stops the program starting.
   A user's document is never treated that way.
-
-**Known defect:** the `CompactBinaryV3` writer omits `op.source` for Structure operations, so a
-published `SetLink`/`SetValue`/`Splice` arrives with no R7 chain and the reader's fold refuses it;
-published slices land as unlinked cells. `Splice` also lacks `at`/`length` on the wire. The fix is
-`CompactBinaryV4`; see `design/structure-hyperop-vision.md` §3 before touching `binary_ops.cpp`.
 
 ### Where the reasoning lives
 

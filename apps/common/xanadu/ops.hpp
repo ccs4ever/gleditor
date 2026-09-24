@@ -138,11 +138,12 @@ inline constexpr std::uint8_t valueKindShift = 4;
 /// endpoint and a formattable, transcludable Xanadu object while a query
 /// never has to parse its text. See design R6.
 enum class ValueKind : std::uint8_t {
-  None     = 0,
-  Double   = 1,
-  Bool     = 2,
-  Int64    = 3,
-  OpHandle = 4,
+  None      = 0,
+  Double    = 1,
+  Bool      = 2,
+  Int64     = 3,
+  OpHandle  = 4,
+  ExternRef = 5,
 };
 
 // bit 7 is unclaimed.
@@ -307,6 +308,8 @@ struct Op {
   /// Structure: the canonical scalar bits, when `flags` says there are any.
   /// Zero for every other kind.
   std::uint64_t value{};
+
+  bool operator==(const Op &) const = default;
 };
 
 } // namespace xanadu
