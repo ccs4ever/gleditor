@@ -980,9 +980,16 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
   }
 
   LiveOpBroadcast b;
+  // A peer's bytes: a hash that is not hex makes the message malformed, which
+  // this decoder answers with nullopt rather than an exception it never
+  // promised to throw.
   const auto hStr = node.dict_find_string_value("h");
   if (!hStr.empty()) {
-    b.swarmHash = InfoHash::fromHex(hStr);
+    const auto hash = InfoHash::parseHex(hStr);
+    if (!hash) {
+      return std::nullopt;
+    }
+    b.swarmHash = *hash;
   }
   const auto vStr = node.dict_find_string_value("v");
   if (!vStr.empty()) {
@@ -1106,15 +1113,24 @@ SwarmContentSource::decodeScrollSealed(const std::string_view body) {
   }
 
   ScrollSealedBroadcast b;
+  // A peer's bytes: see decodeLiveOp().
   const auto hStr = node.dict_find_string_value("h");
   if (!hStr.empty()) {
-    b.swarmHash = InfoHash::fromHex(hStr);
+    const auto hash = InfoHash::parseHex(hStr);
+    if (!hash) {
+      return std::nullopt;
+    }
+    b.swarmHash = *hash;
   }
   b.authorScrollKey = std::string(node.dict_find_string_value("sk"));
   b.sealedUpTo = static_cast<std::uint64_t>(node.dict_find_int_value("up", 0));
   const auto phStr = node.dict_find_string_value("ph");
   if (!phStr.empty()) {
-    b.pieceInfoHash = InfoHash::fromHex(phStr);
+    const auto pieceHash = InfoHash::parseHex(phStr);
+    if (!pieceHash) {
+      return std::nullopt;
+    }
+    b.pieceInfoHash = *pieceHash;
   }
   b.timestamp = node.dict_find_int_value("ts", 0);
   return b;

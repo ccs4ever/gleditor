@@ -646,3 +646,12 @@ TEST(LiveCollaborativeSwarmTest,
 }
 
 } // namespace
+
+// A peer's malformed hash is a malformed message: nullopt, as the decoder
+// promises, rather than an exception thrown out of the message handler.
+TEST(SwarmContentSourceTest, aBroadcastWithANonHexHashIsRejectedNotThrown) {
+  const std::string notHexHash =
+      "d1:h40:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzze";
+  EXPECT_FALSE(SwarmContentSource::decodeLiveOp(notHexHash).has_value());
+  EXPECT_FALSE(SwarmContentSource::decodeScrollSealed(notHexHash).has_value());
+}

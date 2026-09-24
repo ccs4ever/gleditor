@@ -18,15 +18,14 @@ namespace {
 template <std::size_t N>
 std::array<std::uint8_t, N> arrayFromHex(const std::string_view text,
                                          const std::string_view what) {
-  if (text.size() != N * 2) {
-    throw std::runtime_error(std::string{what} + ": expected " +
-                             std::to_string(N * 2) + " hex digits, got " +
-                             std::to_string(text.size()));
+  auto parsed = gleditor::color::decodeHexArray<N>(text);
+  if (!parsed) {
+    throw std::runtime_error(
+        std::string{what} + ": expected " + std::to_string(N * 2) +
+        " hex digits, got \"" + std::string{text} + "\" (" +
+        std::string{gleditor::color::toString(parsed.error())} + ")");
   }
-  const auto raw = fromHex(text);
-  std::array<std::uint8_t, N> out{};
-  std::copy(raw.begin(), raw.end(), out.begin());
-  return out;
+  return *parsed;
 }
 
 template <std::size_t N>
@@ -37,6 +36,14 @@ std::string arrayToHex(const std::array<std::uint8_t, N> &bytes) {
 } // namespace
 
 std::string PublicKey::hex() const { return arrayToHex(bytes); }
+
+std::expected<PublicKey, gleditor::color::HexError>
+PublicKey::parseHex(const std::string_view text) {
+  return gleditor::color::decodeHexArray<32>(text).transform(
+      [](const std::array<std::uint8_t, 32> &bytes) {
+        return PublicKey{bytes};
+      });
+}
 
 PublicKey PublicKey::fromHex(const std::string_view text) {
   return {arrayFromHex<32>(text, "public key")};
@@ -49,11 +56,27 @@ bool PublicKey::isZero() const {
 
 std::string SecretKey::hex() const { return arrayToHex(bytes); }
 
+std::expected<SecretKey, gleditor::color::HexError>
+SecretKey::parseHex(const std::string_view text) {
+  return gleditor::color::decodeHexArray<64>(text).transform(
+      [](const std::array<std::uint8_t, 64> &bytes) {
+        return SecretKey{bytes};
+      });
+}
+
 SecretKey SecretKey::fromHex(const std::string_view text) {
   return {arrayFromHex<64>(text, "secret key")};
 }
 
 std::string Signature::hex() const { return arrayToHex(bytes); }
+
+std::expected<Signature, gleditor::color::HexError>
+Signature::parseHex(const std::string_view text) {
+  return gleditor::color::decodeHexArray<64>(text).transform(
+      [](const std::array<std::uint8_t, 64> &bytes) {
+        return Signature{bytes};
+      });
+}
 
 Signature Signature::fromHex(const std::string_view text) {
   return {arrayFromHex<64>(text, "signature")};

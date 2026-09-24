@@ -266,8 +266,11 @@ std::vector<std::string> splitTokens(const std::string_view str,
 zigzag::DimRef getOrMakeDim(Store &store, MicroversionId &cur,
                             zigzag::Manifold &manifold,
                             const std::string_view name) {
-  return zigzag::DimensionRegistry::instance().getOrCreate(store, cur, manifold,
-                                                           name);
+  // Only ever called with the kDim* constants, which are not empty, so the
+  // one refusal a store-backed getOrCreate() has cannot happen here.
+  return zigzag::DimensionRegistry::instance()
+      .getOrCreate(store, cur, manifold, name)
+      .value();
 }
 
 /// The cell among @p cells whose text reads @p name.

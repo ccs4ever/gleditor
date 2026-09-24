@@ -9,6 +9,7 @@
 #include <compare>
 #include <cstdint>
 #include <deque>
+#include <expected>
 #include <format>
 #include <functional>
 #include <mutex>
@@ -65,6 +66,20 @@ private:
   std::string_view name_;
 };
 
+/// Why DimensionRegistry::getOrCreate() produced no dimension.
+enum class DimensionError : std::uint8_t {
+  EmptyName, ///< a dimension needs a name
+  NoStore,   ///< a manifold with no store cannot mint one
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const DimensionError error) noexcept {
+  return DimensionError::EmptyName == error ? "empty dimension name"
+                                            : "no store to mint a dimension in";
+}
+
+using DimensionResult = std::expected<DimRef, DimensionError>;
+
 /**
  * @class DimensionRegistry
  * @brief Centralized registry managing dimension name interning and
@@ -86,25 +101,31 @@ public:
   /**
    * @brief Given a manifold and a dimension name, return the cellid of the dim
    *        cell in that store, creating it if it doesn't already exist.
+   *
+   * EmptyName for an empty name; NoStore from the manifold-only overloads
+   * when the manifold has no store to record the new dimension in and it
+   * does not already hold one.
    */
-  DimRef getOrCreate(Manifold &manifold, std::string_view name);
-  DimRef getOrCreate(Manifold &manifold, InternedDimName dimName);
+  DimensionResult getOrCreate(Manifold &manifold, std::string_view name);
+  DimensionResult getOrCreate(Manifold &manifold, InternedDimName dimName);
 
   /**
    * @brief Overload taking Store explicitly along with Manifold.
    */
-  DimRef getOrCreate(xanadu::Store &store, Manifold &manifold,
-                     std::string_view name);
-  DimRef getOrCreate(xanadu::Store &store, Manifold &manifold,
-                     InternedDimName dimName);
+  DimensionResult getOrCreate(xanadu::Store &store, Manifold &manifold,
+                              std::string_view name);
+  DimensionResult getOrCreate(xanadu::Store &store, Manifold &manifold,
+                              InternedDimName dimName);
 
   /**
    * @brief Overload taking Store and an active MicroversionId head.
    */
-  DimRef getOrCreate(xanadu::Store &store, xanadu::MicroversionId &head,
-                     Manifold &manifold, std::string_view name);
-  DimRef getOrCreate(xanadu::Store &store, xanadu::MicroversionId &head,
-                     Manifold &manifold, InternedDimName dimName);
+  DimensionResult getOrCreate(xanadu::Store &store,
+                              xanadu::MicroversionId &head, Manifold &manifold,
+                              std::string_view name);
+  DimensionResult getOrCreate(xanadu::Store &store,
+                              xanadu::MicroversionId &head, Manifold &manifold,
+                              InternedDimName dimName);
 
   /**
    * @brief Lookup an existing dimension cell in the given store without

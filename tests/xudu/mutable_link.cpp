@@ -260,3 +260,14 @@ TEST_F(MutableCryptoTest, aFreshNameIsNobodyElsesAndSignsItsOwnPointer) {
 }
 
 } // namespace
+
+TEST(MutableLinkTest, parseHexSaysWhyAKeyIsNotOne) {
+  using gleditor::color::HexError;
+  EXPECT_EQ(xudu::PublicKey::parseHex("abcd").error(), HexError::WrongLength);
+  EXPECT_EQ(xudu::PublicKey::parseHex(std::string(64, 'z')).error(),
+            HexError::NonHexDigit);
+  const auto key = xudu::PublicKey::parseHex(std::string(64, 'a'));
+  ASSERT_TRUE(key.has_value());
+  EXPECT_EQ(key->hex(), std::string(64, 'a'));
+  EXPECT_EQ(xudu::InfoHash::parseHex("12").error(), HexError::WrongLength);
+}

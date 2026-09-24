@@ -108,8 +108,11 @@ void UnifiedTransclusionEngine::ensureSliceBegun() {
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
-  const auto dim =
-      DimensionRegistry::instance().getOrCreate(store_, head_, manifold_, name);
+  // dimensionFor() answers the engine's own sentinel for "no dimension",
+  // which is what an empty name gets.
+  const auto dim = DimensionRegistry::instance()
+                       .getOrCreate(store_, head_, manifold_, name)
+                       .value_or(noCell);
   syncIncremental();
   return dim;
 }

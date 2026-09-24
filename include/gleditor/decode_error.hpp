@@ -15,12 +15,16 @@
 namespace gleditor {
 
 enum class DecodeError : std::uint8_t {
-  Empty,         ///< no bytes, or no file to read them from
-  Truncated,     ///< fewer bytes than the format's own header needs
-  Undecodable,   ///< the decoder rejected them: corrupt, or unsupported
-  Unconvertible, ///< decoded, but could not be converted to RGBA8
-  NotAnimated,   ///< a valid document with nothing to animate
-  NoCodec,       ///< this build was compiled without the decoder
+  Empty,            ///< no bytes, or no file to read them from
+  Truncated,        ///< fewer bytes than the format's own header needs
+  Undecodable,      ///< the decoder rejected them: corrupt, or unsupported
+  Unconvertible,    ///< decoded, but could not be converted to RGBA8
+  NotAnimated,      ///< a valid document with nothing to animate
+  NoCodec,          ///< this build was compiled without the decoder
+  UnsupportedShape, ///< a valid file in a variant this decoder does not
+                    ///< handle (a palette PNG, say)
+  NoVideoStream,    ///< a valid container with no video stream in it
+  EncodeFailed,     ///< decoded, but re-encoding it failed
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -38,6 +42,12 @@ toString(const DecodeError error) noexcept {
     return "nothing to animate";
   case DecodeError::NoCodec:
     return "decoder not built in";
+  case DecodeError::UnsupportedShape:
+    return "unsupported variant of the format";
+  case DecodeError::NoVideoStream:
+    return "no video stream";
+  case DecodeError::EncodeFailed:
+    return "re-encode failed";
   }
   return "undecodable";
 }
