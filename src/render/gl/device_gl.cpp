@@ -510,7 +510,8 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
 
 bool DeviceGL::renderIntoTextureLayer(
     const TextureHandle texture, const int layer,
-    const std::function<void(unsigned fbo, void *glContext)> &fn) {
+    const gleditor::cpp26::function_ref<void(unsigned fbo, void *glContext)>
+        fn) {
   const auto it = textures.find(texture.id);
   if (textures.end() == it) {
     diagnostics.record(DiagnosticSeverity::Error,

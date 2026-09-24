@@ -39,7 +39,7 @@ case; "defer" means there is currently no demonstrated advantage over existing c
 
 | Feature                                      | Likely source                     |             Effort | Project use and decision                                                                        |
 | -------------------------------------------- | --------------------------------- | -----------------: | ----------------------------------------------------------------------------------------------- |
-| `std::function_ref`                          | nontype_functional                |                2-3 | **Implemented** for synchronous Vortex `map`, `filter`, `fold` callbacks.                       |
+| `std::function_ref`                          | nontype_functional                |                2-3 | **Implemented** for Vortex `map`/`filter`/`fold` and `WorkerPool::run` (see below).             |
 | `std::optional<T&>`                          | Beman optional                    |                2-3 | **Implemented** for borrowed ZigZag cell lookup.                                                |
 | Optional range support                       | Beman optional                    |                1-2 | **Implemented** alongside optional references; test zero or one iteration.                      |
 | `std::inplace_vector`                        | Beman inplace_vector              |                3-5 | **Implemented** for the default 17-point tether curve; larger configured curves remain dynamic. |
@@ -120,6 +120,12 @@ point-generation loop feeds the renderer in either case. The Beman implementatio
 development: its `try_push_back` currently returns a pointer, while this native library returns
 `optional<T&>`. Only `resize`, `data`, and `size` are used across both branches here. Keep this use
 local until the fallback's API and constexpr support settle.
+
+`WorkerPool::run` takes its work as `function_ref` because its per-frame caller, the Vulkan
+secondary-command recorder, passes a closure of five captures (40 bytes), past libstdc++'s 16-byte
+`std::function` inline buffer. Measured with a counting `operator new`: wrapping it in
+`std::function` allocated once per call, `function_ref` zero, in both native and forced-fallback
+modes. The pool keeps a pointer to the reference only until `run` returns.
 
 ## Verification and migration
 
