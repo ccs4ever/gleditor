@@ -18,6 +18,7 @@
 #include "common/xanadu/osmic_walker.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "store_tables.hpp"
+#include "user_permascroll.hpp"
 #include "windows_quoting.hpp"
 
 namespace xanadu {
@@ -1275,7 +1276,11 @@ const std::vector<MicroversionId> &Store::currentVersions() const {
   if (currentVersions_.empty()) {
     const auto lat = latest();
     if (!lat.isZero()) {
-      currentVersions_.push_back(lat);
+      const auto manifold = rebuildManifold(lat);
+      const_cast<Store *>(this)->syncCurrentVersionsFromRank(manifold);
+      if (currentVersions_.empty()) {
+        currentVersions_.push_back(lat);
+      }
     }
   }
   return currentVersions_;
@@ -1307,7 +1312,8 @@ void Store::removeCurrentVersion(const MicroversionId &version) {
 MicroversionId Store::designateEdition(const MicroversionId &parent,
                                        const std::string_view name,
                                        const MicroversionId &target,
-                                       const zigzag::Manifold *const known) {
+                                       const zigzag::Manifold *const known,
+                                       const bool allowDuplicateName) {
   const auto targetOp = opsSpool.indexOf(target);
   if (0 == targetOp) {
     throw std::invalid_argument("target version does not exist in store");
@@ -1348,11 +1354,17 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
     currentFold       = &folded.value();
   }
 
-  // 3. Mint the handle cell for targetOp
-  curHead               = makeOpHandle(curHead, targetOp);
-  const auto handleCell = cellRefOf(curHead);
-  folded                = rebuildManifold(curHead);
-  currentFold           = &folded.value();
+  // 3. Mint or find the handle cell for targetOp
+  zigzag::CellRef handleCell = zigzag::noCell;
+  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  if (existingHandle.has_value()) {
+    handleCell = *existingHandle;
+  } else {
+    curHead     = makeOpHandle(curHead, targetOp);
+    handleCell  = cellRefOf(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
 
   // 4. Check if an edition cell named `name` already exists on d.editions rank
   zigzag::CellRef existingEditionCell = zigzag::noCell;
@@ -1362,7 +1374,8 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
                         [&](const zigzag::CellRef cell) {
                           if (cell != homeCell_) {
                             tail = cell;
-                            if (currentFold->textOf(cell, *this) == name) {
+                            if (!allowDuplicateName &&
+                                currentFold->textOf(cell, *this) == name) {
                               existingEditionCell = cell;
                             }
                           }
@@ -1394,8 +1407,10 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
   // Reconcile currentVersions_ cache and legacy aliasIndex_
   folded = rebuildManifold(curHead);
   syncCurrentVersionsFromRank(folded.value());
-  aliasIndex_[std::string(name)]    = target;
-  versionAnnotations_[target].alias = std::string(name);
+  if (name != "current") {
+    aliasIndex_[std::string(name)]    = target;
+    versionAnnotations_[target].alias = std::string(name);
+  }
 
   return curHead;
 }
@@ -1408,15 +1423,37 @@ void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
   std::vector<MicroversionId> heads;
   heads.reserve(eds.size());
   for (const auto &ed : eds) {
-    if (ed.targetOp > 0) {
+    if (ed.name == "current" && ed.targetOp > 0) {
       const auto id = opsSpool.idOf(ed.targetOp);
       if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
         heads.push_back(id);
       }
     }
   }
+  if (heads.empty()) {
+    for (const auto &ed : eds) {
+      if (ed.targetOp > 0) {
+        const auto id = opsSpool.idOf(ed.targetOp);
+        if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
+          heads.push_back(id);
+        }
+      }
+    }
+  }
   if (!heads.empty()) {
     currentVersions_ = std::move(heads);
+  }
+}
+
+void Store::syncAliasesFromRank(const zigzag::Manifold &manifold) {
+  for (const auto &[name, targetOp] : manifold.aliases(*this)) {
+    const auto id = opsSpool.idOf(targetOp);
+    if (!id.isZero()) {
+      aliasIndex_[name] = id;
+      if (const auto ann = manifold.versionAnnotation(targetOp, *this)) {
+        versionAnnotations_[id] = *ann;
+      }
+    }
   }
 }
 
@@ -1450,6 +1487,128 @@ Store::editionNamed(const MicroversionId &version,
   return std::nullopt;
 }
 
+MicroversionId Store::annotateVersion(const MicroversionId &parent,
+                                      const MicroversionId &target,
+                                      VersionAnnotation annotation,
+                                      const zigzag::Manifold *const known) {
+  const auto targetOp = opsSpool.indexOf(target);
+  if (0 == targetOp) {
+    throw std::invalid_argument("target version does not exist in store");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Ensure standard annotation dimensions exist
+  auto dimNotes = currentFold->dimensionNamed("d.notes", *this);
+  if (zigzag::noCell == dimNotes) {
+    const auto minted = makeDimension(curHead, "d.notes", currentFold);
+    curHead           = minted.version;
+    dimNotes          = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  auto dimTag = currentFold->dimensionNamed("d.tag", *this);
+  if (zigzag::noCell == dimTag) {
+    const auto minted = makeDimension(curHead, "d.tag", currentFold);
+    curHead           = minted.version;
+    dimTag            = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  auto dimAlias = currentFold->dimensionNamed("d.alias", *this);
+  if (zigzag::noCell == dimAlias) {
+    const auto minted = makeDimension(curHead, "d.alias", currentFold);
+    curHead           = minted.version;
+    dimAlias          = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  auto dimCreated = currentFold->dimensionNamed("d.created", *this);
+  if (zigzag::noCell == dimCreated) {
+    const auto minted = makeDimension(curHead, "d.created", currentFold);
+    curHead           = minted.version;
+    dimCreated        = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  // Mint or find OpHandle for targetOp
+  zigzag::CellRef handleCell = zigzag::noCell;
+  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  if (existingHandle.has_value()) {
+    handleCell = *existingHandle;
+  } else {
+    curHead     = makeOpHandle(curHead, targetOp);
+    handleCell  = cellRefOf(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.description.empty()) {
+    curHead             = makeCell(curHead, annotation.description);
+    const auto descCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimNotes, zigzag::DimVector::POS,
+                          descCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.tag.empty()) {
+    curHead            = makeCell(curHead, annotation.tag);
+    const auto tagCell = cellRefOf(curHead);
+    folded             = rebuildManifold(curHead);
+    currentFold        = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimTag, zigzag::DimVector::POS,
+                          tagCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.alias.empty()) {
+    curHead              = makeCell(curHead, annotation.alias);
+    const auto aliasCell = cellRefOf(curHead);
+    folded               = rebuildManifold(curHead);
+    currentFold          = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimAlias, zigzag::DimVector::POS,
+                          aliasCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+    aliasIndex_[annotation.alias] = target;
+  }
+
+  if (!annotation.timestamp.empty()) {
+    curHead             = makeCell(curHead, annotation.timestamp);
+    const auto timeCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead = setLink(curHead, handleCell, dimCreated, zigzag::DimVector::POS,
+                      timeCell, currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  versionAnnotations_[target] = annotation;
+  return curHead;
+}
+
 void Store::setVersionAnnotation(const MicroversionId &id,
                                  VersionAnnotation annotation) {
   if (!annotation.alias.empty()) {
@@ -1464,14 +1623,39 @@ Store::versionAnnotation(const MicroversionId &id) const {
   if (it != versionAnnotations_.end()) {
     return it->second;
   }
-  return std::nullopt;
+  const auto targetOp = opsSpool.indexOf(id);
+  if (0 == targetOp) {
+    return std::nullopt;
+  }
+  const auto lat = latest();
+  if (lat.isZero()) {
+    return std::nullopt;
+  }
+  const auto manifold = rebuildManifold(lat);
+  const auto ann      = manifold.versionAnnotation(targetOp, *this);
+  if (ann.has_value()) {
+    versionAnnotations_[id] = *ann;
+    if (!ann->alias.empty()) {
+      aliasIndex_[ann->alias] = id;
+    }
+  }
+  return ann;
 }
 
 std::optional<MicroversionId>
-Store::resolveAlias(std::string_view alias) const {
+Store::resolveAlias(const std::string_view alias) const {
   const auto it = aliasIndex_.find(std::string(alias));
   if (it != aliasIndex_.end()) {
     return it->second;
+  }
+  const auto lat = latest();
+  if (!lat.isZero()) {
+    const auto manifold = rebuildManifold(lat);
+    const_cast<Store *>(this)->syncAliasesFromRank(manifold);
+    const auto it2 = aliasIndex_.find(std::string(alias));
+    if (it2 != aliasIndex_.end()) {
+      return it2->second;
+    }
   }
   if (!currentVersions_.empty()) {
     if (const auto ed = editionNamed(currentVersions_.front(), alias); ed) {
@@ -1485,9 +1669,17 @@ std::string Store::displayName(const MicroversionId &id) const {
   if (const auto ann = versionAnnotation(id); ann && !ann->alias.empty()) {
     return ann->alias;
   }
+  const auto lat = latest();
+  if (!lat.isZero()) {
+    for (const auto &ed : editions(lat)) {
+      if (ed.targetVersion == id && !ed.name.empty() && ed.name != "current") {
+        return ed.name;
+      }
+    }
+  }
   if (!currentVersions_.empty()) {
     for (const auto &ed : editions(currentVersions_.front())) {
-      if (ed.targetVersion == id && !ed.name.empty()) {
+      if (ed.targetVersion == id && !ed.name.empty() && ed.name != "current") {
         return ed.name;
       }
     }
@@ -1528,7 +1720,48 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
   }
 }
 
+void Store::sealPendingMetadataAsCells() const {
+  if (latest().isZero()) {
+    return;
+  }
+  auto *mutableStore = const_cast<Store *>(this);
+  auto curHead       = latest();
+  auto manifold      = rebuildManifold(curHead);
+
+  const auto pendingAnnotations = versionAnnotations_;
+  for (const auto &[id, ann] : pendingAnnotations) {
+    const auto targetOp = opsSpool.indexOf(id);
+    if (targetOp > 0) {
+      const auto existing = manifold.versionAnnotation(targetOp, *this);
+      if (!existing.has_value() || existing->description != ann.description ||
+          existing->tag != ann.tag || existing->alias != ann.alias ||
+          existing->timestamp != ann.timestamp) {
+        curHead  = mutableStore->annotateVersion(curHead, id, ann, &manifold);
+        manifold = rebuildManifold(curHead);
+      }
+    }
+  }
+
+  // Only seal currentVersions_ as "current" editions if the manifold doesn't
+  // already have editions designating heads (§5.3 / §5.4).
+  if (!currentVersions_.empty()) {
+    const auto existingEds = manifold.editions();
+    if (existingEds.empty()) {
+      const auto headsToSeal = currentVersions_;
+      for (std::size_t i = 0; i < headsToSeal.size(); ++i) {
+        if (opsSpool.indexOf(headsToSeal[i]) > 0) {
+          curHead = mutableStore->designateEdition(
+              curHead, "current", headsToSeal[i], &manifold,
+              /*allowDuplicateName=*/(i > 0));
+          manifold = rebuildManifold(curHead);
+        }
+      }
+    }
+  }
+}
+
 void Store::save(const std::string &directory) const {
+  sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
@@ -1576,12 +1809,10 @@ void Store::save(const std::string &directory) const {
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId         = documentId_,
-                                 .scrolls            = externals,
-                                 .localSegments      = localSegments.segments,
-                                 .links              = linkTable,
-                                 .currentVersions    = currentVersions(),
-                                 .versionAnnotations = versionAnnotations_});
+                     StoreTables{.documentId    = documentId_,
+                                 .scrolls       = externals,
+                                 .localSegments = localSegments.segments,
+                                 .links         = linkTable});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -1595,6 +1826,7 @@ void Store::save(const std::string &directory) const {
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
+  sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
@@ -1612,12 +1844,10 @@ void Store::saveOsmicText(const std::string &directory) const {
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId         = documentId_,
-                                 .scrolls            = externals,
-                                 .localSegments      = localSegments.segments,
-                                 .links              = linkTable,
-                                 .currentVersions    = currentVersions(),
-                                 .versionAnnotations = versionAnnotations_});
+                     StoreTables{.documentId    = documentId_,
+                                 .scrolls       = externals,
+                                 .localSegments = localSegments.segments,
+                                 .links         = linkTable});
   }
 }
 
@@ -1726,13 +1956,6 @@ void Store::load(const std::string &directory) {
     for (const auto &[id, link] : linkTable) {
       nextLinkId = std::max(nextLinkId, id + 1);
     }
-    currentVersions_ = std::move(tables.currentVersions);
-    // Through setVersionAnnotation() rather than assigned, so that the alias
-    // index is built from the annotations rather than being a third thing that
-    // has to be kept in step with them.
-    for (auto &[id, annotation] : tables.versionAnnotations) {
-      setVersionAnnotation(id, std::move(annotation));
-    }
   }
 
   // The nodes above arrived as a mapped segment rather than through putOp(),
@@ -1741,6 +1964,11 @@ void Store::load(const std::string &directory) {
   // refs are derived rather than written into the side tables: a store's own
   // operations already say what they are.
   indexGenesisCells();
+  if (!latest().isZero()) {
+    const auto manifold = rebuildManifold(latest());
+    syncCurrentVersionsFromRank(manifold);
+    syncAliasesFromRank(manifold);
+  }
   if (chronofilade_) {
     chronofilade_->clear();
     chronofilade_->indexSpool(*this);

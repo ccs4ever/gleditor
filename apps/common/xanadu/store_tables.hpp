@@ -111,11 +111,6 @@ struct StoreTables {
   std::vector<ScrollSegment> localSegments;
   /// Links by id.
   std::map<std::uint64_t, Link> links;
-  /// The author's designated current versions, in the order they were set.
-  /// Empty means unset, which Store reports as {latest()}.
-  std::vector<MicroversionId> currentVersions;
-  /// Aliases, descriptions and tags, by the microversion they annotate.
-  std::map<MicroversionId, VersionAnnotation> versionAnnotations;
 };
 
 /// Write @p tables to @p path, header and all.

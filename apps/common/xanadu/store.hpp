@@ -658,7 +658,8 @@ public:
   MicroversionId designateEdition(const MicroversionId &parent,
                                   std::string_view name,
                                   const MicroversionId &target,
-                                  const zigzag::Manifold *known = nullptr);
+                                  const zigzag::Manifold *known = nullptr,
+                                  bool allowDuplicateName       = false);
 
   /// All editions designated in @p version, in rank order.
   [[nodiscard]] std::vector<EditionInfo>
@@ -669,6 +670,18 @@ public:
   editionNamed(const MicroversionId &version, std::string_view name) const;
 
   // -- Version Annotations & Aliases ----------------------------------------
+
+  /**
+   * @brief Annotate microversion @p target with @p annotation on an OpHandle.
+   *
+   * Attaches description on d.notes, tag on d.tag, alias on d.alias,
+   * and claimed wall-clock timestamp on d.created off an OpHandle naming
+   * @p target.
+   */
+  MicroversionId annotateVersion(const MicroversionId &parent,
+                                 const MicroversionId &target,
+                                 VersionAnnotation annotation,
+                                 const zigzag::Manifold *known = nullptr);
 
   /// Record an alias, description, or semantic tag for @p id.
   void setVersionAnnotation(const MicroversionId &id,
@@ -967,6 +980,10 @@ private:
   /// duplicate, and keeps a corrupt file opening rather than throwing.
   void adoptOpRecords(const std::vector<OpRecord> &records);
 
+  /// Ensure pending versionAnnotations_ and currentVersions_ are sealed as
+  /// structure hyperop cells in ops.nodes before saving (§5.4).
+  void sealPendingMetadataAsCells() const;
+
   std::shared_ptr<UserPermascroll> userPermascroll_;
   DocumentId documentId_;
   /// Scrolls other than the local spool, in the order they were first
@@ -996,10 +1013,11 @@ private:
   zigzag::DimRef dimsDimension_{zigzag::noCell};
 
   void syncCurrentVersionsFromRank(const zigzag::Manifold &manifold);
+  void syncAliasesFromRank(const zigzag::Manifold &manifold);
 
   mutable std::vector<MicroversionId> currentVersions_;
-  std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
-  std::map<std::string, MicroversionId> aliasIndex_;
+  mutable std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
+  mutable std::map<std::string, MicroversionId> aliasIndex_;
   bool isSystem_{false};
 
   struct RemoteAuthorChunk {

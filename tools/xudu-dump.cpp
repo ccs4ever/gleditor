@@ -310,6 +310,7 @@ std::string segmentFields(const xudu::ScrollSegment &segment) {
 /// conversion is a diff of this output rather than a claim about it.
 void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
                 bool wantLinks) {
+  std::cout << "document  " << tables.documentId.str() << '\n';
   if (wantScrolls) {
     for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
       const auto &scroll = tables.scrolls[i];
@@ -349,18 +350,9 @@ void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
 /// The author-facing metadata, from the same container. Was two YAML files
 /// echoed line by line; is now rendered from the tables, so that the move is a
 /// diff of this output rather than a claim about it.
-void dumpVersions(const xudu::StoreTables &tables) {
-  for (const auto &id : tables.currentVersions) {
-    std::cout << "current  " << id.str() << '\n';
-  }
-  for (const auto &[id, annotation] : tables.versionAnnotations) {
-    std::cout << "version " << id.str() << "  alias="
-              << (annotation.alias.empty() ? "-" : annotation.alias)
-              << " tag=" << (annotation.tag.empty() ? "-" : annotation.tag)
-              << " timestamp="
-              << (annotation.timestamp.empty() ? "-" : annotation.timestamp)
-              << " description=" << excerpt(annotation.description) << '\n';
-  }
+void dumpVersions(const xudu::StoreTables &) {
+  // Versions and annotations moved to first-class cells in ops.nodes (see
+  // §5.4).
 }
 
 void usage() {

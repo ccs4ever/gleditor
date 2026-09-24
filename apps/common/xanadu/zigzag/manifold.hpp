@@ -36,6 +36,7 @@
 
 namespace xanadu {
 class Store;
+struct VersionAnnotation;
 } // namespace xanadu
 
 namespace zigzag {
@@ -374,6 +375,24 @@ public:
    */
   [[nodiscard]] std::optional<Edition>
   editionNamed(std::string_view name) const;
+
+  /// The CellRef of an OpHandle targeting @p targetOp, if any.
+  [[nodiscard]] std::optional<CellRef>
+  findOpHandle(std::uint32_t targetOp) const noexcept;
+
+  /// Look up the VersionAnnotation associated with @p targetOp in this folded
+  /// state.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotation(std::uint32_t targetOp, const xanadu::Store &store) const;
+
+  /// Look up the VersionAnnotation associated with handle cell @p handle.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotationForHandle(CellRef handle, const xanadu::Store &store) const;
+
+  /// All aliases recorded in this folded state (both on d.editions and
+  /// d.alias), paired with their target operation index.
+  [[nodiscard]] std::vector<std::pair<std::string, CellRef>>
+  aliases(const xanadu::Store &store) const;
 
   /**
    * @brief Collect all cells within @p radius hops from @p start along any

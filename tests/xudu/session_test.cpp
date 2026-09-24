@@ -194,8 +194,9 @@ TEST(SystemDocsTest, enumAndUriMappingRoundTrip) {
 }
 
 TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
+  const auto perma   = std::make_shared<xudu::UserPermascroll>();
   const auto sysPath = (testDir / "system_keymap").string();
-  xudu::Store store;
+  xudu::Store store(perma);
   store.setSystem(true);
   EXPECT_TRUE(store.isSystem());
 
@@ -226,7 +227,7 @@ TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   store.save(sysPath);
 
   // Reload and verify persistence of single head and annotations
-  xudu::Store reloaded;
+  xudu::Store reloaded(perma);
   reloaded.load(sysPath);
   reloaded.setSystem(true);
 
@@ -243,8 +244,9 @@ TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
 }
 
 TEST_F(StoreMultiStoreTest, aSystemStoreKeepsExactlyOneCurrentVersion) {
+  const auto perma   = std::make_shared<xudu::UserPermascroll>();
   const auto sysPath = (testDir / "system_keymap_exact").string();
-  xudu::Store store;
+  xudu::Store store(perma);
   store.setSystem(true);
   EXPECT_TRUE(store.isSystem());
 
@@ -262,7 +264,7 @@ TEST_F(StoreMultiStoreTest, aSystemStoreKeepsExactlyOneCurrentVersion) {
 
   store.save(sysPath);
 
-  xudu::Store reloaded;
+  xudu::Store reloaded(perma);
   reloaded.load(sysPath);
   reloaded.setSystem(true);
 

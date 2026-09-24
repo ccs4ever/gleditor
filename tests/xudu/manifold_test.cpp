@@ -1237,3 +1237,48 @@ TEST(ManifoldTest, aVersionAnnotationBecomesAHandleCell) {
   EXPECT_EQ(slice.store.resolveAlias("v1.0-release"), v1);
   EXPECT_EQ(slice.store.displayName(v1), "v1.0-release");
 }
+
+TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
+  Slice slice;
+  const auto v1          = slice.store.insert(slice.at, 0, "Annotated state");
+  const auto claimedTime = "2026-09-24T03:00:00Z";
+
+  // Annotate v1 with full metadata including claimed timestamp
+  slice.at = slice.store.annotateVersion(v1, v1,
+                                         {.alias       = "v1.0",
+                                          .description = "First milestone",
+                                          .tag         = "milestone",
+                                          .timestamp   = claimedTime});
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto targetOp = slice.store.segmentedOps().indexOf(v1);
+
+  // The OpHandle cell names the microversion operation index (state identity)
+  const auto handle = manifold.findOpHandle(targetOp);
+  ASSERT_TRUE(handle.has_value());
+  EXPECT_EQ(manifold.valueKindOf(*handle), ValueKind::OpHandle);
+  EXPECT_EQ(manifold.handleTarget(*handle), std::optional<CellRef>{targetOp});
+
+  // Querying the annotation returns claimed wall-clock time as a distinct field
+  const auto ann = slice.store.versionAnnotation(v1);
+  ASSERT_TRUE(ann.has_value());
+  EXPECT_EQ(ann->alias, "v1.0");
+  EXPECT_EQ(ann->description, "First milestone");
+  EXPECT_EQ(ann->tag, "milestone");
+  EXPECT_EQ(ann->timestamp, claimedTime);
+
+  // An annotation without claimed timestamp has an empty timestamp field;
+  // it is never synthesized or derived from the MicroversionId
+  const auto v2 = slice.store.insert(slice.at, 15, " and another");
+  slice.at = slice.store.annotateVersion(v2, v2,
+                                         {.alias       = "v2.0",
+                                          .description = "No clock reading",
+                                          .tag         = "unclocked",
+                                          .timestamp   = ""});
+
+  const auto ann2 = slice.store.versionAnnotation(v2);
+  ASSERT_TRUE(ann2.has_value());
+  EXPECT_TRUE(ann2->timestamp.empty())
+      << "timestamp must never be inferred from a MicroversionId";
+  EXPECT_EQ(ann2->alias, "v2.0");
+}

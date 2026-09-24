@@ -834,4 +834,143 @@ Manifold::editionNamed(const std::string_view name) const {
   return std::nullopt;
 }
 
+std::optional<CellRef>
+Manifold::findOpHandle(const std::uint32_t targetOp) const noexcept {
+  for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
+    if (it->valueKind ==
+            static_cast<std::uint8_t>(xanadu::ValueKind::OpHandle) &&
+        it->valueBits == targetOp) {
+      return it->birthOp;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<xanadu::VersionAnnotation>
+Manifold::versionAnnotationForHandle(const CellRef handle,
+                                     const xanadu::Store &store) const {
+  xanadu::VersionAnnotation ann;
+  const auto dimNotes   = dimensionNamed("d.notes", store);
+  const auto dimTag     = dimensionNamed("d.tag", store);
+  const auto dimAlias   = dimensionNamed("d.alias", store);
+  const auto dimCreated = dimensionNamed("d.created", store);
+
+  if (noCell != dimNotes) {
+    auto c = linked(handle, dimNotes, DimVector::POS);
+    if (noCell == c) {
+      c = linked(handle, dimNotes, DimVector::NEG);
+    }
+    if (noCell != c) {
+      ann.description = textOf(c, store);
+    }
+  }
+  if (noCell != dimTag) {
+    auto c = linked(handle, dimTag, DimVector::POS);
+    if (noCell == c) {
+      c = linked(handle, dimTag, DimVector::NEG);
+    }
+    if (noCell != c) {
+      ann.tag = textOf(c, store);
+    }
+  }
+  if (noCell != dimAlias) {
+    auto c = linked(handle, dimAlias, DimVector::POS);
+    if (noCell == c) {
+      c = linked(handle, dimAlias, DimVector::NEG);
+    }
+    if (noCell != c) {
+      ann.alias = textOf(c, store);
+    }
+  }
+  if (noCell != dimCreated) {
+    auto c = linked(handle, dimCreated, DimVector::POS);
+    if (noCell == c) {
+      c = linked(handle, dimCreated, DimVector::NEG);
+    }
+    if (noCell != c) {
+      ann.timestamp = textOf(c, store);
+    }
+  }
+
+  // If alias was not directly on d.alias, check if an edition points to this
+  // handle
+  if (ann.alias.empty()) {
+    for (const auto &ed : editions()) {
+      if (ed.handle == handle && !ed.name.empty() && ed.name != "current") {
+        ann.alias = ed.name;
+        break;
+      }
+    }
+  }
+
+  if (ann.alias.empty() && ann.description.empty() && ann.tag.empty() &&
+      ann.timestamp.empty()) {
+    return std::nullopt;
+  }
+  return ann;
+}
+
+std::optional<xanadu::VersionAnnotation>
+Manifold::versionAnnotation(const std::uint32_t targetOp,
+                            const xanadu::Store &store) const {
+  xanadu::VersionAnnotation combined;
+  bool foundAny = false;
+  for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
+    if (it->valueKind ==
+            static_cast<std::uint8_t>(xanadu::ValueKind::OpHandle) &&
+        it->valueBits == targetOp) {
+      const auto ann = versionAnnotationForHandle(it->birthOp, store);
+      if (ann.has_value()) {
+        foundAny = true;
+        if (combined.description.empty() && !ann->description.empty()) {
+          combined.description = ann->description;
+        }
+        if (combined.tag.empty() && !ann->tag.empty()) {
+          combined.tag = ann->tag;
+        }
+        if (combined.alias.empty() && !ann->alias.empty()) {
+          combined.alias = ann->alias;
+        }
+        if (combined.timestamp.empty() && !ann->timestamp.empty()) {
+          combined.timestamp = ann->timestamp;
+        }
+      }
+    }
+  }
+  if (foundAny) {
+    return combined;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::pair<std::string, CellRef>>
+Manifold::aliases(const xanadu::Store &store) const {
+  std::vector<std::pair<std::string, CellRef>> result;
+  for (const auto &ed : editions()) {
+    if (!ed.name.empty() && ed.name != "current" && ed.targetOp > 0) {
+      result.emplace_back(ed.name, static_cast<CellRef>(ed.targetOp));
+    }
+  }
+  const auto dimAlias = dimensionNamed("d.alias", store);
+  if (noCell != dimAlias) {
+    for (const auto &cell : slots) {
+      if (cell.valueKind ==
+              static_cast<std::uint8_t>(xanadu::ValueKind::OpHandle) &&
+          cell.valueBits > 0) {
+        auto aliasCell = linked(cell.birthOp, dimAlias, DimVector::POS);
+        if (noCell == aliasCell) {
+          aliasCell = linked(cell.birthOp, dimAlias, DimVector::NEG);
+        }
+        if (noCell != aliasCell) {
+          const auto name = textOf(aliasCell, store);
+          if (!name.empty()) {
+            result.emplace_back(name, static_cast<CellRef>(cell.valueBits));
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
 } // namespace zigzag
