@@ -43,6 +43,7 @@
 #include "format.hpp"
 #include "microversion.hpp"
 #include "ops.hpp"
+#include "provenance.hpp"
 #include "resolver.hpp"
 #include "scalar.hpp"
 #include "scroll.hpp"
@@ -867,6 +868,22 @@ public:
   void trimRemoteAuthorBuffer(std::string_view authorScrollKey,
                               std::uint64_t sealedUpTo = 0);
 
+  /// The authenticated provenance record sealed in with the publication, if
+  /// opened from one (§5.4).
+  [[nodiscard]] const std::optional<SignedProvenance> &
+  provenance() const noexcept {
+    return provenance_;
+  }
+
+  /// Retain verified publication provenance (§5.4). Throws if signature is
+  /// invalid or tampered.
+  void setProvenance(SignedProvenance prov, const SigningOptions &where = {});
+
+  /// Direct setter for already-verified provenance without invoking gpg.
+  void setVerifiedProvenance(SignedProvenance prov) noexcept {
+    provenance_ = std::move(prov);
+  }
+
   // -- persistence ----------------------------------------------------------
 
   /**
@@ -1041,6 +1058,7 @@ private:
   zigzag::ScrollRegistry scrollRegistry_;
   std::string bootstrapPermascrollKey_;
   std::function<ResolveResult(const PrimediaSpan &)> bootstrapReader_;
+  std::optional<SignedProvenance> provenance_;
   bool isSystem_{false};
 
   struct RemoteAuthorChunk {

@@ -875,6 +875,17 @@ void Store::setBootstrapPermascroll(
   bootstrapReader_         = std::move(reader);
 }
 
+void Store::setProvenance(SignedProvenance prov, const SigningOptions &where) {
+  if (!prov.signature.empty() || !prov.tsv.empty()) {
+    const auto check = verifyProvenance(prov, where);
+    if (!check.signatureValid) {
+      throw std::runtime_error("unverified or tampered provenance: " +
+                               check.detail);
+    }
+  }
+  provenance_ = std::move(prov);
+}
+
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&

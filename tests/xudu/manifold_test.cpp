@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -23,8 +24,10 @@
 #include <utility>
 #include <vector>
 
+#include <common/xanadu/zigzag/arena_manifold.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
+#include <xudu/core/provenance.hpp>
 #include <xudu/core/store.hpp>
 #include <xudu/core/user_permascroll.hpp>
 #include <zigzag/core/manifold.hpp>
@@ -470,9 +473,9 @@ TEST(ManifoldTest, aLinkNamingACellTheFoldDoesNotHoldIsRefused) {
 
 TEST(ManifoldTest, aSetLinkWithNoChainHasNoSubjectAndIsRefused) {
   Slice slice;
-  const auto dim = slice.dimension("d.1");
-  const auto one = slice.cell("one");
-  const auto two = slice.cell("two");
+  const auto dim                  = slice.dimension("d.1");
+  [[maybe_unused]] const auto one = slice.cell("one");
+  const auto two                  = slice.cell("two");
 
   Op op;
   op.kind  = OpKind::Structure;
@@ -1016,9 +1019,9 @@ TEST(ManifoldTest, contentAsOfReplaysASplice) {
 
 TEST(ManifoldTest, contentAsOfRefusesAnOperationFromAnotherCell) {
   Slice slice;
-  const auto cell1   = slice.cell("first cell");
-  const auto cell2   = slice.cell("second cell");
-  const auto opCell2 = slice.store.cellRefOf(slice.at);
+  const auto cell1                  = slice.cell("first cell");
+  [[maybe_unused]] const auto cell2 = slice.cell("second cell");
+  const auto opCell2                = slice.store.cellRefOf(slice.at);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_TRUE(manifold.contentAsOf(cell1, opCell2).empty());
@@ -1438,7 +1441,9 @@ TEST(ManifoldTest, publishedHistoryBootstrapsThroughAuthorship) {
       authorGlobalKey, [&](const PrimediaSpan &span) {
         return xudu::ResolveResult{.status =
                                        xudu::ResolutionStatus::VerifiedBytes,
-                                   .text = authorPerma->read(span)};
+                                   .text       = authorPerma->read(span),
+                                   .lockInfo   = std::nullopt,
+                                   .holeRecord = std::nullopt};
       });
 
   openerStore.load(scratchDir.string());
@@ -1481,4 +1486,241 @@ TEST(ManifoldTest, aStoreDirectoryHoldsOnlyOpsAndLocalFacts) {
   const auto reg = reopened.scrollRegistry();
   ASSERT_EQ(reg.size(), 1U);
   EXPECT_EQ(reg.scrolls.front().globalKey, key);
+}
+
+class Keyring {
+public:
+  Keyring() {
+    path = std::filesystem::temp_directory_path() /
+           ("xudu-gpg-" + std::to_string(getpid()));
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+    std::filesystem::create_directories(path);
+    std::filesystem::permissions(path, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace,
+                                 ignored);
+    setenv("GNUPGHOME", path.c_str(), 1);
+
+    {
+      std::ofstream agent(path / "gpg-agent.conf");
+      agent << "allow-loopback-pinentry\n";
+      std::ofstream options(path / "gpg.conf");
+      options << "pinentry-mode loopback\n";
+    }
+    made = 0 == std::system(("gpg --batch --passphrase '' --quick-generate-key "
+                             "'Ada Lovelace <ada@example.org>' ed25519 sign "
+                             "never >/dev/null 2>&1"));
+  }
+  ~Keyring() {
+    std::system("gpgconf --kill gpg-agent >/dev/null 2>&1");
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+    unsetenv("GNUPGHOME");
+  }
+
+  Keyring(const Keyring &)            = delete;
+  Keyring &operator=(const Keyring &) = delete;
+  Keyring(Keyring &&)                 = delete;
+  Keyring &operator=(Keyring &&)      = delete;
+
+  [[nodiscard]] bool usable() const { return made; }
+
+private:
+  std::filesystem::path path;
+  bool made{};
+};
+
+xudu::Provenance sampleProv() {
+  xudu::Provenance record;
+  record.author.name   = "Ada Lovelace";
+  record.author.email  = "ada@example.org";
+  record.author.gpgKey = "ada@example.org";
+  record.title         = "Notes: on the Analytical Engine";
+  record.salt          = "notes";
+  record.publisher     = std::string(64, 'a');
+  record.permascroll   = "btpk:" + std::string(64, 'a') + ":permascroll";
+  record.version       = "2a4";
+  record.published     = 1700000000;
+  record.contentLength = 4096;
+  record.contentDigest = std::string(64, 'b');
+  record.extra.emplace_back("custom_field", "custom_val");
+  return record;
+}
+
+TEST(ManifoldTest, verifiedAuthorshipAppearsAsEphemeralArenaCells) {
+  Keyring keyring;
+  if (!keyring.usable()) {
+    GTEST_SKIP() << "gpg is not available or could not create test key";
+  }
+
+  const auto record     = sampleProv();
+  const auto signedProv = xudu::signProvenance(record);
+  ASSERT_FALSE(signedProv.signature.empty());
+
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Store store(perma);
+  auto at = store.sliceGenesis(MicroversionId{});
+  at      = store.registerScroll(at, record.permascroll);
+
+  store.setBootstrapPermascroll(
+      record.permascroll, [perma](const PrimediaSpan &span) {
+        return xudu::ResolveResult{.status =
+                                       xudu::ResolutionStatus::VerifiedBytes,
+                                   .text       = perma->read(span),
+                                   .lockInfo   = std::nullopt,
+                                   .holeRecord = std::nullopt};
+      });
+  store.setProvenance(signedProv);
+
+  const auto base = store.rebuildManifold(at);
+  const zigzag::ArenaManifold arena(&base, &store);
+
+  // Root reachable from arena home on d.authorship
+  const auto dimAuthorship = arena.dimensionNamed("d.authorship");
+  ASSERT_NE(dimAuthorship, zigzag::noCell);
+  const auto authRoot =
+      arena.linked(arena.home(), dimAuthorship, zigzag::DimVector::POS);
+  ASSERT_NE(authRoot, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(authRoot));
+
+  // Source link points back to authenticated bootstrap scroll
+  const auto dimSource = arena.dimensionNamed("d.source");
+  ASSERT_NE(dimSource, zigzag::noCell);
+  const auto bootstrapCell =
+      arena.linked(authRoot, dimSource, zigzag::DimVector::POS);
+  EXPECT_NE(bootstrapCell, zigzag::noCell);
+
+  // Canonical fields
+  const auto dimAuthor = arena.dimensionNamed("d.author");
+  ASSERT_NE(dimAuthor, zigzag::noCell);
+  const auto authorCell =
+      arena.linked(authRoot, dimAuthor, zigzag::DimVector::POS);
+  ASSERT_NE(authorCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(authorCell));
+  EXPECT_EQ(arena.textOf(authorCell), "Ada Lovelace");
+
+  const auto dimEmail = arena.dimensionNamed("d.email");
+  ASSERT_NE(dimEmail, zigzag::noCell);
+  const auto emailCell =
+      arena.linked(authRoot, dimEmail, zigzag::DimVector::POS);
+  ASSERT_NE(emailCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(emailCell));
+  EXPECT_EQ(arena.textOf(emailCell), "ada@example.org");
+
+  const auto dimPublisher = arena.dimensionNamed("d.publisher");
+  ASSERT_NE(dimPublisher, zigzag::noCell);
+  const auto pubCell =
+      arena.linked(authRoot, dimPublisher, zigzag::DimVector::POS);
+  ASSERT_NE(pubCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(pubCell));
+  EXPECT_EQ(arena.textOf(pubCell), record.publisher);
+
+  const auto dimPerma = arena.dimensionNamed("d.permascroll");
+  ASSERT_NE(dimPerma, zigzag::noCell);
+  const auto permaCell =
+      arena.linked(authRoot, dimPerma, zigzag::DimVector::POS);
+  ASSERT_NE(permaCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(permaCell));
+  EXPECT_EQ(arena.textOf(permaCell), record.permascroll);
+
+  const auto dimPublished = arena.dimensionNamed("d.published");
+  ASSERT_NE(dimPublished, zigzag::noCell);
+  const auto pubDateCell =
+      arena.linked(authRoot, dimPublished, zigzag::DimVector::POS);
+  ASSERT_NE(pubDateCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(pubDateCell));
+  EXPECT_EQ(arena.textOf(pubDateCell), std::to_string(record.published));
+
+  const auto dimSig = arena.dimensionNamed("d.signature");
+  ASSERT_NE(dimSig, zigzag::noCell);
+  const auto sigCell = arena.linked(authRoot, dimSig, zigzag::DimVector::POS);
+  ASSERT_NE(sigCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(sigCell));
+  EXPECT_EQ(arena.textOf(sigCell), signedProv.signature);
+
+  // Unknown TSV keys remain visible on derived field dimensions
+  const auto dimCustom = arena.dimensionNamed("d.custom_field");
+  ASSERT_NE(dimCustom, zigzag::noCell);
+  const auto customCell =
+      arena.linked(authRoot, dimCustom, zigzag::DimVector::POS);
+  ASSERT_NE(customCell, zigzag::noCell);
+  EXPECT_TRUE(zigzag::isEphemeral(customCell));
+  EXPECT_EQ(arena.textOf(customCell), "custom_val");
+}
+
+TEST(ManifoldTest, authorshipProjectionNeverMintsPersistentOps) {
+  Keyring keyring;
+  if (!keyring.usable()) {
+    GTEST_SKIP() << "gpg is not available or could not create test key";
+  }
+
+  const auto record     = sampleProv();
+  const auto signedProv = xudu::signProvenance(record);
+  ASSERT_FALSE(signedProv.signature.empty());
+
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Store store(perma);
+  auto at = store.sliceGenesis(MicroversionId{});
+  at      = store.registerScroll(at, record.permascroll);
+  store.setProvenance(signedProv);
+
+  const auto opsBefore = store.opCount();
+
+  {
+    const auto base = store.rebuildManifold(at);
+    zigzag::ArenaManifold arena(&base, &store);
+
+    const auto dimAuthorship = arena.dimensionNamed("d.authorship");
+    ASSERT_NE(dimAuthorship, zigzag::noCell);
+    const auto authRoot =
+        arena.linked(arena.home(), dimAuthorship, zigzag::DimVector::POS);
+    ASSERT_NE(authRoot, zigzag::noCell);
+
+    // Promoting the authorship root directly must be refused
+    const auto res = zigzag::promote(store, at, arena, authRoot);
+    EXPECT_FALSE(res.has_value());
+
+    // Promoting from home must exclude provenance cells
+    const auto resHome = zigzag::promote(store, at, arena, arena.home());
+    if (resHome.has_value()) {
+      for (const auto cell : resHome->cells) {
+        EXPECT_FALSE(arena.isProvenanceCell(cell));
+      }
+    }
+  }
+
+  // Building, querying, and dropping the view leaves the store's op count
+  // unchanged
+  EXPECT_EQ(store.opCount(), opsBefore);
+}
+
+TEST(ManifoldTest, tamperedAuthorshipIsNotProjected) {
+  Keyring keyring;
+  if (!keyring.usable()) {
+    GTEST_SKIP() << "gpg is not available or could not create test key";
+  }
+
+  const auto record = sampleProv();
+  auto signedProv   = xudu::signProvenance(record);
+  ASSERT_FALSE(signedProv.signature.empty());
+
+  // Tamper with the TSV content
+  signedProv.tsv += "tampered\ttrue\n";
+
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Store store(perma);
+  auto at = store.sliceGenesis(MicroversionId{});
+  at      = store.registerScroll(at, record.permascroll);
+
+  // Failed verification prevents publication open / provenance setting
+  EXPECT_THROW(store.setProvenance(signedProv), std::runtime_error);
+
+  // If setVerifiedProvenance is forced, ArenaManifold verification still
+  // prevents projection
+  store.setVerifiedProvenance(signedProv);
+  const auto base = store.rebuildManifold(at);
+  const zigzag::ArenaManifold arena(&base, &store);
+
+  EXPECT_EQ(arena.dimensionNamed("d.authorship"), zigzag::noCell);
+  EXPECT_EQ(arena.authorshipRoot(), zigzag::noCell);
 }
