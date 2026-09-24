@@ -8,7 +8,9 @@ without losing the link that made the trip meaningful. This is a design and impl
 the interaction described below is not yet implemented end to end.
 
 [`xuzz-unified-link-traversal-vision.md`](xuzz-unified-link-traversal-vision.md) describes the
-reader journey, compared UI concepts, and experience goals behind this contract.
+reader journey, compared UI concepts, and experience goals behind this contract. The
+[prototype collection](ui/prototypes/README.md) gives each proposed interaction its own reader
+walkthrough and technical design.
 
 Nelson's [ZX model](https://www.xanadu.net/zigzag/fw99/XUmodel.html) describes one addressable link
 with two lists of content spans, including discontinuous spans, and traversal in either direction.

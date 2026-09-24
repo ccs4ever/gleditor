@@ -144,6 +144,31 @@ configuration stores can be. Recording is local and private until the reader exp
 exports a walk. Cross-store references from ordinary xanadocs to activity visits depend on the
 federated reference work; references and annotations within the activity store can precede it.
 
+### Reuse OSMIC without confusing its two histories
+
+The activity store's append-only operation spool records **changes to the activity record**:
+creating a visit, annotating it, naming a walk, or adding a reference. Its `MicroversionId` names a
+state of that store. A visit has its own stable identity and parent visit; its children record the
+reader's alternative routes. An annotation added to an old visit changes the activity store but is
+not another step in the reader's walk. All walks must coexist in one current activity view even when
+a reader resumes from an older visit.
+
+Use Structure operations and the Manifold to persist visit cells, their parent and ordered-child
+relationships, notes, and references. A derived, rebuildable walk index can keep roots, child lists,
+target-span lookups, ancestor jumps, and lowest common ancestors. That makes questions such as
+“where did these walks diverge?” and “which walks passed through this passage?” practical. The index
+is an acceleration of the visit graph, not a second durable source of truth. Its ancestor index can
+borrow Chronofilade's binary-lifting idea, but must follow *visit parents*.
+
+The existing [`Chronofilade`](../apps/common/xanadu/enfilade/chronofilade.hpp) follows *operation
+parents* and rebuilds document edit-decision-list versions. Structure operations are text replay
+no-ops, so it does not itself reconstruct or navigate the activity visit tree. It remains useful for
+the activity Store's own version history where text EDLs are involved. The activity store needs its
+own lossless Structure replay and derived visit index, with activity `MicroversionId`s kept distinct
+from visit IDs. Notes belong in the reader's permascroll; the Store carries their addresses, never
+primedia bytes. An unreadable activity store is preserved and reported, because the walks and
+annotations are user data.
+
 ## The visible language
 
 The selected link has one compact context anchored to the viewport so it remains available while
@@ -181,25 +206,28 @@ hovered.
 | Spatial overview of endpoint groups        | Makes topology apparent at small scale                       | Dense links can still obscure text                 | Offer an optional overview of groups and the reader's current comparison         |
 | Two endset lists beside the active content | Keeps the whole link available while either side is explored | Needs careful sizing and a stable origin marker    | Adopt as the default context, emphasizing the chosen two occurrences plus counts |
 
-The following ideas merit prototypes within that default model:
+The [prototype collection](ui/prototypes/README.md) expands the reader walkthrough and technical
+model for each idea within that default context:
 
 - **The Flap:** Fan the document and cell versions that still manifest the selected link's spans
   into two branch-aware onion-skin wings. Keep the link as a fixed hinge while each side scrubs
-  independently. The [concept note](xuzz-flap-concept.md) defines the reader journey, exact
+  independently. The [prototype](ui/prototypes/flap.md) defines the reader journey, exact
   membership, activity behavior, and prototype questions.
 - **Overlap preview:** A small stack of link summaries at a shared span helps a reader choose a link
   before its full context opens. Test whether type and attribution are enough to distinguish links
-  without filling the margin.
+  without filling the margin. See [Overlap preview](ui/prototypes/overlap-preview.md).
 - **Endpoint search and grouping:** For a large endset, group occurrences by document/version or
   cell neighborhood and allow a text search inside the context. Preserve stored member order when
-  the search is cleared.
+  the search is cleared. See [Endpoint search](ui/prototypes/endpoint-search.md).
 - **On-demand whole-link overview:** Temporarily pull back to show all member clusters and the
   reader's current comparison. Keep the link context in place so overview never becomes a second
-  navigation mode.
+  navigation mode. See [Whole-link overview](ui/prototypes/whole-link-overview.md).
 - **Branch previews:** Show a child's destination, link type, and note in the Forward chooser. A
-  compact preview gives rapid access to a known route while the Walks view shows the full tree.
+  compact preview gives rapid access to a known route while the Walks view shows the full tree. See
+  [Activity walks](ui/prototypes/activity-walks.md).
 - **Ambient provenance:** Let an endpoint reveal its author, version, and primedia source on demand
-  without adding permanent chrome to every page and cell.
+  without adding permanent chrome to every page and cell. See
+  [Ambient provenance](ui/prototypes/ambient-provenance.md).
 
 ## Missing and distant targets
 

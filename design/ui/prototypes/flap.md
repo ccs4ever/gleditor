@@ -1,8 +1,8 @@
 # The Flap: a Link's Living Versions
 
-**Status:** Tentative interaction concept, not implemented.\
-**Context:** [Xuzz unified link traversal](xuzz-unified-link-traversal-vision.md) and its
-[workflow](ui_workflow_xuzz_navigation.md).
+**Status:** Tentative interaction prototype, not implemented.\
+**Context:** [Xuzz unified link traversal](../../xuzz-unified-link-traversal-vision.md) and its
+[workflow](../../ui_workflow_xuzz_navigation.md).
 
 ## The gesture
 
@@ -41,9 +41,10 @@ cells, and occurrences. The other wing does not change when one is scrubbed.
 1. **Enter leaf** moves reading focus to the chosen exact occurrence, including its version and
    intra-cell range. The link hinge and opposite wing remain available. Entry creates one child in
    the reader's activity walk; merely opening, scrubbing, or pinning the flap creates none.
-1. Close Flap to recover the prior live arrangement. Activity Back can later return to the entered
-   visit, and the saved visit can restore the flap selection. Another route from that visit creates
-   a branch in the activity tree without deleting this one.
+1. Before entry, Escape closes Flap and restores the prior live arrangement. After entry, Close
+   removes the overlay around the new reading focus; Activity Back can return to the earlier visit.
+   The saved entry visit can restore the chosen wings, and another route from it creates a branch in
+   the activity tree without deleting this one.
 
 ## What belongs on a leaf
 
@@ -92,17 +93,41 @@ leaf resolves; failure leaves the flap and prior reading focus intact. The saved
 records the chosen link, both wing selections, exact target, and useful view arrangement so it can
 be restored across sessions. Link versions and activity visits are separate trees.
 
-## Prototype path and questions
+## Technical explanation
 
-Xudu already has a 3D onion-skin arrangement for *open documents* and a hypertime graph that can
-select versions. Those surfaces can supply motion and branch cues. The flap needs a new pure
-occurrence query: enumerate bounded candidate versions, find candidate intersections with
-`Version::occurrencesOf()` or version-specific manifold content, verify full address coverage
-against the underlying runs, and return branch-aware exact ranges. The current Spanfilade indexes
-open views, not every historical version, and the existing onion mode cycles a flat list of open
-documents. Neither currently answers this query. Build document leaves first, then cell leaves
-through the shared Xuzz presentation boundary. Keep resolution and version rebuilding off the UI
-thread.
+The flap query begins with one selected link authority and ID and its fixed ordered endsets. For
+each stored member, enumerate candidate Store versions by OSMIC ancestry around the chosen anchor,
+then resolve document `Version` runs and version-specific ZigZag cell content runs against that
+member's primedia address. Preserve every exact occurrence; a version can carry several quotations
+of one member. `Version::occurrencesOf()` identifies candidate overlaps, but full coverage requires
+checking the underlying address sequence. One member's leaf never implies a pair with a member on
+the other wing. Link metadata lives beside versions, so a content manifestation may predate the link
+declaration and needs that provenance label.
+
+Represent each leaf by side, member index, store/document or cell authority, `MicroversionId`,
+occurrence range, coverage state, and resolution generation. The version fan is a projection of the
+OSMIC DAG: parent/child ancestry defines depth, while sibling branches remain distinguishable.
+Chronofilade can help rebuild document versions and jump through their operation ancestry;
+version-specific cell manifolds need their own incremental or bounded replay path. The current
+Spanfilade covers indexed open views and cells, not every historical version, so a lazy historical
+membership index or bounded candidate scan is needed. Remote and missing versions keep placeholders
+and cancellation tokens.
+
+The view holds two independent wing selections and a fixed link hinge. Stage only a bounded window
+of leaf geometry, and keep the selected exact span readable. Existing Xudu onion-skin transforms and
+opacity animation can be reused for document leaves, while the current flat open-document cycling
+cannot choose the flap's membership or forks. Cell leaves require version-specific content views and
+exact anchors through Xuzz's shared presentation. Reduced motion uses branch-aware lists with the
+same leaf identities. The actions Open/Close Flap, Choose wing/member/branch/version/occurrence, Pin
+comparison, Preview, and Enter leaf belong to the sovereign keymap and accessibility command
+surface. Preview and pin add no activity; successful Enter records one visit with both wing states.
+
+## Prototype questions and proof
+
+Begin with a pure document-leaf query and a small branch-aware fan, then add cell leaves through the
+shared Xuzz presentation boundary. Keep resolution and version rebuilding off the UI thread. The
+existing Xudu hypertime graph can supply branch labels and selection, while its onion-skin mode
+supplies only presentation mechanics.
 
 The first prototype should answer these questions with a 2×3 discontinuous link, a transcluded
 duplicate, an OSMIC fork, one cell, a partial remnant, and one unavailable version:
