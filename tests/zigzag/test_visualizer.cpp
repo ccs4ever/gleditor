@@ -837,7 +837,8 @@ TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
   EXPECT_TRUE(viz.dispatchAction("duplicate-focus-cell"));
   const auto dupFocus = viz.focusCellId();
   EXPECT_NE(dupFocus, initialFocus);
-  EXPECT_NE(viz.engine()->findCell(static_cast<CellRef>(dupFocus)), nullptr);
+  EXPECT_TRUE(
+      viz.engine()->findCell(static_cast<CellRef>(dupFocus)).has_value());
   EXPECT_FALSE(isEphemeral(static_cast<CellRef>(dupFocus)));
   const auto cloneDim = viz.engine()->dimensionFor("d.clone");
   EXPECT_EQ(viz.engine()->linked(static_cast<CellRef>(initialFocus), cloneDim,

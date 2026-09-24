@@ -10,15 +10,15 @@
 #include <cstddef>
 #include <span>
 #include <stdexcept>
-#include <version>
+
+#include <gleditor/cpp26_select.hpp>
 
 namespace gleditor::cpp26 {
 
 template <class T, std::size_t Extent>
 [[nodiscard]] constexpr T &span_at(std::span<T, Extent> bytes,
                                    const std::size_t index) {
-#if !defined(GLEDITOR_CPP26_FORCE_FALLBACK) && defined(__cpp_lib_span) &&      \
-    __cpp_lib_span >= 202311L
+#if GLEDITOR_CPP26_NATIVE_SPAN_AT
   return bytes.at(index);
 #else
   if (index >= bytes.size()) {

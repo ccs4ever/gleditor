@@ -282,9 +282,9 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   slice.link(cell, dim, DimVector::POS, noCell);
   const auto secondLink = slice.store.cellRefOf(slice.at);
 
-  const auto manifold    = slice.store.rebuildManifold(slice.at);
-  const auto *const slot = manifold.slot(cell);
-  ASSERT_NE(slot, nullptr);
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto slot     = manifold.slot(cell);
+  ASSERT_TRUE(slot.has_value());
   EXPECT_EQ(slot->birthOp, cell);
   EXPECT_EQ(slot->lastOp, secondLink);
 
@@ -657,8 +657,8 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
     denseOf[cells[i]] = i;
   }
   for (std::size_t i = 0; i < cells.size(); i++) {
-    const auto *const slot = manifold.slot(cells[i]);
-    ASSERT_NE(slot, nullptr);
+    const auto slot = manifold.slot(cells[i]);
+    ASSERT_TRUE(slot.has_value());
     array[i].span      = manifold.contentOf(cells[i]).front();
     array[i].birthOp   = slot->birthOp;
     array[i].lastOp    = slot->lastOp;

@@ -16,8 +16,9 @@ cells.
 
 The first API accepts **two homogeneous `std::span<const T>` inputs** and returns a view usable for
 iteration and `std::ranges` input algorithms. Its namespace and spelling are
-`common::cpp26::views::concat(first, second)`. Callers construct spans from live vectors and consume
-the view before those vectors are mutated or destroyed. No code may depend on the returned view's
+`gleditor::cpp26::views::concat(first, second)` (first shipped as `common::cpp26`; since moved into
+the library, see the compatibility plan). Callers construct spans from live vectors and consume the
+view before those vectors are mutated or destroyed. No code may depend on the returned view's
 concrete type, `size()`, random access, or a borrowed-range guarantee. This contract keeps the first
 use valid on both implementations.
 
@@ -75,11 +76,11 @@ behavior must be proven across supported toolchains.
 
 ## Implemented boundary
 
-`apps/common/cpp26_concat.hpp` provides the two-span adapter. It selects native `std::views::concat`
-when the standard library advertises `__cpp_lib_ranges_concat >= 202403L`, and selects
-`std::views::join` over an owned array of spans in C++23 or when `GLEDITOR_CPP26_FORCE_FALLBACK=1`
-is set. Its result borrows the source elements, so callers must consume it before changing or
-destroying either source.
+`<gleditor/cpp26_concat.hpp>` (originally `apps/common/cpp26_concat.hpp`) provides the two-span
+adapter. It selects native `std::views::concat` when the standard library advertises
+`__cpp_lib_ranges_concat >= 202403L`, and selects `std::views::join` over an owned array of spans in
+C++23 or when `GLEDITOR_CPP26_FORCE_FALLBACK=1` is set. Its result borrows the source elements, so
+callers must consume it before changing or destroying either source.
 
 The VQL direct engine materializes both `!both` branches through one `concatCellStreams` helper. The
 focused tests cover creation, cloned link targets, order, empty inputs, duplicates, and the

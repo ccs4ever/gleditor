@@ -21,9 +21,9 @@ std::uint32_t Manifold::denseOf(const CellRef ref) const noexcept {
   return found == byRef.end() ? noDense : found->second;
 }
 
-const CellSlot *Manifold::slot(const CellRef ref) const noexcept {
+SlotRef Manifold::slot(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
-  return noDense == dense ? nullptr : &slots[dense];
+  return noDense == dense ? SlotRef{} : SlotRef{slots[dense]};
 }
 
 DimLink *Manifold::existingLink(const std::uint32_t dense,
@@ -476,14 +476,14 @@ std::string Manifold::textOf(const CellRef ref,
 }
 
 xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  return nullptr == cell ? xanadu::ValueKind::None
-                         : static_cast<xanadu::ValueKind>(cell->valueKind);
+  const auto cell = slot(ref);
+  return !cell ? xanadu::ValueKind::None
+               : static_cast<xanadu::ValueKind>(cell->valueKind);
 }
 
 std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = slot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Double)) {
     return std::nullopt;
   }
@@ -491,8 +491,8 @@ std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
 }
 
 std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = slot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Bool)) {
     return std::nullopt;
   }
@@ -501,8 +501,8 @@ std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
 
 std::optional<std::int64_t>
 Manifold::asInt64(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = slot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Int64)) {
     return std::nullopt;
   }
@@ -520,8 +520,8 @@ bool Manifold::equivalentTo(const Manifold &other) const {
     return false;
   }
   for (const auto &cell : slots) {
-    const auto *const theirs = other.slot(cell.birthOp);
-    if (nullptr == theirs || theirs->birthOp != cell.birthOp ||
+    const auto theirs = other.slot(cell.birthOp);
+    if (!theirs || theirs->birthOp != cell.birthOp ||
         theirs->lastOp != cell.lastOp ||
         !std::ranges::equal(contentOf(cell.birthOp),
                             other.contentOf(cell.birthOp)) ||

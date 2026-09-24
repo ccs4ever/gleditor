@@ -52,8 +52,8 @@ decodeRegistrySegment(const bencode::Value &value) {
   if (!segment.has_value()) {
     return std::nullopt;
   }
-  if (const auto *mime = value.find("mime");
-      nullptr != mime && mime->isString()) {
+  if (const auto mime = value.find("mime");
+      mime.has_value() && mime->isString()) {
     segment->mimeType = mime->asString();
   }
   return segment;
@@ -88,21 +88,20 @@ std::optional<Scroll> decodeRegistryScroll(const bencode::Value &value) {
   if (!value.isDict()) {
     return std::nullopt;
   }
-  const auto *salt     = value.find("salt");
-  const auto *segments = value.find("segments");
-  if (nullptr == salt || !salt->isString() || nullptr == segments ||
-      !segments->isList()) {
+  const auto salt     = value.find("salt");
+  const auto segments = value.find("segments");
+  if (!salt || !salt->isString() || !segments || !segments->isList()) {
     return std::nullopt;
   }
   Scroll scroll;
   scroll.salt = salt->asString();
-  if (const auto *key = value.find("key");
-      nullptr != key && key->isString() && key->asString().size() == 32) {
+  if (const auto key = value.find("key");
+      key.has_value() && key->isString() && key->asString().size() == 32) {
     std::copy(key->asString().begin(), key->asString().end(),
               scroll.publisher.bytes.begin());
   }
-  if (const auto *mime = value.find("mime");
-      nullptr != mime && mime->isString()) {
+  if (const auto mime = value.find("mime");
+      mime.has_value() && mime->isString()) {
     scroll.defaultMimeType = mime->asString();
   }
   for (const auto &item : segments->asList()) {
@@ -130,13 +129,12 @@ std::optional<PrimediaSpan> decodeLocalSpan(const bencode::Value &value) {
   if (!value.isDict()) {
     return std::nullopt;
   }
-  const auto *scroll = value.find("scroll");
-  const auto *start  = value.find("start");
-  const auto *length = value.find("len");
-  if (nullptr == scroll || !scroll->isInteger() || nullptr == start ||
-      !start->isInteger() || nullptr == length || !length->isInteger() ||
-      start->asInteger() < 0 || length->asInteger() < 0 ||
-      scroll->asInteger() < 0) {
+  const auto scroll = value.find("scroll");
+  const auto start  = value.find("start");
+  const auto length = value.find("len");
+  if (!scroll || !scroll->isInteger() || !start || !start->isInteger() ||
+      !length || !length->isInteger() || start->asInteger() < 0 ||
+      length->asInteger() < 0 || scroll->asInteger() < 0) {
     return std::nullopt;
   }
   return PrimediaSpan{.scroll = static_cast<ScrollId>(scroll->asInteger()),
@@ -191,28 +189,27 @@ std::optional<Link> decodeLink(const bencode::Value &value) {
   if (!value.isDict()) {
     return std::nullopt;
   }
-  const auto *id    = value.find("id");
-  const auto *type  = value.find("type");
-  const auto *left  = value.find("left");
-  const auto *right = value.find("right");
-  if (nullptr == id || !id->isInteger() || id->asInteger() < 0 ||
-      nullptr == type || !type->isString() || nullptr == left ||
-      nullptr == right) {
+  const auto id    = value.find("id");
+  const auto type  = value.find("type");
+  const auto left  = value.find("left");
+  const auto right = value.find("right");
+  if (!id || !id->isInteger() || id->asInteger() < 0 || !type ||
+      !type->isString() || !left || !right) {
     return std::nullopt;
   }
   Link link;
   link.id   = static_cast<std::uint64_t>(id->asInteger());
   link.type = linkTypeFromName(type->asString());
-  if (const auto *owner = value.find("owner");
-      nullptr != owner && owner->isString()) {
+  if (const auto owner = value.find("owner");
+      owner.has_value() && owner->isString()) {
     link.owner = owner->asString();
   }
-  if (const auto *curator = value.find("curator");
-      nullptr != curator && curator->isString()) {
+  if (const auto curator = value.find("curator");
+      curator.has_value() && curator->isString()) {
     link.curator = curator->asString();
   }
-  if (const auto *tier = value.find("tier");
-      nullptr != tier && tier->isString()) {
+  if (const auto tier = value.find("tier");
+      tier.has_value() && tier->isString()) {
     link.tier = prominenceTierFromName(tier->asString());
   }
   if (!decodeLocalSpans(*left, link.left) ||
@@ -244,8 +241,8 @@ decodeAnnotation(const bencode::Value &value) {
   if (!value.isDict()) {
     return std::nullopt;
   }
-  const auto *version = value.find("version");
-  if (nullptr == version || !version->isString()) {
+  const auto version = value.find("version");
+  if (!version || !version->isString()) {
     return std::nullopt;
   }
   MicroversionId id;
@@ -256,9 +253,9 @@ decodeAnnotation(const bencode::Value &value) {
   }
   VersionAnnotation annotation;
   const auto text = [&value](const char *const key) -> std::string {
-    const auto *found = value.find(key);
-    return nullptr != found && found->isString() ? found->asString()
-                                                 : std::string{};
+    const auto found = value.find(key);
+    return found.has_value() && found->isString() ? found->asString()
+                                                  : std::string{};
   };
   annotation.alias       = text("alias");
   annotation.description = text("description");
@@ -369,15 +366,15 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   }
 
   StoreTables tables;
-  if (const auto *document = decoded.find(keyDocumentId); nullptr != document) {
+  if (const auto document = decoded.find(keyDocumentId); document.has_value()) {
     if (!document->isString() ||
         !DocumentId::fromBytes(document->asString(), tables.documentId)) {
       throw StoreTablesUnreadable(path.string() +
                                   " has a document identity it cannot read");
     }
   }
-  if (const auto *scrolls = decoded.find(keyScrolls);
-      nullptr != scrolls && scrolls->isList()) {
+  if (const auto scrolls = decoded.find(keyScrolls);
+      scrolls.has_value() && scrolls->isList()) {
     for (const auto &item : scrolls->asList()) {
       auto scroll = decodeRegistryScroll(item);
       if (!scroll.has_value()) {
@@ -387,8 +384,8 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
       tables.scrolls.push_back(std::move(*scroll));
     }
   }
-  if (const auto *local = decoded.find(keyLocalSegments);
-      nullptr != local && local->isList()) {
+  if (const auto local = decoded.find(keyLocalSegments);
+      local.has_value() && local->isList()) {
     for (const auto &item : local->asList()) {
       auto segment = decodeRegistrySegment(item);
       if (!segment.has_value()) {
@@ -398,8 +395,8 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
       tables.localSegments.push_back(*segment);
     }
   }
-  if (const auto *links = decoded.find(keyLinks);
-      nullptr != links && links->isList()) {
+  if (const auto links = decoded.find(keyLinks);
+      links.has_value() && links->isList()) {
     for (const auto &item : links->asList()) {
       auto link = decodeLink(item);
       if (!link.has_value()) {
@@ -412,8 +409,8 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   // A name that will not parse is refused rather than skipped. These say which
   // state the author is looking at and what they called it, so dropping one
   // quietly reopens the document somewhere else with no account of why.
-  if (const auto *current = decoded.find(keyCurrent);
-      nullptr != current && current->isList()) {
+  if (const auto current = decoded.find(keyCurrent);
+      current.has_value() && current->isList()) {
     for (const auto &item : current->asList()) {
       if (!item.isString()) {
         throw StoreTablesUnreadable(
@@ -431,8 +428,8 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
       }
     }
   }
-  if (const auto *versions = decoded.find(keyVersions);
-      nullptr != versions && versions->isList()) {
+  if (const auto versions = decoded.find(keyVersions);
+      versions.has_value() && versions->isList()) {
     for (const auto &item : versions->asList()) {
       auto annotation = decodeAnnotation(item);
       if (!annotation.has_value()) {

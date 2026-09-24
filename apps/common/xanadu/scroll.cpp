@@ -9,18 +9,17 @@
 
 namespace xanadu {
 
-const ScrollSegment *Scroll::segmentAt(const std::uint64_t offset) const {
-  for (const auto &segment : segments) {
-    if (segment.covers(offset)) {
-      return &segment;
-    }
-    if (segment.at > offset) {
-      // Ordered, so nothing further along can cover it either: this offset
-      // falls in a gap between seals, or before the first one.
-      break;
-    }
+gleditor::cpp26::optional<const ScrollSegment &>
+Scroll::segmentAt(const std::uint64_t offset) const {
+  // Ordered and non-overlapping, so the first segment ending past this offset
+  // is the only one that could cover it: anything before it ended already,
+  // and anything after it starts later still.
+  const auto candidate =
+      std::ranges::upper_bound(segments, offset, {}, &ScrollSegment::end);
+  if (candidate == segments.end() || !candidate->covers(offset)) {
+    return gleditor::cpp26::nullopt;
   }
-  return nullptr;
+  return *candidate;
 }
 
 void Scroll::addSegment(ScrollSegment segment) {

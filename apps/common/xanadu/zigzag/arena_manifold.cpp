@@ -39,12 +39,12 @@ bool ArenaManifold::holdsOwn(const CellRef ref) const noexcept {
   return noDense != denseOf(ref);
 }
 
-const CellSlot *ArenaManifold::slot(const CellRef ref) const noexcept {
+SlotRef ArenaManifold::slot(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
   if (noDense != dense) {
-    return &slots_[dense];
+    return SlotRef{slots_[dense]};
   }
-  return nullptr == base_ ? nullptr : base_->slot(ref);
+  return nullptr == base_ ? SlotRef{} : base_->slot(ref);
 }
 
 DimLink *ArenaManifold::existingLink(const std::uint32_t dense,
@@ -154,25 +154,25 @@ ArenaManifold::cloneMaster(const CellRef ref,
 }
 
 xanadu::ValueKind ArenaManifold::valueKindOf(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  return nullptr == cell ? xanadu::ValueKind::None
-                         : static_cast<xanadu::ValueKind>(cell->valueKind);
+  const auto cell = slot(ref);
+  return !cell ? xanadu::ValueKind::None
+               : static_cast<xanadu::ValueKind>(cell->valueKind);
 }
 
 std::optional<double>
 ArenaManifold::asDouble(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell || xanadu::ValueKind::Double !=
-                             static_cast<xanadu::ValueKind>(cell->valueKind)) {
+  const auto cell = slot(ref);
+  if (!cell || xanadu::ValueKind::Double !=
+                   static_cast<xanadu::ValueKind>(cell->valueKind)) {
     return std::nullopt;
   }
   return std::bit_cast<double>(cell->valueBits);
 }
 
 std::optional<bool> ArenaManifold::asBool(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell || xanadu::ValueKind::Bool !=
-                             static_cast<xanadu::ValueKind>(cell->valueKind)) {
+  const auto cell = slot(ref);
+  if (!cell || xanadu::ValueKind::Bool !=
+                   static_cast<xanadu::ValueKind>(cell->valueKind)) {
     return std::nullopt;
   }
   return 0 != cell->valueBits;
@@ -180,9 +180,9 @@ std::optional<bool> ArenaManifold::asBool(const CellRef ref) const noexcept {
 
 std::optional<std::int64_t>
 ArenaManifold::asInt64(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell || xanadu::ValueKind::Int64 !=
-                             static_cast<xanadu::ValueKind>(cell->valueKind)) {
+  const auto cell = slot(ref);
+  if (!cell || xanadu::ValueKind::Int64 !=
+                   static_cast<xanadu::ValueKind>(cell->valueKind)) {
     return std::nullopt;
   }
   return std::bit_cast<std::int64_t>(cell->valueBits);
@@ -389,8 +389,8 @@ std::uint32_t ArenaManifold::shadow(const CellRef ref) {
   if (nullptr == base_) {
     return noDense;
   }
-  const auto *const theirs = base_->slot(ref);
-  if (nullptr == theirs) {
+  const auto theirs = base_->slot(ref);
+  if (!theirs) {
     return noDense;
   }
 

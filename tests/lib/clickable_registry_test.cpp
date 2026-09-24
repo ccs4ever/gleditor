@@ -85,8 +85,8 @@ TEST(ClickableRegistryTest, DynamicLabels) {
       "volume", 4U, [&] { return muted ? "🔈" : "🔊"; },
       [&] { return muted ? "Unmute" : "Mute"; }, [&] { muted = !muted; });
 
-  const auto *ctrl = registry.find(4U);
-  ASSERT_NE(nullptr, ctrl);
+  const auto ctrl = registry.find(4U);
+  ASSERT_TRUE((ctrl).has_value());
   EXPECT_EQ("🔊", ctrl->getLabel());
   EXPECT_EQ("Mute", ctrl->getA11yLabel());
 

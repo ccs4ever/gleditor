@@ -229,8 +229,8 @@ TEST(A11yPublisherTest, everySourceHangsOffOneWindow) {
   const auto tree = publisher.snapshot();
 
   ASSERT_FALSE(tree.empty());
-  const auto *const root = tree.find(tree.root());
-  ASSERT_NE(root, nullptr);
+  const auto root = tree.find(tree.root());
+  ASSERT_TRUE((root).has_value());
   EXPECT_EQ(root->role, a11y::Role::Window);
   EXPECT_EQ(root->label, "test");
   ASSERT_TRUE(root->bounds.has_value());

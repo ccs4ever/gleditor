@@ -112,9 +112,9 @@ TEST_F(DocGapTest, PagesCanHoldAGapBeforeTheFirstBuiltPage) {
   doc->makePages();
   buildPageDirectly(5);
 
-  EXPECT_EQ(doc->page(0), nullptr) << "page 0 should still be a gap";
-  EXPECT_EQ(doc->page(4), nullptr) << "page 4 should still be a gap";
-  ASSERT_NE(doc->page(5), nullptr) << "page 5 was built directly";
+  EXPECT_FALSE((doc->page(0)).has_value()) << "page 0 should still be a gap";
+  EXPECT_FALSE((doc->page(4)).has_value()) << "page 4 should still be a gap";
+  ASSERT_TRUE((doc->page(5)).has_value()) << "page 5 was built directly";
   EXPECT_EQ(doc->builtPageCount(), 1U)
       << "exactly one page was placed, regardless of its index";
 }
@@ -151,7 +151,7 @@ TEST_F(DocGapTest, ReflowFromsGuardFillsThePageItNeeds) {
   buildPageDirectly(0);
   buildPageDirectly(1);
   buildPageDirectly(3);
-  ASSERT_EQ(doc->page(2), nullptr) << "page 2 must still be a gap";
+  ASSERT_FALSE((doc->page(2)).has_value()) << "page 2 must still be a gap";
 
   // No text is actually changed here (delta 0): this isolates
   // ensurePagesBuiltThrough()'s guard from the rest of reflowFrom()'s own
@@ -161,7 +161,7 @@ TEST_F(DocGapTest, ReflowFromsGuardFillsThePageItNeeds) {
   callReflowFrom(2, page2Hit->startByte, 0, std::vector<int>{},
                  page2Hit->entry.byteLength);
 
-  EXPECT_NE(doc->page(2), nullptr)
+  EXPECT_TRUE((doc->page(2)).has_value())
       << "reflowFrom()'s guard should have filled page 2 before using it";
 }
 

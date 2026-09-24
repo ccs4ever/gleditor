@@ -72,7 +72,7 @@ struct TorrentDataTest : testing::Test {
   [[nodiscard]] Scroll scrollFor(const char *hash,
                                  const std::uint32_t index) const {
     const auto parsed = InfoHash::fromHex(hash);
-    const auto *meta  = source.metainfo(parsed);
+    const auto meta   = source.metainfo(parsed);
     const auto &file  = meta->files()[index];
     return Scroll::ofTorrentFile(parsed, index, file.path, file.offset,
                                  file.length);
@@ -333,8 +333,8 @@ struct PieceCachePerfTest : testing::Test {
     out << content;
     out.close();
 
-    hash             = source.add(made.file, dir.string());
-    const auto *meta = source.metainfo(hash);
+    hash            = source.add(made.file, dir.string());
+    const auto meta = source.metainfo(hash);
     scroll =
         Scroll::ofTorrentFile(hash, 0, meta->files()[0].path,
                               meta->files()[0].offset, meta->files()[0].length);

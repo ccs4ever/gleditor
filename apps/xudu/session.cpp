@@ -311,7 +311,7 @@ void Session::connectPeer(const InfoHash &hash, const std::string &host,
 
 bool Session::awaitMetadata(const InfoHash &hash,
                             const std::chrono::milliseconds timeout) {
-  if (nullptr != content().metainfo(hash)) {
+  if (content().metainfo(hash).has_value()) {
     return true;
   }
   return nullptr != swarmSource && swarmSource->waitForMetadata(hash, timeout);
@@ -373,7 +373,7 @@ InfoHash Session::addMagnet(const std::string &uri) {
   if (nullptr != swarmSource) {
     return swarmSource->addMagnet(uri, path(0) + "-content");
   }
-  if (nullptr == contentSource.metainfo(link.hash)) {
+  if (!contentSource.metainfo(link.hash)) {
     throw std::runtime_error(
         "magnet " + link.hash.hex() +
         " names content whose metadata is not available here. A magnet link "
@@ -389,8 +389,8 @@ MicroversionId
 Session::quoteTorrent(const MicroversionId &parent, const std::uint32_t at,
                       const InfoHash &hash, const std::uint32_t fileIndex,
                       const std::uint64_t offset, const std::uint64_t length) {
-  const auto *const meta = content().metainfo(hash);
-  if (nullptr == meta) {
+  const auto meta = content().metainfo(hash);
+  if (!meta) {
     throw std::runtime_error("no torrent " + hash.hex() +
                              " has been made available");
   }
@@ -580,7 +580,7 @@ std::string Session::publishDocument(const MicroversionId &version,
     if (piece.isLocal()) {
       continue;
     }
-    if (const auto *const scroll = st.scroll(piece.scroll); nullptr != scroll) {
+    if (const auto scroll = st.scroll(piece.scroll); scroll.has_value()) {
       const auto key = scrollKey(*scroll);
       if (!key.empty() &&
           std::ranges::find(record.quotes, key) == record.quotes.end()) {
@@ -2361,11 +2361,11 @@ void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const float anchorX = corner->x;
     const float anchorY = corner->y;
 
-    const auto *const pageObj = p.doc->page(pageIdx);
+    const auto pageObj = p.doc->page(pageIdx);
     // World-Y of this page's own origin, which callers use to convert a
     // page-pixel-space Y (already the same up-positive, centre-relative
     // convention as anchor->y) into world space: pageCenterY + Y*pixelsToWorld.
-    const float pageCenterY = (nullptr != pageObj)
+    const float pageCenterY = (pageObj.has_value())
                                   ? pageObj->getModel()[3][1]
                                   : (-100.0F * static_cast<float>(pageIdx));
 

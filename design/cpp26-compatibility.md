@@ -63,11 +63,13 @@ project has a measured use case.
 
 ## Implemented boundary
 
-`apps/common/cpp26.hpp` exposes `common::cpp26::function_ref` and `common::cpp26::optional`, plus
-optional's associated tags and helper. `apps/common/cpp26_inplace_vector.hpp` exposes
-`common::cpp26::inplace_vector` separately so the large container header is parsed only where it is
-used. They choose native facilities per feature-test macro and otherwise use the pinned headers.
-`function_ref` requires `__cpp_lib_function_ref >= 202603L`; `inplace_vector` requires
+`<gleditor/cpp26.hpp>` exposes `gleditor::cpp26::function_ref` and `gleditor::cpp26::optional`, plus
+optional's associated tags and helper. `<gleditor/cpp26_inplace_vector.hpp>` exposes
+`gleditor::cpp26::inplace_vector` separately so the large container header is parsed only where it
+is used. They choose native facilities per feature-test macro and otherwise use the pinned headers.
+Every choice is made once, in `<gleditor/cpp26_select.hpp>`, which defines a
+`GLEDITOR_CPP26_NATIVE_*` macro per facility; the facades read only those. `function_ref` requires
+`__cpp_lib_function_ref >= 202603L`; `inplace_vector` requires
 `__cpp_lib_inplace_vector >= 202603L`; optional references and range support require both
 `__cpp_lib_optional >= 202506L` and `__cpp_lib_optional_range_support >= 202406L`.
 `GLEDITOR_CPP26_FORCE_FALLBACK=1` exercises all four fallback branches. The Makefile records this
@@ -81,7 +83,7 @@ member to `std::span`. The GIF parser uses it for header and block bytes after i
 checks, preserving its `nullopt`/`false` results for truncated input. The helper is a function
 template with no new shared-library symbol or persistent representation.
 
-`apps/common/cpp26_concat.hpp` adds `common::cpp26::views::concat` for two homogeneous const spans.
+`<gleditor/cpp26_concat.hpp>` adds `gleditor::cpp26::views::concat` for two homogeneous const spans.
 It returns a lazy input range of `const T&` values. Native `std::views::concat` is selected by
 `__cpp_lib_ranges_concat >= 202403L`; the C++23 and forced-fallback branch joins an owned array of
 span descriptors. The two VQL direct-engine `!both` paths consume the view while their source
@@ -95,10 +97,20 @@ and function-pointer forms used here. Do not store `function_ref` beyond the cal
 lifetime. Updating the pin to a final-wording implementation is a prerequisite for exposing the
 constant-wrapper constructor as a common API.
 
-Keep these aliases inside application and engine code. A native and fallback specialization can have
-different layout and symbol names, so no public `gleditor` shared-library API or persistent format
-should contain one. `findCell`'s optional reference borrows from its input map; callers must keep
-the map alive and avoid invalidating the referenced cell.
+These facades live in the library and may appear in its public API (revised 2026-09-24; they were
+first confined to `apps/`). A native and a fallback specialization can differ in layout and symbol
+names, so everything compiled against one `libgleditor` must make the same choice. Inside this tree
+that holds by construction: the library and every program are built together with one compiler,
+standard library and flag set, and `GLEDITOR_CPP26_FORCE_FALLBACK` is part of the recorded build
+flags. For an installed library, `make install` preprocesses `cpp26_select.hpp` with the build's own
+flags and writes the resulting `GLEDITOR_CPP26_NATIVE_*` defines to `<gleditor/cpp26_config.hpp>`,
+which `cpp26_select.hpp` reads before probing. A program built later therefore follows the library's
+choices rather than its own standard library's: a fallback-built library stays fallback-compatible
+under any compiler, and a native-built library refuses to compile against a standard library lacking
+the facility rather than mismatching silently. The fallback headers (and their licences) install
+under `gleditor/cpp26-fallback/`, which `gleditor.pc` adds as `-isystem`. Persistent formats still
+must not contain these types. `findCell`'s optional reference borrows from its input map; callers
+must keep the map alive and avoid invalidating the referenced cell.
 
 The tether renderer normally samples 16 segments into 17 points once per frame. With a local
 allocation-counting probe using `glm::vec3`, construction of the former `std::vector` used one

@@ -855,8 +855,8 @@ void Doc::highlightsFor(const std::uint32_t selStart,
 
 std::optional<std::uint32_t>
 Doc::offsetForPick(const render::PickingTag &tag) const {
-  const auto *target = page(tag.pageIndex);
-  if (nullptr == target) {
+  const auto target = page(tag.pageIndex);
+  if (!target) {
     return std::nullopt;
   }
   // A glyph resolves through its cluster; anything else a page draws is its
@@ -1503,7 +1503,7 @@ bool Doc::isFullyLoaded() const {
     return false;
   }
   return std::ranges::all_of(wantedPageIndices(), [this](const auto index) {
-    return nullptr != page(index);
+    return page(index).has_value();
   });
 }
 
@@ -1598,7 +1598,7 @@ bool Doc::buildPendingPages(RenderState &state) {
   const auto buildBudget = buildBudgetForThisCall();
   const auto buildStart  = std::chrono::steady_clock::now();
   for (const auto trueIndex : wanted) {
-    if (nullptr != page(trueIndex)) {
+    if (page(trueIndex).has_value()) {
       continue; // Already built.
     }
     const auto hit = pageIndexFilade.findEntryByIndex(trueIndex);

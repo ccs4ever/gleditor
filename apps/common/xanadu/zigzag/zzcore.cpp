@@ -21,16 +21,16 @@ bool Diagnostics::mentions(const std::string_view needle) const {
   });
 }
 
-common::cpp26::optional<const Cell &>
+gleditor::cpp26::optional<const Cell &>
 findCell(const std::unordered_map<CellID, Cell> &cells, const CellID id) {
   const auto it = cells.find(id);
   if (it == cells.end()) {
-    return common::cpp26::nullopt;
+    return gleditor::cpp26::nullopt;
   }
   return it->second;
 }
 
-LinkPairs linksOn(const common::cpp26::optional<const Cell &> cell,
+LinkPairs linksOn(const gleditor::cpp26::optional<const Cell &> cell,
                   const std::string_view dimension) {
   if (!cell) {
     return LinkPairs{};

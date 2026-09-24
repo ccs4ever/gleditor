@@ -92,7 +92,7 @@ void PageBreakOverlay::drawFrame(gleditor::FrameContext &ctx) {
       if (!anchor) {
         continue;
       }
-      const auto *const p = doc->page(anchor->pageIndex);
+      const auto p = doc->page(anchor->pageIndex);
       if (!p) {
         continue;
       }

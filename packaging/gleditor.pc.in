@@ -7,4 +7,4 @@ Description: GPU-rendered text and document library: render devices, glyph cache
 Version: @VERSION@
 Requires: spdlog
 Libs: -L${libdir} -lgleditor
-Cflags: -I${includedir}
+Cflags: -I${includedir} -isystem ${includedir}/gleditor/cpp26-fallback

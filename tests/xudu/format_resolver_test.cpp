@@ -128,10 +128,10 @@ TEST(FormatResolverTest, CellResolutionAndFormatFlagsCaching) {
   FormatResolver resolver(store);
   resolver.updateManifoldFormatFlags(manifold);
 
-  const auto *slot1 = manifold.slot(c1);
-  const auto *slot2 = manifold.slot(c2);
-  ASSERT_NE(slot1, nullptr);
-  ASSERT_NE(slot2, nullptr);
+  const auto slot1 = manifold.slot(c1);
+  const auto slot2 = manifold.slot(c2);
+  ASSERT_TRUE(slot1.has_value());
+  ASSERT_TRUE(slot2.has_value());
 
   // Cell 1: Fast-path zero flags
   EXPECT_EQ(slot1->formatFlags, 0U);
@@ -173,8 +173,8 @@ TEST(FormatResolverTest, CrossDomainFormatInheritanceDocToCell) {
   FormatResolver resolver(store);
   resolver.updateManifoldFormatFlags(manifold);
 
-  const auto *slot = manifold.slot(cellRef);
-  ASSERT_NE(slot, nullptr);
+  const auto slot = manifold.slot(cellRef);
+  ASSERT_TRUE(slot.has_value());
 
   const auto italicBit = 1U
                          << static_cast<std::uint8_t>(FormatAttribute::Italic);

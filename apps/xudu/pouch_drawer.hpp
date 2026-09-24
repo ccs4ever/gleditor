@@ -79,13 +79,16 @@ public:
     return pouchManager_.addZone(std::move(config));
   }
   bool removeZone(std::string_view id) { return pouchManager_.removeZone(id); }
-  [[nodiscard]] DropZone *zoneById(std::string_view id) noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneById(std::string_view id) noexcept {
     return pouchManager_.zoneById(id);
   }
-  [[nodiscard]] const DropZone *zoneById(std::string_view id) const noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<const DropZone &>
+  zoneById(std::string_view id) const noexcept {
     return pouchManager_.zoneById(id);
   }
-  [[nodiscard]] DropZone *zoneAt(float screenX, float screenY) noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneAt(float screenX, float screenY) noexcept {
     return pouchManager_.zoneAt(screenX, screenY);
   }
   [[nodiscard]] const std::vector<std::unique_ptr<DropZone>> &

@@ -127,8 +127,7 @@ bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
   }
 
   // 3. Check Partitioned Drop Zones
-  DropZone *zone = zoneAt(screenX, screenY);
-  if (zone) {
+  if (const auto zone = zoneAt(screenX, screenY)) {
     pouchManager_.dropSpan(zone->id(), span, preview, sourceVer, docIndex,
                            charStart, charEnd);
     return true;
@@ -171,8 +170,7 @@ bool PouchDrawer::handleCellDrop(const PrimediaSpan &span,
   }
 
   // 3. Check Partitioned Drop Zones
-  DropZone *zone = zoneAt(screenX, screenY);
-  if (zone) {
+  if (const auto zone = zoneAt(screenX, screenY)) {
     pouchManager_.dropCell(zone->id(), span, preview, cellRef, rankCoord,
                            sliceIndex);
     return true;

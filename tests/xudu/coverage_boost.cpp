@@ -156,7 +156,7 @@ TEST(CoverageBoostTest, scrollMethodsAndEdgeCases) {
   Scroll single2 = Scroll::ofTorrentFile(ih, 0, "file.txt", 0, 500);
   EXPECT_TRUE(single1.sameContentAs(single2));
   EXPECT_EQ(single1.segmentAt(0)->length, 500U);
-  EXPECT_EQ(single1.segmentAt(600), nullptr);
+  EXPECT_FALSE((single1.segmentAt(600)).has_value());
 }
 
 TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {

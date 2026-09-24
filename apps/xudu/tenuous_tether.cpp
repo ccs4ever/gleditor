@@ -12,7 +12,7 @@
 
 #include <gleditor/render/types.hpp>
 
-#include "common/cpp26_inplace_vector.hpp"
+#include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace xudu {
 
@@ -70,7 +70,7 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
   // The default curve fits inline; larger user-configured curves retain the
   // dynamic path rather than changing their tessellation.
-  common::cpp26::inplace_vector<glm::vec3, defaultTessellationSegments + 1>
+  gleditor::cpp26::inplace_vector<glm::vec3, defaultTessellationSegments + 1>
       inlineCurve;
   std::vector<glm::vec3> largeCurve;
   std::span<glm::vec3> curve;

@@ -61,11 +61,11 @@ std::optional<PublishedHoleRecord> decodeHole(const bencode::Value &value) {
   if (!value.isDict()) {
     return std::nullopt;
   }
-  const auto *at     = value.find("at");
-  const auto *length = value.find("len");
-  const auto *reason = value.find("reason");
-  if (nullptr == at || !at->isInteger() || nullptr == length ||
-      !length->isInteger() || nullptr == reason || !reason->isString()) {
+  const auto at     = value.find("at");
+  const auto length = value.find("len");
+  const auto reason = value.find("reason");
+  if (!at || !at->isInteger() || !length || !length->isInteger() || !reason ||
+      !reason->isString()) {
     return std::nullopt;
   }
   if (at->asInteger() < 0 || length->asInteger() < 0) {
@@ -76,41 +76,40 @@ std::optional<PublishedHoleRecord> decodeHole(const bencode::Value &value) {
   hole.length = static_cast<std::uint64_t>(length->asInteger());
   hole.reason = holeReasonFromName(reason->asString());
 
-  if (const auto *comm = value.find("commitment");
-      nullptr != comm && comm->isString() && comm->asString().size() == 32) {
+  if (const auto comm = value.find("commitment");
+      comm.has_value() && comm->isString() && comm->asString().size() == 32) {
     std::copy(comm->asString().begin(), comm->asString().end(),
               hole.contentCommitment.begin());
   }
 
-  if (const auto *tcVal = value.find("transcopyright");
-      nullptr != tcVal && tcVal->isDict()) {
+  if (const auto tcVal = value.find("transcopyright");
+      tcVal.has_value() && tcVal->isDict()) {
     TranscopyrightDescriptor tc;
-    const auto *price  = tcVal->find("price");
-    const auto *flat   = tcVal->find("flat");
-    const auto *sym    = tcVal->find("sym");
-    const auto *memo   = tcVal->find("memo");
-    const auto *wallet = tcVal->find("wallet");
-    const auto *keyId  = tcVal->find("key_id");
-    const auto *nonce  = tcVal->find("nonce");
-    const auto *pubkey = tcVal->find("pubkey");
+    const auto price  = tcVal->find("price");
+    const auto flat   = tcVal->find("flat");
+    const auto sym    = tcVal->find("sym");
+    const auto memo   = tcVal->find("memo");
+    const auto wallet = tcVal->find("wallet");
+    const auto keyId  = tcVal->find("key_id");
+    const auto nonce  = tcVal->find("nonce");
+    const auto pubkey = tcVal->find("pubkey");
 
-    if (nullptr == price || !price->isInteger() || nullptr == keyId ||
-        !keyId->isString() || keyId->asString().size() != 32 ||
-        nullptr == nonce || !nonce->isString() ||
+    if (!price || !price->isInteger() || !keyId || !keyId->isString() ||
+        keyId->asString().size() != 32 || !nonce || !nonce->isString() ||
         nonce->asString().size() != 24) {
       return std::nullopt;
     }
     tc.priceAtomicUnits = static_cast<std::uint64_t>(price->asInteger());
-    if (nullptr != flat && flat->isInteger()) {
+    if (flat.has_value() && flat->isInteger()) {
       tc.flatFee = flat->asInteger() != 0;
     }
-    if (nullptr != sym && sym->isString()) {
+    if (sym.has_value() && sym->isString()) {
       tc.currencySymbol = sym->asString();
     }
-    if (nullptr != memo && memo->isString()) {
+    if (memo.has_value() && memo->isString()) {
       tc.licenseMemo = memo->asString();
     }
-    if (nullptr != wallet && wallet->isString()) {
+    if (wallet.has_value() && wallet->isString()) {
       auto fp = identity::Fingerprint::fromString(wallet->asString());
       if (fp.has_value()) {
         tc.authorWallet = *fp;
@@ -120,7 +119,7 @@ std::optional<PublishedHoleRecord> decodeHole(const bencode::Value &value) {
               tc.keyId.begin());
     std::copy(nonce->asString().begin(), nonce->asString().end(),
               tc.nonce.begin());
-    if (nullptr != pubkey && pubkey->isString() &&
+    if (pubkey.has_value() && pubkey->isString() &&
         pubkey->asString().size() == 32) {
       std::copy(pubkey->asString().begin(), pubkey->asString().end(),
                 tc.authorPubKey.bytes.begin());
@@ -155,17 +154,16 @@ bencode::Value encodeSegment(const ScrollSegment &segment) {
 }
 
 std::optional<ScrollSegment> decodeSegment(const bencode::Value &value) {
-  const auto *at      = value.find("at");
-  const auto *length  = value.find("len");
-  const auto *torrent = value.find("torrent");
-  const auto *stream  = value.find("stream");
-  const auto *file    = value.find("file");
-  const auto *path    = value.find("path");
-  if (nullptr == at || !at->isInteger() || nullptr == length ||
-      !length->isInteger() || nullptr == torrent || !torrent->isString() ||
-      torrent->asString().size() != 20 || nullptr == stream ||
-      !stream->isInteger() || nullptr == file || !file->isInteger() ||
-      nullptr == path || !path->isString()) {
+  const auto at      = value.find("at");
+  const auto length  = value.find("len");
+  const auto torrent = value.find("torrent");
+  const auto stream  = value.find("stream");
+  const auto file    = value.find("file");
+  const auto path    = value.find("path");
+  if (!at || !at->isInteger() || !length || !length->isInteger() || !torrent ||
+      !torrent->isString() || torrent->asString().size() != 20 || !stream ||
+      !stream->isInteger() || !file || !file->isInteger() || !path ||
+      !path->isString()) {
     return std::nullopt;
   }
   ScrollSegment segment;
@@ -176,11 +174,11 @@ std::optional<ScrollSegment> decodeSegment(const bencode::Value &value) {
   segment.path         = path->asString();
   std::copy(torrent->asString().begin(), torrent->asString().end(),
             segment.torrent.bytes.begin());
-  if (const auto *kindVal = value.find("kind");
-      nullptr != kindVal && kindVal->isInteger()) {
+  if (const auto kindVal = value.find("kind");
+      kindVal.has_value() && kindVal->isInteger()) {
     segment.kind = static_cast<SegmentKind>(kindVal->asInteger());
   }
-  if (const auto *holeVal = value.find("hole"); nullptr != holeVal) {
+  if (const auto holeVal = value.find("hole"); holeVal.has_value()) {
     segment.holeRecord = decodeHole(*holeVal);
   }
   return segment;

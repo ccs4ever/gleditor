@@ -489,8 +489,8 @@ TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
   const auto &decodedScroll = decoded->scrolls.at(scrollKey);
   ASSERT_EQ(decodedScroll.segments.size(), 3U);
 
-  const auto *withheldSeg = decodedScroll.segmentAt(1200);
-  ASSERT_NE(withheldSeg, nullptr);
+  const auto withheldSeg = decodedScroll.segmentAt(1200);
+  ASSERT_TRUE((withheldSeg).has_value());
   EXPECT_TRUE(withheldSeg->isWithheld());
   EXPECT_EQ(withheldSeg->kind, xudu::SegmentKind::Withheld);
   ASSERT_TRUE(withheldSeg->holeRecord.has_value());

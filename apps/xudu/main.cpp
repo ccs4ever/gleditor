@@ -548,7 +548,7 @@ public:
             }) |
             std::views::filter(
                 [](const auto &occurrences) { return !occurrences.empty(); });
-        if (const auto occs = xanadu::firstOf(shownEnds)) {
+        if (const auto occs = gleditor::firstOf(shownEnds)) {
           auto *const caret = renderer->editCaret();
           if (caret) {
             caret->placeAt(static_cast<std::uint32_t>(docIdx),
@@ -2275,8 +2275,8 @@ int main(const int argc, char **argv) {
           hash = session->addTorrent(file, root);
         }
         available.push_back(hash);
-        if (const auto *const meta = session->content().metainfo(hash);
-            nullptr != meta) {
+        if (const auto meta = session->content().metainfo(hash);
+            meta.has_value()) {
           quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
                              << " (" << meta->files().size() << " file(s), "
                              << meta->totalLength() << " bytes)\n";
@@ -2616,7 +2616,7 @@ int main(const int argc, char **argv) {
             views.transcludeSelection();
           } else if (id == "info:author") {
             std::string authorStr = "Local Sovereign Author";
-            if (const auto *ps = session->userPermascroll()) {
+            if (const auto ps = session->userPermascroll()) {
               authorStr = std::format("Author OpenPGP: {}",
                                       ps->config().masterIdentity.view());
             }
@@ -2912,8 +2912,7 @@ int main(const int argc, char **argv) {
       // 1. If kinetic tether is currently dragging:
       if (kineticTetherEngine.isDragging()) {
         if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
-          const bool hitZone =
-              (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+          const bool hitZone = pouchDrawer.zoneAt(screenX, screenY).has_value();
           const bool hitLeft =
               pouchDrawer.forge().containsLeft(screenX, screenY);
           const bool hitRight =
@@ -2943,7 +2942,7 @@ int main(const int argc, char **argv) {
       if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
         return false;
       }
-      const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+      const bool hitZone  = pouchDrawer.zoneAt(screenX, screenY).has_value();
       const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
       const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
 

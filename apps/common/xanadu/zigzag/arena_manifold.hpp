@@ -200,10 +200,10 @@ public:
     return ephemeralBit | dense;
   }
 
-  [[nodiscard]] const CellSlot *slot(CellRef ref) const noexcept;
+  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept;
 
   [[nodiscard]] bool contains(CellRef ref) const noexcept {
-    return nullptr != slot(ref);
+    return slot(ref).has_value();
   }
 
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }

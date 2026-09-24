@@ -863,10 +863,16 @@ std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &hash) const {
   return found->second.handle.status().all_time_download;
 }
 
-const Metainfo *SwarmContentSource::metainfo(const InfoHash &hash) const {
+gleditor::cpp26::optional<const Metainfo &>
+SwarmContentSource::metainfo(const InfoHash &hash) const {
   impl->pump();
   const auto found = impl->swarms.find(hash);
-  return found == impl->swarms.end() ? nullptr : found->second.meta.get();
+  // A swarm is registered before its metadata arrives, so a found entry can
+  // still have none.
+  if (found == impl->swarms.end() || !found->second.meta) {
+    return gleditor::cpp26::nullopt;
+  }
+  return *found->second.meta;
 }
 
 std::string SwarmContentSource::readStream(const InfoHash &hash,

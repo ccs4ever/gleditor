@@ -194,7 +194,7 @@ TEST_F(DocPageBudgetTest, ViewportPriorityBuildsTheTargetPageDirectly) {
   // Stage 3's P0 tier (design/priority-page-building.md): the page the
   // camera is looking at is built directly, rather than waiting behind
   // every page before it in document order.
-  EXPECT_NE(doc->page(*lateIndex), nullptr)
+  EXPECT_TRUE((doc->page(*lateIndex)).has_value())
       << "camera parked on a late page should have built it in the very "
          "next call";
   // And it did not simply build the whole backlog to get there -- otherwise
@@ -219,17 +219,17 @@ TEST_F(DocPageBudgetTest, PriorityOffsetComesRightAfterTheViewport) {
   doc->buildPendingPages(*state);
 
   // P0 (the viewport, near the start) wins...
-  EXPECT_NE(doc->page(0), nullptr)
+  EXPECT_TRUE((doc->page(0)).has_value())
       << "the viewport's own pages should still be built first";
   // ...P1 (the priority offset) comes right after...
-  EXPECT_NE(doc->page(*lateIndex), nullptr)
+  EXPECT_TRUE((doc->page(*lateIndex)).has_value())
       << "a priority offset far past build progress should have built its "
          "page directly, the same way the camera does";
   // ...and a page between the two -- neither in the viewport nor named by
   // any priority offset -- is still a gap. Otherwise this call simply built
   // everything, which would not distinguish reordering from finishing the
   // backlog.
-  EXPECT_EQ(doc->page(*lateIndex / 2), nullptr)
+  EXPECT_FALSE((doc->page(*lateIndex / 2)).has_value())
       << "a page between the viewport and the priority target should still "
          "be unbuilt";
 }
@@ -254,7 +254,7 @@ TEST_F(DocPageBudgetTest,
     // transiently cannot slip past a check made once at the end.
     const auto built = doc->builtPageCount();
     for (std::size_t i = 0; i < built; ++i) {
-      EXPECT_NE(doc->page(i), nullptr)
+      EXPECT_TRUE((doc->page(i)).has_value())
           << "page " << i
           << " should already be built -- pages were built out of order "
              "despite no priority offsets and a parked default camera";
@@ -382,7 +382,7 @@ TEST_F(DocPageBudgetTest, ABankedPageBuildsIdenticallyToOneNeverBanked) {
   // (makePages() already did the whole document) but not wanted, so this
   // call banks it rather than building it.
   doc->buildPendingPages(*state);
-  ASSERT_EQ(doc->page(*lateIndex), nullptr)
+  ASSERT_FALSE((doc->page(*lateIndex)).has_value())
       << "the late page should still be banked with no priority signal "
          "pointing at it -- this test needs it banked to exercise the "
          "re-shape-on-demand path";
@@ -394,7 +394,7 @@ TEST_F(DocPageBudgetTest, ABankedPageBuildsIdenticallyToOneNeverBanked) {
   while (!doc->isFullyLoaded()) {
     doc->buildPendingPages(*state);
   }
-  ASSERT_NE(doc->page(*lateIndex), nullptr)
+  ASSERT_TRUE((doc->page(*lateIndex)).has_value())
       << "a banked page should build once it becomes wanted";
 
   // Compare against the same page in a fresh document that wants it from
@@ -408,7 +408,7 @@ TEST_F(DocPageBudgetTest, ABankedPageBuildsIdenticallyToOneNeverBanked) {
   while (!eagerDoc->isFullyLoaded()) {
     eagerDoc->buildPendingPages(*state);
   }
-  ASSERT_NE(eagerDoc->page(*lateIndex), nullptr);
+  ASSERT_TRUE(eagerDoc->page(*lateIndex).has_value());
 
   const auto bankedAnchor = doc->anchorFor(lateOffset);
   const auto eagerAnchor  = eagerDoc->anchorFor(lateOffset);

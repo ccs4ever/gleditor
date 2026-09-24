@@ -33,9 +33,9 @@
 #include <span>
 
 #include "common/xanadu/ops.hpp"
-#include "common/xanadu/range_utils.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
+#include <gleditor/ranges.hpp>
 
 namespace zigzag {
 
@@ -317,8 +317,8 @@ template <CellGraph M>
 
 // -- ranges to optionals ------------------------------------------------------
 
-using xanadu::firstOf;
-using xanadu::lastOf;
+using gleditor::firstOf;
+using gleditor::lastOf;
 
 } // namespace zigzag
 

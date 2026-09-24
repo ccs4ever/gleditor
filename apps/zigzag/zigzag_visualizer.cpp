@@ -618,7 +618,7 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
     info.role = attribute("d.role").value_or(std::string{});
   }
   if (info.role.empty()) {
-    if (const auto *cold = engine_->coldOf(id)) {
+    if (const auto cold = engine_->coldOf(id)) {
       info.role = cold->type;
     }
   }
@@ -976,7 +976,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
   const xanadu::FormatResolver formatResolver(engine_->store());
   auto updateCellFormatting = [&](RenderStateCell &rc, const CellRef cr) {
-    const auto *slot = engine_->manifold().slot(cr);
+    const auto slot = engine_->manifold().slot(cr);
     if (__builtin_expect(slot && slot->formatFlags != 0, 0)) {
       auto res            = formatResolver.resolveCell(engine_->manifold(), cr);
       rc.decorated_ranges = std::move(res.decoratedRanges);
@@ -2071,7 +2071,7 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
         GLEDITOR_LOG_DEBUG("zigzag.action",
                            "action {} focus {} -> {} (visible={})", actionName,
                            accursed_cell_focus_, newFocus,
-                           engine_ && engine_->findCell(newFocus) != nullptr);
+                           engine_ && engine_->findCell(newFocus).has_value());
         if (oldView != current_view_) {
           dimension_bundle_ = DimensionBundle::Custom;
           rebuildActiveViewTopology();
@@ -2278,7 +2278,7 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
         GLEDITOR_LOG_DEBUG("zigzag.edit",
                            "duplicate focus {} -> {} (visible={})",
                            accursed_cell_focus_, newFocus,
-                           engine_ && engine_->findCell(newFocus) != nullptr);
+                           engine_ && engine_->findCell(newFocus).has_value());
         if (newFocus != zigzag::noCell && engine_ &&
             engine_->findCell(newFocus)) {
           navigateFocusTo(static_cast<CellID>(newFocus));

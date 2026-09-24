@@ -178,12 +178,12 @@ jobs:
       run: |
         make -j$(nproc) GLEDITOR_SDL=2 GLEDITOR_ENABLE_VULKAN=1 \
           GLEDITOR_CPP26_FORCE_FALLBACK=1 xudu gleditor_test xudu_test zigzag_test
-        ./build/gleditor_test \
-          --gtest_filter='Cpp26SpanTest.*:DecodeIndexGifTest.PeekGifSize*:DecodeIndexGifTest.IsAnimatedGif*'
-        ./build/xudu_test \
-          --gtest_filter='Cpp26CompatibilityTest.*:VortexStdLibTest.FunctionalModuleMapFilterFoldZip:VQLEngineTest.CreationSugarAndYieldModes:VQLEngineTest.LinkYieldBothPreservesContextsBeforeTargetClones'
-        ./build/zigzag_test \
-          --gtest_filter='ZzCoreTest.CellLookupBorrowsAndFormsZeroOrOneElementRange'
+        # Whole suites, not a filter: optional references now carry the
+        # manifold's slot lookup, page lookup and most engine finds, so the
+        # fallback path is exercised by nearly every test.
+        ./build/gleditor_test
+        ./build/xudu_test
+        ./build/zigzag_test
     # Render the sample document through each backend and require that they
     # agree. A backend that silently stops drawing still exits zero, so the
     # comparison -- not the exit code -- is what actually proves it works.

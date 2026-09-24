@@ -93,8 +93,8 @@ TEST(SatelloidPhysicsTest, CollinearConvergenceWithin300ms) {
     engine.step(dt);
   }
 
-  const auto *solved = engine.findCellBody(42);
-  ASSERT_NE(solved, nullptr);
+  const auto solved = engine.findCellBody(42);
+  ASSERT_TRUE((solved).has_value());
 
   // Satelloid must settle collinear to text line within +/- 0.5px
   EXPECT_NEAR(solved->position.y, expectedTargetY, 0.5F)
@@ -141,8 +141,8 @@ TEST(SatelloidPhysicsTest, TetherRestorationPullsBackToLattice) {
     engine.step(dt);
   }
 
-  const auto *restored = engine.findCellBody(99);
-  ASSERT_NE(restored, nullptr);
+  const auto restored = engine.findCellBody(99);
+  ASSERT_TRUE((restored).has_value());
 
   // Satelloid must return back towards background lattice coordinate
   EXPECT_NEAR(restored->position.z, nativePos.z, 0.5F);
@@ -278,8 +278,8 @@ TEST(SatelloidPhysicsTest, EquilibriumAnalyticalSolverAlignsSatelloids) {
   engine.addConstraint(link);
   engine.solveEquilibrium();
 
-  const auto *resCell = engine.findCellBody(77);
-  ASSERT_NE(resCell, nullptr);
+  const auto resCell = engine.findCellBody(77);
+  ASSERT_TRUE((resCell).has_value());
 
   // In equilibrium:
   // X = doc.x + 0.5 * (60 + 30) + 12 = 0 + 45 + 12 = 57.0px

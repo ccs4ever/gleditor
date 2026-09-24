@@ -18,6 +18,8 @@
 
 #include <glm/ext/vector_float3.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/universal_link_endpoint.hpp"
 
 namespace xanadu {
@@ -178,19 +180,21 @@ public:
 
   /// Retrieve specific body by target ID and kind (defaults to Document for
   /// backward compatibility).
-  [[nodiscard]] const TensionBody *
+  [[nodiscard]] gleditor::cpp26::optional<const TensionBody &>
   findBody(std::size_t targetId,
            LinkTargetKind kind = LinkTargetKind::Document) const;
-  [[nodiscard]] TensionBody *
+  [[nodiscard]] gleditor::cpp26::optional<TensionBody &>
   findBody(std::size_t targetId,
            LinkTargetKind kind = LinkTargetKind::Document);
 
   /// Retrieve specific body by cell reference.
-  [[nodiscard]] const TensionBody *findCellBody(zigzag::CellRef cellRef) const {
+  [[nodiscard]] gleditor::cpp26::optional<const TensionBody &>
+  findCellBody(zigzag::CellRef cellRef) const {
     return findBody(static_cast<std::size_t>(cellRef),
                     LinkTargetKind::ZigzagCell);
   }
-  [[nodiscard]] TensionBody *findCellBody(zigzag::CellRef cellRef) {
+  [[nodiscard]] gleditor::cpp26::optional<TensionBody &>
+  findCellBody(zigzag::CellRef cellRef) {
     return findBody(static_cast<std::size_t>(cellRef),
                     LinkTargetKind::ZigzagCell);
   }
