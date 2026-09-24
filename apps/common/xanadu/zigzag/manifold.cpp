@@ -785,4 +785,53 @@ bool Manifold::verifyAgainstFullRebuild(const xanadu::Store &store) const {
   return equivalentTo(store.rebuildManifoldFromIndex(foldedThrough_));
 }
 
+std::vector<Manifold::Edition> Manifold::editions() const {
+  if (nullptr == store_) {
+    return {};
+  }
+  const auto home = store_->homeCell();
+  if (noCell == home) {
+    return {};
+  }
+  const auto dimEditions = dimensionNamed("d.editions", *store_);
+  if (noCell == dimEditions) {
+    return {};
+  }
+  const auto dimEditionOf = dimensionNamed("d.edition-of", *store_);
+  if (noCell == dimEditionOf) {
+    return {};
+  }
+
+  std::vector<Edition> result;
+  walkRank(home, dimEditions, DimVector::POS, [&](const CellRef cell) {
+    if (cell == home) {
+      return true;
+    }
+    auto handle = linked(cell, dimEditionOf, DimVector::POS);
+    if (noCell == handle) {
+      handle = linked(cell, dimEditionOf, DimVector::NEG);
+    }
+    const auto target = handleTarget(handle);
+    result.push_back(Edition{
+        .cell     = cell,
+        .name     = textOf(cell, *store_),
+        .handle   = handle,
+        .targetOp = target.value_or(0),
+    });
+    return true;
+  });
+
+  return result;
+}
+
+std::optional<Manifold::Edition>
+Manifold::editionNamed(const std::string_view name) const {
+  for (auto &ed : editions()) {
+    if (ed.name == name) {
+      return ed;
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace zigzag

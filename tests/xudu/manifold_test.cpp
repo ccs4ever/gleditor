@@ -1119,3 +1119,121 @@ TEST(ManifoldTest, anEphemeralTargetIsRefused) {
   EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 999999)),
                std::invalid_argument);
 }
+
+TEST(ManifoldTest, anEditionSurvivesBeingRepointed) {
+  Slice slice;
+  const auto v1 = slice.store.insert(slice.at, 0, "Version 1 text");
+  const auto v2 = slice.store.insert(v1, 0, "Version 2 text");
+  slice.at      = v2;
+
+  // Mint "French" pointing to v1
+  slice.at        = slice.store.designateEdition(slice.at, "French", v1);
+  const auto eds1 = slice.store.editions(slice.at);
+  ASSERT_EQ(eds1.size(), 1U);
+  EXPECT_EQ(eds1[0].name, "French");
+  EXPECT_EQ(eds1[0].targetVersion, v1);
+  const auto frenchCell = eds1[0].cell;
+  EXPECT_NE(frenchCell, zigzag::noCell);
+
+  // Repoint "French" pointing to v2
+  slice.at        = slice.store.designateEdition(slice.at, "French", v2);
+  const auto eds2 = slice.store.editions(slice.at);
+  ASSERT_EQ(eds2.size(), 1U);
+  EXPECT_EQ(eds2[0].name, "French");
+  EXPECT_EQ(eds2[0].targetVersion, v2);
+  // The edition's identity is the cell itself: it persists across repointing
+  EXPECT_EQ(eds2[0].cell, frenchCell);
+
+  // In the folded manifold:
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto mEds     = manifold.editions();
+  ASSERT_EQ(mEds.size(), 1U);
+  EXPECT_EQ(mEds[0].cell, frenchCell);
+  EXPECT_EQ(mEds[0].name, "French");
+  EXPECT_EQ(mEds[0].targetOp, slice.store.segmentedOps().indexOf(v2));
+
+  // Assert Manifold::historyOf shows both designations
+  const auto hist = manifold.historyOf(frenchCell);
+  EXPECT_GE(hist.size(), 2U);
+  EXPECT_EQ(hist.front(), frenchCell);
+}
+
+TEST(ManifoldTest, twoBranchesCarryTheirOwnEditions) {
+  Slice slice;
+  const auto v0    = slice.store.insert(slice.at, 0, "Base document");
+  slice.at         = slice.store.designateEdition(v0, "French", v0);
+  const auto vBase = slice.at;
+
+  // Branch A
+  const auto vA1      = slice.store.insert(vBase, 0, "Branch A changes ");
+  const auto vBranchA = slice.store.designateEdition(vA1, "French", vA1);
+
+  // Branch B
+  const auto vB1 = slice.store.insert(vBase, 0, "Branch B changes ");
+  // In Branch B, French was never repointed. It should still point to v0.
+
+  const auto edA = slice.store.editionNamed(vBranchA, "French");
+  ASSERT_TRUE(edA.has_value());
+  EXPECT_EQ(edA->targetVersion, vA1);
+
+  const auto edB = slice.store.editionNamed(vB1, "French");
+  ASSERT_TRUE(edB.has_value());
+  EXPECT_EQ(edB->targetVersion, v0);
+
+  // In folded manifolds
+  const auto manifoldA = slice.store.rebuildManifold(vBranchA);
+  const auto mEdA      = manifoldA.editionNamed("French");
+  ASSERT_TRUE(mEdA.has_value());
+  EXPECT_EQ(mEdA->targetOp, slice.store.segmentedOps().indexOf(vA1));
+
+  const auto manifoldB = slice.store.rebuildManifold(vB1);
+  const auto mEdB      = manifoldB.editionNamed("French");
+  ASSERT_TRUE(mEdB.has_value());
+  EXPECT_EQ(mEdB->targetOp, slice.store.segmentedOps().indexOf(v0));
+}
+
+TEST(ManifoldTest, theEditionsRankAndTheTableCacheAgree) {
+  Slice slice;
+  const auto v1 = slice.store.insert(slice.at, 0, "French text");
+  const auto v2 = slice.store.insert(v1, 0, "English text");
+  const auto v3 = slice.store.insert(v2, 0, "German text");
+  slice.at      = v3;
+
+  slice.at = slice.store.designateEdition(slice.at, "French", v1);
+  slice.at = slice.store.designateEdition(slice.at, "English", v2);
+  slice.at = slice.store.designateEdition(slice.at, "German", v3);
+
+  // Rebuilding the manifold reconciles currentVersions cache to rank order
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto expected = std::vector<MicroversionId>{v1, v2, v3};
+  EXPECT_EQ(slice.store.currentVersions(), expected);
+
+  // If table cache is diverged or tampered with:
+  slice.store.setCurrentVersions({v3, v1});
+  EXPECT_NE(slice.store.currentVersions(), expected);
+
+  // A fold enforces the rank over the cache
+  const auto foldAfterDivergence = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(slice.store.currentVersions(), expected);
+}
+
+TEST(ManifoldTest, aVersionAnnotationBecomesAHandleCell) {
+  Slice slice;
+  const auto v1 = slice.store.insert(slice.at, 0, "Release content");
+  slice.at      = slice.store.designateEdition(v1, "v1.0-release", v1);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto ed       = manifold.editionNamed("v1.0-release");
+  ASSERT_TRUE(ed.has_value());
+  EXPECT_NE(ed->handle, zigzag::noCell);
+
+  // The handle is a ValueKind::OpHandle cell pointing to v1's operation
+  EXPECT_EQ(manifold.valueKindOf(ed->handle), ValueKind::OpHandle);
+  const auto expectedOp = slice.store.segmentedOps().indexOf(v1);
+  EXPECT_EQ(manifold.handleTarget(ed->handle),
+            std::optional<CellRef>{expectedOp});
+
+  // Querying aliases and display names resolves through the edition
+  EXPECT_EQ(slice.store.resolveAlias("v1.0-release"), v1);
+  EXPECT_EQ(slice.store.displayName(v1), "v1.0-release");
+}

@@ -275,6 +275,7 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
   folded.compact();
+  const_cast<Store *>(this)->syncCurrentVersionsFromRank(folded);
   return folded;
 }
 
@@ -1303,6 +1304,152 @@ void Store::removeCurrentVersion(const MicroversionId &version) {
   std::erase(currentVersions_, version);
 }
 
+MicroversionId Store::designateEdition(const MicroversionId &parent,
+                                       const std::string_view name,
+                                       const MicroversionId &target,
+                                       const zigzag::Manifold *const known) {
+  const auto targetOp = opsSpool.indexOf(target);
+  if (0 == targetOp) {
+    throw std::invalid_argument("target version does not exist in store");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // 1. Ensure dimension d.editions exists
+  auto dimEditions = currentFold->dimensionNamed("d.editions", *this);
+  if (zigzag::noCell == dimEditions) {
+    const auto minted = makeDimension(curHead, "d.editions", currentFold);
+    curHead           = minted.version;
+    dimEditions       = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  // 2. Ensure dimension d.edition-of exists
+  auto dimEditionOf = currentFold->dimensionNamed("d.edition-of", *this);
+  if (zigzag::noCell == dimEditionOf) {
+    const auto minted = makeDimension(curHead, "d.edition-of", currentFold);
+    curHead           = minted.version;
+    dimEditionOf      = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  // 3. Mint the handle cell for targetOp
+  curHead               = makeOpHandle(curHead, targetOp);
+  const auto handleCell = cellRefOf(curHead);
+  folded                = rebuildManifold(curHead);
+  currentFold           = &folded.value();
+
+  // 4. Check if an edition cell named `name` already exists on d.editions rank
+  zigzag::CellRef existingEditionCell = zigzag::noCell;
+  auto tail                           = homeCell_;
+
+  currentFold->walkRank(homeCell_, dimEditions, zigzag::DimVector::POS,
+                        [&](const zigzag::CellRef cell) {
+                          if (cell != homeCell_) {
+                            tail = cell;
+                            if (currentFold->textOf(cell, *this) == name) {
+                              existingEditionCell = cell;
+                            }
+                          }
+                          return true;
+                        });
+
+  if (zigzag::noCell != existingEditionCell) {
+    // Repoint existing edition cell to the new handle
+    curHead = setLink(curHead, existingEditionCell, dimEditionOf,
+                      zigzag::DimVector::POS, handleCell, currentFold);
+  } else {
+    // Mint new edition cell with name
+    curHead                = makeCell(curHead, name);
+    const auto editionCell = cellRefOf(curHead);
+    folded                 = rebuildManifold(curHead);
+    currentFold            = &folded.value();
+
+    // Link onto tail of d.editions rank
+    curHead     = setLink(curHead, tail, dimEditions, zigzag::DimVector::POS,
+                          editionCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    // Link editionCell to handleCell on d.edition-of
+    curHead = setLink(curHead, editionCell, dimEditionOf,
+                      zigzag::DimVector::POS, handleCell, currentFold);
+  }
+
+  // Reconcile currentVersions_ cache and legacy aliasIndex_
+  folded = rebuildManifold(curHead);
+  syncCurrentVersionsFromRank(folded.value());
+  aliasIndex_[std::string(name)]    = target;
+  versionAnnotations_[target].alias = std::string(name);
+
+  return curHead;
+}
+
+void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
+  const auto eds = manifold.editions();
+  if (eds.empty()) {
+    return;
+  }
+  std::vector<MicroversionId> heads;
+  heads.reserve(eds.size());
+  for (const auto &ed : eds) {
+    if (ed.targetOp > 0) {
+      const auto id = opsSpool.idOf(ed.targetOp);
+      if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
+        heads.push_back(id);
+      }
+    }
+  }
+  if (!heads.empty()) {
+    currentVersions_ = std::move(heads);
+  }
+}
+
+std::vector<Store::EditionInfo>
+Store::editions(const MicroversionId &version) const {
+  const auto manifold = rebuildManifold(version);
+  const auto eds      = manifold.editions();
+  std::vector<EditionInfo> result;
+  result.reserve(eds.size());
+  for (const auto &ed : eds) {
+    result.push_back(EditionInfo{
+        .cell     = ed.cell,
+        .name     = ed.name,
+        .handle   = ed.handle,
+        .targetOp = ed.targetOp,
+        .targetVersion =
+            ed.targetOp > 0 ? opsSpool.idOf(ed.targetOp) : MicroversionId{},
+    });
+  }
+  return result;
+}
+
+std::optional<Store::EditionInfo>
+Store::editionNamed(const MicroversionId &version,
+                    const std::string_view name) const {
+  for (const auto &ed : editions(version)) {
+    if (ed.name == name) {
+      return ed;
+    }
+  }
+  return std::nullopt;
+}
+
 void Store::setVersionAnnotation(const MicroversionId &id,
                                  VersionAnnotation annotation) {
   if (!annotation.alias.empty()) {
@@ -1326,12 +1473,24 @@ Store::resolveAlias(std::string_view alias) const {
   if (it != aliasIndex_.end()) {
     return it->second;
   }
+  if (!currentVersions_.empty()) {
+    if (const auto ed = editionNamed(currentVersions_.front(), alias); ed) {
+      return ed->targetVersion;
+    }
+  }
   return std::nullopt;
 }
 
 std::string Store::displayName(const MicroversionId &id) const {
   if (const auto ann = versionAnnotation(id); ann && !ann->alias.empty()) {
     return ann->alias;
+  }
+  if (!currentVersions_.empty()) {
+    for (const auto &ed : editions(currentVersions_.front())) {
+      if (ed.targetVersion == id && !ed.name.empty()) {
+        return ed.name;
+      }
+    }
   }
   return id.str();
 }

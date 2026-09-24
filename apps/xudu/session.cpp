@@ -845,7 +845,6 @@ void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
-    syncCurrentVersions(index);
     stores[index].store->save(stores[index].path);
   }
 }

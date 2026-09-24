@@ -354,6 +354,27 @@ public:
   [[nodiscard]] std::vector<xanadu::PrimediaSpan>
   contentAsOf(CellRef cell, std::uint32_t op) const;
 
+  struct Edition {
+    CellRef cell{noCell};
+    std::string name;
+    CellRef handle{noCell};
+    std::uint32_t targetOp{0};
+  };
+
+  /**
+   * @brief All editions designated in this folded state on d.editions,
+   *        in rank order.
+   *
+   * Empty for an unattached manifold, or when d.editions has no cells.
+   */
+  [[nodiscard]] std::vector<Edition> editions() const;
+
+  /**
+   * @brief Lookup an edition by name in this folded state.
+   */
+  [[nodiscard]] std::optional<Edition>
+  editionNamed(std::string_view name) const;
+
   /**
    * @brief Collect all cells within @p radius hops from @p start along any
    *        dimension link.

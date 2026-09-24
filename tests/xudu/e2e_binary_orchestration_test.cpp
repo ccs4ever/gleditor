@@ -65,6 +65,7 @@ using xudu::scrollKey;
 using xudu::ScrollSegment;
 using xudu::signMutableItem;
 using xudu::Store;
+using xudu::ValueKind;
 
 // Source 3 vector: 84 bytes "Epilogue..."
 inline const std::string source3Torrent = xudu_test::fromHex(
@@ -1678,6 +1679,99 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
       << "expected two differently-coloured images plus surrounding text "
          "to produce a reasonably varied image, not a blank or single-"
          "image page";
+}
+
+TEST(E2EBinaryOrchestrationTest, savingADocumentDoesNotRedesignateItsEditions) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot = fs::current_path() / "build" / "editions_save_test";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto storePath = testRoot / "document.xanadoc";
+  const auto perma     = permascrollAt(testRoot / "permascroll");
+  Store store(perma);
+  const auto v1 = store.insert(MicroversionId{}, 0, "English version text.\n");
+  const auto v2 = store.insert(v1, 0, "Texte en français.\n");
+  const auto v3 = store.insert(v2, 0, "Scratch draft for comparison.\n");
+  const auto vEd1 = store.designateEdition(v3, "English", v1);
+  const auto vEd2 = store.designateEdition(vEd1, "French", v2);
+  store.save(storePath.string());
+
+  const auto expected = std::vector<MicroversionId>{v1, v2};
+  EXPECT_EQ(store.currentVersions(), expected);
+
+  // Run xudu opening 3 views: v1 (English), alongside v2 (French), and
+  // alongside v3 (scratch draft). Prior to decoupling Session::save from the
+  // viewport, saving on exit would overwrite currentVersions with all three
+  // visible views {v1, v2, v3}.
+  const auto ppmPath = screenshotDir / "editions_save_views.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --strict-diagnostics" +
+      " --version-id " + v1.str() + " --alongside " + v2.str() +
+      " --background " + v3.str() + " --screenshot " + ppmPath.string() + " " +
+      storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "xudu run failed: " << res.output;
+
+  // Reload store from disk and assert designations were NOT overwritten by
+  // viewport
+  Store reloaded(perma);
+  reloaded.load(storePath.string());
+  EXPECT_EQ(reloaded.currentVersions(), expected);
+  const auto eds = reloaded.editions(reloaded.latest());
+  ASSERT_EQ(eds.size(), 2U);
+  EXPECT_EQ(eds[0].name, "English");
+  EXPECT_EQ(eds[0].targetVersion, v1);
+  EXPECT_EQ(eds[1].name, "French");
+  EXPECT_EQ(eds[1].targetVersion, v2);
+}
+
+TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot      = fs::current_path() / "build" / "cli_alias_test";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto storePath = testRoot / "doc_alias.xanadoc";
+  const auto perma     = permascrollAt(testRoot / "permascroll");
+  Store store(perma);
+  const auto v1 = store.insert(MicroversionId{}, 0, "Base initial text.\n");
+  store.save(storePath.string());
+
+  // Invoke xudu with --alias 1:original-release
+  const auto ppmPath = screenshotDir / "cli_alias.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --strict-diagnostics" +
+      " --alias " + v1.str() + ":original-release" + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "xudu --alias run failed: " << res.output;
+
+  // Reload store and assert that original-release is an edition cell linked on
+  // d.editions
+  Store reloaded(permascrollAt(testRoot / "permascroll"));
+  reloaded.load(storePath.string());
+  const auto manifold = reloaded.rebuildManifold(reloaded.latest());
+  const auto ed       = manifold.editionNamed("original-release");
+  ASSERT_TRUE(ed.has_value());
+  EXPECT_NE(ed->handle, zigzag::noCell);
+  EXPECT_EQ(manifold.valueKindOf(ed->handle), ValueKind::OpHandle);
+  EXPECT_EQ(
+      manifold.handleTarget(ed->handle),
+      std::optional<zigzag::CellRef>{reloaded.segmentedOps().indexOf(v1)});
+  EXPECT_EQ(reloaded.resolveAlias("original-release"), v1);
 }
 
 } // namespace

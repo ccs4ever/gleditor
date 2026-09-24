@@ -638,6 +638,36 @@ public:
   /// Remove a version from the set of current versions.
   void removeCurrentVersion(const MicroversionId &version);
 
+  // -- Editions Rank (§5.3) -------------------------------------------------
+
+  struct EditionInfo {
+    zigzag::CellRef cell{zigzag::noCell};
+    std::string name;
+    zigzag::CellRef handle{zigzag::noCell};
+    std::uint32_t targetOp{0};
+    MicroversionId targetVersion;
+  };
+
+  /**
+   * @brief Designate an edition on the d.editions rank pointing to @p target.
+   *
+   * If an edition named @p name already exists on d.editions, repoints it
+   * by setting its d.edition-of link to a new OpHandle for @p target.
+   * If it does not exist, mints the edition cell and links it onto the rank.
+   */
+  MicroversionId designateEdition(const MicroversionId &parent,
+                                  std::string_view name,
+                                  const MicroversionId &target,
+                                  const zigzag::Manifold *known = nullptr);
+
+  /// All editions designated in @p version, in rank order.
+  [[nodiscard]] std::vector<EditionInfo>
+  editions(const MicroversionId &version) const;
+
+  /// Look up an edition by name in @p version.
+  [[nodiscard]] std::optional<EditionInfo>
+  editionNamed(const MicroversionId &version, std::string_view name) const;
+
   // -- Version Annotations & Aliases ----------------------------------------
 
   /// Record an alias, description, or semantic tag for @p id.
@@ -964,6 +994,8 @@ private:
   /// and re-derived by indexGenesisCells() on load.
   zigzag::CellRef homeCell_{zigzag::noCell};
   zigzag::DimRef dimsDimension_{zigzag::noCell};
+
+  void syncCurrentVersionsFromRank(const zigzag::Manifold &manifold);
 
   mutable std::vector<MicroversionId> currentVersions_;
   std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
