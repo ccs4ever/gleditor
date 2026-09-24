@@ -1,7 +1,9 @@
-#include "ops.hpp"
-
 #include <algorithm>
+#include <span>
 #include <string>
+
+#include "common/cpp26_concat.hpp"
+#include "ops.hpp"
 
 namespace xanadu {
 
@@ -134,7 +136,10 @@ bool Link::touches(const PrimediaSpan &span) const {
   const auto meets = [&span](const PrimediaSpan &end) {
     return !end.intersect(span).empty();
   };
-  return std::ranges::any_of(left, meets) || std::ranges::any_of(right, meets);
+  return std::ranges::any_of(
+      common::cpp26::views::concat(std::span<const PrimediaSpan>{left},
+                                   std::span<const PrimediaSpan>{right}),
+      meets);
 }
 
 } // namespace xanadu

@@ -163,6 +163,25 @@ TEST(RankWalkTest, NeighboursAndFilters) {
   EXPECT_EQ(named("absent"), std::nullopt);
 }
 
+TEST(RankWalkTest, SlotOfAndFindSlotProvideMonadicBorrowedAccess) {
+  Line line;
+  const auto s1 = slotOf(line.arena, line.c1);
+  ASSERT_TRUE(s1.has_value());
+  EXPECT_EQ(s1->birthOp, line.c1);
+
+  EXPECT_FALSE(slotOf(line.arena, noCell).has_value());
+  EXPECT_FALSE(slotOf(line.arena, line.c3 + 9999).has_value());
+
+  const auto directFind = line.arena.findSlot(line.c2);
+  ASSERT_TRUE(directFind.has_value());
+  EXPECT_EQ(directFind->birthOp, line.c2);
+
+  const auto birth = slotOf(line.arena, line.c1)
+                         .transform(&CellSlot::birthOp)
+                         .value_or(noCell);
+  EXPECT_EQ(birth, line.c1);
+}
+
 TEST(RankWalkTest, CopyOnWriteArenaWalksTheWholeBase) {
   xanadu::Store store;
   auto at = store.sliceGenesis(xanadu::MicroversionId{});

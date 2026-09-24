@@ -59,6 +59,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "common/cpp26.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
@@ -224,6 +225,8 @@ public:
   }
 
   [[nodiscard]] const CellSlot *slot(CellRef ref) const noexcept;
+  [[nodiscard]] common::cpp26::optional<const CellSlot &>
+  findSlot(CellRef ref) const noexcept;
 
   [[nodiscard]] bool contains(CellRef ref) const noexcept {
     return nullptr != slot(ref);

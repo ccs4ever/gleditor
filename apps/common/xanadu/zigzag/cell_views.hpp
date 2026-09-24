@@ -32,6 +32,7 @@
 #include <ranges>
 #include <span>
 
+#include "common/cpp26.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/range_utils.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -54,7 +55,17 @@ concept CellGraph = requires(const M &m, CellRef c, DimRef d, DimVector v) {
   { m.cellCount() } noexcept -> std::convertible_to<std::size_t>;
   { m.traversalBound() } noexcept -> std::convertible_to<std::size_t>;
   { m.contains(c) } noexcept -> std::same_as<bool>;
+  { m.slot(c) } noexcept -> std::same_as<const CellSlot *>;
 };
+
+/// The slot for @p ref as a C++26 borrowed optional reference, or nullopt.
+template <CellGraph M>
+[[nodiscard]] constexpr common::cpp26::optional<const CellSlot &>
+slotOf(const M &m, const CellRef ref) noexcept {
+  const auto *const s = m.slot(ref);
+  return nullptr == s ? common::cpp26::nullopt
+                      : common::cpp26::optional<const CellSlot &>(*s);
+}
 
 /// A sentinel-encoded CellRef as an optional: noCell becomes nullopt.
 [[nodiscard]] constexpr std::optional<CellRef> present(const CellRef ref) {

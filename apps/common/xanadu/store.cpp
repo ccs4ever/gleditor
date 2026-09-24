@@ -1320,10 +1320,9 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link,
     std::uint64_t at    = link.left.front().length;
     folded              = rebuildManifold(curHead);
     currentFold         = &folded.value();
-    for (std::size_t i = 1; i < link.left.size(); ++i) {
-      curHead =
-          spliceCellSpan(curHead, fromCell, at, 0, link.left[i], currentFold);
-      at += link.left[i].length;
+    for (const auto &span : link.left | std::views::drop(1)) {
+      curHead = spliceCellSpan(curHead, fromCell, at, 0, span, currentFold);
+      at += span.length;
       folded      = rebuildManifold(curHead);
       currentFold = &folded.value();
     }
@@ -1340,10 +1339,9 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link,
     std::uint64_t at  = link.right.front().length;
     folded            = rebuildManifold(curHead);
     currentFold       = &folded.value();
-    for (std::size_t i = 1; i < link.right.size(); ++i) {
-      curHead =
-          spliceCellSpan(curHead, toCell, at, 0, link.right[i], currentFold);
-      at += link.right[i].length;
+    for (const auto &span : link.right | std::views::drop(1)) {
+      curHead = spliceCellSpan(curHead, toCell, at, 0, span, currentFold);
+      at += span.length;
       folded      = rebuildManifold(curHead);
       currentFold = &folded.value();
     }
@@ -1353,53 +1351,26 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link,
     currentFold = &folded.value();
   }
 
-  // Link type (d.linktype)
-  {
-    curHead             = makeCell(curHead, linkTypeName(link.type));
-    const auto typeCell = cellRefOf(curHead);
+  // Link properties (d.linktype, d.linktier, d.owner, d.curator)
+  auto linkProperty = [&](const std::string_view prop,
+                          const zigzag::DimRef dim) {
+    if (prop.empty()) {
+      return;
+    }
+    curHead             = makeCell(curHead, prop);
+    const auto propCell = cellRefOf(curHead);
     folded              = rebuildManifold(curHead);
     currentFold         = &folded.value();
-    curHead     = setLink(curHead, linkCell, dimType, zigzag::DimVector::POS,
-                          typeCell, currentFold);
-    folded      = rebuildManifold(curHead);
+    curHead = setLink(curHead, linkCell, dim, zigzag::DimVector::POS, propCell,
+                      currentFold);
+    folded  = rebuildManifold(curHead);
     currentFold = &folded.value();
-  }
+  };
 
-  // Link tier (d.linktier)
-  {
-    curHead             = makeCell(curHead, prominenceTierName(link.tier));
-    const auto tierCell = cellRefOf(curHead);
-    folded              = rebuildManifold(curHead);
-    currentFold         = &folded.value();
-    curHead     = setLink(curHead, linkCell, dimTier, zigzag::DimVector::POS,
-                          tierCell, currentFold);
-    folded      = rebuildManifold(curHead);
-    currentFold = &folded.value();
-  }
-
-  // Owner (d.owner)
-  if (!link.owner.empty()) {
-    curHead              = makeCell(curHead, link.owner);
-    const auto ownerCell = cellRefOf(curHead);
-    folded               = rebuildManifold(curHead);
-    currentFold          = &folded.value();
-    curHead     = setLink(curHead, linkCell, dimOwner, zigzag::DimVector::POS,
-                          ownerCell, currentFold);
-    folded      = rebuildManifold(curHead);
-    currentFold = &folded.value();
-  }
-
-  // Curator (d.curator)
-  if (!link.curator.empty()) {
-    curHead                = makeCell(curHead, link.curator);
-    const auto curatorCell = cellRefOf(curHead);
-    folded                 = rebuildManifold(curHead);
-    currentFold            = &folded.value();
-    curHead     = setLink(curHead, linkCell, dimCurator, zigzag::DimVector::POS,
-                          curatorCell, currentFold);
-    folded      = rebuildManifold(curHead);
-    currentFold = &folded.value();
-  }
+  linkProperty(linkTypeName(link.type), dimType);
+  linkProperty(prominenceTierName(link.tier), dimTier);
+  linkProperty(link.owner, dimOwner);
+  linkProperty(link.curator, dimCurator);
 
   syncLinksFromRank(*currentFold);
   return curHead;
@@ -1461,30 +1432,25 @@ MicroversionId Store::latest() const {
   // while one is being read back, and those are not the same order once a
   // branch exists. Picking by name is the one answer that does not change
   // across a save and a load.
-  MicroversionId newest;
-  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
-    if (const auto id = opsSpool.idOf(idx); newest < id) {
-      newest = id;
-    }
+  if (opsSpool.empty()) {
+    return MicroversionId{};
   }
-  return newest;
+  const auto ids =
+      std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
+      std::views::transform(
+          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+  return std::ranges::max(ids);
 }
 
 std::vector<MicroversionId> Store::structureHeads() const {
   if (zigzag::noCell == homeCell_ || opsSpool.empty()) {
     return {};
   }
-  std::vector<MicroversionId> result;
-  for (std::uint32_t idx = 1; idx <= opsSpool.size(); ++idx) {
-    if (!opsSpool.childrenOf(idx).empty()) {
-      continue;
-    }
-    auto curr      = idx;
-    bool foundHome = false;
+  const auto hasHomeInAncestry = [this](const std::uint32_t idx) {
+    auto curr = idx;
     while (curr > 0 && curr <= opsSpool.size()) {
       if (curr == homeCell_) {
-        foundHome = true;
-        break;
+        return true;
       }
       const auto *const node = opsSpool.get(curr);
       if (nullptr == node || 0 == node->parentIndex) {
@@ -1492,25 +1458,24 @@ std::vector<MicroversionId> Store::structureHeads() const {
       }
       curr = node->parentIndex;
     }
-    if (foundHome) {
-      result.push_back(opsSpool.idOf(idx));
-    }
-  }
-  return result;
+    return false;
+  };
+
+  auto leafHeads =
+      std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
+      std::views::filter([this](const std::uint32_t idx) {
+        return opsSpool.childrenOf(idx).empty();
+      }) |
+      std::views::filter(hasHomeInAncestry) |
+      std::views::transform(
+          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+
+  return std::ranges::to<std::vector<MicroversionId>>(leafHeads);
 }
 
 MicroversionId Store::structureHead() const {
   const auto heads = structureHeads();
-  if (heads.empty()) {
-    return MicroversionId{};
-  }
-  MicroversionId best;
-  for (const auto &id : heads) {
-    if (best.isZero() || best < id) {
-      best = id;
-    }
-  }
-  return best;
+  return heads.empty() ? MicroversionId{} : std::ranges::max(heads);
 }
 
 const std::vector<MicroversionId> &Store::currentVersions() const {

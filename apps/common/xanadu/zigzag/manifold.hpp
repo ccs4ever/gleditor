@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/cpp26.hpp"
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
@@ -290,6 +291,8 @@ public:
    * belongs to is something this class has to be able to do anyway.
    */
   [[nodiscard]] const CellSlot *slot(CellRef ref) const noexcept;
+  [[nodiscard]] common::cpp26::optional<const CellSlot &>
+  findSlot(CellRef ref) const noexcept;
 
   /// Whether @p ref names a cell this manifold holds.
   [[nodiscard]] bool contains(CellRef ref) const noexcept {

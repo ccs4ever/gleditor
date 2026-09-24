@@ -26,6 +26,13 @@ const CellSlot *Manifold::slot(const CellRef ref) const noexcept {
   return noDense == dense ? nullptr : &slots[dense];
 }
 
+common::cpp26::optional<const CellSlot &>
+Manifold::findSlot(const CellRef ref) const noexcept {
+  const auto *const s = slot(ref);
+  return nullptr == s ? common::cpp26::nullopt
+                      : common::cpp26::optional<const CellSlot &>(*s);
+}
+
 DimLink *Manifold::existingLink(const std::uint32_t dense,
                                 const DimRef dim) noexcept {
   const auto &cell = slots[dense];
@@ -622,14 +629,16 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
 }
 
 xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  return nullptr == cell ? xanadu::ValueKind::None
-                         : static_cast<xanadu::ValueKind>(cell->valueKind);
+  return findSlot(ref)
+      .transform([](const CellSlot &cell) noexcept {
+        return static_cast<xanadu::ValueKind>(cell.valueKind);
+      })
+      .value_or(xanadu::ValueKind::None);
 }
 
 std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = findSlot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Double)) {
     return std::nullopt;
   }
@@ -637,8 +646,8 @@ std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
 }
 
 std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = findSlot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Bool)) {
     return std::nullopt;
   }
@@ -647,8 +656,8 @@ std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
 
 std::optional<std::int64_t>
 Manifold::asInt64(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell ||
+  const auto cell = findSlot(ref);
+  if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Int64)) {
     return std::nullopt;
   }
@@ -657,9 +666,9 @@ Manifold::asInt64(const CellRef ref) const noexcept {
 
 std::optional<CellRef>
 Manifold::handleTarget(const CellRef ref) const noexcept {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell || cell->valueKind != static_cast<std::uint8_t>(
-                                                xanadu::ValueKind::OpHandle)) {
+  const auto cell = findSlot(ref);
+  if (!cell || cell->valueKind !=
+                   static_cast<std::uint8_t>(xanadu::ValueKind::OpHandle)) {
     return std::nullopt;
   }
   return static_cast<CellRef>(cell->valueBits);
@@ -1108,65 +1117,43 @@ Manifold::links(const xanadu::SpanReader &reader) const {
     xanadu::Link link;
     link.id = cell;
 
-    // 1. From endpoint (d.from)
-    if (dimFrom) {
-      if (const auto fromCell = step(*this, cell, *dimFrom)) {
-        const auto spans = contentOf(*fromCell);
-        link.left.assign(spans.begin(), spans.end());
-      }
-    }
+    const auto readEndpoint = [&](const std::optional<DimRef> &dim) {
+      return dim
+          .and_then(
+              [this, cell](const DimRef d) { return step(*this, cell, d); })
+          .transform([this](const CellRef c) {
+            const auto spans = contentOf(c);
+            return std::vector<xanadu::PrimediaSpan>(spans.begin(),
+                                                     spans.end());
+          })
+          .value_or(std::vector<xanadu::PrimediaSpan>{});
+    };
 
-    // 2. To endpoint (d.to)
-    if (dimTo) {
-      if (const auto toCell = step(*this, cell, *dimTo)) {
-        const auto spans = contentOf(*toCell);
-        link.right.assign(spans.begin(), spans.end());
-      }
-    }
+    const auto readProp =
+        [&](const std::optional<DimRef> &dim) -> std::optional<std::string> {
+      return dim
+          .and_then(
+              [this, cell](const DimRef d) { return step(*this, cell, d); })
+          .and_then(
+              [this, &reader](const CellRef c) -> std::optional<std::string> {
+                try {
+                  return textOf(c, reader);
+                } catch (...) {
+                  return std::nullopt;
+                }
+              });
+    };
 
-    // 3. Link type (d.linktype)
-    if (dimType) {
-      if (const auto typeCell = step(*this, cell, *dimType)) {
-        try {
-          const auto typeStr = textOf(*typeCell, reader);
-          link.type          = xanadu::linkTypeFromName(typeStr);
-        } catch (...) {
-          link.type = xanadu::LinkType::Comment;
-        }
-      }
-    }
-
-    // 4. Link tier (d.linktier)
-    if (dimTier) {
-      if (const auto tierCell = step(*this, cell, *dimTier)) {
-        try {
-          const auto tierStr = textOf(*tierCell, reader);
-          link.tier          = xanadu::prominenceTierFromName(tierStr);
-        } catch (...) {
-          link.tier = xanadu::ProminenceTier::Author;
-        }
-      }
-    }
-
-    // 5. Owner (d.owner)
-    if (dimOwner) {
-      if (const auto ownerCell = step(*this, cell, *dimOwner)) {
-        try {
-          link.owner = textOf(*ownerCell, reader);
-        } catch (...) {
-        }
-      }
-    }
-
-    // 6. Curator (d.curator)
-    if (dimCurator) {
-      if (const auto curatorCell = step(*this, cell, *dimCurator)) {
-        try {
-          link.curator = textOf(*curatorCell, reader);
-        } catch (...) {
-        }
-      }
-    }
+    link.left    = readEndpoint(dimFrom);
+    link.right   = readEndpoint(dimTo);
+    link.type    = readProp(dimType)
+                       .transform(xanadu::linkTypeFromName)
+                       .value_or(xanadu::LinkType::Comment);
+    link.tier    = readProp(dimTier)
+                       .transform(xanadu::prominenceTierFromName)
+                       .value_or(xanadu::ProminenceTier::Author);
+    link.owner   = readProp(dimOwner).value_or("");
+    link.curator = readProp(dimCurator).value_or("");
 
     result.emplace(cell, std::move(link));
   }
