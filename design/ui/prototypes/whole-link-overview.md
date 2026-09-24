@@ -5,11 +5,11 @@
 
 ## Interaction mock-ups
 
-![A central link identity sits between grouped left and right endpoint clusters](images/overview-clusters.png)
+![Whole-link endpoint clusters](images/overview-clusters.png)
 
 *Open Overview: two endsets become visible as groups and counts around one stable link.*
 
-![A single selected comparison joins two exact occurrences while other right groups remain visible](images/overview-comparison.png)
+![One selected comparison](images/overview-comparison.png)
 
 *Expand and compare: one reader-selected line appears without a full left×right web.*
 

@@ -5,11 +5,11 @@
 
 ## Interaction mock-ups
 
-![Three distinct link candidates appear beside one overlapping passage](images/overlap-candidates.png)
+![Three overlapping link choices](images/overlap-candidates.png)
 
 *Preview: a shared passage offers separate link identities without activating any of them.*
 
-![One disagreement link is selected while the other overlapping marks remain subdued](images/overlap-selected.png)
+![Selected disagreement link](images/overlap-selected.png)
 
 *Select: the chosen link is pinned; Enter remains a separate action.*
 

@@ -6,15 +6,15 @@
 
 ## Interaction mock-ups
 
-![The Flap opens two branch-aware version wings around one fixed link hinge](images/flap-open.png)
+![Flap opens two version wings](images/flap-open.png)
 
 *Open Flap: document and cell manifestations fan backward and forward on independent wings.*
 
-![Selected left and right versions form one pinned reader comparison amid translucent history leaves](images/flap-compare.png)
+![Pinned Flap comparison](images/flap-compare.png)
 
 *Scrub and pin: the two wing selections move independently; the line is a reader comparison.*
 
-![After Enter, a cell version takes focus while source, history leaves, and link identity remain](images/flap-enter.png)
+![Flap enters a cell version](images/flap-enter.png)
 
 *Enter leaf: exact cell content takes focus and one activity visit is saved.*
 

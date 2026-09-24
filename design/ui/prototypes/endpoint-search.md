@@ -5,11 +5,11 @@
 
 ## Interaction mock-ups
 
-![Endpoint browser groups document and cell occurrences for one selected link](images/endpoint-groups.png)
+![Grouped endpoint browser](images/endpoint-groups.png)
 
 *Browse: group large endsets by manifestation while keeping stored member positions visible.*
 
-![A search result offers two exact occurrences of the same right member](images/endpoint-filtered.png)
+![Two occurrences after search](images/endpoint-filtered.png)
 
 *Filter: the reader previews occurrence 2 of 2, then may Enter that exact range.*
 
