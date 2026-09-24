@@ -288,6 +288,10 @@ public:
   [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
 
+  /// The target operation index of @p ref, when it is an OpHandle cell -- and
+  /// nothing when it is not.
+  [[nodiscard]] std::optional<CellRef> handleTarget(CellRef ref) const noexcept;
+
   /// Which of the above would answer, or ValueKind::None for a cell whose
   /// content is just content.
   [[nodiscard]] xanadu::ValueKind valueKindOf(CellRef ref) const noexcept;
@@ -331,6 +335,24 @@ public:
   /// The backing Store for this manifold view, or nullptr if unattached.
   [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
   void setStore(xanadu::Store *s) noexcept { store_ = s; }
+
+  // -- store-backed queries: need the associated Store -----------------------
+
+  /**
+   * @brief Every operation that shaped @p cell in this folded state,
+   *        chronological (oldest first).
+   *
+   * Empty for an unattached manifold, an absent cell, or a malformed chain.
+   */
+  [[nodiscard]] std::vector<std::uint32_t> historyOf(CellRef cell) const;
+
+  /**
+   * @brief Content of @p cell as of @p op, which must be in its chain.
+   *
+   * Empty if @p op is not in @p cell's history.
+   */
+  [[nodiscard]] std::vector<xanadu::PrimediaSpan>
+  contentAsOf(CellRef cell, std::uint32_t op) const;
 
   /**
    * @brief Collect all cells within @p radius hops from @p start along any

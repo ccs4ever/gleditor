@@ -465,6 +465,152 @@ std::string Manifold::textOf(const CellRef ref,
   return out;
 }
 
+std::vector<std::uint32_t> Manifold::historyOf(const CellRef cell) const {
+  if (nullptr == store_) {
+    return {};
+  }
+  const auto *const cellSlot = slot(cell);
+  if (nullptr == cellSlot) {
+    return {};
+  }
+
+  std::vector<std::uint32_t> chain;
+  auto curr                  = cellSlot->lastOp;
+  const auto birth           = cellSlot->birthOp;
+  const std::size_t maxSteps = static_cast<std::size_t>(foldedThrough_) + 1;
+
+  while (curr != 0 && chain.size() <= maxSteps) {
+    chain.push_back(curr);
+    if (curr == birth) {
+      break;
+    }
+    const auto *const node = store_->getCompactOp(curr);
+    if (nullptr == node || xanadu::OpKind::Structure != node->kind ||
+        node->sourceOpIndex >= curr) {
+      return {};
+    }
+    curr = node->sourceOpIndex;
+  }
+
+  if (curr != birth) {
+    return {};
+  }
+
+  std::reverse(chain.begin(), chain.end());
+  return chain;
+}
+
+std::vector<xanadu::PrimediaSpan>
+Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
+  const auto history = historyOf(cell);
+  if (history.empty()) {
+    return {};
+  }
+
+  const auto it = std::find(history.begin(), history.end(), op);
+  if (it == history.end()) {
+    return {};
+  }
+
+  bool hasSplice = false;
+  for (auto curIt = history.begin(); curIt <= it; ++curIt) {
+    const auto *const node = store_->getCompactOp(*curIt);
+    if (nullptr == node) {
+      return {};
+    }
+    if (xanadu::StructureVerb::Splice == xanadu::structureVerbOf(node->flags)) {
+      hasSplice = true;
+      break;
+    }
+  }
+
+  if (!hasSplice) {
+    for (auto curIt = it;; --curIt) {
+      const auto *const node = store_->getCompactOp(*curIt);
+      if (nullptr == node) {
+        return {};
+      }
+      const auto verb = xanadu::structureVerbOf(node->flags);
+      if (verb == xanadu::StructureVerb::MakeCell ||
+          verb == xanadu::StructureVerb::SetValue) {
+        if (!node->span().empty()) {
+          return {node->span()};
+        }
+        return {};
+      }
+      if (curIt == history.begin()) {
+        break;
+      }
+    }
+    return {};
+  }
+
+  std::vector<xanadu::PrimediaSpan> currentContent;
+  for (auto curIt = history.begin(); curIt <= it; ++curIt) {
+    const auto *const node = store_->getCompactOp(*curIt);
+    if (nullptr == node) {
+      return {};
+    }
+    const auto verb = xanadu::structureVerbOf(node->flags);
+    switch (verb) {
+    case xanadu::StructureVerb::MakeCell:
+    case xanadu::StructureVerb::SetValue: {
+      if (!node->span().empty()) {
+        currentContent = {node->span()};
+      } else {
+        currentContent.clear();
+      }
+      break;
+    }
+    case xanadu::StructureVerb::SetLink:
+      break;
+    case xanadu::StructureVerb::Splice: {
+      std::vector<xanadu::PrimediaSpan> rebuilt;
+      rebuilt.reserve(currentContent.size() + 2);
+      std::uint64_t seen   = 0;
+      const auto at        = node->at;
+      const auto removing  = node->length;
+      const auto &inserted = node->span();
+      for (const auto &piece : currentContent) {
+        const auto pieceEnd = seen + piece.length;
+        if (seen < at) {
+          rebuilt.push_back(piece.slice(0, std::min(piece.length, at - seen)));
+        }
+        const auto removedEnd = at + removing;
+        if (pieceEnd > removedEnd) {
+          const auto from = removedEnd > seen ? removedEnd - seen : 0;
+          rebuilt.push_back(piece.slice(from, piece.length - from));
+        }
+        seen = pieceEnd;
+      }
+      if (!inserted.empty()) {
+        std::uint64_t upTo = 0;
+        std::size_t where  = 0;
+        for (; where < rebuilt.size() && upTo < at; where++) {
+          upTo += rebuilt[where].length;
+        }
+        rebuilt.insert(rebuilt.begin() + static_cast<std::ptrdiff_t>(where),
+                       inserted);
+      }
+      std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
+      for (std::size_t i = 0; i + 1 < rebuilt.size();) {
+        if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
+            rebuilt[i].end() == rebuilt[i + 1].start) {
+          rebuilt[i].length += rebuilt[i + 1].length;
+          rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+          continue;
+        }
+        i++;
+      }
+      currentContent = std::move(rebuilt);
+      break;
+    }
+    }
+  }
+
+  return currentContent;
+}
+
 xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
   const auto *const cell = slot(ref);
   return nullptr == cell ? xanadu::ValueKind::None
@@ -497,6 +643,16 @@ Manifold::asInt64(const CellRef ref) const noexcept {
     return std::nullopt;
   }
   return std::bit_cast<std::int64_t>(cell->valueBits);
+}
+
+std::optional<CellRef>
+Manifold::handleTarget(const CellRef ref) const noexcept {
+  const auto *const cell = slot(ref);
+  if (nullptr == cell || cell->valueKind != static_cast<std::uint8_t>(
+                                                xanadu::ValueKind::OpHandle)) {
+    return std::nullopt;
+  }
+  return static_cast<CellRef>(cell->valueBits);
 }
 
 CellRef Manifold::cloneMaster(const CellRef ref,

@@ -36,6 +36,7 @@ ArrayCellEntry::fromCell(const zigzag::CellRef ref,
   case xanadu::ValueKind::Bool:
     entry.numericValue = (0 != bits) ? 1.0 : 0.0;
     break;
+  case xanadu::ValueKind::OpHandle:
   case xanadu::ValueKind::None:
     entry.numericValue = 0.0;
     break;

@@ -52,6 +52,8 @@ const char *valueKindName(const ValueKind kind) {
     return "bool";
   case ValueKind::Int64:
     return "int64";
+  case ValueKind::OpHandle:
+    return "op_handle";
   }
   return "unknown";
 }

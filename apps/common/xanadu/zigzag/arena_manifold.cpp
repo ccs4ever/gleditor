@@ -186,6 +186,16 @@ ArenaManifold::asInt64(const CellRef ref) const noexcept {
   return std::bit_cast<std::int64_t>(cell->valueBits);
 }
 
+std::optional<CellRef>
+ArenaManifold::handleTarget(const CellRef ref) const noexcept {
+  const auto *const cell = slot(ref);
+  if (nullptr == cell || xanadu::ValueKind::OpHandle !=
+                             static_cast<xanadu::ValueKind>(cell->valueKind)) {
+    return std::nullopt;
+  }
+  return static_cast<CellRef>(cell->valueBits);
+}
+
 std::string_view
 ArenaManifold::scratchTextOf(const xanadu::PrimediaSpan &span) const noexcept {
   if (xanadu::scratchScroll != span.scroll || span.start > scratch_.size()) {
@@ -647,6 +657,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
     } else if (xanadu::ValueKind::Int64 == kind) {
       minted =
           store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    } else if (xanadu::ValueKind::OpHandle == kind) {
+      minted =
+          store.makeOpHandle(out.version, from.handleTarget(arena).value_or(0),
+                             from.textOf(arena));
     } else if (spans.empty()) {
       minted = store.makeCell(out.version, std::string_view{});
     } else if (xanadu::scratchScroll == spans.front().scroll) {

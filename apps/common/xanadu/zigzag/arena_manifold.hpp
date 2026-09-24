@@ -206,6 +206,7 @@ public:
   [[nodiscard]] std::optional<double> asDouble(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
+  [[nodiscard]] std::optional<CellRef> handleTarget(CellRef ref) const noexcept;
 
   /// @p ref's content as bytes. Scratch spans are read from this arena's own
   /// buffer; any other span needs @p reader, and is skipped when it is null.

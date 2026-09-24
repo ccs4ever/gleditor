@@ -428,6 +428,19 @@ public:
   MicroversionId makeScalarCell(const MicroversionId &parent,
                                 std::int64_t value);
 
+  /**
+   * @brief Mint a handle cell pointing at operation @p target.
+   *
+   * Deliberately not an overload of makeCell() to prevent silent conversions.
+   *
+   * @param parent  State to branch from.
+   * @param target  Operation index to reference (any OpKind is allowed).
+   * @param text    Optional label or commentary content for the handle cell.
+   * @throws std::invalid_argument if target has ephemeralBit or does not exist.
+   */
+  MicroversionId makeOpHandle(const MicroversionId &parent,
+                              std::uint32_t target, std::string_view text = {});
+
   /// Restate @p cell as carrying @p value: a new rendering into the permascroll
   /// and new bits in the operation, both together, as setValue() requires.
   /// See @ref setLink for @p known.

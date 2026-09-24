@@ -387,6 +387,30 @@ MicroversionId Store::makeScalarCell(const MicroversionId &parent,
   return applyScalar(parent, zigzag::noCell, scalarValue(value), nullptr);
 }
 
+MicroversionId Store::makeOpHandle(const MicroversionId &parent,
+                                   const std::uint32_t target,
+                                   const std::string_view text) {
+  if (zigzag::isEphemeral(target)) {
+    throw std::invalid_argument(
+        "a derived cell has no operation behind it, so a handle naming one "
+        "cannot be recorded -- see design R8 and R12");
+  }
+  const auto *const node = opsSpool.get(target);
+  if (nullptr == node) {
+    throw std::invalid_argument("target operation " + std::to_string(target) +
+                                " does not exist in store");
+  }
+  const auto span =
+      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
+  Op op;
+  op.kind = OpKind::Structure;
+  op.flags =
+      structureFlags(StructureVerb::MakeCell, false, ValueKind::OpHandle);
+  op.span  = span;
+  op.value = target;
+  return apply(parent, op);
+}
+
 MicroversionId Store::setScalar(const MicroversionId &parent,
                                 const zigzag::CellRef cell, const double value,
                                 const zigzag::Manifold *const known) {

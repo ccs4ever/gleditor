@@ -76,6 +76,12 @@ struct Slice {
             const CellRef to) {
     at = store.setLink(at, from, dim, negward, to);
   }
+
+  CellRef opHandle(const std::uint32_t target,
+                   const std::string_view text = {}) {
+    at = store.makeOpHandle(at, target, text);
+    return store.cellRefOf(at);
+  }
 };
 
 TEST(ManifoldTest, genesisMintsHomeAndTheDimsDimension) {
@@ -892,4 +898,224 @@ TEST(ManifoldTest, aSpliceRefusesToBePublishedRatherThanArriveWrong) {
   Slice plain;
   static_cast<void>(plain.cell("unspliced"));
   EXPECT_NO_THROW(static_cast<void>(plain.store.exportBinaryOps()));
+}
+
+TEST(ManifoldTest, aCellsHistoryIsEveryOperationThatShapedIt) {
+  Slice slice;
+  const auto dim  = slice.dimension("d.custom");
+  const auto cell = slice.cell("step 1");
+  const auto op1  = slice.store.cellRefOf(slice.at);
+
+  slice.at       = slice.store.setCellText(slice.at, cell, "step 2");
+  const auto op2 = slice.store.segmentedOps().indexOf(slice.at);
+
+  const auto other = slice.cell("other");
+  slice.at = slice.store.setLink(slice.at, cell, dim, DimVector::POS, other);
+  const auto op3 = slice.store.segmentedOps().indexOf(slice.at);
+
+  slice.at       = slice.store.setCellText(slice.at, cell, "step 4");
+  const auto op4 = slice.store.segmentedOps().indexOf(slice.at);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto hist     = manifold.historyOf(cell);
+  EXPECT_EQ(hist, (std::vector<std::uint32_t>{op1, op2, op3, op4}));
+  EXPECT_EQ(hist.front(), cell);
+}
+
+TEST(ManifoldTest, aCellsHistoryIsPerBranch) {
+  Slice slice;
+  const auto cell      = slice.cell("initial");
+  slice.at             = slice.store.setCellText(slice.at, cell, "common");
+  const auto forkState = slice.at;
+
+  const auto branch1Ver =
+      slice.store.setCellText(forkState, cell, "branch1 edit");
+  const auto branch2Ver =
+      slice.store.setCellText(forkState, cell, "branch2 edit");
+
+  const auto manifold1 = slice.store.rebuildManifold(branch1Ver);
+  const auto manifold2 = slice.store.rebuildManifold(branch2Ver);
+
+  const auto hist1 = manifold1.historyOf(cell);
+  const auto hist2 = manifold2.historyOf(cell);
+
+  ASSERT_EQ(hist1.size(), 3U);
+  ASSERT_EQ(hist2.size(), 3U);
+  EXPECT_EQ(hist1[0], hist2[0]);
+  EXPECT_EQ(hist1[1], hist2[1]);
+  EXPECT_NE(hist1[2], hist2[2]);
+}
+
+TEST(ManifoldTest, anUnattachedManifoldHasNoHistory) {
+  Manifold unattached;
+  EXPECT_TRUE(unattached.historyOf(1).empty());
+  EXPECT_TRUE(unattached.contentAsOf(1, 1).empty());
+}
+
+TEST(ManifoldTest, aCellNobodyTouchedHasAHistoryOfOne) {
+  Slice slice;
+  const auto cell     = slice.cell("untouched");
+  const auto op       = slice.store.cellRefOf(slice.at);
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+
+  const auto hist = manifold.historyOf(cell);
+  ASSERT_EQ(hist.size(), 1U);
+  EXPECT_EQ(hist.front(), op);
+  EXPECT_EQ(hist.front(), cell);
+
+  const auto spans = manifold.contentAsOf(cell, op);
+  ASSERT_FALSE(spans.empty());
+  EXPECT_EQ(slice.store.read(spans.front()), "untouched");
+}
+
+TEST(ManifoldTest, contentAsOfReplaysASplice) {
+  Slice slice;
+  const auto cell = slice.cell("the quick brown fox");
+  const auto op1  = slice.store.cellRefOf(slice.at);
+
+  const auto ver2 = slice.store.spliceCell(slice.at, cell, 4, 5, "slow");
+  const auto op2  = slice.store.segmentedOps().indexOf(ver2);
+
+  const auto ver3 = slice.store.spliceCell(ver2, cell, 0, 3, "A");
+  const auto op3  = slice.store.segmentedOps().indexOf(ver3);
+
+  const auto manifold = slice.store.rebuildManifold(ver3);
+
+  const auto spans1 = manifold.contentAsOf(cell, op1);
+  std::string text1;
+  for (const auto &s : spans1) {
+    text1 += slice.store.read(s);
+  }
+  EXPECT_EQ(text1, "the quick brown fox");
+
+  const auto spans2 = manifold.contentAsOf(cell, op2);
+  std::string text2;
+  for (const auto &s : spans2) {
+    text2 += slice.store.read(s);
+  }
+  EXPECT_EQ(text2, "the slow brown fox");
+
+  const auto spans3 = manifold.contentAsOf(cell, op3);
+  std::string text3;
+  for (const auto &s : spans3) {
+    text3 += slice.store.read(s);
+  }
+  EXPECT_EQ(text3, "A slow brown fox");
+
+  const auto currentSpans = manifold.contentOf(cell);
+  ASSERT_EQ(spans3.size(), currentSpans.size());
+  for (std::size_t i = 0; i < currentSpans.size(); ++i) {
+    EXPECT_EQ(spans3[i], currentSpans[i]);
+  }
+}
+
+TEST(ManifoldTest, contentAsOfRefusesAnOperationFromAnotherCell) {
+  Slice slice;
+  const auto cell1   = slice.cell("first cell");
+  const auto cell2   = slice.cell("second cell");
+  const auto opCell2 = slice.store.cellRefOf(slice.at);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_TRUE(manifold.contentAsOf(cell1, opCell2).empty());
+  EXPECT_TRUE(manifold.contentAsOf(cell1, 0).empty());
+  EXPECT_TRUE(manifold.contentAsOf(cell1, 999999).empty());
+}
+
+TEST(ManifoldTest, anOpHandleNamesTheOperationItWasMintedFor) {
+  Slice slice;
+  const auto vInsert  = slice.store.insert(slice.at, 0, "underlying text");
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  slice.at            = vInsert;
+
+  const auto handle   = slice.opHandle(targetOp, "commentary");
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+
+  EXPECT_EQ(manifold.valueKindOf(handle), ValueKind::OpHandle);
+  EXPECT_EQ(manifold.handleTarget(handle), std::optional<CellRef>{targetOp});
+  EXPECT_EQ(manifold.textOf(handle, slice.store), "commentary");
+
+  // Non-handle cell answers nullopt
+  EXPECT_EQ(manifold.handleTarget(slice.store.homeCell()), std::nullopt);
+}
+
+TEST(ManifoldTest, anOpHandleIsNotAScalar) {
+  Slice slice;
+  const auto vInsert  = slice.store.insert(slice.at, 0, "text");
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  slice.at            = vInsert;
+
+  const auto handle   = slice.opHandle(targetOp, "label");
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+
+  EXPECT_EQ(manifold.asDouble(handle), std::nullopt);
+  EXPECT_EQ(manifold.asBool(handle), std::nullopt);
+  EXPECT_EQ(manifold.asInt64(handle), std::nullopt);
+}
+
+TEST(ManifoldTest, aHandleHasItsOwnHistory) {
+  Slice slice;
+  const auto vInsert  = slice.store.insert(slice.at, 0, "text");
+  const auto targetOp = slice.store.segmentedOps().indexOf(vInsert);
+  slice.at            = vInsert;
+
+  const auto handle    = slice.opHandle(targetOp, "initial note");
+  const auto manifold1 = slice.store.rebuildManifold(slice.at);
+
+  const auto hist1 = manifold1.historyOf(handle);
+  ASSERT_EQ(hist1.size(), 1U);
+  EXPECT_EQ(hist1.front(), handle);
+
+  slice.at          = slice.store.setCellText(slice.at, handle, "updated note");
+  const auto editOp = slice.store.segmentedOps().indexOf(slice.at);
+  const auto manifold2 = slice.store.rebuildManifold(slice.at);
+
+  const auto hist2 = manifold2.historyOf(handle);
+  EXPECT_EQ(hist2, (std::vector<std::uint32_t>{handle, editOp}));
+}
+
+TEST(ManifoldTest, aHandleMayNameAnyKindOfOperation) {
+  Slice slice;
+  // 1. Insert
+  const auto vInsert  = slice.store.insert(slice.at, 0, "hello");
+  const auto opInsert = slice.store.segmentedOps().indexOf(vInsert);
+  slice.at            = vInsert;
+
+  // 2. Delete (erase)
+  const auto vDelete  = slice.store.erase(slice.at, 0, 2);
+  const auto opDelete = slice.store.segmentedOps().indexOf(vDelete);
+  slice.at            = vDelete;
+
+  // 3. Link (SetLink)
+  const auto dim = slice.dimension("d.test");
+  const auto c1  = slice.cell("c1");
+  const auto c2  = slice.cell("c2");
+  slice.link(c1, dim, DimVector::POS, c2);
+  const auto opLink = slice.store.segmentedOps().indexOf(slice.at);
+
+  // 4. MakeCell
+  const auto c3     = slice.cell("c3");
+  const auto opMake = c3;
+
+  // Mint handles for each kind of operation
+  const auto h1 = slice.opHandle(opInsert, "h_insert");
+  const auto h2 = slice.opHandle(opDelete, "h_delete");
+  const auto h3 = slice.opHandle(opLink, "h_link");
+  const auto h4 = slice.opHandle(opMake, "h_make");
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(manifold.handleTarget(h1), std::optional<CellRef>{opInsert});
+  EXPECT_EQ(manifold.handleTarget(h2), std::optional<CellRef>{opDelete});
+  EXPECT_EQ(manifold.handleTarget(h3), std::optional<CellRef>{opLink});
+  EXPECT_EQ(manifold.handleTarget(h4), std::optional<CellRef>{opMake});
+}
+
+TEST(ManifoldTest, anEphemeralTargetIsRefused) {
+  Slice slice;
+  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(
+                   slice.at, zigzag::ephemeralBit | 42)),
+               std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 0)),
+               std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 999999)),
+               std::invalid_argument);
 }
