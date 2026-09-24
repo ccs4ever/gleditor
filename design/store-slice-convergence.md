@@ -354,11 +354,22 @@ Set looked like a counterexample; it is not, once *identity* and *state* are sep
   correct answer to "where was I" across an edit, so the ruling is not to pretend there is one: **a
   resumed Vortex cursor re-derives its position or does not exist.**
 
-The general rule, of which all three are instances:
+The rule for a visited document or slice, of which all three are instances:
 
-> **Only a user-generated update persists. Navigation never does.** An op records that a person
+> **Only a user-generated update to that structure persists there.** An op records that a person
 > changed the structure. Where anything — a person, a query, a renderer — happens to be *looking* is
-> not a change to the structure and does not earn a name in hypertime.
+> not a change to that structure and does not earn a name in its hypertime.
+
+**Reader activity extension, proposed.** The
+[`Xuzz link traversal vision`](xuzz-unified-link-traversal-vision.md) calls for a separate,
+reader-owned `system://activity` store. A completed semantic transition becomes a persistent visit
+*in that store*, with its own parent and branches; returning to an old visit and continuing adds a
+child without deleting any prior future. Hover, cursor motion, camera frames, and endpoint preview
+remain ephemeral. Activity Back/Forward moves among existing visits and appends no new visit. The
+activity tree records where the reader went, while the visited document's and slice's hypertime
+record only edits to their content and structure. Activity IDs are not document `MicroversionId`s.
+The write and storage cost of meaningful visits is accepted in the user's activity store rather than
+charged to every visited document. This extension is a design decision, not an implemented store.
 
 This is what makes the two-type split in R8 mechanical rather than a matter of taste at each call
 site: a cursor's cell lives in the `Manifold`, its position and its generator state live in the
@@ -370,12 +381,12 @@ through the computation. Reachability GC ([`vql-query-language.md`](vql-query-la
 scoped to `ArenaManifold` only; on the persistent side `link(c, d, dir, -2)` records a Delete and
 reclaims nothing, because DELETE is REARRANGE TO LIMBO.
 
-The second loss is smaller but user-visible: **reopening a document does not restore where you
-were.** Caret position, scroll offset and open cursors come back at their defaults. That is a
-deliberate trade against the alternative — a spool in which the majority of ops record eye movement
-rather than authorship — and if it is ever wanted back, the place for it is a per-workstation
-session file outside the docuverse, which is a different artefact from a document's history and
-should never be confused with one.
+The second loss is smaller but user-visible in the current implementation: **reopening a document
+does not restore where you were.** Caret position, scroll offset and open cursors come back at their
+defaults. The proposed activity store restores completed visits and their saved view context across
+sessions without adding eye movement to the document spool. Its activity history is a different
+artifact from document hypertime. Because visits and annotations are user data, an unreadable
+activity store must be preserved and reported rather than regenerated like default configuration.
 
 ### R9. `Manifold` is an explicitly materialised view with a stated rebuild policy
 

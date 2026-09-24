@@ -1,9 +1,9 @@
 ---
 name: xuzz-link-navigation
 description: >-
-  Implement or review Xuzz navigation through many-to-many Xanadu links and ZigZag cell content.
-  Use for link selection, endpoint browsing, activation, return, and document/cell transitions;
-  use the xudu or ZigZag UI skills for unrelated layout work.
+  Implement or review Xuzz navigation through many-to-many Xanadu links, ZigZag cell content,
+  and persistent branching walks. Use for link selection, endpoint browsing, activity traversal,
+  and document/cell transitions; use the xudu or ZigZag UI skills for unrelated layout work.
 ---
 
 # Xuzz link navigation
@@ -25,11 +25,12 @@ lead remains responsible for synthesis and implementation; reviewers do not edit
    strands.
 1. **Interaction reviewer:** Walk the same scenario through pointer, sovereign keymap, and
    accessibility input. Check overlap disambiguation, selection versus entry, independent member
-   cursors, Back, and pending or unavailable targets. Produce a short state-transition table and any
-   ambiguous cases.
+   cursors, activity branches, Forward choices, and pending or unavailable targets. Produce a short
+   state-transition table and any ambiguous cases.
 1. **Code and performance reviewer:** Locate current Xuzz composition, beam picks, bridge focus,
-   cell visibility, and test seams. Estimate fanout from endpoint resolution and ribbon staging;
-   identify work that may block the UI thread or grow with the Cartesian product of both endsets.
+   cell visibility, activity-store ownership, and test seams. Estimate fanout from endpoint
+   resolution and ribbon staging; identify work that may block the UI thread or grow with the
+   Cartesian product of both endsets.
 
 Exchange the findings before coding. The lead records the resolved command contract and a minimal
 vertical slice to implement. A review disagreement is resolved against the stored link model and a
@@ -44,15 +45,21 @@ small, local fix, perform these checks directly without spawning agents.
    convergence sections linked from the design document. State what is wired today and what the task
    will add.
 1. **Model one navigation session per selected link.** Keep the link authority and ID, both ordered
-   endsets, independent left/right member and occurrence cursors, explicit active side, origin, and
-   reversible history. Resolve each member to exact document or cell occurrences. Use the functional
-   link and range APIs on `main` where they clarify the query; avoid widening disjoint members into
-   a single highlighted extent.
+   endsets, independent left/right member and occurrence cursors, explicit active side, and origin
+   visit. Resolve each member to exact document or cell occurrences. Use the functional link and
+   range APIs on `main` where they clarify the query; avoid widening disjoint members into a single
+   highlighted extent.
 1. **Implement one command boundary.** `Select link` pins context without moving focus.
    `Select member` changes only one side's cursor. `Cross link` changes the active side;
-   `Enter endpoint` focuses the explicitly chosen occurrence. `Back` restores the saved location and
-   link state. Feed beam picks, cell picks, keymap actions, and accessibility actions through this
-   boundary. A beam with no unambiguous source member selects its link for disambiguation.
+   `Enter endpoint` focuses the explicitly chosen occurrence and records a completed activity visit.
+   Activity Back follows a parent visit; Forward offers all children of a fork. Feed beam picks,
+   cell picks, keymap actions, and accessibility actions through this boundary. A beam with no
+   unambiguous source member selects its link for disambiguation.
+1. **Persist the reader's walks.** Use a separate reader-owned `system://activity` store for stable
+   visit identities, walk roots, branches, references, annotations, and saved view context. A new
+   route from an old visit appends a child without erasing siblings; restoring an existing visit
+   does not append another. Keep document microversion branches distinct from activity branches.
+   Preserve unreadable activity data and report recovery options instead of regenerating defaults.
 1. **Compose the document/cell transition.** Carry link ID, side, member, occurrence, and exact
    range through the Xuzz bridge. Materialize an out-of-neighborhood cell on demand, retain the
    source as a companion, and keep link context visible while either view scrolls or changes
@@ -63,19 +70,21 @@ small, local fix, perform these checks directly without spawning agents.
    identity and meaningful side/member actions. Put bindings in `system://keymap` and
    user-adjustable presentation settings in the appropriate system xanadoc or slice.
 
-Navigation is ephemeral under R8 of `design/store-slice-convergence.md`: browsing and camera
-movement append no operations. Link direction comes from the selected side or hit target, never from
-the caret's document alone. A document and a cell containing the same primedia may expose multiple
-occurrences; preserve the reader's chosen occurrence. Keep network or content resolution off the UI
-thread.
+The R8 activity-store extension keeps live cursor and camera movement ephemeral. Completed semantic
+focus transitions append only to the reader's activity store, never to the visited document or
+slice. Link direction comes from the selected side or hit target, never from the caret's document
+alone. A document and a cell containing the same primedia may expose multiple occurrences; preserve
+the reader's chosen occurrence. Keep network or content resolution off the UI thread.
 
 ## Proof of completion
 
 Exercise a 2×3 discontinuous link with overlapping links and repeated primedia. Cycle each side
-independently, cross both ways, enter an exact document occurrence and an exact cell range, change a
-ZigZag dimension, and use Back. The same commands through pointer, keymap, and accessibility must
-produce the same link ID, member, occurrence, focus, and return state. Include distant-cell and
-unavailable-target cases; the session must remain cancellable and must not invent an endpoint.
+independently, cross both ways, enter an exact document occurrence and an exact cell range, then
+return to an older visit and make two different branches. Reload the activity store and explore both
+futures, a reference, and an annotation. The same commands through pointer, keymap, and
+accessibility must produce the same link ID, member, occurrence, focus, and visit identity. Include
+distant-cell and unavailable-target cases; pending entry must remain cancellable and must not invent
+an endpoint.
 
 Run the affected headless tests using the repository's `make` environment, then
 `make -j$(nproc) format-check` and `make -j$(nproc) lint`. For rendering changes, use the headless

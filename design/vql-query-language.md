@@ -827,13 +827,16 @@ that exist because a query made them, backed by no operation and collected when 
 The rule for which one a VQL mutation lands in is **not** "reads are ephemeral, writes are
 persistent". It is:
 
-> **Only a user-generated update persists. Navigation never does.**
+> **Only a user-generated update to the visited structure persists there.**
 
 So `weave` on behalf of a person editing a document writes operations. A cursor moving, a rank being
 streamed, an intermediate manifold a pipeline built and will discard — none of these earn a name in
 hypertime, however much structure they create along the way. §5's reachability GC below is
 `ArenaManifold`'s garbage collector specifically; the persistent side has no garbage, because an
 append-only spool never drops anything.
+
+The proposed Xuzz activity store can record completed visits in its own history. That does not
+promote a VQL cursor or intermediate query manifold into the visited store.
 
 This is what `promote()` is for: an arena result a person decides to keep is folded into the
 persistent manifold as operations, at the moment they decide, and not before.

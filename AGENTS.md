@@ -27,8 +27,10 @@ xanadoc text and ZigZag cell content, use
 [`xuzz-link-navigation`](.claude/skills/xuzz-link-navigation/SKILL.md). Its interaction contract and
 acceptance criteria are in
 [`design/ui_workflow_xuzz_navigation.md`](design/ui_workflow_xuzz_navigation.md). Keep one link
-identity and both endsets in view while the reader explores either side; navigation must not append
-operations.
+identity and both endsets in view while the reader explores either side. Completed reader
+transitions form branching walks in the private `system://activity` store; live view movement
+appends no operations to visited documents or slices. See the R8 activity-store extension in
+[`store-slice-convergence.md`](design/store-slice-convergence.md).
 
 ## Setup: submodules
 
@@ -374,8 +376,9 @@ published slices land as unlinked cells. `Splice` also lacks `at`/`length` on th
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation and a slice is a replay product. Fourteen rulings (R1–R14) with prices, the migration
   (complete through step 21, `ArenaManifold`), open questions U1–U3. Read before touching
-  `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (only a user-generated update persists;
-  navigation never does), R11 and R12 are the ones most often needed.
+  `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (view movement does not mutate a visited
+  store; a proposed separate activity store records completed reader visits), R11 and R12 are the
+  ones most often needed.
 - [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
   carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),

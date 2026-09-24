@@ -54,9 +54,14 @@ document version or cell, and multiple links may cover the same content.
   endpoint** moves the reading focus into that member. If no target member has been selected,
   crossing presents the opposite endset for choice; it never picks the first rendered strand.
   Left/right are labels, not a one-way source/destination rule.
-- **Back** restores the previous view, caret or cell focus, active side, member cursors, and link
-  context. **Return to origin** restores the location where the link was selected. Either action
-  works after a document-to-cell or cell-to-document crossing.
+- **Activity Back** follows the current visit's parent. **Activity Forward** follows a chosen child;
+  when a visit has several children, show their previews and keep every branch available. **Return
+  to origin** selects the origin visit recorded for the active link. These actions restore saved
+  focus, active side, member cursors, and companion view across document/cell boundaries.
+- **Walks** reveals saved roots, branches, references, and annotations. Previewing a visit moves no
+  reading focus; Enter restores it. Continuing from an older visit appends another child without
+  deleting the futures already there. Existing document hypertime Back/Forward controls remain
+  distinct from Activity Back/Forward.
 
 For example, a link with two left spans and three right spans may be read as `Left 2/2, Right 1/3`.
 Moving to `Right 3/3` leaves `Left 2/2` selected. Crossing back returns to that left member, with
@@ -64,12 +69,12 @@ all five members still represented by the same link context.
 
 ### 3. Enter content without a domain boundary
 
-The same select, preview, cross, enter, and back actions apply to document text and cell content.
-Entering a cell targets its exact content span and intra-cell offset, focuses the cell, and brings
-its immediate dimensional neighborhood into view. The source document remains as a companion with an
-origin marker and a visible connection to the active link. Entering a document from a cell targets
-the chosen link span and chosen occurrence in the document; it does not search for an unrelated
-first matching link.
+The same select, preview, cross, enter, and activity traversal actions apply to document text and
+cell content. Entering a cell targets its exact content span and intra-cell offset, focuses the
+cell, and brings its immediate dimensional neighborhood into view. The source document remains as a
+companion with an origin marker and a visible connection to the active link. Entering a document
+from a cell targets the chosen link span and chosen occurrence in the document; it does not search
+for an unrelated first matching link.
 
 The camera and companion views move continuously while the active span stays readable. The
 connection remains anchored to content as pages scroll or cell projections change. The reader can
@@ -88,29 +93,44 @@ focus on failure. Do not substitute another occurrence or another link without t
 
 ## Navigation state and command contract
 
-Use a view-local, ephemeral navigation session. It records a store/link authority and link ID,
-observed link revision, selected side, independent left/right member indices, selected occurrence
-for each member, origin anchor, and a bounded back stack. An occurrence identifies its exact
-`PrimediaSpan` plus the containing store/version and either document range or `CellRef` with
-intra-cell range. Resolve occurrences against the current view at command time; stale or withdrawn
-members remain identifiable as unavailable until the session is refreshed or dismissed.
+Keep the live link context in view-local state and record completed navigation visits in a
+reader-owned `system://activity` store. Each visit has a stable store-scoped ID, one parent, ordered
+children, an exact destination, the action that reached it, and a saved view. When link-driven, the
+visit records the link authority and ID, selected side, independent left/right member and occurrence
+cursors, and origin visit. An occurrence identifies its exact `PrimediaSpan` plus a durable store
+authority and version and either document range or cell/range; local store indices and `CellRef`s
+alone cannot address targets across sessions. Resolve targets at use time and keep unavailable
+visits addressable. A second visit to the same content retains its own path and context.
+
+Record a visit after a successful semantic focus transition: opening a document/version, entering a
+link endpoint, moving to another cell on a rank, or jumping to a passage. Hover, endpoint preview,
+scroll and camera frames create no visits. Activity Back/Forward and entering a saved visit move
+among existing nodes; a new transition from an older node creates a new child. Record view
+checkpoints separately from visit edges when needed to resume the current view. A pending or failed
+entry records no completed visit.
 
 | Command                  | Effect                                              | Focus moves? |
 | ------------------------ | --------------------------------------------------- | ------------ |
 | Select link              | Pin link ID and full endsets; disambiguate overlaps | No           |
 | Select member/occurrence | Update only that side's cursor and preview          | No           |
 | Cross link               | Make the opposite endset active                     | No           |
-| Enter endpoint           | Focus the explicitly selected occurrence            | Yes          |
+| Enter endpoint           | Focus the chosen occurrence; append a visit         | Yes          |
 | Next/previous link       | Select a neighboring link in stable order           | No           |
-| Back / Return to origin  | Restore saved navigation state and location         | Yes          |
-| Dismiss                  | Remove link context and temporary view cursors      | No           |
+| Activity Back            | Restore the parent visit                            | Yes          |
+| Activity Forward         | Choose and restore a child visit                    | Yes          |
+| Walks / Select visit     | Explore roots and branches; preview a visit         | No           |
+| Enter saved visit        | Restore its recorded focus and link context         | Yes          |
+| Reference / Annotate     | Attach user-authored context to a visit or walk     | No           |
+| Return to origin         | Restore the active link's origin visit              | Yes          |
+| Dismiss                  | Remove live link context and temporary view cursors | No           |
 
-The link session is navigation state under R8 of
-[`store-slice-convergence.md`](store-slice-convergence.md): these commands append no Structure,
-text, or link operations. New key bindings and action names belong in `system://keymap` as Vortex
-routines, with user-facing layout and presentation values in system xanadocs or system slices. The
-same command contract serves pointer and accessibility adapters. No fixed key chords are specified
-here because the sovereign keymap owns them.
+The [R8 activity-store extension](store-slice-convergence.md) keeps live cursor and camera movement
+ephemeral and appends no operations to the visited document or slice. Completed visits, references,
+and annotations belong to the separate activity store. Its history is private by default, survives
+restart, and is user data: an unreadable store must be preserved and reported rather than replaced
+with generated defaults. New bindings and action names belong in `system://keymap` as Vortex
+routines. The same command contract serves pointer and accessibility adapters; no fixed chords are
+specified here.
 
 ## Implementation workflow
 
@@ -135,6 +155,14 @@ ends with a headless interaction test and an explicit record of what is implemen
    from the hit target or current session, never infer it from the caret's document alone. Route
    `BridgeCoordinator` cell activation and document focus through the same navigator, carrying link
    ID, member, occurrence, and exact range. Preserve current editor selection during preview.
+1. **Record branching activity.** Add `system://activity` as a reader-owned store with stable visit
+   IDs, walk roots, parent/ordered-child topology, saved targets and view context, references, and
+   annotations. Since a Structure link has one neighbor per direction, represent child fanout with a
+   first-child and sibling rank (or an equivalent explicit branch-cell scheme), not multiple direct
+   links to one slot. Keep activity branch IDs distinct from document `MicroversionId`. Record
+   completed semantic transitions, restore a chosen parent or child without recording a new visit,
+   and append a sibling when exploration resumes from an old node. Preserve unreadable activity data
+   instead of applying the default system-doc reset path.
 1. **Compose companion views.** Focus or materialize distant cells through the shared ZigZag
    presentation surface, then resolve their anchors. Keep the source document or cell as a companion
    and animate toward a side-by-side reading arrangement. Maintain an origin tether and whole-link
@@ -147,9 +175,11 @@ ends with a headless interaction test and an explicit record of what is implemen
    document/cell names and position counts; avoid duplicate node IDs per strand.
 1. **Verify the complete path.** Run pointer, sovereign-keymap, and accessibility commands through
    the same headless scenario. Compare their resulting link ID, side/member, occurrence, focus, and
-   back stack. Test document→cell→document, cell→document→cell, distant-cell materialization,
-   cancellation, and rapid link switching. Measure endpoint indexing and visual staging with large
-   endsets and visible manifolds before setting frame-budget thresholds.
+   visit tree. Test document→cell→document, cell→document→cell, distant-cell materialization,
+   cancellation, rapid link switching, and two branches from one parent. Save and reload the
+   activity store; verify both futures, last active walk, references, annotations, and unresolved
+   targets survive. Measure endpoint indexing and visual staging with large endsets and visible
+   manifolds before setting frame-budget thresholds.
 
 Current code provides the bridge presentation and cell anchor callback
 ([`BridgeCoordinator`](../apps/xudu/bridge_coordinator.cpp)), but
@@ -166,12 +196,14 @@ the bridge and link beams; federated cross-store links require their own authori
 - A 2×3 link remains one selectable link while either endset is browsed independently; no gap is
   highlighted as linked and no arbitrary pair is presented as authorial intent.
 - Pointer, keymap, and accessibility entry into a chosen document or cell occurrence produce the
-  same exact range and stable link context. Back and return restore the prior view and member
-  cursors.
+  same exact range and stable link context. Activity Back and Forward restore the chosen visit and
+  its member cursors; taking a new route from an old visit retains all prior branches.
 - Crossing between document and cell content keeps both contexts legible, preserves the selected
   link through rank/projection changes, and can reach a cell outside the original focus radius.
 - Overlapping links are disambiguated; unresolved content remains visible as an explicit,
-  cancellable state. Navigation writes no operations and never silently targets an unrelated link.
+  cancellable state. The activity store survives restart and supports exploring, referencing, and
+  annotating any saved walk. Visited stores receive no navigation operations, and resolution never
+  silently targets an unrelated link.
 - Measured high-fanout navigation and rendering have bounded work relative to visible members and
   the selected link, with an explicit benchmark and regression threshold recorded alongside the
   implementation.
