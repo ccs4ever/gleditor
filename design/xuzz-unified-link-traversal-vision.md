@@ -144,6 +144,31 @@ configuration stores can be. Recording is local and private until the reader exp
 exports a walk. Cross-store references from ordinary xanadocs to activity visits depend on the
 federated reference work; references and annotations within the activity store can precede it.
 
+### Reuse OSMIC without confusing its two histories
+
+The activity store's append-only operation spool records **changes to the activity record**:
+creating a visit, annotating it, naming a walk, or adding a reference. Its `MicroversionId` names a
+state of that store. A visit has its own stable identity and parent visit; its children record the
+reader's alternative routes. An annotation added to an old visit changes the activity store but is
+not another step in the reader's walk. All walks must coexist in one current activity view even when
+a reader resumes from an older visit.
+
+Use Structure operations and the Manifold to persist visit cells, their parent and ordered-child
+relationships, notes, and references. A derived, rebuildable walk index can keep roots, child lists,
+target-span lookups, ancestor jumps, and lowest common ancestors. That makes questions such as
+“where did these walks diverge?” and “which walks passed through this passage?” practical. The index
+is an acceleration of the visit graph, not a second durable source of truth. Its ancestor index can
+borrow Chronofilade's binary-lifting idea, but must follow *visit parents*.
+
+The existing [`Chronofilade`](../apps/common/xanadu/enfilade/chronofilade.hpp) follows *operation
+parents* and rebuilds document edit-decision-list versions. Structure operations are text replay
+no-ops, so it does not itself reconstruct or navigate the activity visit tree. It remains useful for
+the activity Store's own version history where text EDLs are involved. The activity store needs its
+own lossless Structure replay and derived visit index, with activity `MicroversionId`s kept distinct
+from visit IDs. Notes belong in the reader's permascroll; the Store carries their addresses, never
+primedia bytes. An unreadable activity store is preserved and reported, because the walks and
+annotations are user data.
+
 ## The visible language
 
 The selected link has one compact context anchored to the viewport so it remains available while
