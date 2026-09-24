@@ -50,24 +50,24 @@ ______________________________________________________________________
 - [1. Architectural Foundation & Design Invariants](#1-architectural-foundation--design-invariants)
   - [The Single-Primitive Invariant](#the-single-primitive-invariant)
   - [Topological Garbage Collection](#topological-garbage-collection)
-- [2. Core C++ Runtime Engine Reference Implementation](#2-core-c-runtime-engine-reference-implementation)
-- [3. The Dual-Wing Calling Convention & Spatial Parameter Binding](#3-the-dual-wing-calling-convention--spatial-parameter-binding)
+- [2. Core C++ Runtime Engine Reference Implementation][toc-01]
+- [3. The Dual-Wing Calling Convention & Spatial Parameter Binding][toc-02]
   - [3.1 Dual-Wing Parameter Topology](#31-dual-wing-parameter-topology)
-  - [3.2 Parameter Preprocessing & Postprocessing Pipelines along `d.spin`](#32-parameter-preprocessing--postprocessing-pipelines-along-dspin)
+  - [3.2 Parameter Preprocessing & Postprocessing Pipelines along `d.spin`][toc-03]
   - [3.3 Design by Contract along `d.contract`](#33-design-by-contract-along-dcontract)
-- [4. Cursor Associative Scopes: `d.vars` and `d.values`](#4-cursor-associative-scopes-dvars-and-dvalues)
+- [4. Cursor Associative Scopes: `d.vars` and `d.values`][toc-04]
 - [5. Reconciliation with the Unified Store/Slice](#5-reconciliation-with-the-unified-storeslice)
-  - [5.1 There is no Cell 0: zero is absence, and the origin is minted](#51-there-is-no-cell-0-zero-is-absence-and-the-origin-is-minted)
-  - [5.2 Entanglement is deleted. Identity sharing is a `d.clone` rank](#52-entanglement-is-deleted-identity-sharing-is-a-dclone-rank)
-  - [5.3 `value()`'s write branch is one operation on a persistent cell](#53-values-write-branch-is-one-operation-on-a-persistent-cell)
+  - [5.1 There is no Cell 0: zero is absence, and the origin is minted][toc-05]
+  - [5.2 Entanglement is deleted. Identity sharing is a `d.clone` rank][toc-06]
+  - [5.3 `value()`'s write branch is one operation on a persistent cell][toc-07]
   - [5.4 The links map becomes a compacting CSR run](#54-the-links-map-becomes-a-compacting-csr-run)
   - [5.5 What this buys the runtime, unasked](#55-what-this-buys-the-runtime-unasked)
-  - [5.6 Pinning: a cursor is how a subgraph outlives the query that built it](#56-pinning-a-cursor-is-how-a-subgraph-outlives-the-query-that-built-it)
-- [6. Vortex-Native Memoization Library: Pinned Islands along `d.cache`](#6-vortex-native-memoization-library-pinned-islands-along-dcache)
-- [7. Vortex Standard Library Architecture (Written in Vortex)](#7-vortex-standard-library-architecture-written-in-vortex)
-  - [7.1 Spatial Module Topology: `d.stdlib` and Symbol Resolution](#71-spatial-module-topology-dstdlib-and-symbol-resolution)
+  - [5.6 Pinning: a cursor is how a subgraph outlives the query that built it][toc-08]
+- [6. Vortex-Native Memoization Library: Pinned Islands along `d.cache`][toc-09]
+- [7. Vortex Standard Library Architecture (Written in Vortex)][toc-10]
+  - [7.1 Spatial Module Topology: `d.stdlib` and Symbol Resolution][toc-11]
   - [7.2 Standard Library Modules](#72-standard-library-modules)
-  - [7.3 Metacircular Execution & Compilation into the Manifold](#73-metacircular-execution--compilation-into-the-manifold)
+  - [7.3 Metacircular Execution & Compilation into the Manifold][toc-12]
 - [8. Vlog Vortex Extension & `std:logic` Module](#8-vlog-vortex-extension--stdlogic-module)
   - [8.1 System Dimension: `d.clause`](#81-system-dimension-dclause)
   - [8.2 Logic VM Opcodes](#82-logic-vm-opcodes)
@@ -1161,3 +1161,16 @@ table.
 | 11.0    | `db39d1a` | 2026-09-12 | Parameter pre/postprocessing along `d.spin`, Design by Contract (`d.contract`), and Vortex-native memoization library (`d.cache`).            |
 | 11.1    | `19c985a` | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.       |
 | 12.0    | `1271d20` | 2026-09-12 | **Vlog Vortex Extension & `std:logic` Module**: `d.clause` dimension, logic opcodes, and SLD resolution over `ArenaManifold`.                 |
+
+[toc-01]: #2-core-c-runtime-engine-reference-implementation
+[toc-02]: #3-the-dual-wing-calling-convention--spatial-parameter-binding
+[toc-03]: #32-parameter-preprocessing--postprocessing-pipelines-along-dspin
+[toc-04]: #4-cursor-associative-scopes-dvars-and-dvalues
+[toc-05]: #51-there-is-no-cell-0-zero-is-absence-and-the-origin-is-minted
+[toc-06]: #52-entanglement-is-deleted-identity-sharing-is-a-dclone-rank
+[toc-07]: #53-values-write-branch-is-one-operation-on-a-persistent-cell
+[toc-08]: #56-pinning-a-cursor-is-how-a-subgraph-outlives-the-query-that-built-it
+[toc-09]: #6-vortex-native-memoization-library-pinned-islands-along-dcache
+[toc-10]: #7-vortex-standard-library-architecture-written-in-vortex
+[toc-11]: #71-spatial-module-topology-dstdlib-and-symbol-resolution
+[toc-12]: #73-metacircular-execution--compilation-into-the-manifold

@@ -45,29 +45,29 @@ ______________________________________________________________________
 ## Contents
 
 - [1. What is being claimed](#1-what-is-being-claimed)
-- [2. The acceptance test: `link` and `value`, and nothing else](#2-the-acceptance-test-link-and-value-and-nothing-else)
+- [2. The acceptance test: `link` and `value`, and nothing else][toc-01]
 - [3. Terms](#3-terms)
-  - [3.1 A term is a cell; its arguments are the Inputs Wing](#31-a-term-is-a-cell-its-arguments-are-the-inputs-wing)
+  - [3.1 A term is a cell; its arguments are the Inputs Wing][toc-02]
   - [3.2 A variable is a cell on a `d.vars` rank](#32-a-variable-is-a-cell-on-a-dvars-rank)
-  - [3.3 `deref` is `cloneMaster`, and it already exists](#33-deref-is-clonemaster-and-it-already-exists)
+  - [3.3 `deref` is `cloneMaster`, and it already exists][toc-03]
 - [4. Unification is one link along `d.clone`](#4-unification-is-one-link-along-dclone)
   - [4.1 The four cases](#41-the-four-cases)
-  - [4.2 Variable-to-variable aliasing is why the clone rank is the right mechanism](#42-variable-to-variable-aliasing-is-why-the-clone-rank-is-the-right-mechanism)
-  - [4.3 Union is splicing two ranks; find is deliberately not compressed](#43-union-is-splicing-two-ranks-find-is-deliberately-not-compressed)
-  - [4.4 Rational trees are the default, and the occurs check is the opt-in](#44-rational-trees-are-the-default-and-the-occurs-check-is-the-opt-in)
-- [5. Backtracking is already implemented, twice, at two scales](#5-backtracking-is-already-implemented-twice-at-two-scales)
-  - [5.1 Persistent: a choice point is a microversion](#51-persistent-a-choice-point-is-a-microversion)
-  - [5.2 Arena: a choice point is a pair of high-water marks](#52-arena-a-choice-point-is-a-pair-of-high-water-marks)
-  - [5.3 The WAM's trail condition falls out of the arena rather than being imposed on it](#53-the-wams-trail-condition-falls-out-of-the-arena-rather-than-being-imposed-on-it)
+  - [4.2 Variable-to-variable aliasing is why the clone rank is the right mechanism][toc-04]
+  - [4.3 Union is splicing two ranks; find is deliberately not compressed][toc-05]
+  - [4.4 Rational trees are the default, and the occurs check is the opt-in][toc-06]
+- [5. Backtracking is already implemented, twice, at two scales][toc-07]
+  - [5.1 Persistent: a choice point is a microversion][toc-08]
+  - [5.2 Arena: a choice point is a pair of high-water marks][toc-09]
+  - [5.3 The WAM's trail condition falls out of the arena rather than being imposed on it][toc-10]
   - [5.4 Cut is one comparison against a barrier](#54-cut-is-one-comparison-against-a-barrier)
-  - [5.5 What the arena is not: no in-memory store, and no in-memory permascroll](#55-what-the-arena-is-not-no-in-memory-store-and-no-in-memory-permascroll)
+  - [5.5 What the arena is not: no in-memory store, and no in-memory permascroll][toc-11]
 - [6. The database](#6-the-database)
   - [6.1 Clauses are a rank on `d.clause`](#61-clauses-are-a-rank-on-dclause)
-  - [6.2 `assertz`, `retract`, and the logical update view for free](#62-assertz-retract-and-the-logical-update-view-for-free)
-  - [6.3 First-argument indexing wants random access, which is U1](#63-first-argument-indexing-wants-random-access-which-is-u1)
+  - [6.2 `assertz`, `retract`, and the logical update view for free][toc-12]
+  - [6.3 First-argument indexing wants random access, which is U1][toc-13]
 - [7. Worked example: `append/3`](#7-worked-example-append3)
 - [8. What the C++ core actually has to gain](#8-what-the-c-core-actually-has-to-gain)
-- [9. What this buys that a conventional Prolog does not have](#9-what-this-buys-that-a-conventional-prolog-does-not-have)
+- [9. What this buys that a conventional Prolog does not have][toc-14]
 - [10. Breakages and costs](#10-breakages-and-costs)
 - [11. Reconciliation with the convergence](#11-reconciliation-with-the-convergence)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
@@ -785,3 +785,18 @@ Editorial changes that alter no normative text bump neither component.
 | 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched.                                   |
 | 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                                                       |
 | 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                                                                             |
+
+[toc-01]: #2-the-acceptance-test-link-and-value-and-nothing-else
+[toc-02]: #31-a-term-is-a-cell-its-arguments-are-the-inputs-wing
+[toc-03]: #33-deref-is-clonemaster-and-it-already-exists
+[toc-04]: #42-variable-to-variable-aliasing-is-why-the-clone-rank-is-the-right-mechanism
+[toc-05]: #43-union-is-splicing-two-ranks-find-is-deliberately-not-compressed
+[toc-06]: #44-rational-trees-are-the-default-and-the-occurs-check-is-the-opt-in
+[toc-07]: #5-backtracking-is-already-implemented-twice-at-two-scales
+[toc-08]: #51-persistent-a-choice-point-is-a-microversion
+[toc-09]: #52-arena-a-choice-point-is-a-pair-of-high-water-marks
+[toc-10]: #53-the-wams-trail-condition-falls-out-of-the-arena-rather-than-being-imposed-on-it
+[toc-11]: #55-what-the-arena-is-not-no-in-memory-store-and-no-in-memory-permascroll
+[toc-12]: #62-assertz-retract-and-the-logical-update-view-for-free
+[toc-13]: #63-first-argument-indexing-wants-random-access-which-is-u1
+[toc-14]: #9-what-this-buys-that-a-conventional-prolog-does-not-have

@@ -22,7 +22,7 @@ ______________________________________________________________________
 
 ## Contents
 
-- [1. The Collision, and the Terminology That Survives It](#1-the-collision-and-the-terminology-that-survives-it)
+- [1. The Collision, and the Terminology That Survives It][toc-01]
 - [2. What a VPL Value Is](#2-what-a-vpl-value-is)
 - [3. The Glyph Set](#3-the-glyph-set)
   - [3.1 Every Glyph Is `link` and `value`](#31-every-glyph-is-link-and-value)
@@ -384,3 +384,5 @@ Editorial changes that alter no normative text bump neither.
 | version | commit | date       | change                                                                                                           |
 | ------- | ------ | ---------- | ---------------------------------------------------------------------------------------------------------------- |
 | 1.0     | *this* | 2026-09-11 | Initial specification: views, the rank/valence collision, the glyph set, and the four places the analogy breaks. |
+
+[toc-01]: #1-the-collision-and-the-terminology-that-survives-it

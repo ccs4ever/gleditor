@@ -107,7 +107,7 @@ ______________________________________________________________________
 
 Each ruling states its price. Where a tension is genuinely unresolved it is in §11 instead.
 
-### R1. `OpKind::Structure` is added. `OpKind::PageBreak` stays.
+### R1. `OpKind::Structure` is added. `OpKind::PageBreak` stays
 
 The sixth hyperop is implemented, and it is deliberately **not** used to re-express page breaks.
 
@@ -431,7 +431,7 @@ invariant is not negotiable and is not what the version bump is spending.
 bytes per op inside the node — and an $O(n)$ rebuild pass per adopt. In exchange, "an op node is
 immutable" becomes true, which is what publication semantics already assumed.
 
-### R11. Bump the format version. Do not carry compatibility.
+### R11. Bump the format version. Do not carry compatibility
 
 Nothing built on this codebase is in production, no third party reads its files, and every store on
 disk can be regenerated from its inputs. Under those conditions a compatibility shim is not caution,
@@ -2347,7 +2347,7 @@ Source: `probe4.cpp`, same machine and compiler as above.
 
 ______________________________________________________________________
 
-## 13. Does This Layout Serve Vortex and VQL?
+## 13. Does This Layout Serve Vortex and VQL
 
 [Vortex](vortex-hyperstructural-runtime.md) and [VQL](vql-query-language.md) are the only specified
 consumers of a cell layout that this note does not itself design. Neither is built, so neither can

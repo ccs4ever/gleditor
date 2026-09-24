@@ -155,7 +155,7 @@ static_assert(sizeof(UniversalLinkEnd) == 16);
 static_assert(alignof(UniversalLinkEnd) == 4);
 ```
 
-#### Aggregate Initialization & Field Access Safety:
+#### Aggregate Initialization & Field Access Safety
 
 Legacy code across [`link_layout.cpp`](../apps/common/xanadu/link_layout.cpp) and
 [`beams.cpp`](../apps/xudu/beams.cpp) initializes and accesses `LinkEnd` as:
@@ -174,7 +174,7 @@ By placing `end` as the third member field, `UniversalLinkEnd` preserves:
    call sites into function calls.
 1. **Register Calling Convention**: Exactly 16 bytes of integer types, passed in `%rsi, %rdx`.
 
-#### Cache-Aligned Transclusion Pairs (`UniversalTransclusionPair`):
+#### Cache-Aligned Transclusion Pairs (`UniversalTransclusionPair`)
 
 A naive 24-byte struct straddles 64-byte cache line boundaries (every other pair requires two cache
 line loads) and drops the essential `span.start` primedia scroll coordinate.
@@ -225,7 +225,7 @@ struct UniversalViewContext {
 };
 ```
 
-#### The Universal Stabbing Algorithm:
+#### The Universal Stabbing Algorithm
 
 1. `Spanfilade::indexManifold()` indexes cell spans into the `ScrollSpanfilade` interval B-tree with
    `.flags = 1U` (`isCell()`) and stores `(cellDense, spanIndex)`.
@@ -270,7 +270,7 @@ public:
 };
 ```
 
-#### Fast-Path Cell Layout Integration:
+#### Fast-Path Cell Layout Integration
 
 `CellSlot` in [`manifold.hpp`](../apps/common/xanadu/zigzag/manifold.hpp) has the following 32-byte
 memory layout:
