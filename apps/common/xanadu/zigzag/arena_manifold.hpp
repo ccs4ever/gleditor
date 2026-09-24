@@ -50,14 +50,20 @@
 
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <optional>
+#include <set>
 #include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
+
+#include <gleditor/cpp26.hpp>
+#include <gleditor/ranges.hpp>
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
@@ -66,9 +72,65 @@
 
 namespace xanadu {
 class Store;
+struct Scroll;
 } // namespace xanadu
 
 namespace zigzag {
+
+/**
+ * @brief One attached manifold, and what it takes to name a cell of it globally
+ * (§5.7).
+ */
+struct Space {
+  const Manifold *manifold{nullptr};
+  const xanadu::Store *store{nullptr};
+  const xanadu::Scroll *sealedAs{
+      nullptr}; ///< opRefOf() needs it; may be null locally
+  const xanadu::SpanReader *reader{
+      nullptr};              ///< owning scroll namespace; lifetime pinned
+  CellRef storeCell{noCell}; ///< its cell on the d.stores rank
+  std::string label;
+};
+
+using QuoteViewId =
+    std::uint32_t; ///< one presentation occurrence, not cell identity
+
+/**
+ * @brief What a proxy stands for, or nothing for an ordinary arena cell (§5.7).
+ */
+struct ForeignRef {
+  std::uint32_t space{0};
+  CellRef index{noCell};
+
+  bool operator==(const ForeignRef &) const  = default;
+  auto operator<=>(const ForeignRef &) const = default;
+};
+
+enum class DimensionBindingMode : std::uint8_t {
+  Explicit,
+  NameMatch,
+  SharedIdentity,
+};
+
+struct BoundDimensionMember {
+  std::uint32_t space{0};
+  DimRef dim{noCell};
+  DimensionBindingMode mode{DimensionBindingMode::Explicit};
+
+  bool operator==(const BoundDimensionMember &) const = default;
+};
+
+struct BoundDimensionSet {
+  std::string name;
+  DimRef arenaDim{noCell};
+  std::vector<BoundDimensionMember> members;
+};
+
+struct ProxyEntry {
+  std::uint32_t space{0};
+  CellRef foreignIndex{noCell};
+  CellRef proxy{noCell};
+};
 
 /**
  * @brief One overwritten CellSlot, and which cell it belonged to.
@@ -115,6 +177,9 @@ struct Mark {
   /// under the mark, so a cell the branch wrote to reverts to reading through
   /// the base -- which is the undo, for an overlaid cell.
   std::uint32_t shadowCount{0};
+  std::uint32_t proxyCount{0};
+  std::uint32_t quoteOccurrenceCount{0};
+  std::uint32_t proxyShadowedEdgeCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -205,6 +270,87 @@ public:
     return provenanceCells_.contains(ref);
   }
   void projectProvenance(const xanadu::Store &store);
+
+  // -- Federation (§5.7) ----------------------------------------------------
+
+  /// Attach @p space: mints its store cell on d.stores and answers its 1-based
+  /// id.
+  std::uint32_t attach(Space space);
+
+  [[nodiscard]] gleditor::cpp26::optional<const Space &>
+  spaceAt(std::uint32_t id) const noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<Space &>
+  spaceAt(std::uint32_t id) noexcept;
+
+  [[nodiscard]] std::size_t spaceCount() const noexcept {
+    return spaces_.size();
+  }
+
+  /// The proxy naming (@p space, @p foreignIndex), minting it on first ask.
+  /// One canonical identity proxy per foreign cell; presentation is separate.
+  CellRef proxyFor(std::uint32_t space, CellRef foreignIndex);
+
+  /// Find existing proxy for (@p space, @p foreignIndex) without allocating;
+  /// noCell if not yet minted.
+  [[nodiscard]] CellRef findExistingProxy(std::uint32_t space,
+                                          CellRef foreignIndex) const noexcept;
+
+  /// Whether @p ref is a canonical federation proxy.
+  [[nodiscard]] bool isProxy(CellRef ref) const noexcept;
+
+  /// Light, view-local presentation cell; content and identity delegate to
+  /// proxy. Its own ZigZag slots hold only edges induced by that quotation's
+  /// selector.
+  CellRef quoteOccurrence(QuoteViewId view, CellRef canonicalProxy);
+
+  [[nodiscard]] bool isQuoteOccurrence(CellRef ref) const noexcept;
+  [[nodiscard]] CellRef canonicalProxyOf(CellRef occurrence) const noexcept;
+
+  /// What a proxy stands for, or nothing for an ordinary arena cell.
+  [[nodiscard]] gleditor::cpp26::optional<ForeignRef>
+  foreignOf(CellRef ref) const noexcept;
+
+  /// The (store, local ref) a proxy names — what promote() and opRefOf() want.
+  [[nodiscard]] gleditor::cpp26::optional<
+      std::pair<const xanadu::Store *, CellRef>>
+  resolveForeign(CellRef ref) const noexcept;
+
+  /// Resolves the corresponding dimension in @p space for @p dim.
+  [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
+
+  /// Explicitly bind @p arenaDim to @p foreignDim in @p space.
+  void
+  bindDimension(DimRef arenaDim, std::uint32_t space, DimRef foreignDim,
+                DimensionBindingMode mode = DimensionBindingMode::Explicit);
+
+  [[nodiscard]] gleditor::cpp26::optional<const BoundDimensionSet &>
+  boundDimensionSet(DimRef dim) const noexcept;
+
+  /// Pre-mints a frontier of canonical proxies along @p foreignDim starting at
+  /// @p foreignHead.
+  void materializeFrontier(std::uint32_t space, CellRef foreignHead,
+                           DimRef foreignDim, DimVector dir = DimVector::POS,
+                           std::size_t maxSteps = 100);
+
+  void setAllocationLimitForTesting(std::uint32_t limit) noexcept {
+    allocationLimit_ = limit;
+  }
+  [[nodiscard]] std::uint32_t allocationLimit() const noexcept {
+    return allocationLimit_;
+  }
+
+  // Functional enumeration APIs leveraging C++26 function_ref
+  void forEachSpace(
+      gleditor::cpp26::function_ref<void(std::uint32_t, const Space &)> visitor)
+      const;
+  void forEachProxy(
+      std::uint32_t space,
+      gleditor::cpp26::function_ref<void(CellRef proxy, CellRef foreignIndex)>
+          visitor) const;
+  void forEachQuoteOccurrence(QuoteViewId view,
+                              gleditor::cpp26::function_ref<void(
+                                  CellRef occurrence, CellRef canonicalProxy)>
+                                  visitor) const;
 
   /// Whether @p ref is a cell this arena minted or has shadowed, as opposed to
   /// one it is merely reading through. What promote() uses to decide whether a
@@ -453,6 +599,31 @@ private:
     std::uint32_t content{0};
   };
   std::vector<Floors> floors_;
+
+  // Federation storage (§5.7)
+  std::vector<Space> spaces_;
+  std::vector<std::unordered_map<CellRef, CellRef>> spaceProxies_;
+  std::vector<ProxyEntry> proxyOrder_;
+  std::vector<CellRef> spaceStoreRefsTail_;
+
+  std::unordered_map<CellRef, CellRef> occurrenceToCanonical_;
+  std::unordered_map<CellRef, QuoteViewId> occurrenceToView_;
+  std::map<std::pair<QuoteViewId, CellRef>, CellRef> viewCanonicalToOccurrence_;
+  std::vector<CellRef> quoteOccurrenceOrder_;
+
+  std::unordered_map<DimRef, BoundDimensionSet> boundDimensions_;
+
+  struct ShadowEdgeKey {
+    std::uint32_t dense{0};
+    DimRef dim{noCell};
+    DimVector dir{DimVector::POS};
+    bool operator==(const ShadowEdgeKey &) const  = default;
+    auto operator<=>(const ShadowEdgeKey &) const = default;
+  };
+  std::set<ShadowEdgeKey> proxyShadowedEdges_;
+  std::vector<ShadowEdgeKey> proxyShadowedEdgeOrder_;
+  CellRef storesRankTail_{noCell};
+  std::uint32_t allocationLimit_{ephemeralBit};
 };
 
 /**

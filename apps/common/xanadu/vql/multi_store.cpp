@@ -186,10 +186,21 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
       v = store->latest();
     }
   }
-  zigzag::Manifold m = store->rebuildManifold(v);
+  auto foldedManifold =
+      std::make_shared<zigzag::Manifold>(store->rebuildManifold(v));
 
-  CellRef importedHome = importManifold(m, core_->arena());
-  if (importedHome == noCell) {
+  zigzag::Space space{
+      .manifold = foldedManifold.get(),
+      .store    = store.get(),
+      .reader   = store.get(),
+      .label    = std::string(label),
+  };
+  const auto spaceId = core_->arena().attach(std::move(space));
+
+  CellRef importedHome = noCell;
+  if (foldedManifold->home() != noCell) {
+    importedHome = core_->arena().proxyFor(spaceId, foldedManifold->home());
+  } else {
     // For xanadocs without zigzag structure ops or empty slices, mint a home
     // cell
     importedHome = core_->arena().makeCell(label);
@@ -201,8 +212,10 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
       .role      = std::string(role),
       .path      = "",
       .store     = store,
+      .manifold  = foldedManifold,
       .homeCell  = importedHome,
       .storeCell = storeCell,
+      .spaceId   = spaceId,
   };
   stores_.push_back(std::move(info));
   return storeCell;
