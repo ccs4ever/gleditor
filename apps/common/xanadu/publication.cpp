@@ -54,11 +54,11 @@ bencode::Value encodeSpan(const GlobalSpan &span) {
 }
 
 std::optional<GlobalSpan> decodeSpan(const bencode::Value &value) {
-  const auto *scroll = value.find("scroll");
-  const auto *start  = value.find("start");
-  const auto *length = value.find("len");
-  if (nullptr == scroll || !scroll->isString() || nullptr == start ||
-      !start->isInteger() || nullptr == length || !length->isInteger()) {
+  const auto scroll = value.find("scroll");
+  const auto start  = value.find("start");
+  const auto length = value.find("len");
+  if (!scroll || !scroll->isString() || !start || !start->isInteger() ||
+      !length || !length->isInteger()) {
     return std::nullopt;
   }
   if (start->asInteger() < 0 || length->asInteger() < 0) {
@@ -109,12 +109,11 @@ bencode::Value encodeScroll(const Scroll &scroll) {
 }
 
 std::optional<Scroll> decodeScroll(const bencode::Value &value) {
-  const auto *key      = value.find("key");
-  const auto *salt     = value.find("salt");
-  const auto *segments = value.find("segments");
-  if (nullptr == key || !key->isString() || key->asString().size() != 32 ||
-      nullptr == salt || !salt->isString() || nullptr == segments ||
-      !segments->isList()) {
+  const auto key      = value.find("key");
+  const auto salt     = value.find("salt");
+  const auto segments = value.find("segments");
+  if (!key || !key->isString() || key->asString().size() != 32 || !salt ||
+      !salt->isString() || !segments || !segments->isList()) {
     return std::nullopt;
   }
   Scroll scroll;
@@ -146,14 +145,14 @@ bencode::Value encodeLink(const GlobalLink &link) {
 }
 
 std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
-  const auto *type    = value.find("type");
-  const auto *owner   = value.find("owner");
-  const auto *left    = value.find("left");
-  const auto *right   = value.find("right");
-  const auto *tier    = value.find("tier");
-  const auto *curator = value.find("curator");
-  if (nullptr == type || !type->isString() || nullptr == owner ||
-      !owner->isString() || nullptr == left || nullptr == right) {
+  const auto type    = value.find("type");
+  const auto owner   = value.find("owner");
+  const auto left    = value.find("left");
+  const auto right   = value.find("right");
+  const auto tier    = value.find("tier");
+  const auto curator = value.find("curator");
+  if (!type || !type->isString() || !owner || !owner->isString() || !left ||
+      !right) {
     return std::nullopt;
   }
   auto lefts  = decodeSpans(*left);
@@ -166,7 +165,7 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   link.owner = owner->asString();
   link.left  = std::move(*lefts);
   link.right = std::move(*rights);
-  if (nullptr != tier && tier->isString()) {
+  if (tier.has_value() && tier->isString()) {
     if ("curated" == tier->asString()) {
       link.tier = ProminenceTier::Curated;
     } else if ("public" == tier->asString()) {
@@ -177,7 +176,7 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   } else {
     link.tier = ProminenceTier::Author;
   }
-  if (nullptr != curator && curator->isString()) {
+  if (curator.has_value() && curator->isString()) {
     link.curator = curator->asString();
   }
   return link;
@@ -328,24 +327,23 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     return std::nullopt;
   }
 
-  const auto *publisher = root.find(keyPublisher);
-  const auto *salt      = root.find(keySalt);
-  const auto *title     = root.find(keyTitle);
-  const auto *version   = root.find(keyVersion);
-  const auto *sequence  = root.find(keySequence);
-  const auto *time      = root.find(keyTime);
-  const auto *pieces    = root.find(keyPieces);
-  const auto *links     = root.find(keyLinks);
-  const auto *scrolls   = root.find(keyScrolls);
-  const auto *signature = root.find(keySignature);
-  if (nullptr == publisher || !publisher->isString() ||
-      publisher->asString().size() != 32 || nullptr == salt ||
-      !salt->isString() || nullptr == title || !title->isString() ||
-      nullptr == version || !version->isString() || nullptr == sequence ||
-      !sequence->isInteger() || nullptr == time || !time->isInteger() ||
-      nullptr == pieces || nullptr == links || !links->isList() ||
-      nullptr == scrolls || !scrolls->isDict() || nullptr == signature ||
-      !signature->isString() || signature->asString().size() != 64) {
+  const auto publisher = root.find(keyPublisher);
+  const auto salt      = root.find(keySalt);
+  const auto title     = root.find(keyTitle);
+  const auto version   = root.find(keyVersion);
+  const auto sequence  = root.find(keySequence);
+  const auto time      = root.find(keyTime);
+  const auto pieces    = root.find(keyPieces);
+  const auto links     = root.find(keyLinks);
+  const auto scrolls   = root.find(keyScrolls);
+  const auto signature = root.find(keySignature);
+  if (!publisher || !publisher->isString() ||
+      publisher->asString().size() != 32 || !salt || !salt->isString() ||
+      !title || !title->isString() || !version || !version->isString() ||
+      !sequence || !sequence->isInteger() || !time || !time->isInteger() ||
+      !pieces || !links || !links->isList() || !scrolls || !scrolls->isDict() ||
+      !signature || !signature->isString() ||
+      signature->asString().size() != 64) {
     return std::nullopt;
   }
 
@@ -389,8 +387,8 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
   // not a decode failure, since the pieces still decode to a whole document
   // on their own; that manifest simply says nothing about the history behind
   // them.
-  if (const auto *opsSegs = root.find(keyOpsSegs);
-      nullptr != opsSegs && opsSegs->isList()) {
+  if (const auto opsSegs = root.find(keyOpsSegs);
+      opsSegs.has_value() && opsSegs->isList()) {
     for (const auto &item : opsSegs->asList()) {
       auto segment = decodeSegment(item);
       if (!segment) {
@@ -400,8 +398,8 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     }
   }
 
-  if (const auto *holesVal = root.find(keyHoles);
-      nullptr != holesVal && holesVal->isList()) {
+  if (const auto holesVal = root.find(keyHoles);
+      holesVal.has_value() && holesVal->isList()) {
     for (const auto &item : holesVal->asList()) {
       auto hole = decodeHole(item);
       if (!hole) {
@@ -695,11 +693,11 @@ std::optional<SealState> decodeSealState(const std::string_view encoded) {
   if (!root.isDict()) {
     return std::nullopt;
   }
-  const auto *scroll    = root.find(keySealScroll);
-  const auto *opsSealed = root.find(keySealOpsSealed);
-  const auto *opsSegs   = root.find(keySealOpsSegs);
-  if (nullptr == scroll || nullptr == opsSealed || !opsSealed->isInteger() ||
-      opsSealed->asInteger() < 0 || nullptr == opsSegs || !opsSegs->isList()) {
+  const auto scroll    = root.find(keySealScroll);
+  const auto opsSealed = root.find(keySealOpsSealed);
+  const auto opsSegs   = root.find(keySealOpsSegs);
+  if (!scroll || !opsSealed || !opsSealed->isInteger() ||
+      opsSealed->asInteger() < 0 || !opsSegs || !opsSegs->isList()) {
     return std::nullopt;
   }
   auto decodedScroll = decodeScroll(*scroll);
@@ -731,9 +729,9 @@ std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
   // A piece of the local spool has a global name exactly when the local spool
   // has been sealed: the offsets are the same bytes, so the sealed scroll's
   // name is the address it always had, said globally.
-  const auto *const scroll =
-      span.isLocal() ? localSealedAs : store.scroll(span.scroll);
-  return nullptr == scroll ? std::string{} : scrollKey(*scroll);
+  const auto scroll = span.isLocal() ? gleditor::refOf(localSealedAs)
+                                     : store.scroll(span.scroll);
+  return scroll ? scrollKey(*scroll) : std::string{};
 }
 
 std::optional<GlobalSpan> globalise(const Store &store,
@@ -817,8 +815,8 @@ std::string sealableOps(const Store &store,
     if (named.contains(node->scrollId)) {
       continue;
     }
-    const auto *const scroll = store.scroll(node->scrollId);
-    if (nullptr == scroll) {
+    const auto scroll = store.scroll(node->scrollId);
+    if (!scroll) {
       throw std::runtime_error(std::format(
           "cannot seal these operations: one of them quotes scroll {}, which "
           "this store does not hold. An operation naming content nobody can "
@@ -1039,7 +1037,8 @@ Publication publish(const Store &store, const MicroversionId &version,
 
   const auto document  = store.rebuild(version);
   const auto scrollFor = [&store, localSealedAs](const PrimediaSpan &span) {
-    return span.isLocal() ? localSealedAs : store.scroll(span.scroll);
+    return span.isLocal() ? gleditor::refOf(localSealedAs)
+                          : store.scroll(span.scroll);
   };
 
   for (const auto &piece : document.pieces()) {
@@ -1056,7 +1055,7 @@ Publication publish(const Store &store, const MicroversionId &version,
           "address a reader could resolve");
     }
     // A break carries no scroll to put in the table -- there is no content
-    // behind it to resolve -- and scrollFor() would hand back nullptr.
+    // behind it to resolve -- and scrollFor() would hand back nothing.
     if (breakMarkerScroll != piece.scroll) {
       pub.scrolls.insert_or_assign(global->scroll, *scrollFor(piece));
     }

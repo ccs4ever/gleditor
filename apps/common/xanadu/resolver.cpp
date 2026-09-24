@@ -62,9 +62,13 @@ InfoHash DirectoryContentSource::add(const std::string_view torrentFile,
   return hash;
 }
 
-const Metainfo *DirectoryContentSource::metainfo(const InfoHash &hash) const {
+gleditor::cpp26::optional<const Metainfo &>
+DirectoryContentSource::metainfo(const InfoHash &hash) const {
   const auto found = held.find(hash);
-  return found == held.end() ? nullptr : &found->second.meta;
+  if (found == held.end()) {
+    return gleditor::cpp26::nullopt;
+  }
+  return found->second.meta;
 }
 
 std::string
@@ -184,7 +188,7 @@ bool Resolver::available(const Scroll &scroll) const {
   }
   return std::ranges::all_of(
       scroll.segments, [this](const ScrollSegment &segment) {
-        if (nullptr != source && nullptr != source->metainfo(segment.torrent)) {
+        if (nullptr != source && source->metainfo(segment.torrent)) {
           return true;
         }
         return !segment.path.empty() &&
@@ -195,8 +199,8 @@ bool Resolver::available(const Scroll &scroll) const {
 std::string Resolver::readSegment(const ScrollSegment &segment,
                                   const std::uint64_t from,
                                   const std::uint64_t count) const {
-  const auto *const meta = source->metainfo(segment.torrent);
-  if (nullptr == meta) {
+  const auto meta = source->metainfo(segment.torrent);
+  if (!meta) {
     return {};
   }
   // Scroll coordinates in, stream coordinates out. The segment is the whole of
@@ -261,8 +265,8 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
   std::string out;
   auto at = span.start;
   while (at < span.end()) {
-    const auto *const segment = scroll.segmentAt(at);
-    if (nullptr == segment) {
+    const auto segment = scroll.segmentAt(at);
+    if (!segment) {
       return ResolveResult{.status = ResolutionStatus::MissingPieces};
     }
     const auto count = std::min(span.end(), segment->end()) - at;
@@ -276,8 +280,8 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
         if (source != nullptr && cache.get_cek(tc.keyId, cekRec)) {
           // The key is held, so this span has been paid for. What is left is
           // to fetch the ciphertext and open it.
-          const auto *const meta = source->metainfo(segment->torrent);
-          if (nullptr == meta) {
+          const auto meta = source->metainfo(segment->torrent);
+          if (!meta) {
             return ResolveResult{.status = ResolutionStatus::MissingPieces};
           }
           // Unsigned, so a segment claiming to start past the end of the
@@ -329,7 +333,7 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
     }
 
     std::string bytes;
-    if (source != nullptr && source->metainfo(segment->torrent) != nullptr) {
+    if (nullptr != source && source->metainfo(segment->torrent)) {
       bytes = readSegment(*segment, at, count);
     } else if (!segment->path.empty()) {
       const std::filesystem::path localPath(segment->path);

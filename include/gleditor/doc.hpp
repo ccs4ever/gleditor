@@ -18,6 +18,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+
+#include <gleditor/cpp26.hpp>
 #include <ranges>
 #include <span>
 #include <string>
@@ -914,12 +916,15 @@ public:
   /// so a result names which document was clicked.
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
-  [[nodiscard]] const Page *page(const std::size_t index) const {
-    // The has_value() check and the dereference both index the same
-    // pages[index] slot, evaluated left-to-right with no mutation between.
+  /// Built page @p index, or nothing for one not built yet or past the end.
+  [[nodiscard]] gleditor::cpp26::optional<const Page &>
+  page(const std::size_t index) const {
+    if (index >= pages.size() || !pages[index].has_value()) {
+      return gleditor::cpp26::nullopt;
+    }
+    // Checked on the line above; nothing between mutates pages.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return (index < pages.size() && pages[index].has_value()) ? &*pages[index]
-                                                              : nullptr;
+    return *pages[index];
   }
 
   /// The measured coordinate frame of one built page.
@@ -940,8 +945,8 @@ public:
   /// The frame of a built page, or nothing while it is still being shaped.
   [[nodiscard]] std::optional<PageFrame>
   pageFrame(const std::size_t index) const {
-    const auto *const built = page(index);
-    if (built == nullptr) {
+    const auto built = page(index);
+    if (!built) {
       return std::nullopt;
     }
     return PageFrame{.localToWorld = modelMatrix() * built->getModel(),

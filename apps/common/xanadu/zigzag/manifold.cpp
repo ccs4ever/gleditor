@@ -21,16 +21,9 @@ std::uint32_t Manifold::denseOf(const CellRef ref) const noexcept {
   return found == byRef.end() ? noDense : found->second;
 }
 
-const CellSlot *Manifold::slot(const CellRef ref) const noexcept {
+SlotRef Manifold::slot(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
-  return noDense == dense ? nullptr : &slots[dense];
-}
-
-common::cpp26::optional<const CellSlot &>
-Manifold::findSlot(const CellRef ref) const noexcept {
-  const auto *const s = slot(ref);
-  return nullptr == s ? common::cpp26::nullopt
-                      : common::cpp26::optional<const CellSlot &>(*s);
+  return noDense == dense ? SlotRef{} : SlotRef{slots[dense]};
 }
 
 DimLink *Manifold::existingLink(const std::uint32_t dense,
@@ -486,8 +479,8 @@ std::vector<std::uint32_t> Manifold::historyOf(const CellRef cell) const {
   if (nullptr == store_) {
     return {};
   }
-  const auto *const cellSlot = slot(cell);
-  if (nullptr == cellSlot) {
+  const auto cellSlot = slot(cell);
+  if (!cellSlot) {
     return {};
   }
 
@@ -629,7 +622,7 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
 }
 
 xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
-  return findSlot(ref)
+  return slot(ref)
       .transform([](const CellSlot &cell) noexcept {
         return static_cast<xanadu::ValueKind>(cell.valueKind);
       })
@@ -637,7 +630,7 @@ xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
 }
 
 std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
-  const auto cell = findSlot(ref);
+  const auto cell = slot(ref);
   if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Double)) {
     return std::nullopt;
@@ -646,7 +639,7 @@ std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
 }
 
 std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
-  const auto cell = findSlot(ref);
+  const auto cell = slot(ref);
   if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Bool)) {
     return std::nullopt;
@@ -656,7 +649,7 @@ std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
 
 std::optional<std::int64_t>
 Manifold::asInt64(const CellRef ref) const noexcept {
-  const auto cell = findSlot(ref);
+  const auto cell = slot(ref);
   if (!cell ||
       cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Int64)) {
     return std::nullopt;
@@ -666,7 +659,7 @@ Manifold::asInt64(const CellRef ref) const noexcept {
 
 std::optional<CellRef>
 Manifold::handleTarget(const CellRef ref) const noexcept {
-  const auto cell = findSlot(ref);
+  const auto cell = slot(ref);
   if (!cell || cell->valueKind !=
                    static_cast<std::uint8_t>(xanadu::ValueKind::OpHandle)) {
     return std::nullopt;
@@ -685,8 +678,8 @@ bool Manifold::equivalentTo(const Manifold &other) const {
     return false;
   }
   for (const auto &cell : slots) {
-    const auto *const theirs = other.slot(cell.birthOp);
-    if (nullptr == theirs || theirs->birthOp != cell.birthOp ||
+    const auto theirs = other.slot(cell.birthOp);
+    if (!theirs || theirs->birthOp != cell.birthOp ||
         theirs->lastOp != cell.lastOp ||
         !std::ranges::equal(contentOf(cell.birthOp),
                             other.contentOf(cell.birthOp)) ||

@@ -20,6 +20,8 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
+#include <gleditor/ranges.hpp>
+
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -1753,14 +1755,10 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
   return model;
 }
 
-const SettingEntry *
+gleditor::cpp26::optional<const SettingEntry &>
 SystemStoreModel::find(const std::string_view name) const noexcept {
-  for (const auto &s : settings_) {
-    if (s.name == name) {
-      return &s;
-    }
-  }
-  return nullptr;
+  return gleditor::findRef(
+      settings_, [name](const SettingEntry &s) { return s.name == name; });
 }
 
 namespace {
@@ -1785,11 +1783,11 @@ const CellValue *findDefaultSettingValue(const std::string_view name) {
 
 double SystemStoreModel::getDouble(const std::string_view name,
                                    const double fallback) const {
-  const auto *const entry = find(name);
-  if (entry != nullptr && !entry->value.elements.empty()) {
+  const auto entry = find(name);
+  if (entry.has_value() && !entry->value.elements.empty()) {
     return entry->value.asDouble(0, fallback);
   }
-  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+  if (entry.has_value() && !entry->schema.alternatives.empty() &&
       !entry->schema.alternatives.front().defaultValues.empty()) {
     const auto &el = entry->schema.alternatives.front().defaultValues.front();
     if (std::holds_alternative<double>(el)) {
@@ -1818,11 +1816,11 @@ double SystemStoreModel::getDouble(const std::string_view name,
 
 std::int64_t SystemStoreModel::getInt64(const std::string_view name,
                                         const std::int64_t fallback) const {
-  const auto *const entry = find(name);
-  if (entry != nullptr && !entry->value.elements.empty()) {
+  const auto entry = find(name);
+  if (entry.has_value() && !entry->value.elements.empty()) {
     return entry->value.asInt64(0, fallback);
   }
-  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+  if (entry.has_value() && !entry->schema.alternatives.empty() &&
       !entry->schema.alternatives.front().defaultValues.empty()) {
     const auto &el = entry->schema.alternatives.front().defaultValues.front();
     if (std::holds_alternative<std::int64_t>(el)) {
@@ -1851,11 +1849,11 @@ std::int64_t SystemStoreModel::getInt64(const std::string_view name,
 
 bool SystemStoreModel::getBool(const std::string_view name,
                                const bool fallback) const {
-  const auto *const entry = find(name);
-  if (entry != nullptr && !entry->value.elements.empty()) {
+  const auto entry = find(name);
+  if (entry.has_value() && !entry->value.elements.empty()) {
     return entry->value.asBool(0, fallback);
   }
-  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+  if (entry.has_value() && !entry->schema.alternatives.empty() &&
       !entry->schema.alternatives.front().defaultValues.empty()) {
     const auto &el = entry->schema.alternatives.front().defaultValues.front();
     if (std::holds_alternative<bool>(el)) {
@@ -1884,11 +1882,11 @@ bool SystemStoreModel::getBool(const std::string_view name,
 
 std::string SystemStoreModel::getString(const std::string_view name,
                                         const std::string_view fallback) const {
-  const auto *const entry = find(name);
-  if (entry != nullptr && !entry->value.elements.empty()) {
+  const auto entry = find(name);
+  if (entry.has_value() && !entry->value.elements.empty()) {
     return entry->value.asString(0, fallback);
   }
-  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+  if (entry.has_value() && !entry->schema.alternatives.empty() &&
       !entry->schema.alternatives.front().defaultValues.empty()) {
     const auto &el = entry->schema.alternatives.front().defaultValues.front();
     if (std::holds_alternative<std::string>(el)) {
@@ -1905,15 +1903,15 @@ std::string SystemStoreModel::getString(const std::string_view name,
 
 std::vector<CellValue>
 SystemStoreModel::getValues(const std::string_view name) const {
-  const auto *const entry = find(name);
-  return entry != nullptr ? entry->value.elements : std::vector<CellValue>{};
+  const auto entry = find(name);
+  return entry.has_value() ? entry->value.elements : std::vector<CellValue>{};
 }
 
 std::vector<double>
 SystemStoreModel::getDoubleList(const std::string_view name) const {
   std::vector<double> result;
-  const auto *const entry = find(name);
-  if (entry != nullptr) {
+  const auto entry = find(name);
+  if (entry.has_value()) {
     for (std::size_t i = 0; i < entry->value.elements.size(); ++i) {
       result.push_back(entry->value.asDouble(i));
     }
@@ -1924,8 +1922,8 @@ SystemStoreModel::getDoubleList(const std::string_view name) const {
 std::vector<std::int64_t>
 SystemStoreModel::getInt64List(const std::string_view name) const {
   std::vector<std::int64_t> result;
-  const auto *const entry = find(name);
-  if (entry != nullptr) {
+  const auto entry = find(name);
+  if (entry.has_value()) {
     for (std::size_t i = 0; i < entry->value.elements.size(); ++i) {
       result.push_back(entry->value.asInt64(i));
     }
@@ -1936,8 +1934,8 @@ SystemStoreModel::getInt64List(const std::string_view name) const {
 std::vector<std::string>
 SystemStoreModel::getStringList(const std::string_view name) const {
   std::vector<std::string> result;
-  const auto *const entry = find(name);
-  if (entry != nullptr) {
+  const auto entry = find(name);
+  if (entry.has_value()) {
     for (std::size_t i = 0; i < entry->value.elements.size(); ++i) {
       result.push_back(entry->value.asString(i));
     }
@@ -1976,8 +1974,8 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
                                 const zigzag::Manifold *const known) {
   const auto curVer = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model  = fromStore(store, curVer);
-  const auto *const entry = model.find(name);
-  if (entry == nullptr) {
+  const auto entry  = model.find(name);
+  if (!entry) {
     throw std::invalid_argument("Setting '" + std::string(name) +
                                 "' not found in store");
   }
@@ -2046,8 +2044,8 @@ SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
                                  const zigzag::Manifold *const known) {
   auto curVer      = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model = fromStore(store, curVer);
-  const auto *const entry = model.find(name);
-  if (entry == nullptr) {
+  const auto entry = model.find(name);
+  if (!entry) {
     throw std::invalid_argument("Setting '" + std::string(name) +
                                 "' not found in store");
   }

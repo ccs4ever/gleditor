@@ -268,7 +268,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
       if (state.docs[i] && state.docs[i]->getModel()[3].z >= 0.0F) {
         const float centerX = state.docs[i]->getModel()[3].x;
         float halfW         = Doc::defaultPageWidthWorld() / 2.0F;
-        if (const auto *p = state.docs[i]->page(0)) {
+        if (const auto p = state.docs[i]->page(0)) {
           halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
         }
         lastRight       = centerX + halfW;

@@ -56,8 +56,8 @@ TEST(CrossDomainClaspTest, PouchManagerDropCell) {
   EXPECT_EQ(item.span.start, 200U);
   EXPECT_EQ(item.span.length, 40U);
 
-  const auto *zone = pm.zoneById("to_link_right");
-  ASSERT_NE(zone, nullptr);
+  const auto zone = pm.zoneById("to_link_right");
+  ASSERT_TRUE((zone).has_value());
   ASSERT_EQ(zone->items().size(), 1U);
   EXPECT_EQ(zone->items().front().originCell, 77U);
   EXPECT_EQ(zone->items().front().originRankCoord, "d.concept: #3");
@@ -116,11 +116,11 @@ TEST(CrossDomainClaspTest, PouchManagerCellPartitionDrop) {
   const auto i2 =
       pm.dropCell("zz_staging", s2, "Staged Cell", 102, "d.y: #2", 0);
 
-  const auto *leftZone    = pm.zoneById("to_link_left");
-  const auto *stagingZone = pm.zoneById("zz_staging");
+  const auto leftZone    = pm.zoneById("to_link_left");
+  const auto stagingZone = pm.zoneById("zz_staging");
 
-  ASSERT_NE(leftZone, nullptr);
-  ASSERT_NE(stagingZone, nullptr);
+  ASSERT_TRUE((leftZone).has_value());
+  ASSERT_TRUE((stagingZone).has_value());
 
   EXPECT_EQ(leftZone->items().size(), 1U);
   EXPECT_EQ(leftZone->items().front().itemId, i1.itemId);
@@ -200,8 +200,8 @@ TEST(CrossDomainClaspTest, PouchManagerCrossDomainCellSpanPreservation) {
   pm.dropCell("to_link_left", s1, "Cell Span 1", 201, "d.time: #10", 0);
   pm.dropCell("to_link_left", s2, "Cell Span 2", 202, "d.time: #11", 0);
 
-  const auto *zone = pm.zoneById("to_link_left");
-  ASSERT_NE(zone, nullptr);
+  const auto zone = pm.zoneById("to_link_left");
+  ASSERT_TRUE((zone).has_value());
   ASSERT_EQ(zone->items().size(), 2U);
 
   const auto allSpans = zone->allSpans();

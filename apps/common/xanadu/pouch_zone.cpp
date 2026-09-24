@@ -9,6 +9,8 @@
 #include <chrono>
 #include <sstream>
 
+#include <gleditor/ranges.hpp>
+
 #include "common/xanadu/system_docs.hpp"
 
 namespace xanadu {
@@ -135,27 +137,42 @@ bool PouchManager::removeZone(const std::string_view id) {
   return false;
 }
 
-DropZone *PouchManager::zoneById(const std::string_view id) noexcept {
-  const auto it = std::ranges::find_if(
-      zones_, [id](const auto &z) { return z->id() == id; });
-  return (it != zones_.end()) ? it->get() : nullptr;
+namespace {
+/// The zone @p pick chooses, as a reference to the zone rather than to the
+/// unique_ptr that owns it.
+template <typename Zones, typename Pick>
+auto zoneWhere(Zones &zones, const Pick &pick) {
+  return gleditor::findRef(zones, [&](const auto &zone) { return pick(*zone); })
+      .transform([](auto &owner) -> decltype(*owner) { return *owner; });
+}
+} // namespace
+
+gleditor::cpp26::optional<DropZone &>
+PouchManager::zoneById(const std::string_view id) noexcept {
+  return zoneWhere(zones_, [id](const DropZone &z) { return z.id() == id; });
 }
 
-const DropZone *
+gleditor::cpp26::optional<const DropZone &>
 PouchManager::zoneById(const std::string_view id) const noexcept {
-  const auto it = std::ranges::find_if(
-      zones_, [id](const auto &z) { return z->id() == id; });
-  return (it != zones_.end()) ? it->get() : nullptr;
+  return zoneWhere(zones_, [id](const DropZone &z) { return z.id() == id; });
 }
 
-DropZone *PouchManager::zoneAt(const float screenX,
-                               const float screenY) noexcept {
-  for (const auto &zone : zones_) {
-    if (zone->contains(screenX, screenY)) {
-      return zone.get();
-    }
+gleditor::cpp26::optional<DropZone &>
+PouchManager::zoneAt(const float screenX, const float screenY) noexcept {
+  return zoneWhere(
+      zones_, [=](const DropZone &z) { return z.contains(screenX, screenY); });
+}
+
+DropZone &PouchManager::zoneOrDefault(const std::string_view id) {
+  if (const auto named = zoneById(id)) {
+    return *named;
   }
-  return nullptr;
+  // An unknown zone drops into the first one, and a manager with none yet
+  // gets its defaults first.
+  if (zones_.empty()) {
+    initDefaultZones();
+  }
+  return *zones_.front();
 }
 
 PouchItem PouchManager::dropSpan(const std::string_view zoneId,
@@ -165,15 +182,7 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
                                  const std::uint32_t docIndex,
                                  const std::uint32_t charStart,
                                  const std::uint32_t charEnd) {
-  DropZone *zone = zoneById(zoneId);
-  if (!zone) {
-    if (!zones_.empty()) {
-      zone = zones_.front().get();
-    } else {
-      initDefaultZones();
-      zone = zones_.front().get();
-    }
-  }
+  DropZone *const zone = &zoneOrDefault(zoneId);
 
   // Record transclusion into the system store: zero raw byte copying!
   currentVersion_ = store().insertSpan(currentVersion_, 0, span);
@@ -215,15 +224,7 @@ PouchItem PouchManager::dropCell(const std::string_view zoneId,
                                  const std::uint32_t cellRef,
                                  const std::string_view rankCoord,
                                  const std::uint32_t sliceIndex) {
-  DropZone *zone = zoneById(zoneId);
-  if (!zone) {
-    if (!zones_.empty()) {
-      zone = zones_.front().get();
-    } else {
-      initDefaultZones();
-      zone = zones_.front().get();
-    }
-  }
+  DropZone *const zone = &zoneOrDefault(zoneId);
 
   // Record transclusion into the system store
   currentVersion_ = store().insertSpan(currentVersion_, 0, span);

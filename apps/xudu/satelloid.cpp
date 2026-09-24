@@ -13,6 +13,8 @@
 #include <gleditor/spatial.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 
+#include <gleditor/ranges.hpp>
+
 namespace xudu {
 
 SatelloidOverlay::SatelloidOverlay(RendererRef renderer, std::string fontName)
@@ -47,27 +49,22 @@ void SatelloidOverlay::removeSatelloid(const zigzag::CellRef cellRef) {
 
 void SatelloidOverlay::clear() { satelloids_.clear(); }
 
-const CellSatelloid *
+gleditor::cpp26::optional<const CellSatelloid &>
 SatelloidOverlay::findSatelloid(const zigzag::CellRef cellRef) const {
-  for (const auto &s : satelloids_) {
-    if (s.cellRef == cellRef) {
-      return &s;
-    }
-  }
-  return nullptr;
+  return gleditor::findRef(satelloids_, [cellRef](const CellSatelloid &s) {
+    return s.cellRef == cellRef;
+  });
 }
 
-CellSatelloid *SatelloidOverlay::findSatelloid(const zigzag::CellRef cellRef) {
-  for (auto &s : satelloids_) {
-    if (s.cellRef == cellRef) {
-      return &s;
-    }
-  }
-  return nullptr;
+gleditor::cpp26::optional<CellSatelloid &>
+SatelloidOverlay::findSatelloid(const zigzag::CellRef cellRef) {
+  return gleditor::findRef(satelloids_, [cellRef](const CellSatelloid &s) {
+    return s.cellRef == cellRef;
+  });
 }
 
 void SatelloidOverlay::triggerPulse(const zigzag::CellRef cellRef) {
-  if (auto *const s = findSatelloid(cellRef)) {
+  if (auto s = findSatelloid(cellRef)) {
     s->triggerPulse();
   }
 }

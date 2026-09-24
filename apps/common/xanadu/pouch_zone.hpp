@@ -15,6 +15,8 @@
 
 #include <glm/vec4.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 #include "microversion.hpp"
 #include "ops.hpp"
 #include "spool.hpp"
@@ -148,9 +150,12 @@ public:
 
   DropZone &addZone(DropZoneConfig config);
   bool removeZone(std::string_view id);
-  [[nodiscard]] DropZone *zoneById(std::string_view id) noexcept;
-  [[nodiscard]] const DropZone *zoneById(std::string_view id) const noexcept;
-  [[nodiscard]] DropZone *zoneAt(float screenX, float screenY) noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneById(std::string_view id) noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<const DropZone &>
+  zoneById(std::string_view id) const noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneAt(float screenX, float screenY) noexcept;
   [[nodiscard]] const std::vector<std::unique_ptr<DropZone>> &
   zones() const noexcept {
     return zones_;
@@ -158,6 +163,8 @@ public:
 
   /// Populate with default Nelsonian partitions.
   void initDefaultZones();
+  /// zoneById(), or the first zone when there is none by that name.
+  DropZone &zoneOrDefault(std::string_view id);
 
   /// Drop a span into a zone, recording OpKind::Transclude in the backing
   /// store.

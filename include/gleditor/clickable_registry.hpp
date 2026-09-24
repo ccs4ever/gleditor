@@ -15,6 +15,8 @@
 #include <functional>
 #include <optional>
 #include <ranges>
+
+#include <gleditor/ranges.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -499,25 +501,22 @@ public:
            });
   }
 
-  // The finds answer a pointer rather than an optional: a hit is a control
-  // this registry owns, and std::optional<const T &> is C++26.
-
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const std::uint32_t tagOffset) const noexcept {
-    return firstWhere([tagOffset](const ClickableControl &ctrl) {
+    return findRef(controls_, [tagOffset](const ClickableControl &ctrl) {
       return ctrl.tagKind == render::tagKindOverlay &&
              tagOffset >= ctrl.tagOffset && tagOffset < ctrl.tagEndOffset;
     });
   }
 
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const render::PickingTag &tag) const noexcept {
-    return firstWhere([&tag, this](const ClickableControl &ctrl) {
+    return findRef(controls_, [&tag, this](const ClickableControl &ctrl) {
       return ctrl.matches(tag, tagBase_);
     });
   }
 
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const std::uint32_t tagKind,
        const std::uint32_t tagOffset) const noexcept {
     render::PickingTag tag;
@@ -527,28 +526,21 @@ public:
   }
 
   [[nodiscard]] bool has(const std::uint32_t tagOffset) const noexcept {
-    return find(tagOffset) != nullptr;
+    return find(tagOffset).has_value();
   }
 
   [[nodiscard]] bool has(const render::PickingTag &tag) const noexcept {
-    return find(tag) != nullptr;
+    return find(tag).has_value();
   }
 
   [[nodiscard]] bool has(const std::uint32_t tagKind,
                          const std::uint32_t tagOffset) const noexcept {
-    return find(tagKind, tagOffset) != nullptr;
+    return find(tagKind, tagOffset).has_value();
   }
 
   void clear() noexcept { controls_.clear(); }
 
 private:
-  template <typename Pred>
-  [[nodiscard]] const ClickableControl *
-  firstWhere(const Pred &pred) const noexcept {
-    const auto hit = std::ranges::find_if(controls_, pred);
-    return hit == controls_.end() ? nullptr : &*hit;
-  }
-
   std::vector<ClickableControl> controls_;
   std::uint32_t tagBase_{0};
 };

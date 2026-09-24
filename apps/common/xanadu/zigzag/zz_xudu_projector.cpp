@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <variant>
 
+#include <gleditor/ranges.hpp>
+
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
@@ -825,7 +827,8 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
                             &localScroll](const xanadu::PrimediaSpan &span) {
-    return span.isLocal() ? &localScroll : store.scroll(span.scroll);
+    return span.isLocal() ? gleditor::refOf(&localScroll)
+                          : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
@@ -844,7 +847,7 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
     if (const auto global =
             xanadu::globalise(store, contentRun.front(), &localScroll)) {
       cellSpans.emplace(slot.birthOp, *global);
-      if (const auto *const s = scrollFor(contentRun.front())) {
+      if (const auto s = scrollFor(contentRun.front())) {
         scrolls.insert_or_assign(global->scroll, *s);
       }
     }

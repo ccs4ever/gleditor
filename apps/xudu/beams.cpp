@@ -350,8 +350,8 @@ std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
                                               const bool towardsRight,
                                               const bool atTextBorder,
                                               const float yOffsetPixels) {
-  const auto *const page = doc.page(anchor.pageIndex);
-  if (nullptr == page) {
+  const auto page = doc.page(anchor.pageIndex);
+  if (!page) {
     return std::nullopt;
   }
   // Margin on the side the other document is on, asked of the page rather
@@ -771,11 +771,11 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   const glm::vec3 nearPos(near->getModel()[3]);
   const glm::vec3 farPos(far->getModel()[3]);
 
-  const auto *const nearPage = near->page(fromAnchor.pageIndex);
-  const auto *const farPage  = far->page(toAnchor.pageIndex);
-  float nearHalfWidth        = fallbackDocHalfWidth;
-  float farHalfWidth         = fallbackDocHalfWidth;
-  if (nullptr != nearPage && nullptr != farPage) {
+  const auto nearPage = near->page(fromAnchor.pageIndex);
+  const auto farPage  = far->page(toAnchor.pageIndex);
+  float nearHalfWidth = fallbackDocHalfWidth;
+  float farHalfWidth  = fallbackDocHalfWidth;
+  if (nearPage.has_value() && farPage.has_value()) {
     nearHalfWidth = (nearPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
     farHalfWidth  = (farPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
   }
@@ -854,7 +854,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
       continue;
     }
     float halfW = fallbackDocHalfWidth;
-    if (const auto *p = state.docs[d]->page(0)) {
+    if (const auto p = state.docs[d]->page(0)) {
       halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
     }
     if (anyForegroundYet) {
@@ -863,7 +863,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
         if (isBackground(prev)) {
           continue;
         }
-        if (const auto *pPrev = state.docs[prev]->page(0)) {
+        if (const auto pPrev = state.docs[prev]->page(0)) {
           prevHalfW = (pPrev->widthPixels() * 0.5F) * Doc::pixelsToWorld;
         }
         break;
@@ -887,7 +887,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     body.restingPosition = cur;
     float halfW          = fallbackDocHalfWidth;
     float heightW        = fallbackDocHeight;
-    if (const auto *p = state.docs[d]->page(0)) {
+    if (const auto p = state.docs[d]->page(0)) {
       halfW   = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
       heightW = p->heightPixels() * Doc::pixelsToWorld;
     }
@@ -915,7 +915,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
       tensionEngine_.step(dt);
     }
     for (std::size_t d = 0; d < state.docs.size(); ++d) {
-      if (const auto *b = tensionEngine_.findBody(d)) {
+      if (const auto b = tensionEngine_.findBody(d)) {
         if (!isBackground(d)) {
           docSlots[d] = b->position.x;
         }
@@ -993,7 +993,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
                            : glm::vec3(docSlots[d] - curPos.x, 0.0F, 0.0F);
 
       for (std::size_t p = 0;; ++p) {
-        const auto *page = doc->page(p);
+        const auto page = doc->page(p);
         if (!page) {
           break;
         }
@@ -1134,7 +1134,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   cellBody.mass            = bridgeConfig_.satelloid.mass;
   cellBody.pinned          = false;
 
-  if (const auto *existing = tensionEngine_.findCellBody(cellRef)) {
+  if (const auto existing = tensionEngine_.findCellBody(cellRef)) {
     cellBody.position = existing->position;
     cellBody.velocity = existing->velocity;
   }
@@ -1176,7 +1176,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
     }
   }
 
-  const auto *solved = tensionEngine_.findCellBody(cellRef);
+  const auto solved = tensionEngine_.findCellBody(cellRef);
   const glm::vec3 solvedPos =
       solved ? solved->position
              : glm::vec3(docPos.x + docHalfW + bridgeConfig_.satelloid.gap,

@@ -13,16 +13,16 @@
 #include <type_traits>
 #include <vector>
 
-#include "common/cpp26.hpp"
-#include "common/cpp26_concat.hpp"
-#include "common/cpp26_inplace_vector.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
+#include <gleditor/cpp26.hpp>
+#include <gleditor/cpp26_concat.hpp>
+#include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace {
 
 int twice(const int value) noexcept { return value * 2; }
 
-int invoke(common::cpp26::function_ref<int(int)> callback) {
+int invoke(gleditor::cpp26::function_ref<int(int)> callback) {
   return callback(21);
 }
 
@@ -36,14 +36,14 @@ TEST(Cpp26CompatibilityTest, FunctionRefBorrowsCallableForTheCall) {
 }
 
 TEST(Cpp26CompatibilityTest, FunctionRefSupportsNoexceptFunctionPointer) {
-  using Ref = common::cpp26::function_ref<int(int) noexcept>;
+  using Ref = gleditor::cpp26::function_ref<int(int) noexcept>;
   static_assert(std::is_trivially_copyable_v<Ref>);
   const Ref callback{twice};
   EXPECT_EQ(callback(21), 42);
 }
 
 TEST(Cpp26CompatibilityTest, InplaceVectorProvidesBoundedContiguousStorage) {
-  common::cpp26::inplace_vector<int, 17> points;
+  gleditor::cpp26::inplace_vector<int, 17> points;
   static_assert(std::ranges::contiguous_range<decltype(points)>);
 
   points.resize(17);
@@ -63,8 +63,8 @@ TEST(Cpp26CompatibilityTest, ConcatPreservesBorrowedCellOrderAndDuplicates) {
   using zigzag::CellRef;
   const std::vector<CellRef> first{1, 2, 2};
   const std::vector<CellRef> second{2, 3};
-  auto view = common::cpp26::views::concat(std::span<const CellRef>{first},
-                                           std::span<const CellRef>{second});
+  auto view = gleditor::cpp26::views::concat(std::span<const CellRef>{first},
+                                             std::span<const CellRef>{second});
   static_assert(std::ranges::input_range<decltype(view)>);
   static_assert(std::is_same_v<std::ranges::range_reference_t<decltype(view)>,
                                const CellRef &>);
@@ -77,7 +77,7 @@ TEST(Cpp26CompatibilityTest, ConcatPreservesBorrowedCellOrderAndDuplicates) {
   const auto collect = [](std::span<const CellRef> a,
                           std::span<const CellRef> b) {
     std::vector<CellRef> values;
-    for (CellRef value : common::cpp26::views::concat(a, b)) {
+    for (CellRef value : gleditor::cpp26::views::concat(a, b)) {
       values.push_back(value);
     }
     return values;

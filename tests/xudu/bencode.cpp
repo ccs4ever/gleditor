@@ -40,7 +40,7 @@ TEST(BencodeTest, dictionaries) {
   const auto value = decode("d3:cow3:moo4:spam4:eggse");
   EXPECT_EQ(value.find("cow")->asString(), "moo");
   EXPECT_EQ(value.find("spam")->asString(), "eggs");
-  EXPECT_EQ(value.find("absent"), nullptr);
+  EXPECT_FALSE((value.find("absent")).has_value());
 }
 
 TEST(BencodeTest, nesting) {

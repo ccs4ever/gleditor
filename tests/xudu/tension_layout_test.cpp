@@ -47,8 +47,8 @@ TEST(TensionLayoutTest, RK4DampedConvergence) {
   }
 
   EXPECT_TRUE(engine.isSettled());
-  const auto *settledBody = engine.findBody(0);
-  ASSERT_NE(settledBody, nullptr);
+  const auto settledBody = engine.findBody(0);
+  ASSERT_TRUE((settledBody).has_value());
   EXPECT_THAT(std::abs(settledBody->position.z), Lt(0.1F));
   EXPECT_THAT(glm::length(settledBody->velocity), Lt(0.02F));
 }
@@ -85,10 +85,10 @@ TEST(TensionLayoutTest, CoulombRepulsionPreventsOverlap) {
     engine.step(dt);
   }
 
-  const auto *res1 = engine.findBody(1);
-  const auto *res2 = engine.findBody(2);
-  ASSERT_NE(res1, nullptr);
-  ASSERT_NE(res2, nullptr);
+  const auto res1 = engine.findBody(1);
+  const auto res2 = engine.findBody(2);
+  ASSERT_TRUE((res1).has_value());
+  ASSERT_TRUE((res2).has_value());
 
   const float finalDist = std::abs(res2->position.x - res1->position.x);
   // Repulsion must have separated them significantly wider than initial
@@ -145,8 +145,8 @@ TEST(TensionLayoutTest, CollinearAlignmentSpring) {
     engine.step(dt);
   }
 
-  const auto *resFar = engine.findBody(20);
-  ASSERT_NE(resFar, nullptr);
+  const auto resFar = engine.findBody(20);
+  ASSERT_TRUE((resFar).has_value());
 
   // Verify collinear side-by-side alignment:
   // X brought to target ~58
@@ -191,13 +191,13 @@ TEST(TensionLayoutTest, AnalyticalEquilibriumSolver) {
 
   engine.solveEquilibrium();
 
-  const auto *r1 = engine.findBody(1);
-  const auto *r2 = engine.findBody(2);
-  const auto *r3 = engine.findBody(3);
+  const auto r1 = engine.findBody(1);
+  const auto r2 = engine.findBody(2);
+  const auto r3 = engine.findBody(3);
 
-  ASSERT_NE(r1, nullptr);
-  ASSERT_NE(r2, nullptr);
-  ASSERT_NE(r3, nullptr);
+  ASSERT_TRUE((r1).has_value());
+  ASSERT_TRUE((r2).has_value());
+  ASSERT_TRUE((r3).has_value());
 
   EXPECT_THAT(r1->position.x, Eq(0.0F));
   EXPECT_THAT(r1->position.z, Eq(0.0F));

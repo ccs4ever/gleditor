@@ -107,7 +107,7 @@ ArrayCellEntry entryOf(const M &m, const zigzag::CellRef cell,
 }
 
 template <zigzag::CellGraph M> auto holdsSlot(const M &m) {
-  return [&m](const zigzag::CellRef cell) { return nullptr != m.slot(cell); };
+  return [&m](const zigzag::CellRef cell) { return m.slot(cell).has_value(); };
 }
 
 /// A rank as a one-dimensional array: its cells in order, up to the first one

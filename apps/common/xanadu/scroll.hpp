@@ -45,6 +45,8 @@
 #include <string_view>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "identity/identity_layout.hpp"
 #include "mutable_link.hpp"
 #include "spool.hpp"
@@ -273,7 +275,8 @@ struct Scroll {
   [[nodiscard]] bool isNamed() const { return !publisher.isZero(); }
 
   /// The segment carrying @p offset, or nullptr when nothing does.
-  [[nodiscard]] const ScrollSegment *segmentAt(std::uint64_t offset) const;
+  [[nodiscard]] gleditor::cpp26::optional<const ScrollSegment &>
+  segmentAt(std::uint64_t offset) const;
 
   /// Record a segment, keeping the list ordered. A segment covering offsets
   /// an existing one already covers replaces it, which is how a re-seal is

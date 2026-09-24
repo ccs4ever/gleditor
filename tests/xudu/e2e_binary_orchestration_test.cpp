@@ -1436,8 +1436,8 @@ TEST(E2EBinaryOrchestrationTest,
   reloaded.load(storePath.string());
   bool foundImageContainer = false;
   for (const auto &piece : reloaded.rebuild(withFragment).pieces()) {
-    if (const auto *segment = reloaded.containerFor(piece);
-        nullptr != segment && "image/png" == segment->mimeType) {
+    if (const auto segment = reloaded.containerFor(piece);
+        segment.has_value() && "image/png" == segment->mimeType) {
       foundImageContainer = true;
       EXPECT_EQ(segment->length, pngBytes.size())
           << "the container segment should span the whole original PNG "

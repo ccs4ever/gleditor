@@ -19,7 +19,12 @@
 #include <string_view>
 
 #include "common/xanadu/ops.hpp"
-#include "common/xanadu/range_utils.hpp"
+#include <gleditor/ranges.hpp>
+
+namespace xanadu {
+using gleditor::firstOf;
+using gleditor::lastOf;
+} // namespace xanadu
 
 namespace xanadu::links {
 

@@ -23,6 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -114,10 +116,12 @@ public:
     return stores_;
   }
 
-  [[nodiscard]] const StoreInfo *
+  [[nodiscard]] gleditor::cpp26::optional<const StoreInfo &>
   findStore(std::string_view label) const noexcept;
 
-  [[nodiscard]] const StoreInfo *primaryStore() const noexcept;
+  /// The store registered with role "primary", else the first registered.
+  [[nodiscard]] gleditor::cpp26::optional<const StoreInfo &>
+  primaryStore() const noexcept;
 
   // -- Runtime Accessors -----------------------------------------------------
 

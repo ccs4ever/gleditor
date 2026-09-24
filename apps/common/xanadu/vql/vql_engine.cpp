@@ -13,10 +13,10 @@
 #include <ranges>
 #include <stdexcept>
 
-#include "common/cpp26_concat.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/cpp26_concat.hpp>
 
 namespace xanadu::vql {
 using zigzag::DimVector;
@@ -28,7 +28,7 @@ concatCellStreams(const std::span<const zigzag::CellRef> current,
                   const std::span<const zigzag::CellRef> created) {
   std::vector<zigzag::CellRef> combined;
   combined.reserve(current.size() + created.size());
-  auto cells = common::cpp26::views::concat(current, created);
+  auto cells = gleditor::cpp26::views::concat(current, created);
   std::ranges::copy(cells, std::back_inserter(combined));
   return combined;
 }

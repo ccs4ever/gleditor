@@ -48,8 +48,8 @@ decodeRegistrySegment(const bencode::Value &value) {
   if (!segment.has_value()) {
     return std::nullopt;
   }
-  if (const auto *mime = value.find("mime");
-      nullptr != mime && mime->isString()) {
+  if (const auto mime = value.find("mime");
+      mime.has_value() && mime->isString()) {
     segment->mimeType = mime->asString();
   }
   return segment;
@@ -133,15 +133,15 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   }
 
   StoreTables tables;
-  if (const auto *document = decoded.find(keyDocumentId); nullptr != document) {
+  if (const auto document = decoded.find(keyDocumentId); document.has_value()) {
     if (!document->isString() ||
         !DocumentId::fromBytes(document->asString(), tables.documentId)) {
       throw StoreTablesUnreadable(path.string() +
                                   " has a document identity it cannot read");
     }
   }
-  if (const auto *local = decoded.find(keyLocalSegments);
-      nullptr != local && local->isList()) {
+  if (const auto local = decoded.find(keyLocalSegments);
+      local.has_value() && local->isList()) {
     for (const auto &item : local->asList()) {
       auto segment = decodeRegistrySegment(item);
       if (!segment.has_value()) {

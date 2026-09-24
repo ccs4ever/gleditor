@@ -23,6 +23,8 @@
 #include <gleditor/render/gl/gl_api.hpp>
 #include <gleditor/render/gl/stream_buffer.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 namespace render::gl {
 
 /**
@@ -90,7 +92,7 @@ public:
    */
   bool renderIntoTextureLayer(
       TextureHandle texture, int layer,
-      const std::function<void(unsigned fbo, void *glContext)> &fn);
+      gleditor::cpp26::function_ref<void(unsigned fbo, void *glContext)> fn);
 
   PipelineHandle createPipeline(const PipelineDesc &desc) override;
 

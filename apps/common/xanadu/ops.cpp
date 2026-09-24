@@ -2,8 +2,8 @@
 #include <span>
 #include <string>
 
-#include "common/cpp26_concat.hpp"
 #include "ops.hpp"
+#include <gleditor/cpp26_concat.hpp>
 
 namespace xanadu {
 
@@ -137,8 +137,8 @@ bool Link::touches(const PrimediaSpan &span) const {
     return !end.intersect(span).empty();
   };
   return std::ranges::any_of(
-      common::cpp26::views::concat(std::span<const PrimediaSpan>{left},
-                                   std::span<const PrimediaSpan>{right}),
+      gleditor::cpp26::views::concat(std::span<const PrimediaSpan>{left},
+                                     std::span<const PrimediaSpan>{right}),
       meets);
 }
 

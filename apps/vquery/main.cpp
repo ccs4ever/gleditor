@@ -430,7 +430,7 @@ int main(int argc, char *argv[]) {
 
     // Handle in-place mutation
     if (program.get<bool>("--in-place") && !primaryPath.empty()) {
-      const auto *primStore = coordinator.primaryStore();
+      const auto primStore = coordinator.primaryStore();
       if (primStore && primStore->store) {
         primStore->store->save(primaryPath);
         std::cout << "Saved in-place changes to primary store: " << primaryPath

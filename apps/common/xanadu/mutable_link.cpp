@@ -181,9 +181,9 @@ std::string encodeMutablePointer(const InfoHash &hash) {
 std::optional<InfoHash>
 decodeMutablePointer(const std::string_view encodedValue) {
   try {
-    const auto value          = bencode::decode(encodedValue);
-    const auto *const pointer = value.find("ih");
-    if (nullptr == pointer || !pointer->isString()) {
+    const auto value   = bencode::decode(encodedValue);
+    const auto pointer = value.find("ih");
+    if (!pointer || !pointer->isString()) {
       return std::nullopt;
     }
     const auto &raw = pointer->asString();

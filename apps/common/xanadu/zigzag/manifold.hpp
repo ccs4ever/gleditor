@@ -31,7 +31,8 @@
 #include <utility>
 #include <vector>
 
-#include "common/cpp26.hpp"
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
@@ -252,6 +253,10 @@ struct CellSlot {
 // being impossible.
 static_assert(sizeof(CellSlot) == 32);
 
+/// A borrowed cell slot, or nothing: what slot() answers. A reference into the
+/// manifold's slot array, so valid until the next fold or write grows it.
+using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
+
 /**
  * @class Manifold
  * @brief A zzstructure over one store's cells: an explicitly materialised view.
@@ -290,13 +295,11 @@ public:
    * operation on the same cell (R7), so resolving a chain index to the cell it
    * belongs to is something this class has to be able to do anyway.
    */
-  [[nodiscard]] const CellSlot *slot(CellRef ref) const noexcept;
-  [[nodiscard]] common::cpp26::optional<const CellSlot &>
-  findSlot(CellRef ref) const noexcept;
+  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept;
 
   /// Whether @p ref names a cell this manifold holds.
   [[nodiscard]] bool contains(CellRef ref) const noexcept {
-    return nullptr != slot(ref);
+    return slot(ref).has_value();
   }
 
   /// How many cells there are.

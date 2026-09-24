@@ -47,11 +47,11 @@ bencode::Value encodeSpan(const GlobalSpan &span) {
 }
 
 std::optional<GlobalSpan> decodeSpan(const bencode::Value &value) {
-  const auto *scroll = value.find("scroll");
-  const auto *start  = value.find("start");
-  const auto *length = value.find("len");
-  if (nullptr == scroll || !scroll->isString() || nullptr == start ||
-      !start->isInteger() || nullptr == length || !length->isInteger()) {
+  const auto scroll = value.find("scroll");
+  const auto start  = value.find("start");
+  const auto length = value.find("len");
+  if (!scroll || !scroll->isString() || !start || !start->isInteger() ||
+      !length || !length->isInteger()) {
     return std::nullopt;
   }
   if (start->asInteger() < 0 || length->asInteger() < 0) {
@@ -108,19 +108,19 @@ bencode::Value encodeScroll(const Scroll &scroll) {
 }
 
 std::optional<Scroll> decodeScroll(const bencode::Value &value) {
-  const auto *segments = value.find("segments");
-  if (nullptr == segments || !segments->isList()) {
+  const auto segments = value.find("segments");
+  if (!segments || !segments->isList()) {
     return std::nullopt;
   }
   Scroll scroll;
-  const auto *publisher = value.find("publisher");
-  if (nullptr != publisher && publisher->isString() &&
+  const auto publisher = value.find("publisher");
+  if (publisher.has_value() && publisher->isString() &&
       32 == publisher->asString().size()) {
     std::copy(publisher->asString().begin(), publisher->asString().end(),
               scroll.publisher.bytes.begin());
   }
-  const auto *salt = value.find("salt");
-  if (nullptr != salt && salt->isString()) {
+  const auto salt = value.find("salt");
+  if (salt.has_value() && salt->isString()) {
     scroll.salt = salt->asString();
   }
   for (const auto &item : segments->asList()) {
@@ -148,14 +148,14 @@ bencode::Value encodeLink(const GlobalLink &link) {
 }
 
 std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
-  const auto *type    = value.find("type");
-  const auto *owner   = value.find("owner");
-  const auto *left    = value.find("left");
-  const auto *right   = value.find("right");
-  const auto *tier    = value.find("tier");
-  const auto *curator = value.find("curator");
-  if (nullptr == type || !type->isString() || nullptr == owner ||
-      !owner->isString() || nullptr == left || nullptr == right) {
+  const auto type    = value.find("type");
+  const auto owner   = value.find("owner");
+  const auto left    = value.find("left");
+  const auto right   = value.find("right");
+  const auto tier    = value.find("tier");
+  const auto curator = value.find("curator");
+  if (!type || !type->isString() || !owner || !owner->isString() || !left ||
+      !right) {
     return std::nullopt;
   }
   auto lefts  = decodeSpans(*left);
@@ -168,7 +168,7 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   link.owner = owner->asString();
   link.left  = std::move(*lefts);
   link.right = std::move(*rights);
-  if (nullptr != tier && tier->isString()) {
+  if (tier.has_value() && tier->isString()) {
     if ("curated" == tier->asString()) {
       link.tier = ProminenceTier::Curated;
     } else if ("public" == tier->asString()) {
@@ -179,7 +179,7 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   } else {
     link.tier = ProminenceTier::Curated;
   }
-  if (nullptr != curator && curator->isString()) {
+  if (curator.has_value() && curator->isString()) {
     link.curator = curator->asString();
   }
   return link;
@@ -263,20 +263,18 @@ std::optional<LinkPackage> decodeLinkPackage(const std::string_view encoded) {
     return std::nullopt;
   }
 
-  const auto *curator   = root.find(keyCurator);
-  const auto *salt      = root.find(keySalt);
-  const auto *title     = root.find(keyTitle);
-  const auto *sequence  = root.find(keySequence);
-  const auto *time      = root.find(keyTime);
-  const auto *links     = root.find(keyLinks);
-  const auto *scrolls   = root.find(keyScrolls);
-  const auto *signature = root.find(keySignature);
-  if (nullptr == curator || !curator->isString() ||
-      curator->asString().size() != 32 || nullptr == salt ||
-      !salt->isString() || nullptr == title || !title->isString() ||
-      nullptr == sequence || !sequence->isInteger() || nullptr == time ||
-      !time->isInteger() || nullptr == links || !links->isList() ||
-      nullptr == scrolls || !scrolls->isDict() || nullptr == signature ||
+  const auto curator   = root.find(keyCurator);
+  const auto salt      = root.find(keySalt);
+  const auto title     = root.find(keyTitle);
+  const auto sequence  = root.find(keySequence);
+  const auto time      = root.find(keyTime);
+  const auto links     = root.find(keyLinks);
+  const auto scrolls   = root.find(keyScrolls);
+  const auto signature = root.find(keySignature);
+  if (!curator || !curator->isString() || curator->asString().size() != 32 ||
+      !salt || !salt->isString() || !title || !title->isString() || !sequence ||
+      !sequence->isInteger() || !time || !time->isInteger() || !links ||
+      !links->isList() || !scrolls || !scrolls->isDict() || !signature ||
       !signature->isString() || signature->asString().size() != 64) {
     return std::nullopt;
   }

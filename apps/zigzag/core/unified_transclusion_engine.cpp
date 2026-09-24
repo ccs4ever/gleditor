@@ -140,15 +140,18 @@ void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
   cold_[cell] = std::move(cold);
 }
 
-const UnifiedTransclusionEngine::ColdCell *
+gleditor::cpp26::optional<const UnifiedTransclusionEngine::ColdCell &>
 UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
   const auto found = cold_.find(cell);
-  return found == cold_.end() ? nullptr : &found->second;
+  if (found == cold_.end()) {
+    return gleditor::cpp26::nullopt;
+  }
+  return found->second;
 }
 
 bool UnifiedTransclusionEngine::isCellLocked(
     const CellRef cell) const noexcept {
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->resolutionStatus ==
         xanadu::ResolutionStatus::TranscopyrightLocked) {
       return true;
@@ -166,7 +169,7 @@ bool UnifiedTransclusionEngine::isCellLocked(
 
 std::optional<xanadu::TranscopyrightDescriptor>
 UnifiedTransclusionEngine::cellRoyalty(const CellRef cell) const noexcept {
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->transcopyrightInfo.has_value()) {
       return cold->transcopyrightInfo;
     }
@@ -186,9 +189,9 @@ bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
   if (spans.empty()) {
     return false;
   }
-  const auto &span       = spans.front();
-  const auto res         = store_.resolve(span);
-  const auto *const cold = coldOf(cell);
+  const auto &span = spans.front();
+  const auto res   = store_.resolve(span);
+  const auto cold  = coldOf(cell);
   if (res.status != xanadu::ResolutionStatus::TranscopyrightLocked ||
       !res.lockInfo.has_value()) {
     if (!cold || !cold->transcopyrightInfo.has_value() ||
@@ -243,18 +246,23 @@ void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
   linkCells(a, zigzag::noCell, dim, DimVector::POS);
 }
 
-const CellSlot *
+zigzag::SlotRef
 UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
   if (isEphemeral(cell)) {
+    // An ephemeral d.meta-dims cell reads as its dimension's slot under its
+    // own name; the copy lives in one mutable scratch slot, so the reference
+    // answered here is valid until the next findCell() of an ephemeral cell.
     const auto it = ephemeralSlots_.find(cell);
-    if (it != ephemeralSlots_.end()) {
-      if (const auto *masterSlot = manifold_.slot(it->second.dimension)) {
-        ephemeralCellSlotDummy_         = *masterSlot;
-        ephemeralCellSlotDummy_.birthOp = cell;
-        return &ephemeralCellSlotDummy_;
-      }
+    if (it == ephemeralSlots_.end()) {
+      return {};
     }
-    return nullptr;
+    return manifold_.slot(it->second.dimension)
+        .transform(
+            [&](const zigzag::CellSlot &master) -> const zigzag::CellSlot & {
+              ephemeralCellSlotDummy_         = master;
+              ephemeralCellSlotDummy_.birthOp = cell;
+              return ephemeralCellSlotDummy_;
+            });
   }
   return manifold_.slot(cell);
 }
@@ -442,7 +450,7 @@ UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
     }
     return "";
   }
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted) {
       return "[Redacted - Withheld]";
     }
@@ -609,7 +617,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    const auto *cell = findCell(currId);
+    const auto cell = findCell(currId);
     if (!cell) {
       continue;
     }
@@ -642,7 +650,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    const auto *cell = findCell(static_cast<CellRef>(cid));
+    const auto cell = findCell(static_cast<CellRef>(cid));
 
     gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
                                        .maxHeightPx     = 240.0F,
@@ -674,7 +682,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
     // the cold table, not in the slot: a withheld span and a paid-for one are
     // the same address until the reader's keys say otherwise.
     std::uint32_t paperCol = Doc::VBORow::color(25);
-    if (const auto *const cold = coldOf(cid); nullptr != cold) {
+    if (const auto cold = coldOf(cid); cold.has_value()) {
       if (cold->resolutionStatus ==
           xanadu::ResolutionStatus::WithheldRedacted) {
         paperCol = Doc::VBORow::color3(17, 24, 39);

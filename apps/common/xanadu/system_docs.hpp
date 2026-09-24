@@ -20,6 +20,8 @@
 #include "common/xanadu/zigzag/dim_vector.hpp"
 #include <gleditor/radial_menu.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 namespace zigzag {
 class Manifold;
 } // namespace zigzag
@@ -586,7 +588,8 @@ public:
   [[nodiscard]] const std::vector<SettingEntry> &settings() const noexcept {
     return settings_;
   }
-  [[nodiscard]] const SettingEntry *find(std::string_view name) const noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<const SettingEntry &>
+  find(std::string_view name) const noexcept;
 
   // Generic value queries
   [[nodiscard]] double getDouble(std::string_view name,

@@ -56,8 +56,8 @@ std::optional<Rect> boundsOf(const Doc &doc, const glm::mat4 &viewProjection,
   bool any    = false;
 
   for (std::size_t index = 0; index < doc.numPages(); index++) {
-    const auto *const page = doc.page(index);
-    if (nullptr == page) {
+    const auto page = doc.page(index);
+    if (!page) {
       continue;
     }
     // Both corners, then the extremes of whatever came back: which of the two

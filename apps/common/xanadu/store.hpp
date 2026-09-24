@@ -38,6 +38,8 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "binary_ops.hpp"
 #include "common/xanadu/enfilade/chronofilade.hpp"
 #include "compact_op.hpp"
@@ -793,7 +795,8 @@ public:
 
   /// The scroll @p id names, or nullptr for the local spool and for anything
   /// this store has never recorded.
-  [[nodiscard]] const Scroll *scroll(ScrollId id) const;
+  [[nodiscard]] gleditor::cpp26::optional<const Scroll &>
+  scroll(ScrollId id) const;
   [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
 
   void setBootstrapPermascroll(
@@ -826,7 +829,7 @@ public:
    * container's own [at, at+length) in @p span's scroll coordinates and its
    * mimeType -- what @p span's own byte offset is relative to.
    */
-  [[nodiscard]] const ScrollSegment *
+  [[nodiscard]] gleditor::cpp26::optional<const ScrollSegment &>
   containerFor(const PrimediaSpan &span) const;
 
   /**

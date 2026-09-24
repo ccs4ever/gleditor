@@ -516,8 +516,8 @@ TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
 
   // 1) Add an unformatted cell
   const auto plainCell = rig.engine.addCell("Unformatted plain cell");
-  const auto *slot1    = rig.engine.manifold().slot(plainCell);
-  ASSERT_NE(slot1, nullptr);
+  const auto slot1     = rig.engine.manifold().slot(plainCell);
+  ASSERT_TRUE(slot1.has_value());
   EXPECT_EQ(slot1->formatFlags, 0U);
 
   // 2) Add a formatted cell with Bold
@@ -535,8 +535,8 @@ TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
   // Update format flags
   rig.engine.updateFormatFlags();
 
-  const auto *slot2 = rig.engine.manifold().slot(boldCell);
-  ASSERT_NE(slot2, nullptr);
+  const auto slot2 = rig.engine.manifold().slot(boldCell);
+  ASSERT_TRUE(slot2.has_value());
   const auto boldBit =
       1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Bold);
   EXPECT_EQ(slot2->formatFlags, boldBit);
@@ -571,8 +571,8 @@ TEST(UnifiedTransclusionEngineTest,
   rig.engine.syncIncremental();
   EXPECT_EQ(rig.engine.formatRescanCount(), initialRescans + 1);
 
-  const auto *slot1 = rig.engine.manifold().slot(italicCell);
-  ASSERT_NE(slot1, nullptr);
+  const auto slot1 = rig.engine.manifold().slot(italicCell);
+  ASSERT_TRUE(slot1.has_value());
   const auto italicBit =
       1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Italic);
   EXPECT_EQ(slot1->formatFlags, italicBit);
@@ -591,12 +591,12 @@ TEST(UnifiedTransclusionEngineTest,
   EXPECT_EQ(rig.engine.formatRescanCount(), initialRescans + 1);
 
   // Existing formatting is strictly preserved
-  const auto *slot1After = rig.engine.manifold().slot(italicCell);
-  ASSERT_NE(slot1After, nullptr);
+  const auto slot1After = rig.engine.manifold().slot(italicCell);
+  ASSERT_TRUE(slot1After.has_value());
   EXPECT_EQ(slot1After->formatFlags, italicBit);
 
-  const auto *slotPlain1 = rig.engine.manifold().slot(plain1);
-  ASSERT_NE(slotPlain1, nullptr);
+  const auto slotPlain1 = rig.engine.manifold().slot(plain1);
+  ASSERT_TRUE(slotPlain1.has_value());
   EXPECT_EQ(slotPlain1->formatFlags, 0U);
 
   // 3) Staging unformatted cells directly exercises zero-allocation fast path

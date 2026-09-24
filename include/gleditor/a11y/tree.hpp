@@ -34,6 +34,8 @@
 #include <string_view>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 namespace gleditor::a11y {
 
 /**
@@ -229,7 +231,7 @@ struct Tree {
   }
   /// The node with this id, or nothing. Linear: the trees here have tens of
   /// nodes, not thousands, and a map would cost more to build than it saves.
-  [[nodiscard]] const Node *find(std::uint64_t id) const;
+  [[nodiscard]] cpp26::optional<const Node &> find(std::uint64_t id) const;
 
   bool operator==(const Tree &) const = default;
 };

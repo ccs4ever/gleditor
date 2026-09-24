@@ -1355,6 +1355,30 @@ install:
 	# and what it may not is the directory itself.
 	$(INSTALL) -d $(DESTDIR)$(includedir)
 	cp -R include/gleditor $(DESTDIR)$(includedir)/
+	# The C++26 facades in those headers pick native or fallback types, and a
+	# program has to pick what this library was built with or the two disagree
+	# on layout. Record the choices this build made -- the same compiler,
+	# standard library and flags as every object above -- and install the
+	# fallbacks, with their licences, where gleditor.pc points.
+	$(CXX) $(CXXFLAGS) -dM -E -x c++ include/gleditor/cpp26_select.hpp \
+	  | grep '^#define GLEDITOR_CPP26_NATIVE_' \
+	  > $(DESTDIR)$(includedir)/gleditor/cpp26_config.hpp
+	$(INSTALL) -d $(DESTDIR)$(includedir)/gleditor/cpp26-fallback
+	cp -R thirdparty/nontype_functional/include/std23 \
+	  thirdparty/beman_optional/include/beman \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/
+	cp -R thirdparty/beman_inplace_vector/include/beman/inplace_vector \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/
+	# Upstream build files ride along in their include trees; a header
+	# directory is no place for them.
+	find $(DESTDIR)$(includedir)/gleditor/cpp26-fallback \
+	  \( -name CMakeLists.txt -o -name '*.in' \) -delete
+	$(INSTALL) -m 644 thirdparty/nontype_functional/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/std23/LICENSE
+	$(INSTALL) -m 644 thirdparty/beman_optional/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/optional/LICENSE
+	$(INSTALL) -m 644 thirdparty/beman_inplace_vector/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/inplace_vector/LICENSE
 	$(INSTALL) -d $(DESTDIR)$(libdir)/pkgconfig
 	$(SED) -e 's,@PREFIX@,$(prefix),g' -e 's,@LIBDIR@,$(libdir),g' \
 	       -e 's,@INCLUDEDIR@,$(includedir),g' -e 's,@VERSION@,$(VERS),g' \

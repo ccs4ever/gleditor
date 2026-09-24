@@ -9,6 +9,8 @@
 #include <ranges>
 #include <stdexcept>
 
+#include <gleditor/ranges.hpp>
+
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vql {
@@ -250,26 +252,23 @@ MultiStoreCoordinator::resolveNamedStore(std::string_view name) const {
                          std::views::transform(&StoreInfo::homeCell));
 }
 
-const StoreInfo *
+gleditor::cpp26::optional<const StoreInfo &>
 MultiStoreCoordinator::findStore(std::string_view label) const noexcept {
-  for (const auto &info : stores_) {
-    if (info.label == label) {
-      return &info;
-    }
-  }
-  return nullptr;
+  return gleditor::findRef(
+      stores_, [label](const StoreInfo &info) { return info.label == label; });
 }
 
-const StoreInfo *MultiStoreCoordinator::primaryStore() const noexcept {
-  for (const auto &info : stores_) {
-    if (info.role == "primary") {
-      return &info;
-    }
-  }
-  if (!stores_.empty()) {
-    return &stores_.front();
-  }
-  return nullptr;
+gleditor::cpp26::optional<const StoreInfo &>
+MultiStoreCoordinator::primaryStore() const noexcept {
+  return gleditor::findRef(
+             stores_,
+             [](const StoreInfo &info) { return info.role == "primary"; })
+      .or_else([this]() -> gleditor::cpp26::optional<const StoreInfo &> {
+        if (stores_.empty()) {
+          return gleditor::cpp26::nullopt;
+        }
+        return stores_.front();
+      });
 }
 
 DimRef MultiStoreCoordinator::resolveDimension(std::string_view name) {

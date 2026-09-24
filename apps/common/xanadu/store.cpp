@@ -306,7 +306,7 @@ std::uint32_t Store::lastOpOnCell(const MicroversionId &parent,
                                   const zigzag::CellRef cell,
                                   const zigzag::Manifold *const known) const {
   if (nullptr != known) {
-    if (const auto *const slot = known->slot(cell); nullptr != slot) {
+    if (const auto slot = known->slot(cell); slot.has_value()) {
       return slot->lastOp;
     }
   }
@@ -818,7 +818,7 @@ void Store::hydrateExternalScroll(Scroll &sc) const {
   }
   for (auto &seg : sc.segments) {
     if (seg.length == 0 || seg.path.empty()) {
-      if (const auto *meta = source->metainfo(seg.torrent)) {
+      if (const auto meta = source->metainfo(seg.torrent)) {
         if (seg.fileIndex < meta->files().size()) {
           const auto &f = meta->files()[seg.fileIndex];
           if (seg.path.empty()) {
@@ -837,30 +837,35 @@ void Store::hydrateExternalScroll(Scroll &sc) const {
   }
 }
 
-const Scroll *Store::scroll(const ScrollId id) const {
+gleditor::cpp26::optional<const Scroll &>
+Store::scroll(const ScrollId id) const {
   if (localScroll == id || id > externals.size()) {
-    return nullptr;
+    return gleditor::cpp26::nullopt;
   }
   auto &sc = const_cast<Scroll &>(externals[id - 1]);
   hydrateExternalScroll(sc);
-  return &sc;
+  return sc;
 }
 
-const ScrollSegment *Store::containerFor(const PrimediaSpan &span) const {
+gleditor::cpp26::optional<const ScrollSegment &>
+Store::containerFor(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     return localSegments.segmentAt(span.start);
   }
-  const auto *external = scroll(span.scroll);
-  return nullptr == external ? nullptr : external->segmentAt(span.start);
+  return scroll(span.scroll).and_then([&](const Scroll &external) {
+    return external.segmentAt(span.start);
+  });
 }
 
 std::vector<ScrollSegment>
 Store::segmentsOverlapping(const ScrollId scrollId, const std::uint64_t start,
                            const std::uint64_t length) const {
-  const auto *const owner =
-      localScroll == scrollId ? &localSegments : scroll(scrollId);
+  const auto owner =
+      localScroll == scrollId
+          ? gleditor::cpp26::optional<const Scroll &>{localSegments}
+          : scroll(scrollId);
   std::vector<ScrollSegment> found;
-  if (nullptr == owner) {
+  if (!owner) {
     return found;
   }
   const auto rangeEnd = start + length;
@@ -903,8 +908,8 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
     return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                          .text   = *vocab};
   }
-  const auto *const which = scroll(span.scroll);
-  if (nullptr == which) {
+  const auto which = scroll(span.scroll);
+  if (!which) {
     return ResolveResult{
         .status     = ResolutionStatus::WithheldRedacted,
         .holeRecord = PublishedHoleRecord{.at     = span.start,
@@ -938,8 +943,8 @@ std::string Store::read(const PrimediaSpan &span) const {
   if (const auto vocab = readVocabulary(span)) {
     return *vocab;
   }
-  const auto *const which = scroll(span.scroll);
-  if (nullptr == which) {
+  const auto which = scroll(span.scroll);
+  if (!which) {
     return {};
   }
   // Check ephemeral live author buffer if not yet sealed into a torrent piece
@@ -1019,7 +1024,7 @@ std::string Store::readRemoteAuthorBuffer(const PrimediaSpan &span) const {
   if (span.scroll == 0) {
     return {};
   }
-  const auto *const which = scroll(span.scroll);
+  const auto which = scroll(span.scroll);
   if (!which) {
     return {};
   }
@@ -1109,7 +1114,7 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
 
   if (effectiveKey.empty()) {
     if (localOp.span.scroll > 0 && localOp.span.scroll <= externals.size()) {
-      const auto *sc = scroll(localOp.span.scroll);
+      const auto sc = scroll(localOp.span.scroll);
       if (sc) {
         effectiveKey = "btpk:" + sc->publisher.hex() + ":" + sc->salt;
       }

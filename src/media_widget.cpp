@@ -357,9 +357,9 @@ std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
     // the same up-positive direction: converting means locating the top
     // edge in this same centre-relative pixel space, half the page's own
     // height above centre, then stepping down by pageY_.
-    const auto *const pageObj = doc_->page(pageIdx);
+    const auto pageObj = doc_->page(pageIdx);
     const float halfHeightPixels =
-        (pageObj != nullptr) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
+        (pageObj.has_value()) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
     effectiveY = halfHeightPixels - pageY_;
   } else {
     // The layout engine already decided where this widget's LayoutBox
@@ -434,10 +434,10 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     const float anchorX    = corner->x;
     const float effectiveY = corner->y;
 
-    const auto *const pageObj = doc_->page(pageIdx);
-    const float pageCenterY   = (pageObj != nullptr)
-                                    ? pageObj->getModel()[3][1]
-                                    : (-100.0F * static_cast<float>(pageIdx));
+    const auto pageObj      = doc_->page(pageIdx);
+    const float pageCenterY = (pageObj.has_value())
+                                  ? pageObj->getModel()[3][1]
+                                  : (-100.0F * static_cast<float>(pageIdx));
 
     const auto docModel = doc_->modelMatrix();
     // Scale from widget layout pixel space to document world space

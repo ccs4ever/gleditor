@@ -25,6 +25,8 @@
 #include <thread>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 namespace render {
 
 /**
@@ -59,6 +61,9 @@ public:
     return static_cast<std::uint32_t>(workers.size()) + 1;
   }
 
+  /// One index of a batch. Borrowed for the duration of run().
+  using Work = gleditor::cpp26::function_ref<void(std::uint32_t)>;
+
   /**
    * @brief Call @p work(i) for every i in [0, @p count), and return once all
    *        of them have returned.
@@ -71,15 +76,20 @@ public:
    * other call has finished. That matters for a graphics backend: abandoning
    * half-recorded command buffers while other threads are still writing to
    * them would be worse than the original failure.
+   *
+   * @p work is borrowed, not owned: a function_ref rather than a
+   * std::function, because the per-frame caller's closure (five captures) is
+   * past std::function's inline buffer, and wrapping it cost the render
+   * thread a heap allocation every frame. The pool keeps only a pointer to it,
+   * and only until this call returns.
    */
-  void run(std::uint32_t count, const std::function<void(std::uint32_t)> &work);
+  void run(std::uint32_t count, Work work);
 
 private:
   void workerLoop();
   /// Run one index, remembering the first exception rather than letting it out.
   /// Called with the mutex released.
-  void runOne(const std::function<void(std::uint32_t)> &work,
-              std::uint32_t index);
+  void runOne(Work work, std::uint32_t index);
 
   std::vector<std::thread> workers;
 
@@ -88,7 +98,7 @@ private:
   std::condition_variable done;
 
   /// The batch currently being run. Null between batches.
-  const std::function<void(std::uint32_t)> *current{};
+  const Work *current{};
   /// Indices of the current batch not yet claimed, and how many are still
   /// running. A batch is finished when both reach zero.
   std::uint32_t unclaimed{};

@@ -55,8 +55,8 @@ TEST(PouchTest, DropSpanIntoZoneAppendsTransclusionWithZeroByteDuplication) {
   EXPECT_EQ(item.originDocIndex, 0U);
 
   // Check drop zone holds item
-  const auto *zone = pm.zoneById("to_link_left");
-  ASSERT_NE(zone, nullptr);
+  const auto zone = pm.zoneById("to_link_left");
+  ASSERT_TRUE((zone).has_value());
   ASSERT_EQ(zone->items().size(), 1U);
   EXPECT_EQ(zone->items().front().itemId, 1U);
 
@@ -79,8 +79,8 @@ TEST(PouchTest, DismissItemMovesToNonDestructiveLimbo) {
   const auto item =
       pm.dropSpan("notes", span, "Important citation", MicroversionId{});
 
-  auto *zone = pm.zoneById("notes");
-  ASSERT_NE(zone, nullptr);
+  auto zone = pm.zoneById("notes");
+  ASSERT_TRUE((zone).has_value());
   EXPECT_EQ(zone->items().size(), 1U);
 
   // Dismiss item
@@ -119,12 +119,13 @@ TEST(PouchTest, AddRemoveCustomZoneAndHitTesting) {
   EXPECT_FALSE(zone.contains(50.0F, 190.0F));
 
   // Hit test via manager
-  EXPECT_EQ(pm.zoneAt(50.0F, 120.0F), &zone);
-  EXPECT_EQ(pm.zoneAt(0.0F, 0.0F), nullptr);
+  // The hit is the zone itself, not a copy of it.
+  EXPECT_EQ(&pm.zoneAt(50.0F, 120.0F).value(), &zone);
+  EXPECT_FALSE((pm.zoneAt(0.0F, 0.0F)).has_value());
 
   // Remove zone
   EXPECT_TRUE(pm.removeZone("rebuttal"));
-  EXPECT_EQ(pm.zoneById("rebuttal"), nullptr);
+  EXPECT_FALSE((pm.zoneById("rebuttal")).has_value());
   EXPECT_FALSE(pm.removeZone("nonexistent"));
 }
 
@@ -148,8 +149,8 @@ TEST(PouchTest, ManifestSerializationRoundTrip) {
   pm2.store().setVersionAnnotation(MicroversionId{}, *ann);
 
   pm2.loadManifest();
-  const auto *restored = pm2.zoneById("custom_zone");
-  ASSERT_NE(restored, nullptr);
+  const auto restored = pm2.zoneById("custom_zone");
+  ASSERT_TRUE((restored).has_value());
   EXPECT_EQ(restored->label(), "Custom Quotes");
   EXPECT_EQ(restored->auraColor(), 0x4488FFFFU);
   EXPECT_FLOAT_EQ(restored->heightWeight(), 2.0F);

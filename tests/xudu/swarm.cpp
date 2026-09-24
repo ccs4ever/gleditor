@@ -110,8 +110,8 @@ TEST_F(SwarmTest, contentArrivesFromTheOtherMachine) {
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   // A range in the middle, so this is not accidentally reading a file that
   // happened to already exist.
@@ -129,8 +129,8 @@ TEST_F(SwarmTest, aRangeSpanningPiecesArrives) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   ASSERT_GT(meta->pieceCount(), 1U) << "the sample needs several pieces";
 
   const auto &file = meta->files().front();
@@ -150,8 +150,8 @@ TEST_F(SwarmTest, theWholeFileArrives) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   const auto &file = meta->files().front();
   const auto scroll =
@@ -171,14 +171,14 @@ TEST_F(SwarmTest, aMagnetGetsItsMetadataFromAPeer) {
   EXPECT_EQ(hash, meta.hash());
 
   // Nothing can be described yet: that is what makes it a magnet.
-  EXPECT_EQ(swarm.metainfo(hash), nullptr);
+  EXPECT_FALSE((swarm.metainfo(hash)).has_value());
 
   swarm.connectPeer(hash, peer.host, peer.port);
   ASSERT_TRUE(swarm.waitForMetadata(hash, 30s))
       << "no metadata arrived from the peer";
 
-  const auto *fetched = swarm.metainfo(hash);
-  ASSERT_NE(fetched, nullptr);
+  const auto fetched = swarm.metainfo(hash);
+  ASSERT_TRUE((fetched).has_value());
   // Read back through this codebase's own parser, and it agrees about the
   // identity -- so the content really is what the magnet named.
   EXPECT_EQ(fetched->hash(), meta.hash());
@@ -193,8 +193,8 @@ TEST_F(SwarmTest, aDocumentQuotesContentThisMachineNeverHad) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   Store store;
   store.setContentSource(&swarm);
@@ -220,8 +220,8 @@ TEST_F(SwarmTest, contentNobodyIsSeedingReadsAsNothing) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);
@@ -250,8 +250,8 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
       << "the download directory has to start empty for this to prove anything";
 
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);
@@ -338,8 +338,8 @@ TEST_F(MutableNameTest, contentIsFetchedFromNothingButAName) {
   swarm.connectPeer(hash, peer.host, peer.port);
   ASSERT_TRUE(swarm.waitForMetadata(hash, 30s)) << "no metadata arrived";
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);

@@ -21,8 +21,8 @@ namespace {
 const bencode::Value &require(const bencode::Value &dict,
                               const std::string_view key,
                               const std::string_view what) {
-  const auto *const found = dict.find(key);
-  if (nullptr == found) {
+  const auto found = dict.find(key);
+  if (!found) {
     throw std::runtime_error("torrent: " + std::string{what} + " has no \"" +
                              std::string{key} + "\"");
   }
@@ -214,7 +214,7 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
   // the order they appear in the files list", so the offsets accumulate and a
   // piece can straddle a boundary.
   std::uint64_t offset = 0;
-  if (const auto *const single = info.find("length"); nullptr != single) {
+  if (const auto single = info.find("length"); single.has_value()) {
     const auto length = single->asInteger();
     if (length < 0) {
       throw std::runtime_error("torrent: \"length\" is negative");
