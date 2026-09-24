@@ -2209,9 +2209,9 @@ CellRef VortexStdLib::createFormatCurrencyPipeline() {
 }
 
 // -- Module 4: std:functional -------------------------------------------------
-CellRef
-VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
-                  const std::function<CellValue(const CellValue &)> &fn) {
+CellRef VortexStdLib::map(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<CellValue(const CellValue &)> fn) {
   return chainCells(core_.arena(),
                     rank(core_.arena(), head, inDim) |
                         std::views::transform([&](const CellRef cell) {
@@ -2229,9 +2229,9 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
   });
 }
 
-CellRef
-VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
-                     const std::function<bool(const CellValue &)> &pred) {
+CellRef VortexStdLib::filter(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<bool(const CellValue &)> pred) {
   // Rendered once into values first: pred may be a Vortex call, and a
   // filter over a transform would render each kept cell twice.
   const auto kept = rank(core_.arena(), head, inDim) |
@@ -2256,7 +2256,8 @@ CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
 
 CellValue VortexStdLib::fold(
     CellRef head, DimRef inDim, CellValue initial,
-    const std::function<CellValue(const CellValue &, const CellValue &)> &fn) {
+    common::cpp26::function_ref<CellValue(const CellValue &, const CellValue &)>
+        fn) {
   return std::ranges::fold_left(
       rank(core_.arena(), head, inDim) |
           std::views::transform(

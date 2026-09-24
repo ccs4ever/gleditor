@@ -21,13 +21,17 @@ bool Diagnostics::mentions(const std::string_view needle) const {
   });
 }
 
-const Cell *findCell(const std::unordered_map<CellID, Cell> &cells,
-                     const CellID id) {
+common::cpp26::optional<const Cell &>
+findCell(const std::unordered_map<CellID, Cell> &cells, const CellID id) {
   const auto it = cells.find(id);
-  return it != cells.end() ? &it->second : nullptr;
+  if (it == cells.end()) {
+    return common::cpp26::nullopt;
+  }
+  return it->second;
 }
 
-LinkPairs linksOn(const Cell *cell, const std::string_view dimension) {
+LinkPairs linksOn(const common::cpp26::optional<const Cell &> cell,
+                  const std::string_view dimension) {
   if (!cell) {
     return LinkPairs{};
   }
@@ -43,7 +47,7 @@ CellID findCloneMaster(const std::unordered_map<CellID, Cell> &cells,
   std::unordered_set<CellID> visited;
   CellID current = id;
   while (current != 0 && visited.insert(current).second) {
-    const auto *cell = findCell(cells, current);
+    const auto cell = findCell(cells, current);
     if (!cell) {
       break;
     }
@@ -87,14 +91,14 @@ std::string getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
   // indistinguishable from a master holding an empty string, so a clone of a
   // number fell back to whatever text the clone itself happened to carry --
   // which is the one thing a clone must never do.
-  const auto *const master = findCell(cells, findCloneMaster(cells, id));
-  if (nullptr != master) {
+  const auto master = findCell(cells, findCloneMaster(cells, id));
+  if (master) {
     return cellDataAsText(master->data);
   }
   // Only reachable when the d.clone rank names a master this space does not
   // hold. The cell's own content is the best answer available.
-  const auto *const cell = findCell(cells, id);
-  return nullptr != cell ? cellDataAsText(cell->data) : std::string{};
+  const auto cell = findCell(cells, id);
+  return cell ? cellDataAsText(cell->data) : std::string{};
 }
 
 } // namespace zigzag::zzcore

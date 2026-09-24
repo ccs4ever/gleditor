@@ -13,6 +13,7 @@
 #include <ranges>
 #include <stdexcept>
 
+#include "common/cpp26_concat.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -21,6 +22,16 @@ namespace xanadu::vql {
 using zigzag::DimVector;
 
 namespace {
+
+std::vector<zigzag::CellRef>
+concatCellStreams(const std::span<const zigzag::CellRef> current,
+                  const std::span<const zigzag::CellRef> created) {
+  std::vector<zigzag::CellRef> combined;
+  combined.reserve(current.size() + created.size());
+  auto cells = common::cpp26::views::concat(current, created);
+  std::ranges::copy(cells, std::back_inserter(combined));
+  return combined;
+}
 
 bool stringToDouble(std::string_view sv, double &out) {
   if (sv.empty()) {
@@ -388,9 +399,7 @@ VQLEngine::evaluateStep(const PathStep &step,
           stepOutput = {stepOutput.back()};
         }
       } else if (step.yieldMode == YieldMode::Both) {
-        std::vector<zigzag::CellRef> combined = currentCells;
-        combined.insert(combined.end(), stepOutput.begin(), stepOutput.end());
-        stepOutput = std::move(combined);
+        stepOutput = concatCellStreams(currentCells, stepOutput);
       } else if (step.yieldMode == YieldMode::Keep) {
         stepOutput = currentCells;
       }
@@ -517,10 +526,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
 
         if (step.yieldMode == YieldMode::Both) {
-          std::vector<zigzag::CellRef> combined = currentCells;
-          combined.insert(combined.end(), attachedClones.begin(),
-                          attachedClones.end());
-          stepOutput = std::move(combined);
+          stepOutput = concatCellStreams(currentCells, attachedClones);
         } else if (step.yieldMode == YieldMode::Keep) {
           stepOutput = currentCells;
         } else if (step.yieldMode == YieldMode::Last) {

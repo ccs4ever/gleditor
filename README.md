@@ -1588,8 +1588,10 @@ What SDL does have, this program uses:
   - accesskit-c (optional; what reports the user interface to screen readers. See "Accessibility"
     above)
 - Testing: GoogleTest + GoogleMock
-- Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/cosmopolitan`
-  toolchain support (optional)
+- Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/merklecpp`,
+  `thirdparty/SDL`, `thirdparty/zstd`, `thirdparty/nontype_functional`, `thirdparty/beman_optional`,
+  and `thirdparty/beman_inplace_vector` (C++26 fallbacks); `thirdparty/cosmopolitan` toolchain
+  support (optional)
 
 ## Requirements
 

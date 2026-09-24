@@ -115,6 +115,38 @@ TEST(VQLEngineTest, CreationSugarAndYieldModes) {
   auto res3 = engine.execute("##/d.cities%\"Paris\"%\"Tokyo\"!last");
   ASSERT_EQ(res3.size(), 1u);
   EXPECT_EQ(arena.textOf(res3[0]), "Tokyo");
+
+  auto res4 = engine.execute("##/d.seasons%\"Spring\"%\"Summer\"!both");
+  ASSERT_EQ(res4.size(), 3u);
+  EXPECT_EQ(res4[0], core.home());
+  EXPECT_EQ(arena.textOf(res4[1]), "Spring");
+  EXPECT_EQ(arena.textOf(res4[2]), "Summer");
+}
+
+TEST(VQLEngineTest, LinkYieldBothPreservesContextsBeforeTargetClones) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  VQLEngine engine(core);
+
+  const zigzag::CellRef first  = arena.makeCell("First");
+  const zigzag::CellRef second = arena.makeCell("Second");
+  const zigzag::CellRef target = arena.makeCell("Target");
+  engine.setVariable("contexts", std::vector<zigzag::CellRef>{first, second});
+  engine.setVariable("target", target);
+
+  const auto result = engine.execute("$contexts/link(+d.fanout, $target)!both");
+  ASSERT_EQ(result.size(), 4u);
+  EXPECT_EQ(result[0], first);
+  EXPECT_EQ(result[1], second);
+  EXPECT_NE(result[2], target);
+  EXPECT_NE(result[3], target);
+  EXPECT_NE(result[2], result[3]);
+  EXPECT_EQ(core.render(result[2]), core.render(target));
+  EXPECT_EQ(core.render(result[3]), core.render(target));
+
+  const zigzag::DimRef dim = engine.resolveDimension("d.fanout");
+  EXPECT_EQ(arena.linked(first, dim, DimVector::POS), result[2]);
+  EXPECT_EQ(arena.linked(second, dim, DimVector::POS), result[3]);
 }
 
 TEST(VQLEngineTest, PredicatesAndQuantifiers) {
