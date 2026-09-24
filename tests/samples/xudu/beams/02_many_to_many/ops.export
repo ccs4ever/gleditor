@@ -1,3 +1,14 @@
-1 insert 0 0 0 7174 373 0 0 0 0 0 0 0
+1 insert 0 0 0 8271 373 0 0 0 0 0 0 0
 2 link 0 0 0 0 0 0 0 0 1 0 0 0
-a1 insert 0 0 0 7547 420 0 0 0 0 0 0 0
+a1 insert 0 0 0 8644 420 0 0 0 0 0 0 0
+a2 structure 0 0 0 9064 4 0 0 0 0 0 0 0
+a3 structure 0 0 0 9068 6 0 0 0 0 0 0 0
+a4 structure 0 0 5 0 0 a2 0 0 5 0 1 0
+a5 structure 0 0 0 9074 10 0 0 0 0 0 0 0
+a6 structure 0 0 7 0 0 a3 0 0 5 0 1 0
+a7 structure 0 0 0 9084 12 0 0 0 0 0 0 0
+a8 structure 0 0 9 0 0 a5 0 0 5 0 1 0
+a9 structure 0 0 0 0 0 0 0 0 0 0 64 2
+a10 structure 0 0 0 9096 7 0 0 0 0 0 0 0
+a11 structure 0 0 12 0 0 a4 0 0 7 0 1 0
+a12 structure 0 0 11 0 0 a10 0 0 9 0 1 0

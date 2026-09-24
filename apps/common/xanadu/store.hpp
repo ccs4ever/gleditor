@@ -30,6 +30,7 @@
 #define XUDU_STORE_H
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
@@ -761,6 +762,24 @@ public:
   [[nodiscard]] const Scroll *scroll(ScrollId id) const;
   [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
 
+  void setBootstrapPermascroll(
+      std::string key,
+      std::function<ResolveResult(const PrimediaSpan &)> reader = nullptr);
+  [[nodiscard]] const std::string &bootstrapPermascrollKey() const noexcept {
+    return bootstrapPermascrollKey_;
+  }
+  [[nodiscard]] const zigzag::ScrollRegistry &scrollRegistry() const noexcept {
+    return scrollRegistry_;
+  }
+  [[nodiscard]] MicroversionId
+  registerScroll(const MicroversionId &parent, std::string_view globalKey,
+                 const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId
+  linkScrollRef(const MicroversionId &parent, zigzag::CellRef scrollCell,
+                zigzag::CellRef placeholderCell,
+                const zigzag::Manifold *known = nullptr);
+  void syncScrollsFromRank(const zigzag::Manifold &manifold);
+
   /**
    * @brief The segment @p span's own start offset falls in, local or
    *        external, or nullptr if nothing covers it.
@@ -789,9 +808,8 @@ public:
   segmentsOverlapping(ScrollId scroll, std::uint64_t start,
                       std::uint64_t length) const;
 
-  void setContentSource(const ContentSource *source) {
-    resolver.setSource(source);
-  }
+  void setContentSource(const ContentSource *source);
+  void hydrateExternalScroll(Scroll &sc) const;
   [[nodiscard]] const Resolver &contentResolver() const { return resolver; }
   [[nodiscard]] Resolver &contentResolver() { return resolver; }
 
@@ -1016,8 +1034,13 @@ private:
   void syncAliasesFromRank(const zigzag::Manifold &manifold);
 
   mutable std::vector<MicroversionId> currentVersions_;
+  mutable bool hasExplicitCurrentVersions_{false};
+  mutable std::vector<MicroversionId> currentVersionsFallback_;
   mutable std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
   mutable std::map<std::string, MicroversionId> aliasIndex_;
+  zigzag::ScrollRegistry scrollRegistry_;
+  std::string bootstrapPermascrollKey_;
+  std::function<ResolveResult(const PrimediaSpan &)> bootstrapReader_;
   bool isSystem_{false};
 
   struct RemoteAuthorChunk {

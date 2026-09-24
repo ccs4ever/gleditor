@@ -41,6 +41,53 @@ struct VersionAnnotation;
 
 namespace zigzag {
 
+class UnrootedRegistryDependency : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+struct ScrollRecord {
+  xanadu::ScrollId id{0};
+  CellRef cell{noCell};
+  std::string globalKey;
+  bool operator==(const ScrollRecord &) const = default;
+};
+
+struct ScrollRegistry {
+  std::vector<ScrollRecord> scrolls;
+  std::unordered_map<std::string, xanadu::ScrollId> byKey;
+  std::unordered_map<CellRef, xanadu::ScrollId> byCell;
+
+  [[nodiscard]] bool empty() const noexcept { return scrolls.empty(); }
+  [[nodiscard]] std::size_t size() const noexcept { return scrolls.size(); }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForCell(const CellRef cell) const noexcept {
+    const auto it = byCell.find(cell);
+    if (it != byCell.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForKey(const std::string_view key) const noexcept {
+    const auto it = byKey.find(std::string(key));
+    if (it != byKey.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] const ScrollRecord *
+  recordForId(const xanadu::ScrollId id) const noexcept {
+    if (id == 0 || id > scrolls.size()) {
+      return nullptr;
+    }
+    return &scrolls[id - 1];
+  }
+};
+
 // CellRef, DimRef, and noCell are defined in dim_vector.hpp
 
 /// Sentinel "no dense index" value, shared by Manifold and ArenaManifold's
@@ -393,6 +440,19 @@ public:
   /// d.alias), paired with their target operation index.
   [[nodiscard]] std::vector<std::pair<std::string, CellRef>>
   aliases(const xanadu::Store &store) const;
+
+  /**
+   * @brief Replay product index of the scroll registry (§5.4).
+   *
+   * Walks d.scrolls and d.scroll-refs to map scroll cells and placeholders
+   * to derived local ScrollIds and global keys.
+   */
+  [[nodiscard]] ScrollRegistry
+  scrollRegistry(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] ScrollRegistry scrollRegistry() const;
+
+  [[nodiscard]] std::vector<ScrollRecord> scrolls() const;
 
   /**
    * @brief Collect all cells within @p radius hops from @p start along any

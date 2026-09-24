@@ -1490,13 +1490,6 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
       ++imageSegments;
     }
   }
-  for (const auto &scroll : tables.scrolls) {
-    for (const auto &segment : scroll.segments) {
-      if (segment.mimeType.starts_with("image/png")) {
-        ++imageSegments;
-      }
-    }
-  }
   EXPECT_EQ(imageSegments, 1U)
       << "the figure appears once per page but should only be stored once, in "
       << tablesPath.string();

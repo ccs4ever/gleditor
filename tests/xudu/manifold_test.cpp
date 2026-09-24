@@ -62,6 +62,11 @@ struct Slice {
   }
 
   DimRef dimension(const std::string_view name) {
+    const auto manifold = store.rebuildManifold(at);
+    const auto existing = manifold.dimensionNamed(name, store);
+    if (existing != zigzag::noCell) {
+      return existing;
+    }
     const auto minted = store.makeDimension(at, name);
     at                = minted.version;
     return minted.dim;
@@ -1281,4 +1286,199 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
   EXPECT_TRUE(ann2->timestamp.empty())
       << "timestamp must never be inferred from a MicroversionId";
   EXPECT_EQ(ann2->alias, "v2.0");
+}
+
+TEST(ManifoldTest, theFoldedRegistryMatchesAColdRebuild) {
+  Slice slice;
+  const auto key1 = "btpk:0123456789abcdef0123456789abcdef0123456789abcdef"
+                    "0123456789abcdef:salt1";
+  const auto key2 = "btpk:fedcba9876543210fedcba9876543210fedcba9876543210"
+                    "fedcba9876543210:salt2";
+
+  slice.at = slice.store.registerScroll(slice.at, key1);
+  slice.at = slice.store.registerScroll(slice.at, key2);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(slice.store))
+      << "folded registry must match cold rebuild exactly";
+
+  const auto reg = slice.store.scrollRegistry();
+  ASSERT_EQ(reg.size(), 2U);
+  EXPECT_EQ(reg.scrollIdForKey(key1), std::optional<xudu::ScrollId>{1});
+  EXPECT_EQ(reg.scrollIdForKey(key2), std::optional<xudu::ScrollId>{2});
+  ASSERT_NE(reg.recordForId(1), nullptr);
+  EXPECT_EQ(reg.recordForId(1)->globalKey, key1);
+  ASSERT_NE(reg.recordForId(2), nullptr);
+  EXPECT_EQ(reg.recordForId(2)->globalKey, key2);
+}
+
+TEST(ManifoldTest, aRegistryCellMayUseAnAlreadyMappedNonZeroScroll) {
+  Slice slice;
+  const auto key1 = "btpk:" + std::string(64, '1') + ":salt1";
+  const auto key2 = "btpk:" + std::string(64, '2') + ":salt2";
+
+  // Register first scroll using local content (scroll 0)
+  slice.at        = slice.store.registerScroll(slice.at, key1);
+  const auto reg1 = slice.store.scrollRegistry();
+  ASSERT_EQ(reg1.size(), 1U);
+  const auto scroll1Id = reg1.scrolls.front().id;
+  EXPECT_EQ(scroll1Id, 1U);
+
+  // Mint a second cell on d.scrolls whose content span points into scroll 1!
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = xudu::structureFlags(StructureVerb::MakeCell);
+  op.span =
+      PrimediaSpan{.scroll = scroll1Id, .start = 0, .length = key2.size()};
+  slice.at         = slice.store.apply(slice.at, op);
+  const auto cell2 = slice.store.cellRefOf(slice.at);
+
+  const auto dimScrolls = slice.dimension("d.scrolls");
+  const auto cell1      = reg1.scrolls.front().cell;
+  slice.link(cell1, dimScrolls, DimVector::POS, cell2);
+
+  // Define a mock reader that resolves scroll 0 (from store) and scroll 1
+  // (key2)
+  struct MockReader : public xudu::SpanReader {
+    const Store &store;
+    std::string key2Content;
+    MockReader(const Store &s, std::string k2)
+        : store(s), key2Content(std::move(k2)) {}
+    std::string read(const PrimediaSpan &span) const override {
+      if (span.scroll == xudu::localScroll) {
+        return store.read(span);
+      }
+      if (span.scroll == 1) {
+        return key2Content.substr(span.start, span.length);
+      }
+      return {};
+    }
+  } reader(slice.store, key2);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto reg2     = manifold.scrollRegistry(reader);
+  ASSERT_EQ(reg2.size(), 2U);
+  EXPECT_EQ(reg2.scrolls[0].globalKey, key1);
+  EXPECT_EQ(reg2.scrolls[1].globalKey, key2);
+  EXPECT_EQ(reg2.scrolls[1].id, 2U);
+}
+
+TEST(ManifoldTest, anUnrootedRegistryDependencyIsRefused) {
+  Slice slice;
+  const auto key1  = "btpk:" + std::string(64, '1') + ":salt1";
+  slice.at         = slice.store.registerScroll(slice.at, key1);
+  const auto reg1  = slice.store.scrollRegistry();
+  const auto cell1 = reg1.scrolls.front().cell;
+
+  // Mint an unrooted cell referencing unmapped scroll 99
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = xudu::structureFlags(StructureVerb::MakeCell);
+  op.span  = PrimediaSpan{.scroll = 99, .start = 0, .length = 10};
+  slice.at = slice.store.apply(slice.at, op);
+  const auto unrootedCell = slice.store.cellRefOf(slice.at);
+
+  const auto dimScrolls = slice.dimension("d.scrolls");
+  slice.link(cell1, dimScrolls, DimVector::POS, unrootedCell);
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_THROW(static_cast<void>(manifold.scrollRegistry(slice.store)),
+               zigzag::UnrootedRegistryDependency);
+}
+
+TEST(ManifoldTest, aPlaceholderLinksToItsScrollCell) {
+  Slice slice;
+  const auto key = "btpk:" + std::string(64, '3') + ":root";
+  slice.at       = slice.store.registerScroll(slice.at, key);
+
+  const auto reg = slice.store.scrollRegistry();
+  ASSERT_EQ(reg.size(), 1U);
+  const auto scrollCell = reg.scrolls.front().cell;
+  const auto expectedId = reg.scrolls.front().id;
+
+  // Mint placeholder cells P1 and P2
+  const auto p1 = slice.cell("extern_placeholder_1");
+  const auto p2 = slice.cell("extern_placeholder_2");
+
+  slice.at = slice.store.linkScrollRef(slice.at, scrollCell, p1);
+  slice.at = slice.store.linkScrollRef(slice.at, scrollCell, p2);
+
+  const auto manifold  = slice.store.rebuildManifold(slice.at);
+  const auto activeReg = manifold.scrollRegistry(slice.store);
+
+  // Placeholders resolve in O(1) byCell lookup to the parent scroll's id
+  EXPECT_EQ(activeReg.scrollIdForCell(p1),
+            std::optional<xudu::ScrollId>{expectedId});
+  EXPECT_EQ(activeReg.scrollIdForCell(p2),
+            std::optional<xudu::ScrollId>{expectedId});
+}
+
+TEST(ManifoldTest, publishedHistoryBootstrapsThroughAuthorship) {
+  // Author side: create document and register a scroll
+  const auto authorPerma = std::make_shared<xudu::UserPermascroll>();
+  Store authorStore(authorPerma);
+  auto at                    = authorStore.sliceGenesis(MicroversionId{});
+  const auto authorGlobalKey = "btpk:" + std::string(64, 'a') + ":permascroll";
+  const auto targetKey       = "btpk:" + std::string(64, 'b') + ":salt";
+  at                         = authorStore.registerScroll(at, targetKey);
+
+  const auto scratchDir =
+      std::filesystem::temp_directory_path() /
+      ("published-bootstrap-test-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(scratchDir);
+  authorStore.save(scratchDir.string());
+
+  // Opener side: fresh opener with their own empty permascroll
+  const auto openerPerma = std::make_shared<xudu::UserPermascroll>();
+  Store openerStore(openerPerma);
+  // Configure bootstrap reader for author's global permascroll
+  openerStore.setBootstrapPermascroll(
+      authorGlobalKey, [&](const PrimediaSpan &span) {
+        return xudu::ResolveResult{.status =
+                                       xudu::ResolutionStatus::VerifiedBytes,
+                                   .text = authorPerma->read(span)};
+      });
+
+  openerStore.load(scratchDir.string());
+  const auto reg = openerStore.scrollRegistry();
+  ASSERT_EQ(reg.size(), 1U);
+  EXPECT_EQ(reg.scrolls.front().globalKey, targetKey);
+  EXPECT_EQ(reg.scrollIdForKey(targetKey), std::optional<xudu::ScrollId>{1});
+}
+
+TEST(ManifoldTest, aStoreDirectoryHoldsOnlyOpsAndLocalFacts) {
+  const auto dir =
+      std::filesystem::temp_directory_path() /
+      ("local-facts-test-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(dir);
+
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto key   = "btpk:" + std::string(64, 'c') + ":scroll";
+  {
+    Store store(perma);
+    auto at = store.sliceGenesis(MicroversionId{});
+    at      = store.registerScroll(at, key);
+    xudu::ScrollSegment seg;
+    seg.at       = 0;
+    seg.length   = 100;
+    seg.mimeType = "text/plain";
+    store.addSegment(xudu::localScroll, seg);
+    store.save(dir.string());
+  }
+
+  // Inspect the store.tables file directly
+  const auto tables = xudu::readStoreTables(dir / "store.tables");
+  EXPECT_FALSE(tables.documentId.str().empty());
+  EXPECT_EQ(tables.localSegments.size(), 1U);
+
+  // Reopen and verify scroll was replayed from ops rather than store.tables
+  Store reopened(perma);
+  reopened.load(dir.string());
+  const auto reg = reopened.scrollRegistry();
+  ASSERT_EQ(reg.size(), 1U);
+  EXPECT_EQ(reg.scrolls.front().globalKey, key);
 }

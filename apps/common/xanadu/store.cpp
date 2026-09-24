@@ -17,6 +17,7 @@
 #include "binary_ops.hpp"
 #include "common/xanadu/osmic_walker.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
+#include "publication.hpp"
 #include "store_tables.hpp"
 #include "user_permascroll.hpp"
 #include "windows_quoting.hpp"
@@ -787,17 +788,58 @@ ScrollId Store::addScroll(const Scroll &scroll) {
 }
 
 void Store::addSegment(const ScrollId id, const ScrollSegment &segment) {
-  if (localScroll == id || id > externals.size()) {
+  if (localScroll == id) {
+    localSegments.addSegment(segment);
+    return;
+  }
+  if (id > externals.size()) {
     return;
   }
   externals[id - 1].addSegment(segment);
+}
+
+void Store::setContentSource(const ContentSource *source) {
+  resolver.setSource(source);
+  if (source) {
+    for (auto &sc : externals) {
+      hydrateExternalScroll(sc);
+    }
+  }
+}
+
+void Store::hydrateExternalScroll(Scroll &sc) const {
+  const auto *source = resolver.contentSource();
+  if (!source) {
+    return;
+  }
+  for (auto &seg : sc.segments) {
+    if (seg.length == 0 || seg.path.empty()) {
+      if (const auto *meta = source->metainfo(seg.torrent)) {
+        if (seg.fileIndex < meta->files().size()) {
+          const auto &f = meta->files()[seg.fileIndex];
+          if (seg.path.empty()) {
+            seg.path = f.path;
+          }
+          if (seg.streamOffset == 0) {
+            seg.streamOffset = f.offset;
+          }
+          if (seg.length == 0) {
+            seg.at     = 0;
+            seg.length = f.length;
+          }
+        }
+      }
+    }
+  }
 }
 
 const Scroll *Store::scroll(const ScrollId id) const {
   if (localScroll == id || id > externals.size()) {
     return nullptr;
   }
-  return &externals[id - 1];
+  auto &sc = const_cast<Scroll &>(externals[id - 1]);
+  hydrateExternalScroll(sc);
+  return &sc;
 }
 
 const ScrollSegment *Store::containerFor(const PrimediaSpan &span) const {
@@ -826,8 +868,19 @@ Store::segmentsOverlapping(const ScrollId scrollId, const std::uint64_t start,
   return found;
 }
 
+void Store::setBootstrapPermascroll(
+    std::string key,
+    std::function<ResolveResult(const PrimediaSpan &)> reader) {
+  bootstrapPermascrollKey_ = std::move(key);
+  bootstrapReader_         = std::move(reader);
+}
+
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
+    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
+        bootstrapReader_) {
+      return bootstrapReader_(span);
+    }
     return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                          .text   = userPermascroll_->read(span)};
   }
@@ -861,6 +914,10 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
 
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
+    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
+        bootstrapReader_) {
+      return bootstrapReader_(span).text;
+    }
     return userPermascroll_->read(span);
   }
   if (const auto vocab = readVocabulary(span)) {
@@ -1279,7 +1336,8 @@ const std::vector<MicroversionId> &Store::currentVersions() const {
       const auto manifold = rebuildManifold(lat);
       const_cast<Store *>(this)->syncCurrentVersionsFromRank(manifold);
       if (currentVersions_.empty()) {
-        currentVersions_.push_back(lat);
+        currentVersionsFallback_ = {lat};
+        return currentVersionsFallback_;
       }
     }
   }
@@ -1292,21 +1350,25 @@ MicroversionId Store::primaryCurrentVersion() const {
 }
 
 void Store::setCurrentVersions(std::vector<MicroversionId> versions) {
-  currentVersions_ = std::move(versions);
+  currentVersions_            = std::move(versions);
+  hasExplicitCurrentVersions_ = true;
 }
 
 void Store::repointCurrentVersion(const MicroversionId &version) {
-  currentVersions_ = {version};
+  currentVersions_            = {version};
+  hasExplicitCurrentVersions_ = true;
 }
 
 void Store::addCurrentVersion(const MicroversionId &version) {
   if (std::ranges::find(currentVersions_, version) == currentVersions_.end()) {
     currentVersions_.push_back(version);
+    hasExplicitCurrentVersions_ = true;
   }
 }
 
 void Store::removeCurrentVersion(const MicroversionId &version) {
   std::erase(currentVersions_, version);
+  hasExplicitCurrentVersions_ = true;
 }
 
 MicroversionId Store::designateEdition(const MicroversionId &parent,
@@ -1455,6 +1517,168 @@ void Store::syncAliasesFromRank(const zigzag::Manifold &manifold) {
       }
     }
   }
+}
+
+void Store::syncScrollsFromRank(const zigzag::Manifold &manifold) {
+  scrollRegistry_ = manifold.scrollRegistry(*this);
+  for (const auto &rec : scrollRegistry_.scrolls) {
+    if (externals.size() < rec.id) {
+      externals.resize(rec.id);
+    }
+    auto &sc = externals[rec.id - 1];
+    if (rec.globalKey.starts_with("btpk:")) {
+      const auto rest  = std::string_view(rec.globalKey).substr(5);
+      const auto colon = rest.find(':');
+      if (colon != std::string_view::npos) {
+        try {
+          sc.publisher = PublicKey::fromHex(rest.substr(0, colon));
+          sc.salt      = std::string(rest.substr(colon + 1));
+        } catch (...) {
+        }
+      }
+    } else if (rec.globalKey.starts_with("file:")) {
+      const auto rest  = std::string_view(rec.globalKey).substr(5);
+      const auto colon = rest.find(':');
+      if (colon != std::string_view::npos) {
+        const auto hashHex = rest.substr(0, colon);
+        const auto fidxStr = rest.substr(colon + 1);
+        try {
+          const auto fidx =
+              static_cast<std::uint32_t>(std::stoul(std::string(fidxStr)));
+          const auto hash = InfoHash::fromHex(hashHex);
+          if (sc.segments.empty()) {
+            bool foundInLocal = false;
+            for (const auto &seg : localSegments.segments) {
+              if (seg.torrent == hash && seg.fileIndex == fidx) {
+                sc.segments.push_back(seg);
+                foundInLocal = true;
+                break;
+              }
+            }
+            if (!foundInLocal) {
+              ScrollSegment seg;
+              seg.torrent   = hash;
+              seg.fileIndex = fidx;
+              sc.segments.push_back(std::move(seg));
+            }
+          }
+        } catch (...) {
+        }
+      }
+    }
+    hydrateExternalScroll(sc);
+  }
+}
+
+MicroversionId Store::registerScroll(const MicroversionId &parent,
+                                     const std::string_view globalKey,
+                                     const zigzag::Manifold *known) {
+  if (globalKey.empty()) {
+    return parent;
+  }
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto dimScrolls = currentFold->dimensionNamed("d.scrolls", *this);
+  if (zigzag::noCell == dimScrolls) {
+    const auto minted = makeDimension(curHead, "d.scrolls", currentFold);
+    curHead           = minted.version;
+    dimScrolls        = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  zigzag::CellRef existingScrollCell = zigzag::noCell;
+  auto tail                          = homeCell_;
+
+  currentFold->walkRank(homeCell_, dimScrolls, zigzag::DimVector::POS,
+                        [&](const zigzag::CellRef cell) {
+                          if (cell != homeCell_) {
+                            tail = cell;
+                            if (currentFold->textOf(cell, *this) == globalKey) {
+                              existingScrollCell = cell;
+                            }
+                          }
+                          return true;
+                        });
+
+  if (zigzag::noCell != existingScrollCell) {
+    return curHead;
+  }
+
+  curHead               = makeCell(curHead, globalKey);
+  const auto scrollCell = cellRefOf(curHead);
+  folded                = rebuildManifold(curHead);
+  currentFold           = &folded.value();
+
+  curHead     = setLink(curHead, tail, dimScrolls, zigzag::DimVector::POS,
+                        scrollCell, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  syncScrollsFromRank(*currentFold);
+  return curHead;
+}
+
+MicroversionId Store::linkScrollRef(const MicroversionId &parent,
+                                    const zigzag::CellRef scrollCell,
+                                    const zigzag::CellRef placeholderCell,
+                                    const zigzag::Manifold *known) {
+  if (zigzag::noCell == scrollCell || zigzag::noCell == placeholderCell) {
+    return parent;
+  }
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto dimScrollRefs = currentFold->dimensionNamed("d.scroll-refs", *this);
+  if (zigzag::noCell == dimScrollRefs) {
+    const auto minted = makeDimension(curHead, "d.scroll-refs", currentFold);
+    curHead           = minted.version;
+    dimScrollRefs     = minted.dim;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+  }
+
+  auto tail = scrollCell;
+  currentFold->walkRank(scrollCell, dimScrollRefs, zigzag::DimVector::POS,
+                        [&](const zigzag::CellRef cell) {
+                          if (cell != scrollCell) {
+                            tail = cell;
+                          }
+                          return true;
+                        });
+
+  curHead     = setLink(curHead, tail, dimScrollRefs, zigzag::DimVector::POS,
+                        placeholderCell, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  syncScrollsFromRank(*currentFold);
+  return curHead;
 }
 
 std::vector<Store::EditionInfo>
@@ -1724,6 +1948,10 @@ void Store::sealPendingMetadataAsCells() const {
   if (latest().isZero()) {
     return;
   }
+  if (versionAnnotations_.empty() && !hasExplicitCurrentVersions_ &&
+      (zigzag::noCell == homeCell_ || externals.empty())) {
+    return;
+  }
   auto *mutableStore = const_cast<Store *>(this);
   auto curHead       = latest();
   auto manifold      = rebuildManifold(curHead);
@@ -1742,9 +1970,9 @@ void Store::sealPendingMetadataAsCells() const {
     }
   }
 
-  // Only seal currentVersions_ as "current" editions if the manifold doesn't
-  // already have editions designating heads (§5.3 / §5.4).
-  if (!currentVersions_.empty()) {
+  // Only seal currentVersions_ as "current" editions if explicitly set
+  // (§5.3 / §5.4).
+  if (hasExplicitCurrentVersions_ && !currentVersions_.empty()) {
     const auto existingEds = manifold.editions();
     if (existingEds.empty()) {
       const auto headsToSeal = currentVersions_;
@@ -1755,6 +1983,20 @@ void Store::sealPendingMetadataAsCells() const {
               /*allowDuplicateName=*/(i > 0));
           manifold = rebuildManifold(curHead);
         }
+      }
+    }
+    mutableStore->hasExplicitCurrentVersions_ = false;
+  }
+
+  // Only seal externals on d.scrolls if this store is a slice (homeCell_ !=
+  // noCell)
+  if (zigzag::noCell != homeCell_ && !externals.empty()) {
+    const auto reg = manifold.scrollRegistry(*this);
+    for (const auto &sc : externals) {
+      const auto key = scrollKey(sc);
+      if (!key.empty() && !reg.byKey.contains(key)) {
+        curHead  = mutableStore->registerScroll(curHead, key, &manifold);
+        manifold = rebuildManifold(curHead);
       }
     }
   }
@@ -1808,10 +2050,26 @@ void Store::save(const std::string &directory) const {
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
+    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+    for (const auto &sc : externals) {
+      for (const auto &seg : sc.segments) {
+        if (!seg.path.empty() || !seg.torrent.isZero()) {
+          bool already = false;
+          for (const auto &existing : deploymentSegments) {
+            if (existing == seg) {
+              already = true;
+              break;
+            }
+          }
+          if (!already) {
+            deploymentSegments.push_back(seg);
+          }
+        }
+      }
+    }
     writeStoreTables(dir / storeTablesName,
                      StoreTables{.documentId    = documentId_,
-                                 .scrolls       = externals,
-                                 .localSegments = localSegments.segments,
+                                 .localSegments = deploymentSegments,
                                  .links         = linkTable});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
@@ -1843,10 +2101,26 @@ void Store::saveOsmicText(const std::string &directory) const {
     // scroll and link tables being plaintext alongside them was incidental,
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
+    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+    for (const auto &sc : externals) {
+      for (const auto &seg : sc.segments) {
+        if (!seg.path.empty() || !seg.torrent.isZero()) {
+          bool already = false;
+          for (const auto &existing : deploymentSegments) {
+            if (existing == seg) {
+              already = true;
+              break;
+            }
+          }
+          if (!already) {
+            deploymentSegments.push_back(seg);
+          }
+        }
+      }
+    }
     writeStoreTables(dir / storeTablesName,
                      StoreTables{.documentId    = documentId_,
-                                 .scrolls       = externals,
-                                 .localSegments = localSegments.segments,
+                                 .localSegments = deploymentSegments,
                                  .links         = linkTable});
   }
 }
@@ -1888,6 +2162,7 @@ void Store::load(const std::string &directory) {
         "spans from the permascroll the store was opened with; open this one "
         "with that file as the permascroll instead. See design R11.");
   }
+
   if (std::filesystem::exists(dir / legacyOpsFile)) {
     throw OpsSegmentUnreadable(
         (dir / legacyOpsFile).string() +
@@ -1898,8 +2173,9 @@ void Store::load(const std::string &directory) {
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
-  localSegments = Scroll{};
-  nextLinkId    = 1;
+  scrollRegistry_ = {};
+  localSegments   = Scroll{};
+  nextLinkId      = 1;
   currentVersions_.clear();
   versionAnnotations_.clear();
   aliasIndex_.clear();
@@ -1949,7 +2225,6 @@ void Store::load(const std::string &directory) {
     // tax R11 refuses.
     auto tables            = readStoreTables(dir / storeTablesName);
     documentId_            = tables.documentId;
-    externals              = std::move(tables.scrolls);
     localSegments          = Scroll{};
     localSegments.segments = std::move(tables.localSegments);
     linkTable              = std::move(tables.links);
@@ -1968,6 +2243,30 @@ void Store::load(const std::string &directory) {
     const auto manifold = rebuildManifold(latest());
     syncCurrentVersionsFromRank(manifold);
     syncAliasesFromRank(manifold);
+    syncScrollsFromRank(manifold);
+  }
+  if (zigzag::noCell == homeCell_) {
+    for (const auto &seg : localSegments.segments) {
+      if (!seg.torrent.isZero()) {
+        bool found = false;
+        for (auto &sc : externals) {
+          for (const auto &s : sc.segments) {
+            if (s.torrent == seg.torrent && s.fileIndex == seg.fileIndex) {
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            break;
+          }
+        }
+        if (!found) {
+          Scroll sc;
+          sc.segments.push_back(seg);
+          externals.push_back(std::move(sc));
+        }
+      }
+    }
   }
   if (chronofilade_) {
     chronofilade_->clear();

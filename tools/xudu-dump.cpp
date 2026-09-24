@@ -312,17 +312,6 @@ void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
                 bool wantLinks) {
   std::cout << "document  " << tables.documentId.str() << '\n';
   if (wantScrolls) {
-    for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
-      const auto &scroll = tables.scrolls[i];
-      const auto id      = i + 1;
-      std::cout << "scroll " << id << "  publisher="
-                << (scroll.isNamed() ? scroll.publisher.hex() : "-")
-                << " salt=" << (scroll.salt.empty() ? "-" : scroll.salt)
-                << " mime=" << scroll.defaultMimeType << '\n';
-      for (const auto &segment : scroll.segments) {
-        std::cout << "segment " << id << "  " << segmentFields(segment) << '\n';
-      }
-    }
     for (const auto &segment : tables.localSegments) {
       std::cout << "localsegment  " << segmentFields(segment) << '\n';
     }

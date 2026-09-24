@@ -20,7 +20,6 @@ namespace {
 
 /// Keys of the container's dictionary, written once here so that the reader
 /// and the writer cannot disagree about them.
-constexpr auto keyScrolls       = "scrolls";
 constexpr auto keyLocalSegments = "local";
 constexpr auto keyLinks         = "links";
 constexpr auto keyDocumentId    = "document";
@@ -55,62 +54,6 @@ decodeRegistrySegment(const bencode::Value &value) {
     segment->mimeType = mime->asString();
   }
   return segment;
-}
-
-/// A registry scroll, which is not a publication's scroll: it may have no
-/// publisher at all -- Scroll::ofTorrentFile() makes those, and they are how
-/// content that exists only as one fixed torrent is named -- and it carries
-/// the default MIME type that a manifest has no use for.
-bencode::Value encodeRegistryScroll(const Scroll &scroll) {
-  bencode::List segments;
-  segments.reserve(scroll.segments.size());
-  for (const auto &segment : scroll.segments) {
-    segments.push_back(encodeRegistrySegment(segment));
-  }
-  bencode::Dict dict = {
-      {"mime", bencode::Value::string(scroll.defaultMimeType)},
-      {"salt", bencode::Value::string(scroll.salt)},
-      {"segments", bencode::Value::list(std::move(segments))},
-  };
-  // Omitted rather than written as thirty-two zero bytes, so that "this scroll
-  // has no publisher" is the absence of a key rather than a value that has to
-  // be recognised as meaning nothing.
-  if (scroll.isNamed()) {
-    dict.emplace("key",
-                 bencode::Value::string(rawBytes(scroll.publisher.bytes)));
-  }
-  return bencode::Value::dict(std::move(dict));
-}
-
-std::optional<Scroll> decodeRegistryScroll(const bencode::Value &value) {
-  if (!value.isDict()) {
-    return std::nullopt;
-  }
-  const auto *salt     = value.find("salt");
-  const auto *segments = value.find("segments");
-  if (nullptr == salt || !salt->isString() || nullptr == segments ||
-      !segments->isList()) {
-    return std::nullopt;
-  }
-  Scroll scroll;
-  scroll.salt = salt->asString();
-  if (const auto *key = value.find("key");
-      nullptr != key && key->isString() && key->asString().size() == 32) {
-    std::copy(key->asString().begin(), key->asString().end(),
-              scroll.publisher.bytes.begin());
-  }
-  if (const auto *mime = value.find("mime");
-      nullptr != mime && mime->isString()) {
-    scroll.defaultMimeType = mime->asString();
-  }
-  for (const auto &item : segments->asList()) {
-    auto segment = decodeRegistrySegment(item);
-    if (!segment.has_value()) {
-      return std::nullopt;
-    }
-    scroll.segments.push_back(*segment);
-  }
-  return scroll;
 }
 
 /// A span in this store's own coordinates: a ScrollId rather than a global
@@ -224,11 +167,6 @@ std::optional<Link> decodeLink(const bencode::Value &value) {
 
 void writeStoreTables(const std::filesystem::path &path,
                       const StoreTables &tables) {
-  bencode::List scrolls;
-  scrolls.reserve(tables.scrolls.size());
-  for (const auto &scroll : tables.scrolls) {
-    scrolls.push_back(encodeRegistryScroll(scroll));
-  }
   bencode::List local;
   local.reserve(tables.localSegments.size());
   for (const auto &segment : tables.localSegments) {
@@ -249,7 +187,6 @@ void writeStoreTables(const std::filesystem::path &path,
                                   tables.documentId.bytes().size()})},
               {keyLinks, bencode::Value::list(std::move(links))},
               {keyLocalSegments, bencode::Value::list(std::move(local))},
-              {keyScrolls, bencode::Value::list(std::move(scrolls))},
           })
           .encode();
 
@@ -315,17 +252,6 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
         !DocumentId::fromBytes(document->asString(), tables.documentId)) {
       throw StoreTablesUnreadable(path.string() +
                                   " has a document identity it cannot read");
-    }
-  }
-  if (const auto *scrolls = decoded.find(keyScrolls);
-      nullptr != scrolls && scrolls->isList()) {
-    for (const auto &item : scrolls->asList()) {
-      auto scroll = decodeRegistryScroll(item);
-      if (!scroll.has_value()) {
-        throw StoreTablesUnreadable(path.string() +
-                                    " has a scroll it cannot read");
-      }
-      tables.scrolls.push_back(std::move(*scroll));
     }
   }
   if (const auto *local = decoded.find(keyLocalSegments);

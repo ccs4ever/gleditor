@@ -782,7 +782,17 @@ void Manifold::setFormatFlags(const CellRef ref,
 }
 
 bool Manifold::verifyAgainstFullRebuild(const xanadu::Store &store) const {
-  return equivalentTo(store.rebuildManifoldFromIndex(foldedThrough_));
+  const auto cold = store.rebuildManifoldFromIndex(foldedThrough_);
+  if (!equivalentTo(cold)) {
+    return false;
+  }
+  const auto regWarm = scrollRegistry(store);
+  const auto regCold = cold.scrollRegistry(store);
+  if (regWarm.scrolls != regCold.scrolls || regWarm.byKey != regCold.byKey ||
+      regWarm.byCell != regCold.byCell) {
+    return false;
+  }
+  return true;
 }
 
 std::vector<Manifold::Edition> Manifold::editions() const {
@@ -971,6 +981,131 @@ Manifold::aliases(const xanadu::Store &store) const {
     }
   }
   return result;
+}
+
+ScrollRegistry
+Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
+  ScrollRegistry registry;
+  if (nullptr == store_ && noCell == home_) {
+    return registry;
+  }
+  const auto dimScrolls = store_ ? dimensionNamed("d.scrolls", *store_)
+                                 : dimensionNamed("d.scrolls");
+  if (noCell == dimScrolls || noCell == home_) {
+    return registry;
+  }
+
+  // 1. Collect all scroll cells on d.scrolls rank off home
+  std::vector<CellRef> scrollCells;
+  walkRank(home_, dimScrolls, DimVector::POS, [&](const CellRef cell) {
+    if (cell != home_) {
+      scrollCells.push_back(cell);
+    }
+    return true;
+  });
+
+  if (scrollCells.empty()) {
+    return registry;
+  }
+
+  // 2. Rooted dependency walk (§4):
+  // Local scroll 0 is rooted. Mapped non-zero scrolls make further cells
+  // readable.
+  std::unordered_set<CellRef> resolved;
+  std::unordered_map<CellRef, std::string> cellKeys;
+  std::unordered_set<xanadu::ScrollId> resolvedScrollIds;
+  resolvedScrollIds.insert(xanadu::localScroll);
+
+  bool progress = true;
+  while (resolved.size() < scrollCells.size() && progress) {
+    progress = false;
+    for (std::size_t i = 0; i < scrollCells.size(); ++i) {
+      const auto cell = scrollCells[i];
+      if (resolved.contains(cell)) {
+        continue;
+      }
+      const auto spans = contentOf(cell);
+      bool canRead     = true;
+      for (const auto &span : spans) {
+        if (span.scroll != xanadu::localScroll &&
+            !resolvedScrollIds.contains(span.scroll)) {
+          canRead = false;
+          break;
+        }
+      }
+      if (canRead) {
+        std::string key;
+        try {
+          key = textOf(cell, reader);
+        } catch (...) {
+          canRead = false;
+        }
+        if (canRead && !key.empty()) {
+          resolved.insert(cell);
+          cellKeys[cell] = std::move(key);
+          resolvedScrollIds.insert(static_cast<xanadu::ScrollId>(i + 1));
+          progress = true;
+        }
+      }
+    }
+  }
+
+  if (resolved.size() < scrollCells.size()) {
+    std::string unresolvedList;
+    for (std::size_t i = 0; i < scrollCells.size(); ++i) {
+      if (!resolved.contains(scrollCells[i])) {
+        if (!unresolvedList.empty()) {
+          unresolvedList += ", ";
+        }
+        unresolvedList += "cell " + std::to_string(scrollCells[i]) +
+                          " (scroll id " + std::to_string(i + 1) + ")";
+      }
+    }
+    throw UnrootedRegistryDependency("unrooted scroll registry dependency: " +
+                                     unresolvedList);
+  }
+
+  // 3. Populate registry with sequential 1-based ScrollIds
+  registry.scrolls.reserve(scrollCells.size());
+  for (std::size_t i = 0; i < scrollCells.size(); ++i) {
+    const auto cell = scrollCells[i];
+    const auto id   = static_cast<xanadu::ScrollId>(i + 1);
+    const auto &key = cellKeys[cell];
+    registry.scrolls.push_back(ScrollRecord{
+        .id        = id,
+        .cell      = cell,
+        .globalKey = key,
+    });
+    registry.byKey[key]   = id;
+    registry.byCell[cell] = id;
+  }
+
+  // 4. Map placeholders along d.scroll-refs (§6)
+  const auto dimScrollRefs = store_ ? dimensionNamed("d.scroll-refs", *store_)
+                                    : dimensionNamed("d.scroll-refs");
+  if (noCell != dimScrollRefs) {
+    for (const auto &rec : registry.scrolls) {
+      walkRank(rec.cell, dimScrollRefs, DimVector::POS, [&](const CellRef p) {
+        if (p != rec.cell) {
+          registry.byCell[p] = rec.id;
+        }
+        return true;
+      });
+    }
+  }
+
+  return registry;
+}
+
+ScrollRegistry Manifold::scrollRegistry() const {
+  if (nullptr == store_) {
+    return {};
+  }
+  return scrollRegistry(*store_);
+}
+
+std::vector<ScrollRecord> Manifold::scrolls() const {
+  return scrollRegistry().scrolls;
 }
 
 } // namespace zigzag
