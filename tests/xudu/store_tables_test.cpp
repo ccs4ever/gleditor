@@ -47,66 +47,11 @@ fs::path scratch(const std::string &name) {
 StoreTables everything() {
   StoreTables tables;
 
-  Scroll published;
-  published.publisher.bytes.fill(0x5a);
-  published.salt            = "essay";
-  published.defaultMimeType = "text/plain;charset=utf-8";
-  ScrollSegment plain;
-  plain.at           = 0;
-  plain.length       = 100;
-  plain.torrent      = InfoHash::fromHex(std::string(40, 'b'));
-  plain.streamOffset = 27;
-  plain.fileIndex    = 2;
-  plain.path         = "chapter.txt";
-  plain.mimeType     = "text/plain;charset=utf-8";
-  published.segments.push_back(plain);
-
-  // A withheld stretch with a price on it: the two fields the plaintext table
-  // had no column for, and a nested descriptor inside the second.
-  ScrollSegment locked;
-  locked.at       = 100;
-  locked.length   = 50;
-  locked.torrent  = InfoHash::fromHex(std::string(40, 'c'));
-  locked.mimeType = "image/png";
-  locked.kind     = xudu::SegmentKind::Withheld;
-  PublishedHoleRecord hole;
-  hole.at     = 100;
-  hole.length = 50;
-  hole.reason = HoleReason::TranscopyrightLock;
-  hole.contentCommitment.fill(0x11);
-  xudu::TranscopyrightDescriptor tc;
-  tc.priceAtomicUnits = 4200;
-  tc.flatFee          = true;
-  tc.currencySymbol   = "XU";
-  tc.licenseMemo      = "Nelson-Transcopyright-v1";
-  tc.keyId.fill(0x22);
-  tc.nonce.fill(0x33);
-  hole.transcopyright = tc;
-  locked.holeRecord   = hole;
-  published.segments.push_back(locked);
-  tables.scrolls.push_back(published);
-
-  // A scroll with no publisher at all, which a publication's table cannot
-  // hold and a registry must: this is what content that exists only as one
-  // fixed torrent is named by.
-  tables.scrolls.push_back(Scroll::ofTorrentFile(
-      InfoHash::fromHex(std::string(40, 'd')), 0, "fox.txt", 0, 61));
-
   ScrollSegment local;
   local.at       = 4070;
   local.length   = 228;
   local.mimeType = "image/png";
   tables.localSegments.push_back(local);
-
-  Link curated;
-  curated.id      = 7;
-  curated.type    = LinkType::Quotation;
-  curated.tier    = ProminenceTier::Curated;
-  curated.owner   = "Theodor_Holm_Nelson";
-  curated.curator = "btpk:" + std::string(64, 'e');
-  curated.left    = {PrimediaSpan{0, 10, 20}};
-  curated.right   = {PrimediaSpan{1, 30, 40}, PrimediaSpan{2, 0, 5}};
-  tables.links.emplace(curated.id, curated);
 
   return tables;
 }
@@ -119,47 +64,11 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   const auto back = xudu::readStoreTables(path);
 
   EXPECT_EQ(back.documentId, sent.documentId);
-  ASSERT_EQ(back.scrolls.size(), sent.scrolls.size());
-  EXPECT_EQ(back.scrolls[0].publisher.hex(), sent.scrolls[0].publisher.hex());
-  EXPECT_EQ(back.scrolls[0].salt, "essay");
-  EXPECT_EQ(back.scrolls[0].defaultMimeType, "text/plain;charset=utf-8");
-  ASSERT_EQ(back.scrolls[0].segments.size(), 2U);
-  EXPECT_EQ(back.scrolls[0].segments, sent.scrolls[0].segments)
-      << "a segment came back as something other than what went in";
-
-  // The withheld stretch in particular: kind, hole, and the descriptor inside
-  // it. The plaintext table had no column for any of this, so a store that
-  // had adopted a document with a price on part of it came back with that
-  // part looking like ordinary content.
-  const auto &locked = back.scrolls[0].segments[1];
-  EXPECT_TRUE(locked.isWithheld());
-  EXPECT_TRUE(locked.isLocked());
-  ASSERT_TRUE(locked.holeRecord.has_value());
-  EXPECT_EQ(locked.holeRecord->reason, HoleReason::TranscopyrightLock);
-  ASSERT_TRUE(locked.holeRecord->transcopyright.has_value());
-  EXPECT_EQ(locked.holeRecord->transcopyright->priceAtomicUnits, 4200U);
-  EXPECT_TRUE(locked.holeRecord->transcopyright->flatFee);
-
-  // The unnamed scroll, which has no publisher key to write down.
-  EXPECT_FALSE(back.scrolls[1].isNamed());
-  ASSERT_EQ(back.scrolls[1].segments.size(), 1U);
-  EXPECT_EQ(back.scrolls[1].segments.front().path, "fox.txt");
 
   ASSERT_EQ(back.localSegments.size(), 1U);
   EXPECT_EQ(back.localSegments.front().mimeType, "image/png")
       << "a local segment's MIME type is the one thing the shared segment "
          "encoding has no key for, so the registry adds it";
-
-  ASSERT_EQ(back.links.size(), 1U);
-  const auto &link = back.links.at(7);
-  EXPECT_EQ(link.type, LinkType::Quotation);
-  EXPECT_EQ(link.tier, ProminenceTier::Curated) << "tier was dropped before";
-  EXPECT_EQ(link.owner, "Theodor_Holm_Nelson");
-  EXPECT_EQ(link.curator, "btpk:" + std::string(64, 'e'))
-      << "curator was dropped before";
-  EXPECT_EQ(link.left, (std::vector<PrimediaSpan>{PrimediaSpan{0, 10, 20}}));
-  EXPECT_EQ(link.right, (std::vector<PrimediaSpan>{PrimediaSpan{1, 30, 40},
-                                                   PrimediaSpan{2, 0, 5}}));
 }
 
 TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {

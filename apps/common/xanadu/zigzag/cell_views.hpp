@@ -54,6 +54,7 @@ concept CellGraph = requires(const M &m, CellRef c, DimRef d, DimVector v) {
   { m.cellCount() } noexcept -> std::convertible_to<std::size_t>;
   { m.traversalBound() } noexcept -> std::convertible_to<std::size_t>;
   { m.contains(c) } noexcept -> std::same_as<bool>;
+  { m.slot(c) } noexcept -> std::same_as<SlotRef>;
 };
 
 /// A sentinel-encoded CellRef as an optional: noCell becomes nullopt.

@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <expected>
 #include <limits>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -39,9 +40,57 @@
 
 namespace xanadu {
 class Store;
+struct VersionAnnotation;
 } // namespace xanadu
 
 namespace zigzag {
+
+class UnrootedRegistryDependency : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+struct ScrollRecord {
+  xanadu::ScrollId id{0};
+  CellRef cell{noCell};
+  std::string globalKey;
+  bool operator==(const ScrollRecord &) const = default;
+};
+
+struct ScrollRegistry {
+  std::vector<ScrollRecord> scrolls;
+  std::unordered_map<std::string, xanadu::ScrollId> byKey;
+  std::unordered_map<CellRef, xanadu::ScrollId> byCell;
+
+  [[nodiscard]] bool empty() const noexcept { return scrolls.empty(); }
+  [[nodiscard]] std::size_t size() const noexcept { return scrolls.size(); }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForCell(const CellRef cell) const noexcept {
+    const auto it = byCell.find(cell);
+    if (it != byCell.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForKey(const std::string_view key) const noexcept {
+    const auto it = byKey.find(std::string(key));
+    if (it != byKey.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] const ScrollRecord *
+  recordForId(const xanadu::ScrollId id) const noexcept {
+    if (id == 0 || id > scrolls.size()) {
+      return nullptr;
+    }
+    return &scrolls[id - 1];
+  }
+};
 
 // CellRef, DimRef, and noCell are defined in dim_vector.hpp
 
@@ -294,6 +343,10 @@ public:
   [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
 
+  /// The target operation index of @p ref, when it is an OpHandle cell -- and
+  /// nothing when it is not.
+  [[nodiscard]] std::optional<CellRef> handleTarget(CellRef ref) const noexcept;
+
   /// Which of the above would answer, or ValueKind::None for a cell whose
   /// content is just content.
   [[nodiscard]] xanadu::ValueKind valueKindOf(CellRef ref) const noexcept;
@@ -340,6 +393,88 @@ public:
   /// The backing Store for this manifold view, or nullptr if unattached.
   [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
   void setStore(xanadu::Store *s) noexcept { store_ = s; }
+
+  // -- store-backed queries: need the associated Store -----------------------
+
+  /**
+   * @brief Every operation that shaped @p cell in this folded state,
+   *        chronological (oldest first).
+   *
+   * Empty for an unattached manifold, an absent cell, or a malformed chain.
+   */
+  [[nodiscard]] std::vector<std::uint32_t> historyOf(CellRef cell) const;
+
+  /**
+   * @brief Content of @p cell as of @p op, which must be in its chain.
+   *
+   * Empty if @p op is not in @p cell's history.
+   */
+  [[nodiscard]] std::vector<xanadu::PrimediaSpan>
+  contentAsOf(CellRef cell, std::uint32_t op) const;
+
+  struct Edition {
+    CellRef cell{noCell};
+    std::string name;
+    CellRef handle{noCell};
+    std::uint32_t targetOp{0};
+  };
+
+  /**
+   * @brief All editions designated in this folded state on d.editions,
+   *        in rank order.
+   *
+   * Empty for an unattached manifold, or when d.editions has no cells.
+   */
+  [[nodiscard]] std::vector<Edition> editions() const;
+
+  /**
+   * @brief Lookup an edition by name in this folded state.
+   */
+  [[nodiscard]] std::optional<Edition>
+  editionNamed(std::string_view name) const;
+
+  /// The CellRef of an OpHandle targeting @p targetOp, if any.
+  [[nodiscard]] std::optional<CellRef>
+  findOpHandle(std::uint32_t targetOp) const noexcept;
+
+  /// Look up the VersionAnnotation associated with @p targetOp in this folded
+  /// state.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotation(std::uint32_t targetOp, const xanadu::Store &store) const;
+
+  /// Look up the VersionAnnotation associated with handle cell @p handle.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotationForHandle(CellRef handle, const xanadu::Store &store) const;
+
+  /// All aliases recorded in this folded state (both on d.editions and
+  /// d.alias), paired with their target operation index.
+  [[nodiscard]] std::vector<std::pair<std::string, CellRef>>
+  aliases(const xanadu::Store &store) const;
+
+  /**
+   * @brief Replay product index of the scroll registry (§5.4).
+   *
+   * Walks d.scrolls and d.scroll-refs to map scroll cells and placeholders
+   * to derived local ScrollIds and global keys.
+   */
+  [[nodiscard]] ScrollRegistry
+  scrollRegistry(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] ScrollRegistry scrollRegistry() const;
+
+  [[nodiscard]] std::vector<ScrollRecord> scrolls() const;
+
+  /**
+   * @brief Replay product index of links (§5.4).
+   *
+   * Walks d.links off home, decoding endpoints on d.from and d.to,
+   * link type on d.linktype, tier on d.linktier, owner on d.owner,
+   * and curator on d.curator.
+   */
+  [[nodiscard]] std::map<CellRef, xanadu::Link>
+  links(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] std::map<CellRef, xanadu::Link> links() const;
 
   /**
    * @brief Collect all cells within @p radius hops from @p start along any
@@ -472,7 +607,7 @@ private:
   /// assertion, and spending four of them on a capacity would have made the
   /// run design cost exactly what the fixed array it replaced cost (R12's
   /// 108 bytes per cell against 112), which is most of why the run won.
-  std::vector<DimLink> links;
+  std::vector<DimLink> links_;
   /// The content arena, run per cell, grown and compacted exactly as @ref links
   /// is. Separate from the links because the two grow independently: a cell
   /// gains dimensions and gains text at different times, and interleaving them

@@ -194,8 +194,9 @@ TEST(SystemDocsTest, enumAndUriMappingRoundTrip) {
 }
 
 TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
+  const auto perma   = std::make_shared<xudu::UserPermascroll>();
   const auto sysPath = (testDir / "system_keymap").string();
-  xudu::Store store;
+  xudu::Store store(perma);
   store.setSystem(true);
   EXPECT_TRUE(store.isSystem());
 
@@ -226,7 +227,7 @@ TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   store.save(sysPath);
 
   // Reload and verify persistence of single head and annotations
-  xudu::Store reloaded;
+  xudu::Store reloaded(perma);
   reloaded.load(sysPath);
   reloaded.setSystem(true);
 
@@ -240,4 +241,61 @@ TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   reloaded.repointCurrentVersion(v1);
   EXPECT_EQ(reloaded.currentVersions().size(), 1U);
   EXPECT_EQ(reloaded.primaryCurrentVersion(), v1);
+}
+
+TEST_F(StoreMultiStoreTest, aSystemStoreKeepsExactlyOneCurrentVersion) {
+  const auto perma   = std::make_shared<xudu::UserPermascroll>();
+  const auto sysPath = (testDir / "system_keymap_exact").string();
+  xudu::Store store(perma);
+  store.setSystem(true);
+  EXPECT_TRUE(store.isSystem());
+
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "# Default keymap\n");
+  store.repointCurrentVersion(v1);
+
+  EXPECT_EQ(store.currentVersions().size(), 1U);
+  EXPECT_EQ(store.primaryCurrentVersion(), v1);
+
+  const auto v2 = store.insert(v1, 0, "# Custom keymap\n");
+  store.repointCurrentVersion(v2);
+
+  EXPECT_EQ(store.currentVersions().size(), 1U);
+  EXPECT_EQ(store.primaryCurrentVersion(), v2);
+
+  store.save(sysPath);
+
+  xudu::Store reloaded(perma);
+  reloaded.load(sysPath);
+  reloaded.setSystem(true);
+
+  EXPECT_EQ(reloaded.currentVersions().size(), 1U);
+  EXPECT_EQ(reloaded.primaryCurrentVersion(), v2);
+}
+
+TEST_F(StoreMultiStoreTest, savingADocumentDoesNotRedesignateItsEditions) {
+  const auto perma     = std::make_shared<xudu::UserPermascroll>();
+  const auto storePath = (testDir / "editions_doc.xanadoc").string();
+  xudu::Store store(perma);
+  store.load(storePath);
+
+  const auto v1 =
+      store.insert(xudu::MicroversionId{}, 0, "English version text.\n");
+  const auto v2 = store.insert(v1, 0, "Texte en français.\n");
+
+  const auto vEd1     = store.designateEdition(v2, "English", v1);
+  const auto vEd2     = store.designateEdition(vEd1, "French", v2);
+  const auto expected = std::vector<xudu::MicroversionId>{v1, v2};
+  EXPECT_EQ(store.currentVersions(), expected);
+
+  store.save(storePath);
+
+  xudu::Store reloaded(perma);
+  reloaded.load(storePath);
+  EXPECT_EQ(reloaded.currentVersions(), expected);
+  const auto eds = reloaded.editions(vEd2);
+  ASSERT_EQ(eds.size(), 2U);
+  EXPECT_EQ(eds[0].name, "English");
+  EXPECT_EQ(eds[0].targetVersion, v1);
+  EXPECT_EQ(eds[1].name, "French");
+  EXPECT_EQ(eds[1].targetVersion, v2);
 }

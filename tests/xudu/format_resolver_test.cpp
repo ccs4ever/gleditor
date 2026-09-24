@@ -36,14 +36,14 @@ TEST(FormatResolverTest, FormatResolverInitializationAndFiltering) {
   Link commentLink;
   commentLink.type = LinkType::Comment;
   commentLink.left = span;
-  store.addLink(v1, commentLink);
+  auto at          = store.addLink(v1, commentLink);
 
   // 2) Add valid format link (Bold)
   Link boldLink;
   boldLink.type = LinkType::Format;
   boldLink.left = span;
   boldLink.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
-  store.addLink(v1, boldLink);
+  at = store.addLink(at, boldLink);
 
   FormatResolver resolver(store);
   const auto res = resolver.resolveSpans(span);
@@ -70,21 +70,21 @@ TEST(FormatResolverTest, OverlappingDecorationsAndAlignment) {
   boldLink.type = LinkType::Format;
   boldLink.left = spanBold;
   boldLink.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
-  store.addLink(v1, boldLink);
+  auto at = store.addLink(v1, boldLink);
 
   // Italic on "media architecture" [5..22)
   Link italicLink;
   italicLink.type = LinkType::Format;
   italicLink.left = spanItalic;
   italicLink.right.push_back(vocabularySpanFor(FormatAttribute::Italic));
-  store.addLink(v1, italicLink);
+  at = store.addLink(at, italicLink);
 
   // AlignCentre on whole phrase
   Link alignLink;
   alignLink.type = LinkType::Format;
   alignLink.left = spanAlign;
   alignLink.right.push_back(vocabularySpanFor(FormatAttribute::AlignCentre));
-  store.addLink(v1, alignLink);
+  at = store.addLink(at, alignLink);
 
   FormatResolver resolver(store);
   const auto res = resolver.resolveVersion(versionObj);
@@ -160,10 +160,9 @@ TEST(FormatResolverTest, CrossDomainFormatInheritanceDocToCell) {
   italicLink.type = LinkType::Format;
   italicLink.left = docSpans;
   italicLink.right.push_back(vocabularySpanFor(FormatAttribute::Italic));
-  store.addLink(docVer, italicLink);
+  auto at = store.addLink(docVer, italicLink);
 
   // 3) Create cell and transclude the formatted span into the cell
-  auto at            = store.sliceGenesis(docVer);
   at                 = store.makeCell(at, "");
   const auto cellRef = store.cellRefOf(at);
   at = store.spliceCellSpan(at, cellRef, 0, 0, docSpans.front());

@@ -308,40 +308,11 @@ std::string segmentFields(const xudu::ScrollSegment &segment) {
 /// The side tables, from the one container they live in. Rendered in the same
 /// shape the plaintext files were rendered in, so that migration step 11's
 /// conversion is a diff of this output rather than a claim about it.
-void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
-                bool wantLinks) {
+void dumpTables(const xudu::StoreTables &tables, bool wantScrolls) {
+  std::cout << "document  " << tables.documentId.str() << '\n';
   if (wantScrolls) {
-    for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
-      const auto &scroll = tables.scrolls[i];
-      const auto id      = i + 1;
-      std::cout << "scroll " << id << "  publisher="
-                << (scroll.isNamed() ? scroll.publisher.hex() : "-")
-                << " salt=" << (scroll.salt.empty() ? "-" : scroll.salt)
-                << " mime=" << scroll.defaultMimeType << '\n';
-      for (const auto &segment : scroll.segments) {
-        std::cout << "segment " << id << "  " << segmentFields(segment) << '\n';
-      }
-    }
     for (const auto &segment : tables.localSegments) {
       std::cout << "localsegment  " << segmentFields(segment) << '\n';
-    }
-  }
-  if (wantLinks) {
-    for (const auto &[id, link] : tables.links) {
-      std::ostringstream out;
-      out << "link " << id << "  type=" << xudu::linkTypeName(link.type)
-          << " tier=" << xudu::prominenceTierName(link.tier)
-          << " owner=" << (link.owner.empty() ? "-" : link.owner)
-          << " curator=" << (link.curator.empty() ? "-" : link.curator);
-      for (const auto &span : link.left) {
-        out << " left=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      for (const auto &span : link.right) {
-        out << " right=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      std::cout << out.str() << '\n';
     }
   }
 }
@@ -349,18 +320,9 @@ void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
 /// The author-facing metadata, from the same container. Was two YAML files
 /// echoed line by line; is now rendered from the tables, so that the move is a
 /// diff of this output rather than a claim about it.
-void dumpVersions(const xudu::StoreTables &tables) {
-  for (const auto &id : tables.currentVersions) {
-    std::cout << "current  " << id.str() << '\n';
-  }
-  for (const auto &[id, annotation] : tables.versionAnnotations) {
-    std::cout << "version " << id.str() << "  alias="
-              << (annotation.alias.empty() ? "-" : annotation.alias)
-              << " tag=" << (annotation.tag.empty() ? "-" : annotation.tag)
-              << " timestamp="
-              << (annotation.timestamp.empty() ? "-" : annotation.timestamp)
-              << " description=" << excerpt(annotation.description) << '\n';
-  }
+void dumpVersions(const xudu::StoreTables &) {
+  // Versions and annotations moved to first-class cells in ops.nodes (see
+  // §5.4).
 }
 
 void usage() {
@@ -490,7 +452,7 @@ int main(int argc, char **argv) {
     if (exists("store.tables")) {
       try {
         const auto tables = xudu::readStoreTables(target / "store.tables");
-        dumpTables(tables, wants("scrolls"), wants("links"));
+        dumpTables(tables, wants("scrolls"));
         if (wants("versions")) {
           dumpVersions(tables);
         }

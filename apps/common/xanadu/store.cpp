@@ -16,8 +16,11 @@
 
 #include "binary_ops.hpp"
 #include "common/xanadu/osmic_walker.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
+#include "publication.hpp"
 #include "store_tables.hpp"
+#include "user_permascroll.hpp"
 #include "windows_quoting.hpp"
 
 namespace xanadu {
@@ -277,6 +280,7 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
   folded.compact();
+  const_cast<Store *>(this)->syncCurrentVersionsFromRank(folded);
   return folded;
 }
 
@@ -388,6 +392,30 @@ MicroversionId Store::makeScalarCell(const MicroversionId &parent,
 MicroversionId Store::makeScalarCell(const MicroversionId &parent,
                                      const std::int64_t value) {
   return applyScalar(parent, zigzag::noCell, scalarValue(value), nullptr);
+}
+
+MicroversionId Store::makeOpHandle(const MicroversionId &parent,
+                                   const std::uint32_t target,
+                                   const std::string_view text) {
+  if (zigzag::isEphemeral(target)) {
+    throw std::invalid_argument(
+        "a derived cell has no operation behind it, so a handle naming one "
+        "cannot be recorded -- see design R8 and R12");
+  }
+  const auto *const node = opsSpool.get(target);
+  if (nullptr == node) {
+    throw std::invalid_argument("target operation " + std::to_string(target) +
+                                " does not exist in store");
+  }
+  const auto span =
+      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
+  Op op;
+  op.kind = OpKind::Structure;
+  op.flags =
+      structureFlags(StructureVerb::MakeCell, false, ValueKind::OpHandle);
+  op.span  = span;
+  op.value = target;
+  return apply(parent, op);
 }
 
 MicroversionId Store::setScalar(const MicroversionId &parent,
@@ -764,10 +792,49 @@ ScrollId Store::addScroll(const Scroll &scroll) {
 }
 
 void Store::addSegment(const ScrollId id, const ScrollSegment &segment) {
-  if (localScroll == id || id > externals.size()) {
+  if (localScroll == id) {
+    localSegments.addSegment(segment);
+    return;
+  }
+  if (id > externals.size()) {
     return;
   }
   externals[id - 1].addSegment(segment);
+}
+
+void Store::setContentSource(const ContentSource *source) {
+  resolver.setSource(source);
+  if (source) {
+    for (auto &sc : externals) {
+      hydrateExternalScroll(sc);
+    }
+  }
+}
+
+void Store::hydrateExternalScroll(Scroll &sc) const {
+  const auto *source = resolver.contentSource();
+  if (!source) {
+    return;
+  }
+  for (auto &seg : sc.segments) {
+    if (seg.length == 0 || seg.path.empty()) {
+      if (const auto meta = source->metainfo(seg.torrent)) {
+        if (seg.fileIndex < meta->files().size()) {
+          const auto &f = meta->files()[seg.fileIndex];
+          if (seg.path.empty()) {
+            seg.path = f.path;
+          }
+          if (seg.streamOffset == 0) {
+            seg.streamOffset = f.offset;
+          }
+          if (seg.length == 0) {
+            seg.at     = 0;
+            seg.length = f.length;
+          }
+        }
+      }
+    }
+  }
 }
 
 gleditor::cpp26::optional<const Scroll &>
@@ -775,7 +842,9 @@ Store::scroll(const ScrollId id) const {
   if (localScroll == id || id > externals.size()) {
     return gleditor::cpp26::nullopt;
   }
-  return externals[id - 1];
+  auto &sc = const_cast<Scroll &>(externals[id - 1]);
+  hydrateExternalScroll(sc);
+  return sc;
 }
 
 gleditor::cpp26::optional<const ScrollSegment &>
@@ -808,8 +877,30 @@ Store::segmentsOverlapping(const ScrollId scrollId, const std::uint64_t start,
   return found;
 }
 
+void Store::setBootstrapPermascroll(
+    std::string key,
+    std::function<ResolveResult(const PrimediaSpan &)> reader) {
+  bootstrapPermascrollKey_ = std::move(key);
+  bootstrapReader_         = std::move(reader);
+}
+
+void Store::setProvenance(SignedProvenance prov, const SigningOptions &where) {
+  if (!prov.signature.empty() || !prov.tsv.empty()) {
+    const auto check = verifyProvenance(prov, where);
+    if (!check.signatureValid) {
+      throw std::runtime_error("unverified or tampered provenance: " +
+                               check.detail);
+    }
+  }
+  provenance_ = std::move(prov);
+}
+
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
+    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
+        bootstrapReader_) {
+      return bootstrapReader_(span);
+    }
     return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                          .text   = userPermascroll_->read(span)};
   }
@@ -843,6 +934,10 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
 
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
+    if (!bootstrapPermascrollKey_.empty() && userPermascroll_->size() == 0 &&
+        bootstrapReader_) {
+      return bootstrapReader_(span).text;
+    }
     return userPermascroll_->read(span);
   }
   if (const auto vocab = readVocabulary(span)) {
@@ -1167,14 +1262,123 @@ MicroversionId Store::transclude(const MicroversionId &parent,
   return apply(parent, op);
 }
 
-MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
-  link.id = nextLinkId++;
-  linkTable.emplace(link.id, std::move(link));
+MicroversionId Store::addLink(const MicroversionId &parent, Link link,
+                              const zigzag::Manifold *const known) {
+  std::optional<zigzag::Manifold> folded;
+  const zigzag::Manifold *currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
 
-  Op op;
-  op.kind = OpKind::Link;
-  op.link = nextLinkId - 1;
-  return apply(parent, op);
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimLinks   = ensureDim("d.links");
+  const auto dimFrom    = ensureDim("d.from");
+  const auto dimTo      = ensureDim("d.to");
+  const auto dimType    = ensureDim("d.linktype");
+  const auto dimTier    = ensureDim("d.linktier");
+  const auto dimOwner   = ensureDim("d.owner");
+  const auto dimCurator = ensureDim("d.curator");
+
+  // Mint the link cell itself.
+  curHead             = makeCell(curHead, PrimediaSpan{});
+  const auto linkCell = cellRefOf(curHead);
+  link.id             = linkCell;
+  folded              = rebuildManifold(curHead);
+  currentFold         = &folded.value();
+
+  // Link onto d.links rank off homeCell_
+  const auto tailLinks = zigzag::rankTail(*currentFold, homeCell_, dimLinks,
+                                          zigzag::DimVector::POS);
+  curHead     = setLink(curHead, tailLinks, dimLinks, zigzag::DimVector::POS,
+                        linkCell, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // From endpoint (d.from)
+  if (!link.left.empty()) {
+    curHead             = makeCell(curHead, link.left.front());
+    const auto fromCell = cellRefOf(curHead);
+    std::uint64_t at    = link.left.front().length;
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    for (const auto &span : link.left | std::views::drop(1)) {
+      curHead = spliceCellSpan(curHead, fromCell, at, 0, span, currentFold);
+      at += span.length;
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+    curHead     = setLink(curHead, linkCell, dimFrom, zigzag::DimVector::POS,
+                          fromCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // To endpoint (d.to)
+  if (!link.right.empty()) {
+    curHead           = makeCell(curHead, link.right.front());
+    const auto toCell = cellRefOf(curHead);
+    std::uint64_t at  = link.right.front().length;
+    folded            = rebuildManifold(curHead);
+    currentFold       = &folded.value();
+    for (const auto &span : link.right | std::views::drop(1)) {
+      curHead = spliceCellSpan(curHead, toCell, at, 0, span, currentFold);
+      at += span.length;
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+    curHead = setLink(curHead, linkCell, dimTo, zigzag::DimVector::POS, toCell,
+                      currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Link properties (d.linktype, d.linktier, d.owner, d.curator)
+  auto linkProperty = [&](const std::string_view prop,
+                          const zigzag::DimRef dim) {
+    if (prop.empty()) {
+      return;
+    }
+    curHead             = makeCell(curHead, prop);
+    const auto propCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead = setLink(curHead, linkCell, dim, zigzag::DimVector::POS, propCell,
+                      currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  };
+
+  linkProperty(linkTypeName(link.type), dimType);
+  linkProperty(prominenceTierName(link.tier), dimTier);
+  linkProperty(link.owner, dimOwner);
+  linkProperty(link.curator, dimCurator);
+
+  syncLinksFromRank(*currentFold);
+  return curHead;
 }
 
 std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
@@ -1233,20 +1437,63 @@ MicroversionId Store::latest() const {
   // while one is being read back, and those are not the same order once a
   // branch exists. Picking by name is the one answer that does not change
   // across a save and a load.
-  MicroversionId newest;
-  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
-    if (const auto id = opsSpool.idOf(idx); newest < id) {
-      newest = id;
-    }
+  if (opsSpool.empty()) {
+    return MicroversionId{};
   }
-  return newest;
+  const auto ids =
+      std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
+      std::views::transform(
+          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+  return std::ranges::max(ids);
+}
+
+std::vector<MicroversionId> Store::structureHeads() const {
+  if (zigzag::noCell == homeCell_ || opsSpool.empty()) {
+    return {};
+  }
+  const auto hasHomeInAncestry = [this](const std::uint32_t idx) {
+    auto curr = idx;
+    while (curr > 0 && curr <= opsSpool.size()) {
+      if (curr == homeCell_) {
+        return true;
+      }
+      const auto *const node = opsSpool.get(curr);
+      if (nullptr == node || 0 == node->parentIndex) {
+        break;
+      }
+      curr = node->parentIndex;
+    }
+    return false;
+  };
+
+  auto leafHeads =
+      std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
+      std::views::filter([this](const std::uint32_t idx) {
+        return opsSpool.childrenOf(idx).empty();
+      }) |
+      std::views::filter(hasHomeInAncestry) |
+      std::views::transform(
+          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
+
+  return std::ranges::to<std::vector<MicroversionId>>(leafHeads);
+}
+
+MicroversionId Store::structureHead() const {
+  const auto heads = structureHeads();
+  return heads.empty() ? MicroversionId{} : std::ranges::max(heads);
 }
 
 const std::vector<MicroversionId> &Store::currentVersions() const {
   if (currentVersions_.empty()) {
-    const auto lat = latest();
-    if (!lat.isZero()) {
-      currentVersions_.push_back(lat);
+    const auto sHead  = structureHead();
+    const auto target = !sHead.isZero() ? sHead : latest();
+    if (!target.isZero()) {
+      const auto manifold = rebuildManifold(target);
+      const_cast<Store *>(this)->syncCurrentVersionsFromRank(manifold);
+      if (currentVersions_.empty()) {
+        currentVersionsFallback_ = {target};
+        return currentVersionsFallback_;
+      }
     }
   }
   return currentVersions_;
@@ -1258,21 +1505,476 @@ MicroversionId Store::primaryCurrentVersion() const {
 }
 
 void Store::setCurrentVersions(std::vector<MicroversionId> versions) {
-  currentVersions_ = std::move(versions);
+  currentVersions_            = std::move(versions);
+  hasExplicitCurrentVersions_ = true;
 }
 
 void Store::repointCurrentVersion(const MicroversionId &version) {
-  currentVersions_ = {version};
+  currentVersions_            = {version};
+  hasExplicitCurrentVersions_ = true;
 }
 
 void Store::addCurrentVersion(const MicroversionId &version) {
   if (std::ranges::find(currentVersions_, version) == currentVersions_.end()) {
     currentVersions_.push_back(version);
+    hasExplicitCurrentVersions_ = true;
   }
 }
 
 void Store::removeCurrentVersion(const MicroversionId &version) {
   std::erase(currentVersions_, version);
+  hasExplicitCurrentVersions_ = true;
+}
+
+MicroversionId Store::designateEdition(const MicroversionId &parent,
+                                       const std::string_view name,
+                                       const MicroversionId &target,
+                                       const zigzag::Manifold *const known,
+                                       const bool allowDuplicateName) {
+  const auto targetOp = opsSpool.indexOf(target);
+  if (0 == targetOp) {
+    throw std::invalid_argument("target version does not exist in store");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  // 1. Ensure dimensions d.editions and d.edition-of exist
+  const auto dimEditions  = ensureDim("d.editions");
+  const auto dimEditionOf = ensureDim("d.edition-of");
+
+  // 3. Mint or find the handle cell for targetOp
+  zigzag::CellRef handleCell = zigzag::noCell;
+  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  if (existingHandle.has_value()) {
+    handleCell = *existingHandle;
+  } else {
+    curHead     = makeOpHandle(curHead, targetOp);
+    handleCell  = cellRefOf(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // 4. Check if an edition cell named `name` already exists on d.editions rank
+  zigzag::CellRef existingEditionCell = zigzag::noCell;
+  if (!allowDuplicateName) {
+    for (const auto cell :
+         zigzag::rankAfter(*currentFold, homeCell_, dimEditions)) {
+      if (currentFold->textOf(cell, *this) == name) {
+        existingEditionCell = cell;
+        break;
+      }
+    }
+  }
+
+  if (zigzag::noCell != existingEditionCell) {
+    // Repoint existing edition cell to the new handle
+    curHead = setLink(curHead, existingEditionCell, dimEditionOf,
+                      zigzag::DimVector::POS, handleCell, currentFold);
+  } else {
+    // Mint new edition cell with name
+    curHead                = makeCell(curHead, name);
+    const auto editionCell = cellRefOf(curHead);
+    folded                 = rebuildManifold(curHead);
+    currentFold            = &folded.value();
+
+    // Link onto tail of d.editions rank
+    const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimEditions,
+                                       zigzag::DimVector::POS);
+    curHead     = setLink(curHead, tail, dimEditions, zigzag::DimVector::POS,
+                          editionCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    // Link editionCell to handleCell on d.edition-of
+    curHead = setLink(curHead, editionCell, dimEditionOf,
+                      zigzag::DimVector::POS, handleCell, currentFold);
+  }
+
+  // Reconcile currentVersions_ cache and legacy aliasIndex_
+  folded = rebuildManifold(curHead);
+  syncCurrentVersionsFromRank(folded.value());
+  if (name != "current") {
+    aliasIndex_[std::string(name)]    = target;
+    versionAnnotations_[target].alias = std::string(name);
+  }
+
+  return curHead;
+}
+
+void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
+  const auto eds = manifold.editions();
+  if (eds.empty()) {
+    return;
+  }
+  std::vector<MicroversionId> heads;
+  heads.reserve(eds.size());
+  for (const auto &ed : eds) {
+    if (ed.name == "current" && ed.targetOp > 0) {
+      const auto id = opsSpool.idOf(ed.targetOp);
+      if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
+        heads.push_back(id);
+      }
+    }
+  }
+  if (heads.empty()) {
+    for (const auto &ed : eds) {
+      if (ed.targetOp > 0) {
+        const auto id = opsSpool.idOf(ed.targetOp);
+        if (!id.isZero() && std::ranges::find(heads, id) == heads.end()) {
+          heads.push_back(id);
+        }
+      }
+    }
+  }
+  if (!heads.empty()) {
+    currentVersions_ = std::move(heads);
+  }
+}
+
+void Store::syncAliasesFromRank(const zigzag::Manifold &manifold) {
+  for (const auto &[name, targetOp] : manifold.aliases(*this)) {
+    const auto id = opsSpool.idOf(targetOp);
+    if (!id.isZero()) {
+      aliasIndex_[name] = id;
+      if (const auto ann = manifold.versionAnnotation(targetOp, *this)) {
+        versionAnnotations_[id] = *ann;
+      }
+    }
+  }
+}
+
+void Store::syncScrollsFromRank(const zigzag::Manifold &manifold) {
+  scrollRegistry_ = manifold.scrollRegistry(*this);
+  for (const auto &rec : scrollRegistry_.scrolls) {
+    if (externals.size() < rec.id) {
+      externals.resize(rec.id);
+    }
+    auto &sc = externals[rec.id - 1];
+    if (rec.globalKey.starts_with("btpk:")) {
+      const auto rest  = std::string_view(rec.globalKey).substr(5);
+      const auto colon = rest.find(':');
+      if (colon != std::string_view::npos) {
+        try {
+          sc.publisher = PublicKey::fromHex(rest.substr(0, colon));
+          sc.salt      = std::string(rest.substr(colon + 1));
+        } catch (...) {
+        }
+      }
+    } else if (rec.globalKey.starts_with("file:")) {
+      const auto rest  = std::string_view(rec.globalKey).substr(5);
+      const auto colon = rest.find(':');
+      if (colon != std::string_view::npos) {
+        const auto hashHex = rest.substr(0, colon);
+        const auto fidxStr = rest.substr(colon + 1);
+        try {
+          const auto fidx =
+              static_cast<std::uint32_t>(std::stoul(std::string(fidxStr)));
+          const auto hash = InfoHash::fromHex(hashHex);
+          if (sc.segments.empty()) {
+            bool foundInLocal = false;
+            for (const auto &seg : localSegments.segments) {
+              if (seg.torrent == hash && seg.fileIndex == fidx) {
+                sc.segments.push_back(seg);
+                foundInLocal = true;
+                break;
+              }
+            }
+            if (!foundInLocal) {
+              ScrollSegment seg;
+              seg.torrent   = hash;
+              seg.fileIndex = fidx;
+              sc.segments.push_back(std::move(seg));
+            }
+          }
+        } catch (...) {
+        }
+      }
+    }
+    hydrateExternalScroll(sc);
+  }
+}
+
+void Store::syncLinksFromRank(const zigzag::Manifold &manifold) {
+  const auto mlinks = manifold.links(*this);
+  linkTable.insert(mlinks.begin(), mlinks.end());
+}
+
+MicroversionId Store::registerScroll(const MicroversionId &parent,
+                                     const std::string_view globalKey,
+                                     const zigzag::Manifold *known) {
+  if (globalKey.empty()) {
+    return parent;
+  }
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimScrolls = ensureDim("d.scrolls");
+
+  for (const auto cell :
+       zigzag::rankAfter(*currentFold, homeCell_, dimScrolls)) {
+    if (currentFold->textOf(cell, *this) == globalKey) {
+      return curHead;
+    }
+  }
+
+  curHead               = makeCell(curHead, globalKey);
+  const auto scrollCell = cellRefOf(curHead);
+  folded                = rebuildManifold(curHead);
+  currentFold           = &folded.value();
+
+  const auto tail = zigzag::rankTail(*currentFold, homeCell_, dimScrolls,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimScrolls, zigzag::DimVector::POS,
+                            scrollCell, currentFold);
+  folded          = rebuildManifold(curHead);
+  currentFold     = &folded.value();
+
+  syncScrollsFromRank(*currentFold);
+  return curHead;
+}
+
+MicroversionId Store::linkScrollRef(const MicroversionId &parent,
+                                    const zigzag::CellRef scrollCell,
+                                    const zigzag::CellRef placeholderCell,
+                                    const zigzag::Manifold *known) {
+  if (zigzag::noCell == scrollCell || zigzag::noCell == placeholderCell) {
+    return parent;
+  }
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimScrollRefs = ensureDim("d.scroll-refs");
+  const auto tail = zigzag::rankTail(*currentFold, scrollCell, dimScrollRefs,
+                                     zigzag::DimVector::POS);
+
+  curHead     = setLink(curHead, tail, dimScrollRefs, zigzag::DimVector::POS,
+                        placeholderCell, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  syncScrollsFromRank(*currentFold);
+  return curHead;
+}
+
+std::vector<Store::EditionInfo>
+Store::editions(const MicroversionId &version) const {
+  const auto manifold = rebuildManifold(version);
+  const auto eds      = manifold.editions();
+  std::vector<EditionInfo> result;
+  result.reserve(eds.size());
+  for (const auto &ed : eds) {
+    result.push_back(EditionInfo{
+        .cell     = ed.cell,
+        .name     = ed.name,
+        .handle   = ed.handle,
+        .targetOp = ed.targetOp,
+        .targetVersion =
+            ed.targetOp > 0 ? opsSpool.idOf(ed.targetOp) : MicroversionId{},
+    });
+  }
+  return result;
+}
+
+std::optional<Store::EditionInfo>
+Store::editionNamed(const MicroversionId &version,
+                    const std::string_view name) const {
+  for (const auto &ed : editions(version)) {
+    if (ed.name == name) {
+      return ed;
+    }
+  }
+  return std::nullopt;
+}
+
+MicroversionId Store::annotateVersion(const MicroversionId &parent,
+                                      const MicroversionId &target,
+                                      VersionAnnotation annotation,
+                                      const zigzag::Manifold *const known) {
+  const auto targetOp = opsSpool.indexOf(target);
+  if (0 == targetOp) {
+    throw std::invalid_argument("target version does not exist in store");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  if (zigzag::noCell == homeCell_) {
+    curHead     = sliceGenesis(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (!currentFold->contains(homeCell_)) {
+    curHead     = structureHead();
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  auto ensureDim = [&](const std::string_view name) {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimNotes   = ensureDim("d.notes");
+  const auto dimTag     = ensureDim("d.tag");
+  const auto dimAlias   = ensureDim("d.alias");
+  const auto dimCreated = ensureDim("d.created");
+
+  // Mint or find OpHandle for targetOp
+  zigzag::CellRef handleCell = zigzag::noCell;
+  const auto existingHandle  = currentFold->findOpHandle(targetOp);
+  if (existingHandle.has_value()) {
+    handleCell = *existingHandle;
+  } else {
+    curHead     = makeOpHandle(curHead, targetOp);
+    handleCell  = cellRefOf(curHead);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.description.empty()) {
+    curHead             = makeCell(curHead, annotation.description);
+    const auto descCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimNotes, zigzag::DimVector::POS,
+                          descCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.tag.empty()) {
+    curHead            = makeCell(curHead, annotation.tag);
+    const auto tagCell = cellRefOf(curHead);
+    folded             = rebuildManifold(curHead);
+    currentFold        = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimTag, zigzag::DimVector::POS,
+                          tagCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  if (!annotation.alias.empty()) {
+    curHead              = makeCell(curHead, annotation.alias);
+    const auto aliasCell = cellRefOf(curHead);
+    folded               = rebuildManifold(curHead);
+    currentFold          = &folded.value();
+    curHead     = setLink(curHead, handleCell, dimAlias, zigzag::DimVector::POS,
+                          aliasCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+    aliasIndex_[annotation.alias] = target;
+  }
+
+  if (!annotation.timestamp.empty()) {
+    curHead             = makeCell(curHead, annotation.timestamp);
+    const auto timeCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+    curHead = setLink(curHead, handleCell, dimCreated, zigzag::DimVector::POS,
+                      timeCell, currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  versionAnnotations_[target] = annotation;
+  return curHead;
 }
 
 void Store::setVersionAnnotation(const MicroversionId &id,
@@ -1289,14 +1991,44 @@ Store::versionAnnotation(const MicroversionId &id) const {
   if (it != versionAnnotations_.end()) {
     return it->second;
   }
-  return std::nullopt;
+  const auto targetOp = opsSpool.indexOf(id);
+  if (0 == targetOp) {
+    return std::nullopt;
+  }
+  const auto lat = latest();
+  if (lat.isZero()) {
+    return std::nullopt;
+  }
+  const auto manifold = rebuildManifold(lat);
+  const auto ann      = manifold.versionAnnotation(targetOp, *this);
+  if (ann.has_value()) {
+    versionAnnotations_[id] = *ann;
+    if (!ann->alias.empty()) {
+      aliasIndex_[ann->alias] = id;
+    }
+  }
+  return ann;
 }
 
 std::optional<MicroversionId>
-Store::resolveAlias(std::string_view alias) const {
+Store::resolveAlias(const std::string_view alias) const {
   const auto it = aliasIndex_.find(std::string(alias));
   if (it != aliasIndex_.end()) {
     return it->second;
+  }
+  const auto lat = latest();
+  if (!lat.isZero()) {
+    const auto manifold = rebuildManifold(lat);
+    const_cast<Store *>(this)->syncAliasesFromRank(manifold);
+    const auto it2 = aliasIndex_.find(std::string(alias));
+    if (it2 != aliasIndex_.end()) {
+      return it2->second;
+    }
+  }
+  if (!currentVersions_.empty()) {
+    if (const auto ed = editionNamed(currentVersions_.front(), alias); ed) {
+      return ed->targetVersion;
+    }
   }
   return std::nullopt;
 }
@@ -1304,6 +2036,21 @@ Store::resolveAlias(std::string_view alias) const {
 std::string Store::displayName(const MicroversionId &id) const {
   if (const auto ann = versionAnnotation(id); ann && !ann->alias.empty()) {
     return ann->alias;
+  }
+  const auto lat = latest();
+  if (!lat.isZero()) {
+    for (const auto &ed : editions(lat)) {
+      if (ed.targetVersion == id && !ed.name.empty() && ed.name != "current") {
+        return ed.name;
+      }
+    }
+  }
+  if (!currentVersions_.empty()) {
+    for (const auto &ed : editions(currentVersions_.front())) {
+      if (ed.targetVersion == id && !ed.name.empty() && ed.name != "current") {
+        return ed.name;
+      }
+    }
   }
   return id.str();
 }
@@ -1339,9 +2086,88 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
       putOp(record.produces, record.op);
     }
   }
+  indexGenesisCells();
+  const auto sHeads = structureHeads();
+  if (!sHeads.empty()) {
+    for (const auto &sh : sHeads) {
+      const auto manifold = rebuildManifold(sh);
+      syncCurrentVersionsFromRank(manifold);
+      syncAliasesFromRank(manifold);
+      syncScrollsFromRank(manifold);
+      syncLinksFromRank(manifold);
+    }
+  } else if (!latest().isZero()) {
+    const auto manifold = rebuildManifold(latest());
+    syncCurrentVersionsFromRank(manifold);
+    syncAliasesFromRank(manifold);
+    syncScrollsFromRank(manifold);
+    syncLinksFromRank(manifold);
+  }
+}
+
+void Store::sealPendingMetadataAsCells() const {
+  if (latest().isZero()) {
+    return;
+  }
+  if (versionAnnotations_.empty() && !hasExplicitCurrentVersions_ &&
+      (zigzag::noCell == homeCell_ || externals.empty())) {
+    return;
+  }
+  auto *mutableStore = const_cast<Store *>(this);
+  auto curHead = (zigzag::noCell != homeCell_) ? structureHead() : latest();
+  if (curHead.isZero()) {
+    curHead = latest();
+  }
+  auto manifold = rebuildManifold(curHead);
+
+  const auto pendingAnnotations = versionAnnotations_;
+  for (const auto &[id, ann] : pendingAnnotations) {
+    const auto targetOp = opsSpool.indexOf(id);
+    if (targetOp > 0) {
+      const auto existing = manifold.versionAnnotation(targetOp, *this);
+      if (!existing.has_value() || existing->description != ann.description ||
+          existing->tag != ann.tag || existing->alias != ann.alias ||
+          existing->timestamp != ann.timestamp) {
+        curHead  = mutableStore->annotateVersion(curHead, id, ann, &manifold);
+        manifold = rebuildManifold(curHead);
+      }
+    }
+  }
+
+  // Only seal currentVersions_ as "current" editions if explicitly set
+  // (§5.3 / §5.4).
+  if (hasExplicitCurrentVersions_ && !currentVersions_.empty()) {
+    const auto existingEds = manifold.editions();
+    if (existingEds.empty()) {
+      const auto headsToSeal = currentVersions_;
+      for (std::size_t i = 0; i < headsToSeal.size(); ++i) {
+        if (opsSpool.indexOf(headsToSeal[i]) > 0) {
+          curHead = mutableStore->designateEdition(
+              curHead, "current", headsToSeal[i], &manifold,
+              /*allowDuplicateName=*/(i > 0));
+          manifold = rebuildManifold(curHead);
+        }
+      }
+    }
+    mutableStore->hasExplicitCurrentVersions_ = false;
+  }
+
+  // Only seal externals on d.scrolls if this store is a slice (homeCell_ !=
+  // noCell)
+  if (zigzag::noCell != homeCell_ && !externals.empty()) {
+    const auto reg = manifold.scrollRegistry(*this);
+    for (const auto &sc : externals) {
+      const auto key = scrollKey(sc);
+      if (!key.empty() && !reg.byKey.contains(key)) {
+        curHead  = mutableStore->registerScroll(curHead, key, &manifold);
+        manifold = rebuildManifold(curHead);
+      }
+    }
+  }
 }
 
 void Store::save(const std::string &directory) const {
+  sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
@@ -1388,13 +2214,26 @@ void Store::save(const std::string &directory) const {
     // different times -- both are per-store side tables replayed at load --
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
+    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+    for (const auto &sc : externals) {
+      for (const auto &seg : sc.segments) {
+        if (!seg.path.empty() || !seg.torrent.isZero()) {
+          bool already = false;
+          for (const auto &existing : deploymentSegments) {
+            if (existing == seg) {
+              already = true;
+              break;
+            }
+          }
+          if (!already) {
+            deploymentSegments.push_back(seg);
+          }
+        }
+      }
+    }
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId         = documentId_,
-                                 .scrolls            = externals,
-                                 .localSegments      = localSegments.segments,
-                                 .links              = linkTable,
-                                 .currentVersions    = currentVersions(),
-                                 .versionAnnotations = versionAnnotations_});
+                     StoreTables{.documentId    = documentId_,
+                                 .localSegments = deploymentSegments});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -1408,6 +2247,7 @@ void Store::save(const std::string &directory) const {
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
+  sealPendingMetadataAsCells();
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
@@ -1424,13 +2264,26 @@ void Store::saveOsmicText(const std::string &directory) const {
     // scroll and link tables being plaintext alongside them was incidental,
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
+    std::vector<ScrollSegment> deploymentSegments = localSegments.segments;
+    for (const auto &sc : externals) {
+      for (const auto &seg : sc.segments) {
+        if (!seg.path.empty() || !seg.torrent.isZero()) {
+          bool already = false;
+          for (const auto &existing : deploymentSegments) {
+            if (existing == seg) {
+              already = true;
+              break;
+            }
+          }
+          if (!already) {
+            deploymentSegments.push_back(seg);
+          }
+        }
+      }
+    }
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId         = documentId_,
-                                 .scrolls            = externals,
-                                 .localSegments      = localSegments.segments,
-                                 .links              = linkTable,
-                                 .currentVersions    = currentVersions(),
-                                 .versionAnnotations = versionAnnotations_});
+                     StoreTables{.documentId    = documentId_,
+                                 .localSegments = deploymentSegments});
   }
 }
 
@@ -1471,6 +2324,7 @@ void Store::load(const std::string &directory) {
         "spans from the permascroll the store was opened with; open this one "
         "with that file as the permascroll instead. See design R11.");
   }
+
   if (std::filesystem::exists(dir / legacyOpsFile)) {
     throw OpsSegmentUnreadable(
         (dir / legacyOpsFile).string() +
@@ -1481,8 +2335,8 @@ void Store::load(const std::string &directory) {
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
-  localSegments = Scroll{};
-  nextLinkId    = 1;
+  scrollRegistry_ = {};
+  localSegments   = Scroll{};
   currentVersions_.clear();
   versionAnnotations_.clear();
   aliasIndex_.clear();
@@ -1532,20 +2386,8 @@ void Store::load(const std::string &directory) {
     // tax R11 refuses.
     auto tables            = readStoreTables(dir / storeTablesName);
     documentId_            = tables.documentId;
-    externals              = std::move(tables.scrolls);
     localSegments          = Scroll{};
     localSegments.segments = std::move(tables.localSegments);
-    linkTable              = std::move(tables.links);
-    for (const auto &[id, link] : linkTable) {
-      nextLinkId = std::max(nextLinkId, id + 1);
-    }
-    currentVersions_ = std::move(tables.currentVersions);
-    // Through setVersionAnnotation() rather than assigned, so that the alias
-    // index is built from the annotations rather than being a third thing that
-    // has to be kept in step with them.
-    for (auto &[id, annotation] : tables.versionAnnotations) {
-      setVersionAnnotation(id, std::move(annotation));
-    }
   }
 
   // The nodes above arrived as a mapped segment rather than through putOp(),
@@ -1554,6 +2396,45 @@ void Store::load(const std::string &directory) {
   // refs are derived rather than written into the side tables: a store's own
   // operations already say what they are.
   indexGenesisCells();
+  const auto sHeads = structureHeads();
+  if (!sHeads.empty()) {
+    for (const auto &sh : sHeads) {
+      const auto manifold = rebuildManifold(sh);
+      syncCurrentVersionsFromRank(manifold);
+      syncAliasesFromRank(manifold);
+      syncScrollsFromRank(manifold);
+      syncLinksFromRank(manifold);
+    }
+  } else if (!latest().isZero()) {
+    const auto manifold = rebuildManifold(latest());
+    syncCurrentVersionsFromRank(manifold);
+    syncAliasesFromRank(manifold);
+    syncScrollsFromRank(manifold);
+    syncLinksFromRank(manifold);
+  }
+  if (zigzag::noCell == homeCell_) {
+    for (const auto &seg : localSegments.segments) {
+      if (!seg.torrent.isZero()) {
+        bool found = false;
+        for (auto &sc : externals) {
+          for (const auto &s : sc.segments) {
+            if (s.torrent == seg.torrent && s.fileIndex == seg.fileIndex) {
+              found = true;
+              break;
+            }
+          }
+          if (found) {
+            break;
+          }
+        }
+        if (!found) {
+          Scroll sc;
+          sc.segments.push_back(seg);
+          externals.push_back(std::move(sc));
+        }
+      }
+    }
+  }
   if (chronofilade_) {
     chronofilade_->clear();
     chronofilade_->indexSpool(*this);

@@ -203,7 +203,7 @@ TEST_F(XuduDumpTest, aStoreTheLoaderRefusesIsStillReadable) {
 
   // The side tables it *can* read are still rendered, which is what makes it
   // worth running on a broken store at all.
-  EXPECT_THAT(run.output, testing::HasSubstr("current  "));
+  EXPECT_THAT(run.output, testing::HasSubstr("document  "));
 }
 
 TEST_F(XuduDumpTest, sectionsAreAddressableSoAFormatChangeCanBeDiffed) {

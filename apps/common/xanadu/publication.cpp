@@ -1012,7 +1012,7 @@ Adopted adopt(Store &store, const Publication &pub) {
     if (std::ranges::any_of(store.linkView(), same)) {
       continue;
     }
-    taken.version = store.addLink(taken.version, std::move(link));
+    store.addLink(taken.version, std::move(link));
     taken.links++;
   }
 

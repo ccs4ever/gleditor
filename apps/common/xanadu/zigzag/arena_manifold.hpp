@@ -56,6 +56,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/microversion.hpp"
@@ -179,9 +180,31 @@ public:
   /// An arena over @p base: reads fall through, writes shadow. @p base must
   /// outlive this, and must not be mutated while it is being read through --
   /// a shadow copies a cell, not a promise about one.
-  explicit ArenaManifold(const Manifold *base) : base_(base) {}
+  explicit ArenaManifold(const Manifold *base) : ArenaManifold(base, nullptr) {}
+
+  /// Store-backed arena construction (§5.4 phase 4): overlays @p base and
+  /// projects the authenticated publication provenance view as ephemeral
+  /// cells if @p store holds verified provenance.
+  ArenaManifold(const Manifold *base, const xanadu::Store *store);
+  ArenaManifold(const Manifold *base, const xanadu::Store &store)
+      : ArenaManifold(base, &store) {}
 
   [[nodiscard]] const Manifold *base() const noexcept { return base_; }
+  [[nodiscard]] CellRef home() const noexcept;
+  [[nodiscard]] CellRef homeCell() const noexcept { return home(); }
+
+  [[nodiscard]] DimRef
+  dimensionNamed(std::string_view name,
+                 const xanadu::SpanReader *reader = nullptr) const;
+  DimRef ensureDimension(std::string_view name);
+
+  [[nodiscard]] CellRef authorshipRoot() const noexcept {
+    return authorshipRoot_;
+  }
+  [[nodiscard]] bool isProvenanceCell(CellRef ref) const noexcept {
+    return provenanceCells_.contains(ref);
+  }
+  void projectProvenance(const xanadu::Store &store);
 
   /// Whether @p ref is a cell this arena minted or has shadowed, as opposed to
   /// one it is merely reading through. What promote() uses to decide whether a
@@ -254,6 +277,7 @@ public:
   [[nodiscard]] std::optional<double> asDouble(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
+  [[nodiscard]] std::optional<CellRef> handleTarget(CellRef ref) const noexcept;
 
   /// @p ref's content as bytes. Scratch spans are read from this arena's own
   /// buffer; any other span needs @p reader, and is skipped when it is null.
@@ -402,6 +426,10 @@ private:
 
   /// The document being read through, or null for a standalone arena.
   const Manifold *base_{nullptr};
+  const xanadu::Store *store_{nullptr};
+  CellRef authorshipRoot_{noCell};
+  std::unordered_set<CellRef> provenanceCells_;
+  std::unordered_map<std::string, DimRef> arenaDims_;
   /// base CellRef -> the dense slot shadowing it.
   std::unordered_map<CellRef, std::uint32_t> overlay_;
   /// The same refs in the order they were shadowed, so release() can drop the

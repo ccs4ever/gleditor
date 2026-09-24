@@ -4,16 +4,217 @@
 #include <bit>
 #include <cstddef>
 #include <limits>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 
-#include <gleditor/logging.hpp>
-
+#include "common/xanadu/provenance.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
+#include <gleditor/logging.hpp>
 
 namespace zigzag {
+
+ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
+    : base_(base), store_(store) {
+  if (store_ != nullptr) {
+    projectProvenance(*store_);
+  }
+}
+
+CellRef ArenaManifold::home() const noexcept {
+  return base_ ? base_->home() : noCell;
+}
+
+DimRef ArenaManifold::dimensionNamed(const std::string_view name,
+                                     const xanadu::SpanReader *reader) const {
+  if (base_ != nullptr) {
+    std::optional<DimRef> baseDim;
+    if (reader != nullptr) {
+      baseDim = base_->dimensionNamed(name, *reader);
+    } else if (store_ != nullptr) {
+      baseDim = base_->dimensionNamed(name, *store_);
+    } else if (base_->store() != nullptr) {
+      baseDim = base_->dimensionNamed(name);
+    }
+    if (baseDim.has_value()) {
+      return *baseDim;
+    }
+  }
+  const auto it = arenaDims_.find(std::string(name));
+  if (it != arenaDims_.end()) {
+    return it->second;
+  }
+  return noCell;
+}
+
+DimRef ArenaManifold::ensureDimension(const std::string_view name) {
+  const auto existing = dimensionNamed(name);
+  if (noCell != existing) {
+    return existing;
+  }
+  const auto it = arenaDims_.find(std::string(name));
+  if (it != arenaDims_.end()) {
+    return it->second;
+  }
+  const auto span               = intern(name);
+  const auto dim                = makeCell(span);
+  arenaDims_[std::string(name)] = dim;
+
+  const auto dimDims = dimensionNamed("d.dims");
+  const auto home    = homeCell();
+  if (noCell != dimDims && noCell != home) {
+    CellRef tail = home;
+    while (true) {
+      const CellRef nxt = linked(tail, dimDims, DimVector::POS);
+      if (noCell == nxt) {
+        break;
+      }
+      tail = nxt;
+    }
+    link(tail, dimDims, DimVector::POS, dim);
+  }
+  return dim;
+}
+
+void ArenaManifold::projectProvenance(const xanadu::Store &store) {
+  if (!store.provenance().has_value()) {
+    return;
+  }
+  const auto &signedProv = *store.provenance();
+  if (signedProv.signature.empty() || signedProv.tsv.empty()) {
+    return;
+  }
+  const auto check = xanadu::verifyProvenance(signedProv);
+  if (!check.signatureValid) {
+    return;
+  }
+  const auto prov = xanadu::parseProvenance(signedProv.tsv);
+  if (!prov) {
+    return;
+  }
+
+  const CellRef home = homeCell();
+  if (noCell == home) {
+    return;
+  }
+
+  const DimRef dimAuthorship = ensureDimension("d.authorship");
+  provenanceCells_.insert(dimAuthorship);
+  authorshipRoot_ = makeCell(intern("AUTHORSHIP.tsv"));
+  provenanceCells_.insert(authorshipRoot_);
+  link(home, dimAuthorship, DimVector::POS, authorshipRoot_);
+
+  const DimRef dimSource = ensureDimension("d.source");
+  provenanceCells_.insert(dimSource);
+  CellRef bootstrapCell    = noCell;
+  const auto &bootstrapKey = store.bootstrapPermascrollKey();
+  if (!bootstrapKey.empty()) {
+    const auto &registry = store.scrollRegistry();
+    for (const auto &rec : registry.scrolls) {
+      if (rec.globalKey == bootstrapKey && rec.cell != noCell) {
+        bootstrapCell = rec.cell;
+        break;
+      }
+    }
+    if (noCell == bootstrapCell) {
+      const DimRef dimScrolls = dimensionNamed("d.scrolls");
+      if (noCell != dimScrolls) {
+        CellRef cur = home;
+        while (true) {
+          cur = linked(cur, dimScrolls, DimVector::POS);
+          if (noCell == cur) {
+            break;
+          }
+          if (textOf(cur) == bootstrapKey) {
+            bootstrapCell = cur;
+            break;
+          }
+        }
+      }
+    }
+    if (noCell == bootstrapCell) {
+      bootstrapCell = makeCell(intern(bootstrapKey));
+      provenanceCells_.insert(bootstrapCell);
+    }
+  }
+  if (noCell != bootstrapCell) {
+    link(authorshipRoot_, dimSource, DimVector::POS, bootstrapCell);
+  }
+
+  auto appendRank = [this](std::string_view dimName, std::string_view value) {
+    const DimRef dim = ensureDimension(dimName);
+    provenanceCells_.insert(dim);
+    const CellRef cell = makeCell(intern(value));
+    provenanceCells_.insert(cell);
+    CellRef tail = authorshipRoot_;
+    while (true) {
+      const CellRef nxt = linked(tail, dim, DimVector::POS);
+      if (noCell == nxt) {
+        break;
+      }
+      tail = nxt;
+    }
+    link(tail, dim, DimVector::POS, cell);
+    return cell;
+  };
+
+  std::istringstream lines{signedProv.tsv};
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (line.empty()) {
+      continue;
+    }
+    const auto tab = line.find('\t');
+    if (std::string::npos == tab || 0 == tab) {
+      continue;
+    }
+    const auto key    = std::string_view{line}.substr(0, tab);
+    const auto valRaw = std::string_view{line}.substr(tab + 1);
+
+    std::string val;
+    val.reserve(valRaw.size());
+    for (std::size_t i = 0; i < valRaw.size(); ++i) {
+      if ('\\' != valRaw[i]) {
+        val.push_back(valRaw[i]);
+        continue;
+      }
+      if (++i == valRaw.size()) {
+        break;
+      }
+      switch (valRaw[i]) {
+      case 't':
+        val.push_back('\t');
+        break;
+      case 'n':
+        val.push_back('\n');
+        break;
+      case 'r':
+        val.push_back('\r');
+        break;
+      case '\\':
+        val.push_back('\\');
+        break;
+      default:
+        val.push_back(valRaw[i]);
+        break;
+      }
+    }
+
+    std::string dimName;
+    if (key.starts_with("d.")) {
+      dimName = std::string(key);
+    } else {
+      dimName = "d." + std::string(key);
+    }
+    appendRank(dimName, val);
+  }
+
+  if (!signedProv.signature.empty()) {
+    appendRank("d.signature", signedProv.signature);
+  }
+}
 
 void expectWritten(const ArenaResult &result,
                    const std::source_location where) noexcept {
@@ -23,7 +224,6 @@ void expectWritten(const ArenaResult &result,
                       where.line());
   }
 }
-
 std::uint32_t ArenaManifold::denseOf(const CellRef ref) const noexcept {
   if (!isEphemeral(ref)) {
     // A base cell, which this arena holds only once it has been shadowed.
@@ -154,9 +354,11 @@ ArenaManifold::cloneMaster(const CellRef ref,
 }
 
 xanadu::ValueKind ArenaManifold::valueKindOf(const CellRef ref) const noexcept {
-  const auto cell = slot(ref);
-  return !cell ? xanadu::ValueKind::None
-               : static_cast<xanadu::ValueKind>(cell->valueKind);
+  return slot(ref)
+      .transform([](const CellSlot &cell) noexcept {
+        return static_cast<xanadu::ValueKind>(cell.valueKind);
+      })
+      .value_or(xanadu::ValueKind::None);
 }
 
 std::optional<double>
@@ -188,6 +390,16 @@ ArenaManifold::asInt64(const CellRef ref) const noexcept {
   return std::bit_cast<std::int64_t>(cell->valueBits);
 }
 
+std::optional<CellRef>
+ArenaManifold::handleTarget(const CellRef ref) const noexcept {
+  const auto cell = slot(ref);
+  if (!cell || xanadu::ValueKind::OpHandle !=
+                   static_cast<xanadu::ValueKind>(cell->valueKind)) {
+    return std::nullopt;
+  }
+  return static_cast<CellRef>(cell->valueBits);
+}
+
 std::string_view
 ArenaManifold::scratchTextOf(const xanadu::PrimediaSpan &span) const noexcept {
   if (xanadu::scratchScroll != span.scroll || span.start > scratch_.size()) {
@@ -206,6 +418,10 @@ std::string ArenaManifold::textOf(const CellRef ref,
       out += scratchTextOf(span);
     } else if (nullptr != reader) {
       out += reader->read(span);
+    } else if (nullptr != store_) {
+      out += store_->read(span);
+    } else if (nullptr != base_ && nullptr != base_->store()) {
+      out += base_->store()->read(span);
     }
   }
   return out;
@@ -586,7 +802,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
                                 const xanadu::MicroversionId &parent,
                                 const ArenaManifold &from, const CellRef root,
                                 const PromotionBudget budget) {
-  if (!from.contains(root)) {
+  if (!from.contains(root) || from.isProvenanceCell(root)) {
     return std::nullopt;
   }
 
@@ -608,7 +824,8 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
     for (const auto &edge : from.dimensionsOf(current)) {
       auto discover = [&](const CellRef next, const bool expand) {
-        if (noCell == next || !from.contains(next)) {
+        if (noCell == next || !from.contains(next) ||
+            from.isProvenanceCell(next)) {
           return;
         }
         if (seen.insert(next).second) {
@@ -656,6 +873,10 @@ std::optional<Promoted> promote(xanadu::Store &store,
     } else if (xanadu::ValueKind::Int64 == kind) {
       minted =
           store.makeScalarCell(out.version, from.asInt64(arena).value_or(0));
+    } else if (xanadu::ValueKind::OpHandle == kind) {
+      minted =
+          store.makeOpHandle(out.version, from.handleTarget(arena).value_or(0),
+                             from.textOf(arena));
     } else if (spans.empty()) {
       minted = store.makeCell(out.version, std::string_view{});
     } else if (xanadu::scratchScroll == spans.front().scroll) {
@@ -705,6 +926,12 @@ std::optional<Promoted> promote(xanadu::Store &store,
       const auto to  = real.find(edge.pos);
       if (dim == real.end() || to == real.end()) {
         continue;
+      }
+      if (nullptr != from.base() && !isEphemeral(arena) &&
+          !isEphemeral(edge.dim) && !isEphemeral(edge.pos)) {
+        if (from.base()->linked(arena, edge.dim, DimVector::POS) == edge.pos) {
+          continue;
+        }
       }
       out.version = store.setLink(out.version, real.at(arena), dim->second,
                                   false, to->second, &known);

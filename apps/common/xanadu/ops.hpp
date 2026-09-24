@@ -138,10 +138,11 @@ inline constexpr std::uint8_t valueKindShift = 4;
 /// endpoint and a formattable, transcludable Xanadu object while a query
 /// never has to parse its text. See design R6.
 enum class ValueKind : std::uint8_t {
-  None   = 0,
-  Double = 1,
-  Bool   = 2,
-  Int64  = 3,
+  None     = 0,
+  Double   = 1,
+  Bool     = 2,
+  Int64    = 3,
+  OpHandle = 4,
 };
 
 // bit 7 is unclaimed.
@@ -247,7 +248,7 @@ ProminenceTier prominenceTierFromName(const std::string &name);
  * read by nothing here that decides what may be done.
  */
 struct Link {
-  std::uint64_t id{};
+  zigzag::CellRef id{zigzag::noCell};
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.
@@ -259,6 +260,8 @@ struct Link {
 
   /// Whether either end covers any of @p span.
   [[nodiscard]] bool touches(const PrimediaSpan &span) const;
+
+  bool operator==(const Link &) const = default;
 };
 
 /**

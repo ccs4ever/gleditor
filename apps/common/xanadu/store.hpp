@@ -30,6 +30,7 @@
 #define XUDU_STORE_H
 
 #include <cstdint>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <optional>
@@ -46,6 +47,7 @@
 #include "link_views.hpp"
 #include "microversion.hpp"
 #include "ops.hpp"
+#include "provenance.hpp"
 #include "resolver.hpp"
 #include "scalar.hpp"
 #include "scroll.hpp"
@@ -432,6 +434,19 @@ public:
   MicroversionId makeScalarCell(const MicroversionId &parent,
                                 std::int64_t value);
 
+  /**
+   * @brief Mint a handle cell pointing at operation @p target.
+   *
+   * Deliberately not an overload of makeCell() to prevent silent conversions.
+   *
+   * @param parent  State to branch from.
+   * @param target  Operation index to reference (any OpKind is allowed).
+   * @param text    Optional label or commentary content for the handle cell.
+   * @throws std::invalid_argument if target has ephemeralBit or does not exist.
+   */
+  MicroversionId makeOpHandle(const MicroversionId &parent,
+                              std::uint32_t target, std::string_view text = {});
+
   /// Restate @p cell as carrying @p value: a new rendering into the permascroll
   /// and new bits in the operation, both together, as setValue() requires.
   /// See @ref setLink for @p known.
@@ -564,9 +579,10 @@ public:
    * Links are kept beside the operations rather than inside a version, because
    * they attach to content and every version quoting that content has them.
    */
-  MicroversionId addLink(const MicroversionId &parent, Link link);
+  MicroversionId addLink(const MicroversionId &parent, Link link,
+                         const zigzag::Manifold *known = nullptr);
 
-  [[nodiscard]] const std::map<std::uint64_t, Link> &links() const {
+  [[nodiscard]] const std::map<zigzag::CellRef, Link> &links() const {
     return linkTable;
   }
 
@@ -632,6 +648,11 @@ public:
   /// opened a store should start.
   [[nodiscard]] MicroversionId latest() const;
 
+  /// The head/leaf microversion in opsSpool that contains the home cell and
+  /// the store's structure hyperop ranks (d.dims, d.links, d.scrolls, etc.).
+  [[nodiscard]] MicroversionId structureHead() const;
+  [[nodiscard]] std::vector<MicroversionId> structureHeads() const;
+
   // -- Current Versions (Author-Designated Heads) --------------------------
 
   /// Author-designated current/active versions. Falls back to {latest()} when
@@ -654,7 +675,50 @@ public:
   /// Remove a version from the set of current versions.
   void removeCurrentVersion(const MicroversionId &version);
 
+  // -- Editions Rank (§5.3) -------------------------------------------------
+
+  struct EditionInfo {
+    zigzag::CellRef cell{zigzag::noCell};
+    std::string name;
+    zigzag::CellRef handle{zigzag::noCell};
+    std::uint32_t targetOp{0};
+    MicroversionId targetVersion;
+  };
+
+  /**
+   * @brief Designate an edition on the d.editions rank pointing to @p target.
+   *
+   * If an edition named @p name already exists on d.editions, repoints it
+   * by setting its d.edition-of link to a new OpHandle for @p target.
+   * If it does not exist, mints the edition cell and links it onto the rank.
+   */
+  MicroversionId designateEdition(const MicroversionId &parent,
+                                  std::string_view name,
+                                  const MicroversionId &target,
+                                  const zigzag::Manifold *known = nullptr,
+                                  bool allowDuplicateName       = false);
+
+  /// All editions designated in @p version, in rank order.
+  [[nodiscard]] std::vector<EditionInfo>
+  editions(const MicroversionId &version) const;
+
+  /// Look up an edition by name in @p version.
+  [[nodiscard]] std::optional<EditionInfo>
+  editionNamed(const MicroversionId &version, std::string_view name) const;
+
   // -- Version Annotations & Aliases ----------------------------------------
+
+  /**
+   * @brief Annotate microversion @p target with @p annotation on an OpHandle.
+   *
+   * Attaches description on d.notes, tag on d.tag, alias on d.alias,
+   * and claimed wall-clock timestamp on d.created off an OpHandle naming
+   * @p target.
+   */
+  MicroversionId annotateVersion(const MicroversionId &parent,
+                                 const MicroversionId &target,
+                                 VersionAnnotation annotation,
+                                 const zigzag::Manifold *known = nullptr);
 
   /// Record an alias, description, or semantic tag for @p id.
   void setVersionAnnotation(const MicroversionId &id,
@@ -735,6 +799,25 @@ public:
   scroll(ScrollId id) const;
   [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
 
+  void setBootstrapPermascroll(
+      std::string key,
+      std::function<ResolveResult(const PrimediaSpan &)> reader = nullptr);
+  [[nodiscard]] const std::string &bootstrapPermascrollKey() const noexcept {
+    return bootstrapPermascrollKey_;
+  }
+  [[nodiscard]] const zigzag::ScrollRegistry &scrollRegistry() const noexcept {
+    return scrollRegistry_;
+  }
+  [[nodiscard]] MicroversionId
+  registerScroll(const MicroversionId &parent, std::string_view globalKey,
+                 const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId
+  linkScrollRef(const MicroversionId &parent, zigzag::CellRef scrollCell,
+                zigzag::CellRef placeholderCell,
+                const zigzag::Manifold *known = nullptr);
+  void syncScrollsFromRank(const zigzag::Manifold &manifold);
+  void syncLinksFromRank(const zigzag::Manifold &manifold);
+
   /**
    * @brief The segment @p span's own start offset falls in, local or
    *        external, or nullptr if nothing covers it.
@@ -763,9 +846,8 @@ public:
   segmentsOverlapping(ScrollId scroll, std::uint64_t start,
                       std::uint64_t length) const;
 
-  void setContentSource(const ContentSource *source) {
-    resolver.setSource(source);
-  }
+  void setContentSource(const ContentSource *source);
+  void hydrateExternalScroll(Scroll &sc) const;
   [[nodiscard]] const Resolver &contentResolver() const { return resolver; }
   [[nodiscard]] Resolver &contentResolver() { return resolver; }
 
@@ -823,6 +905,22 @@ public:
   void trimRemoteAuthorBuffer(std::string_view authorScrollKey,
                               std::uint64_t sealedUpTo = 0);
 
+  /// The authenticated provenance record sealed in with the publication, if
+  /// opened from one (§5.4).
+  [[nodiscard]] const std::optional<SignedProvenance> &
+  provenance() const noexcept {
+    return provenance_;
+  }
+
+  /// Retain verified publication provenance (§5.4). Throws if signature is
+  /// invalid or tampered.
+  void setProvenance(SignedProvenance prov, const SigningOptions &where = {});
+
+  /// Direct setter for already-verified provenance without invoking gpg.
+  void setVerifiedProvenance(SignedProvenance prov) noexcept {
+    provenance_ = std::move(prov);
+  }
+
   // -- persistence ----------------------------------------------------------
 
   /**
@@ -875,25 +973,6 @@ public:
   /// text formats. A directory with no store in it produces an empty one.
   void load(const std::string &directory);
 
-private:
-  friend class enfilade::Chronofilade;
-  friend class OsmicWalker;
-  /// Apply one recorded op to @p onto. The single replay path: everything that
-  /// rebuilds a document comes through here, so replaying and recording cannot
-  /// drift.
-  ///
-  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
-  /// same operation -- CompactOpNode names the parent and transclusion source
-  /// by spool index where Op names them by microversion -- but the node is
-  /// what the ancestral walk already has in hand, and going back through the
-  /// Op map for it cost about nine tenths of a rebuild.
-  void replay(const CompactOpNode &node, Version &onto) const;
-
-  /// rebuild(), for a state already known to be in the spool at @p index.
-  /// Split out because a transclusion replays its source the same way, and it
-  /// has the index rather than the name.
-  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
-
   /**
    * @brief Every recorded operation, in the order they are serialized.
    *
@@ -917,6 +996,30 @@ private:
    */
   [[nodiscard]] std::vector<OpRecord>
   opRecords(std::uint32_t sinceExclusive = 0) const;
+
+  /// Record @p records into the spool, skipping any state already filed --
+  /// which is what the std::map these were read into used to do on a
+  /// duplicate, and keeps a corrupt file opening rather than throwing.
+  void adoptOpRecords(const std::vector<OpRecord> &records);
+
+private:
+  friend class enfilade::Chronofilade;
+  friend class OsmicWalker;
+  /// Apply one recorded op to @p onto. The single replay path: everything that
+  /// rebuilds a document comes through here, so replaying and recording cannot
+  /// drift.
+  ///
+  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
+  /// same operation -- CompactOpNode names the parent and transclusion source
+  /// by spool index where Op names them by microversion -- but the node is
+  /// what the ancestral walk already has in hand, and going back through the
+  /// Op map for it cost about nine tenths of a rebuild.
+  void replay(const CompactOpNode &node, Version &onto) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
 
   /**
    * @brief The head of @p cell's micro-history chain as of @p parent.
@@ -949,10 +1052,9 @@ private:
   /// otherwise kept up to date -- never runs.
   void indexGenesisCells();
 
-  /// Record @p records into the spool, skipping any state already filed --
-  /// which is what the std::map these were read into used to do on a
-  /// duplicate, and keeps a corrupt file opening rather than throwing.
-  void adoptOpRecords(const std::vector<OpRecord> &records);
+  /// Ensure pending versionAnnotations_ and currentVersions_ are sealed as
+  /// structure hyperop cells in ops.nodes before saving (§5.4).
+  void sealPendingMetadataAsCells() const;
 
   std::shared_ptr<UserPermascroll> userPermascroll_;
   DocumentId documentId_;
@@ -974,17 +1076,25 @@ private:
   /// them, holding the same operations a second time at about twice the size
   /// and three heap allocations apiece.
   SegmentedOpsSpool opsSpool;
-  std::map<std::uint64_t, Link> linkTable;
-  std::uint64_t nextLinkId{1};
+  std::map<zigzag::CellRef, Link> linkTable;
   /// The first two cells minted, which is what genesis mints. Derived from the
   /// operations rather than stored beside them -- kept in step as they arrive,
   /// and re-derived by indexGenesisCells() on load.
   zigzag::CellRef homeCell_{zigzag::noCell};
   zigzag::DimRef dimsDimension_{zigzag::noCell};
 
+  void syncCurrentVersionsFromRank(const zigzag::Manifold &manifold);
+  void syncAliasesFromRank(const zigzag::Manifold &manifold);
+
   mutable std::vector<MicroversionId> currentVersions_;
-  std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
-  std::map<std::string, MicroversionId> aliasIndex_;
+  mutable bool hasExplicitCurrentVersions_{false};
+  mutable std::vector<MicroversionId> currentVersionsFallback_;
+  mutable std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
+  mutable std::map<std::string, MicroversionId> aliasIndex_;
+  zigzag::ScrollRegistry scrollRegistry_;
+  std::string bootstrapPermascrollKey_;
+  std::function<ResolveResult(const PrimediaSpan &)> bootstrapReader_;
+  std::optional<SignedProvenance> provenance_;
   bool isSystem_{false};
 
   struct RemoteAuthorChunk {

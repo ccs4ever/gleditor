@@ -2453,11 +2453,24 @@ int main(const int argc, char **argv) {
         if (colon != std::string::npos) {
           const auto verStr   = spec.substr(0, colon);
           const auto aliasStr = spec.substr(colon + 1);
-          session->store(0).setVersionAnnotation(MicroversionId::parse(verStr),
-                                                 {.alias       = aliasStr,
-                                                  .description = {},
-                                                  .tag         = {},
-                                                  .timestamp   = {}});
+          const auto targetId = MicroversionId::parse(verStr);
+          auto &st            = session->store(0);
+          try {
+            const auto latest = st.latest();
+            if (!latest.isZero()) {
+              st.designateEdition(latest, aliasStr, targetId);
+            } else {
+              st.setVersionAnnotation(targetId, {.alias       = aliasStr,
+                                                 .description = {},
+                                                 .tag         = {},
+                                                 .timestamp   = {}});
+            }
+          } catch (...) {
+            st.setVersionAnnotation(targetId, {.alias       = aliasStr,
+                                               .description = {},
+                                               .tag         = {},
+                                               .timestamp   = {}});
+          }
         }
       }
     }

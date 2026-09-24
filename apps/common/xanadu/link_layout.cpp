@@ -92,7 +92,7 @@ struct ViewPiece {
 
 } // namespace
 
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const UniversalViewContext &ctx,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving) {
@@ -172,7 +172,7 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   }
 }
 
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const std::vector<const Version *> &views,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving) {

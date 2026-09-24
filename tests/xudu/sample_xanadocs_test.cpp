@@ -331,9 +331,11 @@ TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
   const auto rebuilt = store.rebuild(ver);
 
   EXPECT_GE(rebuilt.forcedBreaks().size(), 2U);
-  EXPECT_EQ(ver.str(), "8");
+  EXPECT_EQ(ver.str(), "27");
   EXPECT_GT(rebuilt.length(), 350000U);
-  EXPECT_EQ(store.allVersions().size(), 8U);
+  EXPECT_EQ(store.allVersions().size(), 27U);
+  ASSERT_FALSE(store.currentVersions().empty());
+  EXPECT_EQ(store.currentVersions().front().str(), "8");
 }
 
 TEST(SampleXanadocsTest,
@@ -472,18 +474,17 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
   const auto &links = store.links();
   ASSERT_EQ(links.size(), 3U);
 
-  // Link 1: Broad multi-span link connecting both top and bottom non-contiguous
-  // spans
-  ASSERT_TRUE(links.contains(1));
-  ASSERT_TRUE(links.contains(2));
-  ASSERT_TRUE(links.contains(3));
-
-  EXPECT_EQ(links.at(1).left.size(), 2U);
-  EXPECT_EQ(links.at(1).right.size(), 2U);
-  EXPECT_EQ(links.at(2).left.size(), 1U);
-  EXPECT_EQ(links.at(2).right.size(), 1U);
-  EXPECT_EQ(links.at(3).left.size(), 1U);
-  EXPECT_EQ(links.at(3).right.size(), 1U);
+  std::size_t multiSpanCount  = 0;
+  std::size_t singleSpanCount = 0;
+  for (const auto &[id, link] : links) {
+    if (link.left.size() == 2 && link.right.size() == 2) {
+      multiSpanCount++;
+    } else if (link.left.size() == 1 && link.right.size() == 1) {
+      singleSpanCount++;
+    }
+  }
+  EXPECT_EQ(multiSpanCount, 1U);
+  EXPECT_EQ(singleSpanCount, 2U);
 }
 
 } // namespace

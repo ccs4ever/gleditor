@@ -56,6 +56,11 @@ std::string formatCellBrief(const zigzag::ArenaManifold &manifold,
     if (val) {
       oss << ":" << (*val ? "true" : "false");
     }
+  } else if (kind == xanadu::ValueKind::OpHandle) {
+    auto val = manifold.handleTarget(master);
+    if (val) {
+      oss << ":@" << *val;
+    }
   } else {
     std::string text = manifold.textOf(master);
     if (!text.empty()) {
@@ -682,6 +687,12 @@ AsciiVisualizer::renderCellInspection(const zigzag::ArenaManifold &manifold,
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto boolVal = *manifold.asBool(cell);
     oss << "Bool (" << (boolVal ? "true" : "false") << ")\n";
+    break;
+  }
+  case xanadu::ValueKind::OpHandle: {
+    const auto target = manifold.handleTarget(cell);
+    oss << "OpHandle (@" << (target ? std::to_string(*target) : "unknown")
+        << ")\n";
     break;
   }
   }

@@ -1,7 +1,9 @@
-#include "ops.hpp"
-
 #include <algorithm>
+#include <span>
 #include <string>
+
+#include "ops.hpp"
+#include <gleditor/cpp26_concat.hpp>
 
 namespace xanadu {
 
@@ -52,6 +54,8 @@ const char *valueKindName(const ValueKind kind) {
     return "bool";
   case ValueKind::Int64:
     return "int64";
+  case ValueKind::OpHandle:
+    return "op_handle";
   }
   return "unknown";
 }
@@ -132,7 +136,10 @@ bool Link::touches(const PrimediaSpan &span) const {
   const auto meets = [&span](const PrimediaSpan &end) {
     return !end.intersect(span).empty();
   };
-  return std::ranges::any_of(left, meets) || std::ranges::any_of(right, meets);
+  return std::ranges::any_of(
+      gleditor::cpp26::views::concat(std::span<const PrimediaSpan>{left},
+                                     std::span<const PrimediaSpan>{right}),
+      meets);
 }
 
 } // namespace xanadu

@@ -30,10 +30,12 @@ explorations, backtracking choice points, and scratch text concatenations. Persi
 computational step directly into the microversion DAG would trigger catastrophic spool bloat and
 violate the fundamental architectural boundary:
 
-> **Invariant R8:** *Only a user-generated update persists. Navigation and intermediate computation
-> never do.* An operation records that a person or committed transaction changed the structure.
-> Where a cursor, query, or evaluator looks or speculates is not a change to the document and does
-> not earn a name in hypertime.
+> **Invariant R8 for the visited structure:** *Only a user-generated update to that structure
+> persists there.* Where a cursor, query, or evaluator looks or speculates is not a change to the
+> document and does not earn a name in its hypertime.
+
+The proposed reader-owned activity store records completed visits as a separate artifact; it does
+not persist speculative structure or modify the visited document.
 
 To enforce this boundary cleanly without runtime tagging overhead or fragmented allocations, the
 architecture establishes two distinct, non-interchangeable concrete C++ types:
