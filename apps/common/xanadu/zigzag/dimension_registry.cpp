@@ -4,8 +4,6 @@
  */
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
-#include <stdexcept>
-
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
@@ -131,10 +129,10 @@ void DimensionRegistry::clear() noexcept {
   internPool_.clear();
 }
 
-DimRef DimensionRegistry::getOrCreate(Manifold &manifold,
-                                      const InternedDimName dimName) {
+DimensionResult DimensionRegistry::getOrCreate(Manifold &manifold,
+                                               const InternedDimName dimName) {
   if (dimName.empty()) {
-    return noCell;
+    return std::unexpected{DimensionError::EmptyName};
   }
   auto *const store = manifold.store();
   if (nullptr != store) {
@@ -143,9 +141,9 @@ DimRef DimensionRegistry::getOrCreate(Manifold &manifold,
   if (const auto existing = get(manifold, dimName)) {
     return *existing;
   }
-  throw std::invalid_argument("Cannot create dimension '" +
-                              std::string(dimName.name()) +
-                              "' on Manifold without an associated Store");
+  // Minting a dimension is recording an operation, and a manifold with no
+  // store has nowhere to record one.
+  return std::unexpected{DimensionError::NoStore};
 }
 
 std::optional<DimRef> DimensionRegistry::held(const xanadu::Store &store,
@@ -164,15 +162,16 @@ std::optional<DimRef> DimensionRegistry::held(const xanadu::Store &store,
       });
 }
 
-DimRef DimensionRegistry::getOrCreate(Manifold &manifold,
-                                      const std::string_view name) {
+DimensionResult DimensionRegistry::getOrCreate(Manifold &manifold,
+                                               const std::string_view name) {
   return getOrCreate(manifold, intern(name));
 }
 
-DimRef DimensionRegistry::getOrCreate(xanadu::Store &store, Manifold &manifold,
-                                      const InternedDimName dimName) {
+DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
+                                               Manifold &manifold,
+                                               const InternedDimName dimName) {
   if (dimName.empty()) {
-    return noCell;
+    return std::unexpected{DimensionError::EmptyName};
   }
   if (const auto known = held(store, manifold, dimName)) {
     return *known;
@@ -189,17 +188,18 @@ DimRef DimensionRegistry::getOrCreate(xanadu::Store &store, Manifold &manifold,
   return getOrCreate(store, head, manifold, dimName);
 }
 
-DimRef DimensionRegistry::getOrCreate(xanadu::Store &store, Manifold &manifold,
-                                      const std::string_view name) {
+DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
+                                               Manifold &manifold,
+                                               const std::string_view name) {
   return getOrCreate(store, manifold, intern(name));
 }
 
-DimRef DimensionRegistry::getOrCreate(xanadu::Store &store,
-                                      xanadu::MicroversionId &head,
-                                      Manifold &manifold,
-                                      const InternedDimName dimName) {
+DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
+                                               xanadu::MicroversionId &head,
+                                               Manifold &manifold,
+                                               const InternedDimName dimName) {
   if (dimName.empty()) {
-    return noCell;
+    return std::unexpected{DimensionError::EmptyName};
   }
   if (const auto known = held(store, manifold, dimName)) {
     return *known;
@@ -223,10 +223,10 @@ DimRef DimensionRegistry::getOrCreate(xanadu::Store &store,
   return minted.dim;
 }
 
-DimRef DimensionRegistry::getOrCreate(xanadu::Store &store,
-                                      xanadu::MicroversionId &head,
-                                      Manifold &manifold,
-                                      const std::string_view name) {
+DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
+                                               xanadu::MicroversionId &head,
+                                               Manifold &manifold,
+                                               const std::string_view name) {
   return getOrCreate(store, head, manifold, intern(name));
 }
 

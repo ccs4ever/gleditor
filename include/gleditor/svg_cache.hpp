@@ -6,6 +6,7 @@
 #define GLEDITOR_SVG_CACHE_HPP
 
 #include <cstdint>
+#include <expected>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -13,6 +14,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include <gleditor/decode_error.hpp>
 #include <gleditor/image_cache.hpp>
 #include <gleditor/render/device.hpp>
 
@@ -69,8 +71,11 @@ public:
    *        texture, no GL context required. Safe to call off the render
    *        thread. Used for placeholder-height sizing, the same role
    *        DecodedImage::aspectRatio() plays for raster images.
+   * @return the size, or Empty, Undecodable (ThorVG will not load it),
+   *         UnsupportedShape (a valid SVG with no intrinsic size) or NoCodec
+   *         (a build without ThorVG).
    */
-  [[nodiscard]] static std::optional<std::pair<float, float>>
+  [[nodiscard]] static std::expected<std::pair<float, float>, DecodeError>
   peekSize(std::span<const std::uint8_t> bytes);
 
 private:

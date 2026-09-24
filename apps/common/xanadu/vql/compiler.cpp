@@ -937,10 +937,12 @@ VQLCompiler::exportToStore(xanadu::Store &store,
     if (!arena.contains(c)) continue;
     std::string name = arena.textOf(c);
     if (!name.empty() && name.starts_with("d.")) {
-      const DimRef dim = zigzag::DimensionRegistry::instance().getOrCreate(
-          store, ver, manifold, name);
-      dimMap[c]  = dim;
-      cellMap[c] = dim;
+      // name is non-empty here, the one way getOrCreate() can refuse a store.
+      if (const auto dim = zigzag::DimensionRegistry::instance().getOrCreate(
+              store, ver, manifold, name)) {
+        dimMap[c]  = *dim;
+        cellMap[c] = *dim;
+      }
     }
   }
 

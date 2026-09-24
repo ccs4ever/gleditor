@@ -35,6 +35,7 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <span>
@@ -42,6 +43,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <gleditor/color.hpp>
 
 namespace xanadu {
 
@@ -57,7 +60,12 @@ struct InfoHash {
   /// Lowercase hex, which is how one is written in a magnet link.
   [[nodiscard]] std::string hex() const;
   /// Parse forty hex digits. Nothing else is accepted, including the base-32
-  /// form, which is a different length and is not what this writes.
+  /// form, which is a different length and is not what this writes. The
+  /// form for text from a peer or a file: it says why rather than throwing.
+  [[nodiscard]] static std::expected<InfoHash, gleditor::color::HexError>
+  parseHex(std::string_view text);
+  /// parseHex() for text this program wrote itself.
+  /// @throws std::runtime_error naming the HexError.
   [[nodiscard]] static InfoHash fromHex(std::string_view text);
   [[nodiscard]] bool isZero() const;
 

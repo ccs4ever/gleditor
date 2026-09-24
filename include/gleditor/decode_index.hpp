@@ -37,12 +37,14 @@
 #define GLEDITOR_DECODE_INDEX_HPP
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
 #include <utility>
 #include <vector>
 
+#include <gleditor/decode_error.hpp>
 #include <gleditor/mimetype.hpp>
 
 namespace gleditor {
@@ -158,14 +160,15 @@ struct DecodeIndex {
  * a caller sizing a placeholder before anything is actually drawn has no GL
  * context and no player yet, only bytes.
  *
- * Returns nullopt if @p videoBytes does not parse as a container FFmpeg
- * recognises, has no video stream, or if this build lacks libavformat/
- * libavcodec/libavutil (GLEDITOR_HAVE_DECODE_INDEX_LIBAV) -- the same
- * "check before relying on it" contract as the rest of this header. A
+ * Answers Undecodable if @p videoBytes does not parse as a container FFmpeg
+ * recognises, NoVideoStream if it has none, and NoCodec if this build lacks
+ * libavformat/libavcodec/libavutil (GLEDITOR_HAVE_DECODE_INDEX_LIBAV) -- the
+ * three used to be one nullopt. A
  * caller with no answer here has nothing worse to fall back to than
  * whatever default aspect ratio it already assumed before this existed.
  */
-[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
+[[nodiscard]] std::expected<std::pair<std::uint32_t, std::uint32_t>,
+                            DecodeError>
 peekVideoSize(std::span<const std::uint8_t> videoBytes);
 
 /**
@@ -207,15 +210,15 @@ peekGifSize(std::span<const std::uint8_t> gifBytes);
  * this default is chosen to stay well clear of that, not measured against
  * this codebase's own content.
  *
- * Returns nullopt if @p zstdBytes does not decompress as zstd at all, or if
- * this build lacks libzstd (GLEDITOR_HAVE_DECODE_INDEX_ZSTD) -- the same
- * "check before relying on it" contract as the rest of this header. Bytes
+ * Answers Undecodable if @p zstdBytes does not decompress as zstd at all,
+ * EncodeFailed if the seekable re-encode fails, and NoCodec if this build
+ * lacks libzstd (GLEDITOR_HAVE_DECODE_INDEX_ZSTD). Bytes
  * already in the seekable format round-trip through this unchanged in
  * effect (replaced with a fresh seek table at the same @p maxFrameSize),
  * not detected and skipped, since re-deriving the same answer costs nothing
  * additional to check for it separately.
  */
-[[nodiscard]] std::optional<std::vector<std::uint8_t>>
+[[nodiscard]] std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeZstdSeekable(std::span<const std::uint8_t> zstdBytes,
                      std::uint32_t maxFrameSize = 1U << 20);
 
@@ -248,10 +251,11 @@ reencodeZstdSeekable(std::span<const std::uint8_t> zstdBytes,
  * point). "Generous" per the request that led to this: seek tables in the
  * wild are commonly spaced 10s or more apart; the default here is denser.
  *
- * Returns nullopt if @p flacBytes does not decode as FLAC at all, or if
- * this build lacks libFLAC++ (GLEDITOR_HAVE_DECODE_INDEX_FLAC).
+ * Answers Undecodable if @p flacBytes does not decode as FLAC at all,
+ * EncodeFailed if the re-encode fails, and NoCodec if this build lacks
+ * libFLAC++ (GLEDITOR_HAVE_DECODE_INDEX_FLAC).
  */
-[[nodiscard]] std::optional<std::vector<std::uint8_t>>
+[[nodiscard]] std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeFlacSeekable(std::span<const std::uint8_t> flacBytes,
                      float secondsPerSeekPoint = 0.5F);
 
@@ -290,10 +294,11 @@ reencodeFlacSeekable(std::span<const std::uint8_t> flacBytes,
  * per strip, not a constant row count, and produces exactly the coarse,
  * barely-seekable output this function exists to fix for a large image).
  *
- * Returns nullopt if @p tiffBytes does not decode as TIFF at all, or if
- * this build lacks libtiff (GLEDITOR_HAVE_DECODE_INDEX_TIFF).
+ * Answers Undecodable if @p tiffBytes does not decode as TIFF at all,
+ * EncodeFailed if the re-encode fails, and NoCodec if this build lacks
+ * libtiff (GLEDITOR_HAVE_DECODE_INDEX_TIFF).
  */
-[[nodiscard]] std::optional<std::vector<std::uint8_t>>
+[[nodiscard]] std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeTiffSeekable(std::span<const std::uint8_t> tiffBytes,
                      std::uint32_t rowsPerStrip = 8);
 
@@ -333,12 +338,13 @@ public:
    *
    * Requires an 8-bit-per-channel, non-interlaced, truecolour+alpha (PNG
    * colour type 6) image -- the one shape this component handles;
-   * interlaced, lower-bit-depth, greyscale and palette PNGs return
-   * nullopt, same as a build without zlib or a file that fails to parse
-   * as PNG at all. See design/decode-index-spike.md for why this scope
-   * limit was chosen deliberately rather than discovered as a gap.
+   * interlaced, lower-bit-depth, greyscale and palette PNGs answer
+   * UnsupportedShape, told apart from a file that is not a PNG
+   * (Undecodable) and a build without zlib (NoCodec). See
+   * design/decode-index-spike.md for why this scope limit was chosen
+   * deliberately rather than discovered as a gap.
    */
-  [[nodiscard]] static std::optional<PngCheckpoints>
+  [[nodiscard]] static std::expected<PngCheckpoints, DecodeError>
   build(std::span<const std::uint8_t> pngBytes, std::uint32_t rowInterval = 8);
 
   [[nodiscard]] std::uint32_t width() const { return width_; }

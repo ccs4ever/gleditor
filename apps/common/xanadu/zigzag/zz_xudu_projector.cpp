@@ -598,9 +598,11 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
 
   auto manifold = store.rebuildManifold(out.version);
   for (const auto &name : dimensionNames) {
-    const auto dim = DimensionRegistry::instance().getOrCreate(
-        store, out.version, manifold, name);
-    out.dimensions.emplace(name, dim);
+    // A slice naming an empty dimension has nothing to mint for it.
+    if (const auto dim = DimensionRegistry::instance().getOrCreate(
+            store, out.version, manifold, name)) {
+      out.dimensions.emplace(name, *dim);
+    }
   }
 
   // One cell per YAML cell, in id order. A number or a flag becomes a scalar

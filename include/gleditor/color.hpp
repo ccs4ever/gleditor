@@ -156,7 +156,21 @@ inline std::string toHex(const std::string_view bytes) {
 enum class HexError : std::uint8_t {
   OddLength,   ///< two digits make a byte, and there was one left over
   NonHexDigit, ///< a character outside [0-9a-fA-F]
+  WrongLength, ///< not the number of digits a fixed-size value needs
 };
+
+[[nodiscard]] constexpr std::string_view
+toString(const HexError error) noexcept {
+  switch (error) {
+  case HexError::OddLength:
+    return "odd number of hex digits";
+  case HexError::NonHexDigit:
+    return "not hex";
+  case HexError::WrongLength:
+    return "wrong number of hex digits";
+  }
+  return "not hex";
+}
 
 /// Decode a lowercase or uppercase hex string into binary bytes, or say why
 /// it is not one.
@@ -176,6 +190,22 @@ decodeHex(const std::string_view text) {
     out.push_back(static_cast<char>((*high << 4) | *low));
   }
   return out;
+}
+
+/// Exactly @p N bytes from exactly 2N hex digits: a key, a hash, a signature.
+template <std::size_t N>
+[[nodiscard]] inline std::expected<std::array<std::uint8_t, N>, HexError>
+decodeHexArray(const std::string_view text) {
+  if (text.size() != N * 2) {
+    return std::unexpected{HexError::WrongLength};
+  }
+  return decodeHex(text).transform([](const std::string &raw) {
+    std::array<std::uint8_t, N> out{};
+    std::ranges::transform(raw, out.begin(), [](const char byte) {
+      return static_cast<std::uint8_t>(byte);
+    });
+    return out;
+  });
 }
 
 /**

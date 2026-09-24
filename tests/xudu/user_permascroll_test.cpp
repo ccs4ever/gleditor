@@ -209,6 +209,18 @@ TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
   EXPECT_EQ(*decoded, cert);
 }
 
+TEST(UserPermascrollTest, ACertificateWithANonHexDeviceKeyIsRejected) {
+  auto tsv         = fixtureDelegation().toTsv();
+  const auto field = std::string{"device_public_key\t"};
+  const auto at    = tsv.find(field);
+  ASSERT_NE(at, std::string::npos);
+  const auto valueAt = at + field.size();
+  tsv.replace(valueAt, tsv.find('\n', valueAt) - valueAt, "not a key");
+  // fromTsv() answers nullopt for a malformed certificate; it used to throw
+  // for this one.
+  EXPECT_FALSE(xudu::DeviceDelegation::fromTsv(tsv).has_value());
+}
+
 TEST(UserPermascrollTest, DeviceDelegationVerifiesAgainstItsMasterKey) {
   const auto cert = fixtureDelegation();
   EXPECT_TRUE(cert.verify(xudu::testing::kAuthorPublicKey));

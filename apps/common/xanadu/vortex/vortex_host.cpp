@@ -527,9 +527,18 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
   }
 
   if (persistentTarget != noCell && persistentTarget != zigzag::noCell) {
-    auto manifold       = store.rebuildManifold(promoted->version);
-    const DimRef dimRef = zigzag::DimensionRegistry::instance().getOrCreate(
+    auto manifold     = store.rebuildManifold(promoted->version);
+    const auto attach = zigzag::DimensionRegistry::instance().getOrCreate(
         store, promoted->version, manifold, attachDimension);
+    if (!attach) {
+      // The program is persisted either way; with no dimension to hang it
+      // on it stays unattached rather than linked along noCell, which is an
+      // operation every fold would refuse.
+      GLEDITOR_LOG_WARN("vortex.edit", "cannot attach promoted program: {}",
+                        zigzag::toString(attach.error()));
+      return promoted;
+    }
+    const DimRef dimRef = *attach;
     static_cast<void>(manifold.advance(store, promoted->version));
     const CellRef persistentEntryOp = promoted->cells.front();
     promoted->version =
