@@ -108,7 +108,10 @@ mutation. Crums-as-cells would mint a `SetLink` per rotation, so *reading* the 5
 could append operations to the author's spool, and scrubbing to an earlier microversion would show
 the rebalance as an edit to the document. R8 exists to forbid exactly that:
 
-> **Only a user-generated update persists. Navigation never does.**
+> **Only a user-generated update to the visited structure persists there.**
+
+The proposed reader activity store records completed visits separately; rank-index maintenance
+remains a derived replay product and never writes to either store.
 
 So the proposal is the other shape the convergence already has a name for:
 
