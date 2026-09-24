@@ -137,7 +137,10 @@ ______________________________________________________________________
 
 ### 2.3 `system://layout` (Spatial Geometry & Notification Coordinates)
 
-Defines the physical layout of 3D document cosmos, floating overlays, and notification toasts.
+Defines the physical layout of 3D document cosmos, floating overlays, and notification toasts. The
+proposed [ZigZag window layout system](zigzag-window-layout-system.md) extends this scalar
+configuration into a component graph; the YAML-shaped example below is historical exposition, not
+the current store loader.
 
 #### Canonical Format
 
