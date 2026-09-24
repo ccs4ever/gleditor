@@ -12,9 +12,25 @@
 
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag::vortex {
+
+namespace {
+/// Whether @p store's keymap already has its group hierarchy at @p version:
+/// a d.groups rank hanging off home. Without one it needs a genesis.
+bool hasKeymapGroups(xanadu::Store &store,
+                     const xanadu::MicroversionId &version) {
+  const auto manifold = store.rebuildManifold(version);
+  return DimensionRegistry::instance()
+      .get(store, xanadu::kDimGroups)
+      .and_then([&](const DimRef groups) {
+        return step(manifold, store.homeCell(), groups);
+      })
+      .has_value();
+}
+} // namespace
 
 VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
   VortexHostConfig cfg{};
@@ -66,17 +82,15 @@ VortexHost::VortexHost(const Manifold *baseManifold)
 void VortexHost::initHostServices() {
   stdlib_.bootstrap();
 
-  CellRef sweepOp = stdlib_.resolve("std:gc/sweep");
-  if (sweepOp != noCell) {
-    gcCursor_ = vm_.spawnCursor(sweepOp, "sys:gc");
+  if (const auto sweepOp = stdlib_.resolve("std:gc/sweep")) {
+    gcCursor_ = vm_.spawnCursor(*sweepOp, "sys:gc");
   }
 
   // Register native Vortex routines for keymap actions
   auto regPair = [&](std::string_view legacy, std::string_view canonical) {
-    CellRef op = stdlib_.resolve(canonical);
-    if (op != noCell) {
-      registerActionRoutine(legacy, op);
-      registerActionRoutine(canonical, op);
+    if (const auto op = stdlib_.resolve(canonical)) {
+      registerActionRoutine(legacy, *op);
+      registerActionRoutine(canonical, *op);
     }
   };
   regPair("swap-xy", "std:ui/swap_axes");
@@ -377,12 +391,11 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   }
 
   // Stdlib fallback: check if standard library has a registered routine cell
-  CellRef stdlibOp = stdlib_.resolve(canonical);
-  if (stdlibOp == noCell && canonical != actionName) {
-    stdlibOp = stdlib_.resolve(actionName);
-  }
-  if (stdlibOp != noCell) {
-    CellRef cursor = vm_.spawnCursor(stdlibOp, canonical);
+  const auto stdlibOp = stdlib_.resolve(canonical).or_else([&] {
+    return canonical != actionName ? stdlib_.resolve(actionName) : std::nullopt;
+  });
+  if (stdlibOp) {
+    CellRef cursor = vm_.spawnCursor(*stdlibOp, canonical);
     static_cast<void>(vm_.run(cursor, 1000));
     return true;
   }
@@ -471,11 +484,11 @@ CellRef VortexHost::cloneSymbolToChain(std::string_view symbolPath,
     }
     return op;
   }
-  CellRef sym = stdlib_.resolve(symbolPath);
-  if (sym == noCell) {
-    return noCell;
-  }
-  return stdlib_.zzCloneToChain(sym, targetCell);
+  return stdlib_.resolve(symbolPath)
+      .transform([&](const CellRef sym) {
+        return stdlib_.zzCloneToChain(sym, targetCell);
+      })
+      .value_or(noCell);
 }
 
 xanadu::vql::CompilationResult VortexHost::compileAndAttachVQL(
@@ -514,9 +527,18 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
   }
 
   if (persistentTarget != noCell && persistentTarget != zigzag::noCell) {
-    auto manifold       = store.rebuildManifold(promoted->version);
-    const DimRef dimRef = zigzag::DimensionRegistry::instance().getOrCreate(
+    auto manifold     = store.rebuildManifold(promoted->version);
+    const auto attach = zigzag::DimensionRegistry::instance().getOrCreate(
         store, promoted->version, manifold, attachDimension);
+    if (!attach) {
+      // The program is persisted either way; with no dimension to hang it
+      // on it stays unattached rather than linked along noCell, which is an
+      // operation every fold would refuse.
+      GLEDITOR_LOG_WARN("vortex.edit", "cannot attach promoted program: {}",
+                        zigzag::toString(attach.error()));
+      return promoted;
+    }
+    const DimRef dimRef = *attach;
     static_cast<void>(manifold.advance(store, promoted->version));
     const CellRef persistentEntryOp = promoted->cells.front();
     promoted->version =
@@ -759,11 +781,7 @@ bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
         parent = xanadu::initializeSystemStoreGenesis(
             *persistStore, xanadu::SystemDocKind::Keymap, parent);
       } else {
-        auto groupsDim = zigzag::DimensionRegistry::instance().get(
-            *persistStore, xanadu::kDimGroups);
-        auto m = persistStore->rebuildManifold(parent);
-        if (groupsDim == noCell || m.linked(persistStore->homeCell(), groupsDim,
-                                            DimVector::POS) == noCell) {
+        if (!hasKeymapGroups(*persistStore, parent)) {
           parent = xanadu::initializeSystemStoreGenesis(
               *persistStore, xanadu::SystemDocKind::Keymap, parent);
         }
@@ -810,11 +828,7 @@ xanadu::MicroversionId VortexHost::saveMacroToStore(
     parent = xanadu::initializeSystemStoreGenesis(
         keymapStore, xanadu::SystemDocKind::Keymap, parent);
   } else {
-    auto groupsDim = zigzag::DimensionRegistry::instance().get(
-        keymapStore, xanadu::kDimGroups);
-    auto m = keymapStore.rebuildManifold(parent);
-    if (groupsDim == noCell ||
-        m.linked(keymapStore.homeCell(), groupsDim, DimVector::POS) == noCell) {
+    if (!hasKeymapGroups(keymapStore, parent)) {
       parent = xanadu::initializeSystemStoreGenesis(
           keymapStore, xanadu::SystemDocKind::Keymap, parent);
     }

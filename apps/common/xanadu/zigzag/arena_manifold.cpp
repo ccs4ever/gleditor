@@ -8,9 +8,11 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <gleditor/logging.hpp>
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace zigzag {
 
@@ -214,6 +216,14 @@ void ArenaManifold::projectProvenance(const xanadu::Store &store) {
   }
 }
 
+void expectWritten(const ArenaResult &result,
+                   const std::source_location where) noexcept {
+  if (!result) {
+    GLEDITOR_LOG_WARN("zigzag.arena", "arena write refused ({}) at {}:{}",
+                      toString(result.error()), where.file_name(),
+                      where.line());
+  }
+}
 std::uint32_t ArenaManifold::denseOf(const CellRef ref) const noexcept {
   if (!isEphemeral(ref)) {
     // A base cell, which this arena holds only once it has been shadowed.
@@ -258,7 +268,7 @@ DimLink *ArenaManifold::linkFor(const std::uint32_t dense, const DimRef dim) {
   // since release() truncates the dead runs away.
   if (0 == outstandingMarks_ &&
       links_.size() > 2 * liveLinks_ + compactionSlack) {
-    compact();
+    zigzag::expectWritten(compact());
   }
 
   auto &cell = slots_[dense];
@@ -337,20 +347,10 @@ ArenaManifold::contentOf(const CellRef ref) const noexcept {
       content_.data() + cell.spanOffset, cell.spanCount};
 }
 
-CellRef ArenaManifold::cloneMaster(const CellRef ref,
-                                   const DimRef cloneDim) const noexcept {
-  CellRef result = ref;
-  bool looped    = false;
-  walkRank(ref, cloneDim, DimVector::NEG, [&](const CellRef cursor) {
-    const auto next = linked(cursor, cloneDim, DimVector::NEG);
-    if (next == ref) {
-      looped = true;
-      return false;
-    }
-    result = cursor;
-    return true;
-  });
-  return looped ? ref : result;
+std::optional<CellRef>
+ArenaManifold::cloneMaster(const CellRef ref,
+                           const DimRef cloneDim) const noexcept {
+  return rankEnd(*this, ref, cloneDim, DimVector::NEG);
 }
 
 xanadu::ValueKind ArenaManifold::valueKindOf(const CellRef ref) const noexcept {
@@ -514,41 +514,48 @@ void ArenaManifold::setContentAt(
 
   if (0 == outstandingMarks_ &&
       content_.size() > 2 * liveContent_ + compactionSlack) {
-    compact();
+    zigzag::expectWritten(compact());
   }
 }
 
-bool ArenaManifold::setContent(
-    const CellRef cell, const std::span<const xanadu::PrimediaSpan> spans) {
+ArenaResult
+ArenaManifold::setContent(const CellRef cell,
+                          const std::span<const xanadu::PrimediaSpan> spans) {
   const auto dense = shadow(cell);
   if (noDense == dense) {
-    return false;
+    return std::unexpected{ArenaRefusal::UnknownCell};
   }
   trail(dense);
   setContentAt(dense, spans);
-  return true;
+  return {};
 }
 
-bool ArenaManifold::setValueBits(const CellRef cell,
-                                 const xanadu::ValueKind kind,
-                                 const std::uint64_t bits) {
+ArenaResult ArenaManifold::setValueBits(const CellRef cell,
+                                        const xanadu::ValueKind kind,
+                                        const std::uint64_t bits) {
   const auto dense = shadow(cell);
   if (noDense == dense) {
-    return false;
+    return std::unexpected{ArenaRefusal::UnknownCell};
   }
   trail(dense);
   slots_[dense].valueKind = static_cast<std::uint8_t>(kind);
   slots_[dense].valueBits = bits;
-  return true;
+  return {};
 }
 
-bool ArenaManifold::link(const CellRef from, const DimRef dim,
-                         const DimVector dir, const CellRef to) {
+ArenaResult ArenaManifold::link(const CellRef from, const DimRef dim,
+                                const DimVector dir, const CellRef to) {
   // The dimension and the far end are only *read* here, so they are resolved
   // rather than shadowed -- a link to a base cell shadows that cell because
   // its reciprocal end changes, which is what the second shadow() below is.
-  if (!contains(from) || !contains(dim) || (noCell != to && !contains(to))) {
-    return false;
+  if (!contains(from)) {
+    return std::unexpected{ArenaRefusal::UnknownCell};
+  }
+  if (!contains(dim)) {
+    return std::unexpected{ArenaRefusal::UnknownDimension};
+  }
+  if (noCell != to && !contains(to)) {
+    return std::unexpected{ArenaRefusal::UnknownTarget};
   }
   const auto dense  = shadow(from);
   const auto target = noCell == to ? noDense : shadow(to);
@@ -586,7 +593,7 @@ bool ArenaManifold::link(const CellRef from, const DimRef dim,
     setOneSide(target, dim, -dir, from);
   }
   setOneSide(dense, dim, dir, to);
-  return true;
+  return {};
 }
 
 std::uint32_t ArenaManifold::shadow(const CellRef ref) {
@@ -758,9 +765,9 @@ void ArenaManifold::release(const Mark &m) noexcept {
   }
 }
 
-bool ArenaManifold::compact() {
+ArenaResult ArenaManifold::compact() {
   if (outstandingMarks_ > 0) {
-    return false;
+    return std::unexpected{ArenaRefusal::MarksOutstanding};
   }
 
   std::vector<xanadu::PrimediaSpan> tightContent;
@@ -786,7 +793,7 @@ bool ArenaManifold::compact() {
   }
   links_.swap(tight);
   liveLinks_ = links_.size();
-  return true;
+  return {};
 }
 
 std::optional<Promoted> promote(xanadu::Store &store,
@@ -926,7 +933,15 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
       out.version = store.setLink(out.version, real.at(arena), dim->second,
                                   false, to->second, &known);
-      known.advance(store, out.version);
+      // The next setLink reads `known`, so a link it failed to fold would
+      // make every later one validate against a stale view.
+      if (const auto stepped = known.advance(store, out.version); !stepped) {
+        GLEDITOR_LOG_WARN("zigzag.arena",
+                          "promote: the fold refused a link it just minted "
+                          "(kind {}, {})",
+                          static_cast<int>(stepped.error().kind),
+                          toString(stepped.error().refusal));
+      }
     }
   }
 

@@ -39,12 +39,11 @@ ParsedFontSpec parseFontSpec(const std::string &spec) {
   return {.family = spec, .pointSize = 16.0};
 }
 
-std::string resolveFontPath(const std::string &spec) {
+std::expected<std::string, FontError> resolveFontPath(const std::string &spec) {
   FcInit();
   FcPattern *pat = FcNameParse(reinterpret_cast<const FcChar8 *>(spec.c_str()));
   if (!pat) {
-    throw std::runtime_error(
-        std::format("Failed to parse font spec: {}", spec));
+    return std::unexpected{FontError::BadSpec};
   }
 
   FcConfigSubstitute(nullptr, pat, FcMatchPattern);
@@ -55,20 +54,29 @@ std::string resolveFontPath(const std::string &spec) {
   FcPatternDestroy(pat);
 
   if (!match) {
-    throw std::runtime_error(
-        std::format("Fontconfig found no match for: {}", spec));
+    return std::unexpected{FontError::NoMatch};
   }
 
   FcChar8 *file = nullptr;
   if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch || !file) {
     FcPatternDestroy(match);
-    throw std::runtime_error(
-        std::format("Fontconfig matched font with no file path: {}", spec));
+    return std::unexpected{FontError::NoMatch};
   }
 
   std::string fontPath = reinterpret_cast<const char *>(file);
   FcPatternDestroy(match);
   return fontPath;
+}
+
+/// A FontFace for @p fontPath, or LoadFailed. The constructor throws because it
+/// is a constructor; this is where that becomes a value.
+FontResult openFace(FT_Library lib, const std::string &fontPath,
+                    const double pointSize) {
+  try {
+    return std::make_shared<FontFace>(lib, fontPath, pointSize);
+  } catch (const std::runtime_error &) {
+    return std::unexpected{FontError::LoadFailed};
+  }
 }
 
 } // namespace
@@ -180,39 +188,41 @@ FontManager::~FontManager() {
   }
 }
 
-FontFacePtr FontManager::getFont(const std::string &fontSpec) {
-  const auto it = cache_.find(fontSpec);
-  if (it != cache_.end()) {
+FontResult FontManager::findFont(const std::string &fontSpec) {
+  if (const auto it = cache_.find(fontSpec); it != cache_.end()) {
     return it->second;
   }
-
-  const auto parsed   = parseFontSpec(fontSpec);
-  const auto fontPath = resolveFontPath(fontSpec);
-  auto font = std::make_shared<FontFace>(ftLib_, fontPath, parsed.pointSize);
-  cache_[fontSpec] = font;
+  const auto pointSize = parseFontSpec(fontSpec).pointSize;
+  auto font = resolveFontPath(fontSpec).and_then([&](const std::string &path) {
+    return openFace(ftLib_, path, pointSize);
+  });
+  cache_.emplace(fontSpec, font);
   return font;
 }
 
-FontFacePtr FontManager::getFallbackFont(const FontFacePtr &primaryFont,
-                                         const uint32_t codepoint) {
-  if (!primaryFont) {
-    return nullptr;
+FontFacePtr FontManager::getFont(const std::string &fontSpec) {
+  auto font = findFont(fontSpec);
+  if (!font) {
+    throw std::runtime_error(
+        std::format("{}: {}", toString(font.error()), fontSpec));
   }
-  const auto cacheKey = std::format("{}_{:#x}", primaryFont->key(), codepoint);
-  const auto it       = fallbackCache_.find(cacheKey);
-  if (it != fallbackCache_.end()) {
-    return it->second;
-  }
+  return *std::move(font);
+}
 
+namespace {
+/// The file of the font Fontconfig would use for @p codepoint, as close to
+/// @p primary as it can match.
+std::expected<std::string, FontError>
+fallbackPathFor(const FontFace &primary, const uint32_t codepoint) {
   FcInit();
   FcPattern *pat = FcPatternCreate();
   FcCharSet *cs  = FcCharSetCreate();
   FcCharSetAddChar(cs, codepoint);
   FcPatternAddCharSet(pat, FC_CHARSET, cs);
-  FcPatternAddDouble(pat, FC_SIZE, primaryFont->pointSize());
+  FcPatternAddDouble(pat, FC_SIZE, primary.pointSize());
   FcPatternAddString(
       pat, FC_FAMILY,
-      reinterpret_cast<const FcChar8 *>(primaryFont->family().c_str()));
+      reinterpret_cast<const FcChar8 *>(primary.family().c_str()));
 
   FcConfigSubstitute(nullptr, pat, FcMatchPattern);
   FcDefaultSubstitute(pat);
@@ -221,31 +231,37 @@ FontFacePtr FontManager::getFallbackFont(const FontFacePtr &primaryFont,
   FcPattern *match = FcFontMatch(nullptr, pat, &result);
   FcCharSetDestroy(cs);
   FcPatternDestroy(pat);
-
   if (!match) {
-    fallbackCache_[cacheKey] = nullptr;
-    return nullptr;
+    return std::unexpected{FontError::NoMatch};
   }
 
   FcChar8 *file = nullptr;
   if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch || !file) {
     FcPatternDestroy(match);
-    fallbackCache_[cacheKey] = nullptr;
-    return nullptr;
+    return std::unexpected{FontError::NoMatch};
   }
-
   std::string fontPath = reinterpret_cast<const char *>(file);
   FcPatternDestroy(match);
+  return fontPath;
+}
+} // namespace
 
-  try {
-    auto fallback =
-        std::make_shared<FontFace>(ftLib_, fontPath, primaryFont->pointSize());
-    fallbackCache_[cacheKey] = fallback;
-    return fallback;
-  } catch (...) {
-    fallbackCache_[cacheKey] = nullptr;
-    return nullptr;
+FontResult FontManager::getFallbackFont(const FontFacePtr &primaryFont,
+                                        const uint32_t codepoint) {
+  if (!primaryFont) {
+    return std::unexpected{FontError::NoPrimary};
   }
+  const auto cacheKey = std::format("{}_{:#x}", primaryFont->key(), codepoint);
+  if (const auto it = fallbackCache_.find(cacheKey);
+      it != fallbackCache_.end()) {
+    return it->second;
+  }
+  auto fallback = fallbackPathFor(*primaryFont, codepoint)
+                      .and_then([&](const std::string &path) {
+                        return openFace(ftLib_, path, primaryFont->pointSize());
+                      });
+  fallbackCache_.emplace(cacheKey, fallback);
+  return fallback;
 }
 
 } // namespace gleditor::text

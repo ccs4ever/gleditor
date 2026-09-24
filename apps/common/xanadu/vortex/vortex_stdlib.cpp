@@ -15,11 +15,22 @@
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
 
 namespace {
+
+/// Link @p cells into one rank along @p dim, in order, and answer its head --
+/// noCell for no cells. Every builtin that makes a list makes it this way.
+CellRef chainCells(ArenaManifold &arena, const std::vector<CellRef> &cells,
+                   const DimRef dim) {
+  for (const auto [from, to] : cells | std::views::adjacent<2>) {
+    zigzag::expectWritten(arena.link(from, dim, DimVector::POS, to));
+  }
+  return cells.empty() ? noCell : cells.front();
+}
 
 std::int64_t toInt64(const CellValue &v) {
   if (std::holds_alternative<std::int64_t>(v)) {
@@ -102,14 +113,16 @@ CellRef freshenTerm(VortexStdLib &stdlib, VortexCore &core, CellRef term,
                         .grab  = core.dims().grab,
                         .step  = core.dims().step,
                         .vars  = core.dims().vars};
-      core.arena().link(vlog.endOfRank(master, core.dims().clone, false),
-                        core.dims().clone, false, cloneCell);
+      zigzag::expectWritten(
+          core.arena().link(vlog.endOfRank(master, core.dims().clone, false),
+                            core.dims().clone, false, cloneCell));
       return cloneCell;
     }
     CellRef fresh    = stdlib.makeVar();
     CellRef nameCell = core.arena().linked(actual, core.dims().name, false);
     if (nameCell != noCell && core.arena().contains(nameCell)) {
-      core.arena().link(fresh, core.dims().name, false, nameCell);
+      zigzag::expectWritten(
+          core.arena().link(fresh, core.dims().name, false, nameCell));
     }
     varMap[actual] = fresh;
     return fresh;
@@ -123,8 +136,9 @@ CellRef freshenTerm(VortexStdLib &stdlib, VortexCore &core, CellRef term,
                       .grab  = core.dims().grab,
                       .step  = core.dims().step,
                       .vars  = core.dims().vars};
-    core.arena().link(vlog.endOfRank(actual, core.dims().clone, false),
-                      core.dims().clone, false, cloneCell);
+    zigzag::expectWritten(
+        core.arena().link(vlog.endOfRank(actual, core.dims().clone, false),
+                          core.dims().clone, false, cloneCell));
     return cloneCell;
   }
 
@@ -141,9 +155,11 @@ CellRef freshenTerm(VortexStdLib &stdlib, VortexCore &core, CellRef term,
   for (CellRef arg : args) {
     CellRef freshArg = freshenTerm(stdlib, core, arg, varMap, visiting);
     if (prev == noCell) {
-      core.arena().link(freshTerm, core.dims().grab, false, freshArg);
+      zigzag::expectWritten(
+          core.arena().link(freshTerm, core.dims().grab, false, freshArg));
     } else {
-      core.arena().link(prev, core.dims().step, false, freshArg);
+      zigzag::expectWritten(
+          core.arena().link(prev, core.dims().step, false, freshArg));
     }
     prev = freshArg;
   }
@@ -480,8 +496,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         std::string fullPath = modName;
         fullPath += "/";
         fullPath += symName;
-        CellRef entryOp = stdlib.resolve(fullPath);
-        if (entryOp == noCell) continue;
+        const auto resolved = stdlib.resolve(fullPath);
+        if (!resolved) continue;
+        const CellRef entryOp = *resolved;
 
         CellRef curOp        = entryOp;
         std::int64_t stepIdx = 0;
@@ -526,8 +543,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         std::string fullPath = modName;
         fullPath += "/";
         fullPath += symName;
-        CellRef entryOp = stdlib.resolve(fullPath);
-        if (entryOp == noCell) continue;
+        const auto resolved = stdlib.resolve(fullPath);
+        if (!resolved) continue;
+        const CellRef entryOp = *resolved;
 
         CellRef curOp     = entryOp;
         std::size_t limit = core.arena().cellCount() + 1;
@@ -597,8 +615,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         std::string fullPath = modName;
         fullPath += "/";
         fullPath += symName;
-        CellRef entryOp = stdlib.resolve(fullPath);
-        if (entryOp == noCell) continue;
+        const auto resolved = stdlib.resolve(fullPath);
+        if (!resolved) continue;
+        const CellRef entryOp = *resolved;
 
         // Input wing
         std::vector<CellRef> inCells = core.inputsOf(entryOp);
@@ -739,8 +758,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
 
   // Non-unifiable: \=(A, B)
   if (goalFunctor == "\\=" && goalArgs.size() == 2) {
-    auto mark    = core.arena().mark();
-    bool unifies = stdlib.unify(goalArgs[0], goalArgs[1]);
+    auto mark          = core.arena().mark();
+    const bool unifies = stdlib.unify(goalArgs[0], goalArgs[1]).has_value();
     core.arena().release(mark);
     if (!unifies) {
       return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
@@ -1112,7 +1131,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if (goalFunctor == "xanalink" && goalArgs.size() == 3) {
     if (stdlib.boundStore() != nullptr) {
       const auto &store = *stdlib.boundStore();
-      for (const auto &[id, link] : store.links()) {
+      for (const auto &link : store.linkView()) {
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark = core.arena().mark();
         std::string leftStr =
@@ -1361,47 +1380,21 @@ VortexStdLib::VortexStdLib(VortexCore &core, VortexVM &vm)
 }
 
 CellRef VortexStdLib::getOrCreateModule(std::string_view modulePath) {
-  CellRef cur  = core_.arena().linked(core_.home(), core_.dims().stdlib, false);
-  CellRef prev = core_.home();
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    if (core_.arena().textOf(cur) == modulePath) {
-      return cur;
-    }
-    prev = cur;
-    cur  = core_.arena().linked(cur, core_.dims().stdlib, false);
-  }
+  return core_.getOrCreateModule(modulePath);
+}
 
-  // Mint new module cell
-  CellRef modCell = core_.arena().makeCell(modulePath);
-  if (prev == core_.home()) {
-    core_.arena().link(core_.home(), core_.dims().stdlib, false, modCell);
-  } else {
-    core_.arena().link(prev, core_.dims().stdlib, false, modCell);
-  }
-  return modCell;
+std::vector<std::string> VortexStdLib::namesAfter(const CellRef from,
+                                                  const DimRef dim) const {
+  return rankAfter(core_.arena(), from, dim) |
+         std::views::transform([this](const CellRef cell) {
+           return core_.arena().textOf(cell);
+         }) |
+         std::ranges::to<std::vector>();
 }
 
 void VortexStdLib::exportSymbol(CellRef moduleCell, std::string_view symbolName,
                                 CellRef entryOp) {
-  CellRef symCell = core_.arena().makeCell(symbolName);
-  core_.arena().link(symCell, core_.dims().values, false, entryOp);
-
-  CellRef first = core_.arena().linked(moduleCell, core_.dims().vars, false);
-  if (first == noCell) {
-    core_.arena().link(moduleCell, core_.dims().vars, false, symCell);
-  } else {
-    CellRef cur       = first;
-    std::size_t limit = core_.arena().cellCount() + 1;
-    while (limit-- > 0) {
-      CellRef next = core_.arena().linked(cur, core_.dims().vars, false);
-      if (next == noCell) {
-        core_.arena().link(cur, core_.dims().vars, false, symCell);
-        break;
-      }
-      cur = next;
-    }
-  }
+  core_.exportSymbol(moduleCell, symbolName, entryOp);
 }
 
 void VortexStdLib::bootstrap() {
@@ -1508,7 +1501,8 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     core_.bindInput(opMin, hi);
     core_.bindOutput(opMin, out);
 
-    core_.arena().link(opMax, core_.dims().spin, false, opMin);
+    zigzag::expectWritten(
+        core_.arena().link(opMax, core_.dims().spin, false, opMin));
 
     routineBindings_[opMax] = {.inputParams  = {in, lo, hi},
                                .outputParams = {out}};
@@ -1654,7 +1648,8 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     core_.bindInput(opLower, temp);
     core_.bindOutput(opLower, out);
 
-    core_.arena().link(opTrim, core_.dims().spin, false, opLower);
+    zigzag::expectWritten(
+        core_.arena().link(opTrim, core_.dims().spin, false, opLower));
 
     routineBindings_[opTrim] = {.inputParams = {in}, .outputParams = {out}};
     exportSymbol(mod, "clean", opTrim);
@@ -1877,77 +1872,49 @@ void VortexStdLib::buildCollectionsModule(CellRef mod) {
   }
 }
 
-CellRef VortexStdLib::resolve(std::string_view path) const {
-  auto slashPos = path.find('/');
-  std::string_view modPath =
-      slashPos == std::string_view::npos ? path : path.substr(0, slashPos);
-  std::string_view symName = slashPos == std::string_view::npos
-                                 ? std::string_view{}
-                                 : path.substr(slashPos + 1);
-
-  CellRef curMod =
-      core_.arena().linked(core_.home(), core_.dims().stdlib, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (curMod != noCell && limit-- > 0) {
-    if (core_.arena().textOf(curMod) == modPath) {
-      if (symName.empty()) {
-        return curMod;
-      }
-      // Walk +d.vars for symbol
-      CellRef curSym = core_.arena().linked(curMod, core_.dims().vars, false);
-      std::size_t symLimit = core_.arena().cellCount() + 1;
-      while (curSym != noCell && symLimit-- > 0) {
-        if (core_.arena().textOf(curSym) == symName) {
-          return core_.arena().linked(curSym, core_.dims().values, false);
-        }
-        curSym = core_.arena().linked(curSym, core_.dims().vars, false);
-      }
-      return noCell;
-    }
-    curMod = core_.arena().linked(curMod, core_.dims().stdlib, false);
+std::optional<CellRef> VortexStdLib::resolve(std::string_view path) const {
+  const auto slashPos = path.find('/');
+  const auto module   = core_.findModule(path.substr(0, slashPos));
+  if (slashPos == std::string_view::npos) {
+    return module;
   }
-  return noCell;
+  // A symbol is a cell on its module's d.vars rank; its entry op hangs off it
+  // on d.values.
+  const auto symName = path.substr(slashPos + 1);
+  return module
+      .and_then([&](const CellRef mod) {
+        return firstOf(rankAfter(core_.arena(), mod, core_.dims().vars) |
+                       std::views::filter([&](const CellRef sym) {
+                         return core_.arena().textOf(sym) == symName;
+                       }));
+      })
+      .and_then(hop(core_.arena(), core_.dims().values));
 }
 
 bool VortexStdLib::has(std::string_view path) const {
-  return resolve(path) != noCell;
+  return resolve(path).has_value();
 }
 
 std::vector<std::string> VortexStdLib::modules() const {
-  std::vector<std::string> result;
-  CellRef curMod =
-      core_.arena().linked(core_.home(), core_.dims().stdlib, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (curMod != noCell && limit-- > 0) {
-    result.push_back(core_.arena().textOf(curMod));
-    curMod = core_.arena().linked(curMod, core_.dims().stdlib, false);
-  }
-  return result;
+  return namesAfter(core_.home(), core_.dims().stdlib);
 }
 
 std::vector<std::string>
 VortexStdLib::symbolsInModule(std::string_view modulePath) const {
-  std::vector<std::string> result;
-  CellRef mod = resolve(modulePath);
-  if (mod == noCell) {
-    return result;
-  }
-  CellRef curSym    = core_.arena().linked(mod, core_.dims().vars, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (curSym != noCell && limit-- > 0) {
-    result.push_back(core_.arena().textOf(curSym));
-    curSym = core_.arena().linked(curSym, core_.dims().vars, false);
-  }
-  return result;
+  return resolve(modulePath)
+      .transform([this](const CellRef mod) {
+        return namesAfter(mod, core_.dims().vars);
+      })
+      .value_or(std::vector<std::string>{});
 }
 
 std::vector<CellValue> VortexStdLib::call(std::string_view path,
                                           const std::vector<CellValue> &args) {
-  CellRef op = resolve(path);
-  if (op == noCell) {
+  const auto op = resolve(path);
+  if (!op) {
     return {};
   }
-  return call(op, args);
+  return call(*op, args);
 }
 
 std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
@@ -2157,14 +2124,8 @@ std::size_t VortexStdLib::memoEntryCount(std::string_view cacheKey) const {
   if (!pinOpt) {
     return 0;
   }
-  std::size_t count = 0;
-  CellRef cur       = core_.arena().linked(*pinOpt, core_.dims().cache, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    count++;
-    cur = core_.arena().linked(cur, core_.dims().cache, false);
-  }
-  return count;
+  return static_cast<std::size_t>(std::ranges::distance(
+      rankAfter(core_.arena(), *pinOpt, core_.dims().cache)));
 }
 
 // -- Module 2: std:contract ---------------------------------------------------
@@ -2248,30 +2209,16 @@ CellRef VortexStdLib::createFormatCurrencyPipeline() {
 }
 
 // -- Module 4: std:functional -------------------------------------------------
-CellRef
-VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
-                  const std::function<CellValue(const CellValue &)> &fn) {
-  if (head == noCell) return noCell;
-  CellRef resHead = noCell;
-  CellRef resTail = noCell;
-
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    CellValue inVal  = core_.render(cur);
-    CellValue outVal = fn(inVal);
-    CellRef newC     = core_.arena().makeCell();
-    core_.value(newC, 0, -1, outVal);
-    if (resHead == noCell) {
-      resHead = newC;
-      resTail = newC;
-    } else {
-      core_.arena().link(resTail, outDim, DimVector::POS, newC);
-      resTail = newC;
-    }
-    cur = core_.arena().linked(cur, inDim, DimVector::POS);
-  }
-  return resHead;
+CellRef VortexStdLib::map(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<CellValue(const CellValue &)> fn) {
+  return chainCells(core_.arena(),
+                    rank(core_.arena(), head, inDim) |
+                        std::views::transform([&](const CellRef cell) {
+                          return valueCell(fn(core_.render(cell)));
+                        }) |
+                        std::ranges::to<std::vector>(),
+                    outDim);
 }
 
 CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
@@ -2282,31 +2229,20 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
   });
 }
 
-CellRef
-VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
-                     const std::function<bool(const CellValue &)> &pred) {
-  if (head == noCell) return noCell;
-  CellRef resHead = noCell;
-  CellRef resTail = noCell;
-
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    CellValue inVal = core_.render(cur);
-    if (pred(inVal)) {
-      CellRef newC = core_.arena().makeCell();
-      core_.value(newC, 0, -1, inVal);
-      if (resHead == noCell) {
-        resHead = newC;
-        resTail = newC;
-      } else {
-        core_.arena().link(resTail, outDim, DimVector::POS, newC);
-        resTail = newC;
-      }
-    }
-    cur = core_.arena().linked(cur, inDim, DimVector::POS);
-  }
-  return resHead;
+CellRef VortexStdLib::filter(
+    CellRef head, DimRef inDim, DimRef outDim,
+    common::cpp26::function_ref<bool(const CellValue &)> pred) {
+  // Rendered once into values first: pred may be a Vortex call, and a
+  // filter over a transform would render each kept cell twice.
+  const auto kept = rank(core_.arena(), head, inDim) |
+                    std::views::transform([this](const CellRef cell) {
+                      return core_.render(cell);
+                    }) |
+                    std::ranges::to<std::vector>() | std::views::filter(pred) |
+                    std::views::transform(
+                        [this](const CellValue &v) { return valueCell(v); }) |
+                    std::ranges::to<std::vector>();
+  return chainCells(core_.arena(), kept, outDim);
 }
 
 CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
@@ -2320,15 +2256,13 @@ CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
 
 CellValue VortexStdLib::fold(
     CellRef head, DimRef inDim, CellValue initial,
-    const std::function<CellValue(const CellValue &, const CellValue &)> &fn) {
-  CellValue acc     = std::move(initial);
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    acc = fn(acc, core_.render(cur));
-    cur = core_.arena().linked(cur, inDim, DimVector::POS);
-  }
-  return acc;
+    common::cpp26::function_ref<CellValue(const CellValue &, const CellValue &)>
+        fn) {
+  return std::ranges::fold_left(
+      rank(core_.arena(), head, inDim) |
+          std::views::transform(
+              [this](const CellRef cell) { return core_.render(cell); }),
+      std::move(initial), fn);
 }
 
 CellValue VortexStdLib::fold(CellRef head, DimRef inDim, CellValue initial,
@@ -2342,132 +2276,88 @@ CellValue VortexStdLib::fold(CellRef head, DimRef inDim, CellValue initial,
 
 CellRef VortexStdLib::zip(CellRef headA, CellRef headB, DimRef dimA,
                           DimRef dimB, DimRef outDim) {
-  CellRef curA      = headA;
-  CellRef curB      = headB;
-  CellRef resHead   = noCell;
-  CellRef resTail   = noCell;
-  std::size_t limit = core_.arena().cellCount() + 1;
-
-  while (curA != noCell && curB != noCell && limit-- > 0) {
-    CellRef pairCell = core_.arena().makeCell();
-    // In zzstructures, a pair cell can link curA negward on dimA, and curB
-    // posward on dimB
-    core_.arena().link(pairCell, dimA, DimVector::NEG, curA);
-    core_.arena().link(pairCell, dimB, DimVector::POS, curB);
-
-    if (resHead == noCell) {
-      resHead = pairCell;
-      resTail = pairCell;
-    } else {
-      core_.arena().link(resTail, outDim, DimVector::POS, pairCell);
-      resTail = pairCell;
-    }
-    curA = core_.arena().linked(curA, dimA, DimVector::POS);
-    curB = core_.arena().linked(curB, dimB, DimVector::POS);
-  }
-  return resHead;
+  auto &arena = core_.arena();
+  // In zzstructures, a pair cell can link its A cell negward on dimA, and its
+  // B cell posward on dimB. Materialised before any pair is linked: linking a
+  // pair onto dimA would otherwise put it on the rank still being walked.
+  const auto pairs =
+      std::views::zip(rank(arena, headA, dimA), rank(arena, headB, dimB)) |
+      std::ranges::to<std::vector>();
+  return chainCells(
+      arena,
+      pairs | std::views::transform([&](const auto &pair) {
+        const auto [a, b]      = pair;
+        const CellRef pairCell = arena.makeCell();
+        zigzag::expectWritten(arena.link(pairCell, dimA, DimVector::NEG, a));
+        zigzag::expectWritten(arena.link(pairCell, dimB, DimVector::POS, b));
+        return pairCell;
+      }) | std::ranges::to<std::vector>(),
+      outDim);
 }
 
 // -- Module 5: std:collections ----------------------------------------------
 CellRef VortexStdLib::createList(const std::vector<CellValue> &items,
                                  DimRef dim) {
-  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  CellRef head   = noCell;
-  CellRef tail   = noCell;
-  for (const auto &item : items) {
-    CellRef c = core_.arena().makeCell();
-    core_.value(c, 0, -1, item);
-    if (head == noCell) {
-      head = c;
-      tail = c;
-    } else {
-      core_.arena().link(tail, linkDim, DimVector::POS, c);
-      tail = c;
-    }
-  }
-  return head;
+  return chainCells(core_.arena(),
+                    items | std::views::transform([this](const CellValue &v) {
+                      return valueCell(v);
+                    }) | std::ranges::to<std::vector>(),
+                    listDim(dim));
 }
 
 std::vector<CellValue> VortexStdLib::listToVector(CellRef head,
                                                   DimRef dim) const {
-  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  std::vector<CellValue> result;
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    result.push_back(core_.render(cur));
-    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  return result;
+  return rank(core_.arena(), head, listDim(dim)) |
+         std::views::transform(
+             [this](const CellRef cell) { return core_.render(cell); }) |
+         std::ranges::to<std::vector>();
 }
 
 void VortexStdLib::pushBack(CellRef head, const CellValue &val, DimRef dim) {
   if (head == noCell) return;
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (limit-- > 0) {
-    CellRef next = core_.arena().linked(cur, linkDim, DimVector::POS);
-    if (next == noCell) {
-      CellRef c = core_.arena().makeCell();
-      core_.value(c, 0, -1, val);
-      core_.arena().link(cur, linkDim, DimVector::POS, c);
-      return;
-    }
-    cur = next;
-  }
+  const DimRef linkDim = listDim(dim);
+  zigzag::expectWritten(
+      core_.arena().link(rankTail(core_.arena(), head, linkDim), linkDim,
+                         DimVector::POS, valueCell(val)));
 }
 
 CellRef VortexStdLib::pushFront(CellRef head, const CellValue &val,
                                 DimRef dim) {
-  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  CellRef c      = core_.arena().makeCell();
-  core_.value(c, 0, -1, val);
+  const CellRef c = valueCell(val);
   if (head != noCell) {
-    core_.arena().link(c, linkDim, DimVector::POS, head);
+    zigzag::expectWritten(
+        core_.arena().link(c, listDim(dim), DimVector::POS, head));
   }
   return c;
 }
 
 std::optional<CellValue> VortexStdLib::popBack(CellRef head, DimRef dim) {
   if (head == noCell) return std::nullopt;
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  CellRef cur       = head;
-  CellRef prev      = noCell;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (limit-- > 0) {
-    CellRef next = core_.arena().linked(cur, linkDim, DimVector::POS);
-    if (next == noCell) {
-      CellValue val = core_.render(cur);
-      if (prev != noCell) {
-        core_.breakLink(prev, linkDim, DimVector::POS);
-      }
-      return val;
-    }
-    prev = cur;
-    cur  = next;
+  const DimRef linkDim = listDim(dim);
+  // The last pair of the list is (the new tail, the cell popped). A list of
+  // one has no pair, and popping it leaves the head where it is.
+  const auto lastPair =
+      lastOf(rank(core_.arena(), head, linkDim) | std::views::adjacent<2>);
+  if (!lastPair) {
+    return core_.render(head);
   }
-  return std::nullopt;
+  const auto [newTail, popped] = *lastPair;
+  CellValue val                = core_.render(popped);
+  core_.breakLink(newTail, linkDim, DimVector::POS);
+  return val;
 }
 
 CellRef VortexStdLib::popFront(CellRef head, DimRef dim) {
   if (head == noCell) return noCell;
-  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  CellRef next   = core_.arena().linked(head, linkDim, DimVector::POS);
+  const DimRef linkDim = listDim(dim);
+  CellRef next         = core_.arena().linked(head, linkDim, DimVector::POS);
   core_.breakLink(head, linkDim, DimVector::POS);
   return next;
 }
 
 std::size_t VortexStdLib::listLength(CellRef head, DimRef dim) const {
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  std::size_t len   = 0;
-  CellRef cur       = head;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    len++;
-    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  return len;
+  return static_cast<std::size_t>(
+      std::ranges::distance(rank(core_.arena(), head, listDim(dim))));
 }
 
 CellRef VortexStdLib::createMap() { return core_.arena().makeCell("map"); }
@@ -2475,53 +2365,34 @@ CellRef VortexStdLib::createMap() { return core_.arena().makeCell("map"); }
 void VortexStdLib::mapSet(CellRef mapRoot, std::string_view key,
                           const CellValue &val) {
   if (mapRoot == noCell) return;
-  // Check existing key
-  CellRef cur       = core_.arena().linked(mapRoot, core_.dims().vars, false);
-  CellRef prev      = mapRoot;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    if (core_.arena().textOf(cur) == key) {
-      CellRef valCell = core_.arena().linked(cur, core_.dims().values, false);
-      if (valCell == noCell) {
-        valCell = core_.arena().makeCell();
-        core_.arena().link(cur, core_.dims().values, false, valCell);
-      }
+  auto &arena = core_.arena();
+  if (const auto keyCell = mapKeyCell(mapRoot, key)) {
+    // An existing key: restate its value cell, minting one if it had none.
+    const CellRef valCell =
+        step(arena, *keyCell, core_.dims().values).value_or(noCell);
+    if (valCell != noCell) {
       core_.value(valCell, 0, -1, val);
-      return;
+    } else {
+      zigzag::expectWritten(
+          arena.link(*keyCell, core_.dims().values, false, valueCell(val)));
     }
-    prev = cur;
-    cur  = core_.arena().linked(cur, core_.dims().vars, false);
+    return;
   }
 
-  // Mint fresh key-value pair
-  CellRef keyCell = core_.arena().makeCell(key);
-  CellRef valCell = core_.arena().makeCell();
-  core_.value(valCell, 0, -1, val);
-  core_.arena().link(keyCell, core_.dims().values, false, valCell);
-
-  if (prev == mapRoot) {
-    core_.arena().link(mapRoot, core_.dims().vars, false, keyCell);
-  } else {
-    core_.arena().link(prev, core_.dims().vars, false, keyCell);
-  }
+  // A fresh key-value pair onto the tail of the key rank.
+  const CellRef keyCell = arena.makeCell(key);
+  zigzag::expectWritten(
+      arena.link(keyCell, core_.dims().values, false, valueCell(val)));
+  zigzag::expectWritten(arena.link(rankTail(arena, mapRoot, core_.dims().vars),
+                                   core_.dims().vars, false, keyCell));
 }
 
 std::optional<CellValue> VortexStdLib::mapGet(CellRef mapRoot,
                                               std::string_view key) const {
   if (mapRoot == noCell) return std::nullopt;
-  CellRef cur       = core_.arena().linked(mapRoot, core_.dims().vars, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    if (core_.arena().textOf(cur) == key) {
-      CellRef valCell = core_.arena().linked(cur, core_.dims().values, false);
-      if (valCell != noCell) {
-        return core_.render(valCell);
-      }
-      return std::nullopt;
-    }
-    cur = core_.arena().linked(cur, core_.dims().vars, false);
-  }
-  return std::nullopt;
+  return mapKeyCell(mapRoot, key)
+      .and_then(hop(core_.arena(), core_.dims().values))
+      .transform([this](const CellRef cell) { return core_.render(cell); });
 }
 
 bool VortexStdLib::mapHas(CellRef mapRoot, std::string_view key) const {
@@ -2529,15 +2400,11 @@ bool VortexStdLib::mapHas(CellRef mapRoot, std::string_view key) const {
 }
 
 std::vector<std::string> VortexStdLib::mapKeys(CellRef mapRoot) const {
-  std::vector<std::string> keys;
-  if (mapRoot == noCell) return keys;
-  CellRef cur       = core_.arena().linked(mapRoot, core_.dims().vars, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    keys.push_back(core_.arena().textOf(cur));
-    cur = core_.arena().linked(cur, core_.dims().vars, false);
-  }
-  return keys;
+  return rankAfter(core_.arena(), mapRoot, core_.dims().vars) |
+         std::views::transform([this](const CellRef cell) {
+           return core_.arena().textOf(cell);
+         }) |
+         std::ranges::to<std::vector>();
 }
 
 CellRef VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
@@ -2557,14 +2424,16 @@ CellRef VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
   // Link horizontally on dCol
   for (std::size_t r = 0; r < rows; ++r) {
     for (std::size_t c = 0; c + 1 < cols; ++c) {
-      core_.arena().link(grid[r][c], dCol, DimVector::POS, grid[r][c + 1]);
+      zigzag::expectWritten(
+          core_.arena().link(grid[r][c], dCol, DimVector::POS, grid[r][c + 1]));
     }
   }
 
   // Link vertically on dRow
   for (std::size_t r = 0; r + 1 < rows; ++r) {
     for (std::size_t c = 0; c < cols; ++c) {
-      core_.arena().link(grid[r][c], dRow, DimVector::POS, grid[r + 1][c]);
+      zigzag::expectWritten(
+          core_.arena().link(grid[r][c], dRow, DimVector::POS, grid[r + 1][c]));
     }
   }
 
@@ -2573,29 +2442,62 @@ CellRef VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
 
 CellValue VortexStdLib::getGrid(CellRef gridRoot, std::size_t r, std::size_t c,
                                 DimRef dRow, DimRef dCol) const {
-  CellRef cur = gridRoot;
-  for (std::size_t i = 0; i < r && cur != noCell; ++i) {
-    cur = core_.arena().linked(cur, dRow, DimVector::POS);
-  }
-  for (std::size_t j = 0; j < c && cur != noCell; ++j) {
-    cur = core_.arena().linked(cur, dCol, DimVector::POS);
-  }
-  if (cur == noCell) return false;
-  return core_.render(cur);
+  return gridCell(gridRoot, r, c, dRow, dCol)
+      .transform([this](const CellRef cell) { return core_.render(cell); })
+      .value_or(CellValue{false});
 }
 
 void VortexStdLib::setGrid(CellRef gridRoot, std::size_t r, std::size_t c,
                            DimRef dRow, DimRef dCol, const CellValue &val) {
-  CellRef cur = gridRoot;
-  for (std::size_t i = 0; i < r && cur != noCell; ++i) {
-    cur = core_.arena().linked(cur, dRow, DimVector::POS);
+  if (const auto cell = gridCell(gridRoot, r, c, dRow, dCol)) {
+    core_.value(*cell, 0, -1, val);
   }
-  for (std::size_t j = 0; j < c && cur != noCell; ++j) {
-    cur = core_.arena().linked(cur, dCol, DimVector::POS);
-  }
-  if (cur != noCell) {
-    core_.value(cur, 0, -1, val);
-  }
+}
+
+std::optional<CellRef> VortexStdLib::gridCell(const CellRef gridRoot,
+                                              const std::size_t r,
+                                              const std::size_t c,
+                                              const DimRef dRow,
+                                              const DimRef dCol) const {
+  return hops(core_.arena(), gridRoot, dRow, r)
+      .and_then(
+          [&](const CellRef row) { return hops(core_.arena(), row, dCol, c); });
+}
+
+CellRef VortexStdLib::valueCell(const CellValue &val) {
+  const CellRef cell = core_.arena().makeCell();
+  core_.value(cell, 0, -1, val);
+  return cell;
+}
+
+CellRef VortexStdLib::copyValueCell(const CellRef source) {
+  // Typed bits copy as bits (R6); anything else copies as its rendering.
+  auto &arena = core_.arena();
+  const auto scalar =
+      arena.asDouble(source)
+          .transform([&](const double d) { return arena.makeScalarCell(d); })
+          .or_else([&] {
+            return arena.asInt64(source).transform(
+                [&](const std::int64_t n) { return arena.makeScalarCell(n); });
+          })
+          .or_else([&] {
+            return arena.asBool(source).transform(
+                [&](const bool b) { return arena.makeScalarCell(b); });
+          });
+  return scalar ? *scalar : valueCell(core_.render(source));
+}
+
+DimRef VortexStdLib::listDim(const DimRef dim) const noexcept {
+  return dim == noCell ? core_.dims().step : dim;
+}
+
+std::optional<CellRef>
+VortexStdLib::mapKeyCell(const CellRef mapRoot,
+                         const std::string_view key) const {
+  return firstOf(rankAfter(core_.arena(), mapRoot, core_.dims().vars) |
+                 std::views::filter([&](const CellRef cell) {
+                   return core_.arena().textOf(cell) == key;
+                 }));
 }
 
 // -- Module 6: std:math -------------------------------------------------------
@@ -3009,7 +2911,8 @@ CellRef VortexStdLib::makeVar(std::string_view name) {
   CellRef var = v.makeVar();
   if (!name.empty()) {
     CellRef nameCell = core_.arena().makeCell(name);
-    core_.arena().link(var, core_.dims().name, false, nameCell);
+    zigzag::expectWritten(
+        core_.arena().link(var, core_.dims().name, false, nameCell));
   }
   return var;
 }
@@ -3068,7 +2971,7 @@ CellRef VortexStdLib::deref(CellRef cell) const {
   return v.deref(cell);
 }
 
-bool VortexStdLib::unify(CellRef a, CellRef b) {
+zigzag::UnifyResult VortexStdLib::unify(CellRef a, CellRef b) {
   zigzag::Vlog v{.m     = core_.arena(),
                  .clone = core_.dims().clone,
                  .grab  = core_.dims().grab,
@@ -3167,33 +3070,19 @@ CellRef VortexStdLib::createPredicate(std::string_view name) {
 
 CellRef VortexStdLib::addClause(CellRef predCell, CellRef headTerm,
                                 std::span<const CellRef> bodyGoals) {
-  CellRef clauseCell = core_.arena().makeCell();
-  core_.arena().link(clauseCell, core_.dims().grab, false, headTerm);
+  auto &arena              = core_.arena();
+  const CellRef clauseCell = arena.makeCell();
+  zigzag::expectWritten(
+      arena.link(clauseCell, core_.dims().grab, false, headTerm));
 
-  CellRef prevGoal = noCell;
-  for (CellRef goal : bodyGoals) {
-    if (prevGoal == noCell) {
-      core_.arena().link(clauseCell, core_.dims().spin, false, goal);
-    } else {
-      core_.arena().link(prevGoal, core_.dims().spin, false, goal);
-    }
-    prevGoal = goal;
-  }
+  // The body hangs off the clause cell as one d.spin rank.
+  std::vector<CellRef> spine{clauseCell};
+  spine.insert(spine.end(), bodyGoals.begin(), bodyGoals.end());
+  chainCells(arena, spine, core_.dims().spin);
 
-  CellRef cur = core_.arena().linked(predCell, core_.dims().clause, false);
-  if (cur == noCell) {
-    core_.arena().link(predCell, core_.dims().clause, false, clauseCell);
-  } else {
-    std::size_t limit = core_.arena().cellCount() + 1;
-    while (limit-- > 0) {
-      CellRef next = core_.arena().linked(cur, core_.dims().clause, false);
-      if (next == noCell) {
-        core_.arena().link(cur, core_.dims().clause, false, clauseCell);
-        break;
-      }
-      cur = next;
-    }
-  }
+  zigzag::expectWritten(
+      arena.link(rankTail(arena, predCell, core_.dims().clause),
+                 core_.dims().clause, false, clauseCell));
   return clauseCell;
 }
 
@@ -3314,7 +3203,8 @@ CellRef VortexStdLib::arrayIota(std::size_t n, DimRef dim, CellRef origin) {
   for (std::size_t i = 1; i < n; ++i) {
     CellRef next =
         core_.arena().makeScalarCell(static_cast<std::int64_t>(i + 1));
-    core_.arena().link(prev, linkDim, DimVector::POS, next);
+    zigzag::expectWritten(
+        core_.arena().link(prev, linkDim, DimVector::POS, next));
     prev = next;
   }
   return head;
@@ -3328,119 +3218,61 @@ VortexStdLib::arrayShape(CellRef origin, std::span<const DimRef> dims) const {
   if (dims.empty()) {
     return {arrayTally(origin, core_.dims().step)};
   }
-  std::vector<std::size_t> shape;
-  shape.reserve(dims.size());
-  for (DimRef d : dims) {
-    std::size_t len   = 0;
-    CellRef cur       = origin;
-    std::size_t limit = core_.arena().cellCount() + 1;
-    while (cur != noCell && core_.arena().contains(cur) && limit-- > 0) {
-      ++len;
-      cur = core_.arena().linked(cur, d, DimVector::POS);
-    }
-    shape.push_back(len);
-  }
-  return shape;
+  const auto held = [this](const CellRef cell) {
+    return core_.arena().contains(cell);
+  };
+  return dims | std::views::transform([&](const DimRef d) {
+           return static_cast<std::size_t>(std::ranges::distance(
+               rank(core_.arena(), origin, d) | std::views::take_while(held)));
+         }) |
+         std::ranges::to<std::vector>();
 }
 
 CellRef VortexStdLib::arrayTake(CellRef origin, DimRef dim, std::size_t count) {
   if (origin == noCell || count == 0 || !core_.arena().contains(origin)) {
     return noCell;
   }
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  CellRef cur       = origin;
-  CellRef head      = noCell;
-  CellRef prev      = noCell;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  for (std::size_t i = 0; i < count && cur != noCell && limit-- > 0; ++i) {
-    CellRef copy = core_.arena().makeCell();
-    if (auto d = core_.arena().asDouble(cur); d.has_value()) {
-      core_.arena().makeScalarCell(*d);
-      // copy scalar value
-      copy = core_.arena().makeScalarCell(*d);
-    } else if (auto n = core_.arena().asInt64(cur); n.has_value()) {
-      copy = core_.arena().makeScalarCell(*n);
-    } else if (auto b = core_.arena().asBool(cur); b.has_value()) {
-      copy = core_.arena().makeScalarCell(*b);
-    } else {
-      core_.value(copy, 0, -1, core_.render(cur));
-    }
-    if (head == noCell) {
-      head = copy;
-    } else {
-      core_.arena().link(prev, linkDim, DimVector::POS, copy);
-    }
-    prev = copy;
-    cur  = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  return head;
+  const DimRef linkDim = listDim(dim);
+  return chainCells(core_.arena(),
+                    rank(core_.arena(), origin, linkDim) |
+                        std::views::take(count) |
+                        std::views::transform([this](const CellRef cell) {
+                          return copyValueCell(cell);
+                        }) |
+                        std::ranges::to<std::vector>(),
+                    linkDim);
 }
 
 CellRef VortexStdLib::arrayDrop(CellRef origin, DimRef dim, std::size_t count) {
   if (origin == noCell || !core_.arena().contains(origin)) {
     return noCell;
   }
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  CellRef cur       = origin;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  for (std::size_t i = 0; i < count && cur != noCell && limit-- > 0; ++i) {
-    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  return cur;
+  return hops(core_.arena(), origin, listDim(dim), count).value_or(noCell);
 }
 
 CellRef VortexStdLib::arrayReverse(CellRef origin, DimRef dim) {
   if (origin == noCell || !core_.arena().contains(origin)) {
     return noCell;
   }
-  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  std::vector<CellRef> cells;
-  CellRef cur       = origin;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    cells.push_back(cur);
-    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  if (cells.empty()) {
-    return noCell;
-  }
-  std::ranges::reverse(cells);
-  CellRef head = noCell;
-  CellRef prev = noCell;
-  for (CellRef c : cells) {
-    CellRef copy = core_.arena().makeCell();
-    if (auto d = core_.arena().asDouble(c); d.has_value()) {
-      copy = core_.arena().makeScalarCell(*d);
-    } else if (auto n = core_.arena().asInt64(c); n.has_value()) {
-      copy = core_.arena().makeScalarCell(*n);
-    } else if (auto b = core_.arena().asBool(c); b.has_value()) {
-      copy = core_.arena().makeScalarCell(*b);
-    } else {
-      core_.value(copy, 0, -1, core_.render(c));
-    }
-    if (head == noCell) {
-      head = copy;
-    } else {
-      core_.arena().link(prev, linkDim, DimVector::POS, copy);
-    }
-    prev = copy;
-  }
-  return head;
+  const DimRef linkDim = listDim(dim);
+  // Collected first: a rank is a forward range, and reverse needs both ends.
+  const auto cells =
+      rank(core_.arena(), origin, linkDim) | std::ranges::to<std::vector>();
+  return chainCells(core_.arena(),
+                    cells | std::views::reverse |
+                        std::views::transform([this](const CellRef cell) {
+                          return copyValueCell(cell);
+                        }) |
+                        std::ranges::to<std::vector>(),
+                    linkDim);
 }
 
 std::size_t VortexStdLib::arrayTally(CellRef origin, DimRef dim) const {
   if (origin == noCell || !core_.arena().contains(origin)) {
     return 0;
   }
-  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
-  std::size_t count = 0;
-  CellRef cur       = origin;
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    ++count;
-    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
-  }
-  return count;
+  return static_cast<std::size_t>(
+      std::ranges::distance(rank(core_.arena(), origin, listDim(dim))));
 }
 
 void VortexStdLib::buildZigzagModule(CellRef mod) {
@@ -3902,8 +3734,10 @@ CellRef VortexStdLib::zzCloneToChain(CellRef symbolOp, CellRef targetCell) {
     return noCell;
   }
   CellRef clone = core_.arena().makeCell();
-  core_.arena().link(symbolOp, core_.dims().clone, DimVector::POS, clone);
-  core_.arena().link(targetCell, core_.dims().spin, DimVector::POS, clone);
+  zigzag::expectWritten(
+      core_.arena().link(symbolOp, core_.dims().clone, DimVector::POS, clone));
+  zigzag::expectWritten(
+      core_.arena().link(targetCell, core_.dims().spin, DimVector::POS, clone));
   return clone;
 }
 
@@ -3918,11 +3752,14 @@ CellRef VortexStdLib::zzDuplicate(CellRef cell) {
   auto vk          = core_.arena().valueKindOf(cell);
   if (vk != xanadu::ValueKind::None) {
     if (auto d = core_.arena().asDouble(cell)) {
-      core_.arena().setValueBits(dup, vk, std::bit_cast<std::uint64_t>(*d));
+      zigzag::expectWritten(core_.arena().setValueBits(
+          dup, vk, std::bit_cast<std::uint64_t>(*d)));
     } else if (auto i = core_.arena().asInt64(cell)) {
-      core_.arena().setValueBits(dup, vk, static_cast<std::uint64_t>(*i));
+      zigzag::expectWritten(
+          core_.arena().setValueBits(dup, vk, static_cast<std::uint64_t>(*i)));
     } else if (auto b = core_.arena().asBool(cell)) {
-      core_.arena().setValueBits(dup, vk, *b ? 1ULL : 0ULL);
+      zigzag::expectWritten(
+          core_.arena().setValueBits(dup, vk, *b ? 1ULL : 0ULL));
     }
   }
   core_.link(cell, core_.dims().clone, DimVector::POS, dup);
@@ -3970,45 +3807,28 @@ CellRef VortexStdLib::hopHead(CellRef cursor, DimRef dim) {
   if (cursor == noCell || !core_.arena().contains(cursor) || dim == noCell) {
     return cursor;
   }
-  CellRef cur       = cursor;
-  std::size_t limit = core_.arena().cellCount() + 10;
-  while (limit-- > 0) {
-    CellRef prev = core_.arena().linked(cur, dim, DimVector::NEG);
-    if (prev == noCell || prev == cur || prev == cursor) {
-      break;
-    }
-    cur = prev;
-  }
-  return cur;
+  return rankTail(core_.arena(), cursor, dim, DimVector::NEG);
 }
 
 CellRef VortexStdLib::hopTail(CellRef cursor, DimRef dim) {
   if (cursor == noCell || !core_.arena().contains(cursor) || dim == noCell) {
     return cursor;
   }
-  CellRef cur       = cursor;
-  std::size_t limit = core_.arena().cellCount() + 10;
-  while (limit-- > 0) {
-    CellRef next = core_.arena().linked(cur, dim, DimVector::POS);
-    if (next == noCell || next == cur || next == cursor) {
-      break;
-    }
-    cur = next;
-  }
-  return cur;
+  return rankTail(core_.arena(), cursor, dim, DimVector::POS);
 }
 
 CellRef VortexStdLib::jumpHome() const noexcept { return core_.home(); }
 
 bool VortexStdLib::exportModuleToStore(std::string_view modulePath,
                                        xanadu::Store &destStore) const {
-  CellRef mod = resolve(modulePath);
-  if (mod == noCell) {
+  const auto resolved = resolve(modulePath);
+  if (!resolved) {
     return false;
   }
-  auto parent = destStore.allVersions().empty()
-                    ? xanadu::MicroversionId::parse("1")
-                    : destStore.primaryCurrentVersion();
+  const CellRef mod = *resolved;
+  auto parent       = destStore.allVersions().empty()
+                          ? xanadu::MicroversionId::parse("1")
+                          : destStore.primaryCurrentVersion();
   zigzag::PromotionBudget budget{.maxOps = 100000};
   auto promoted =
       zigzag::promote(destStore, parent, core_.arena(), mod, budget);
@@ -4056,9 +3876,9 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
     std::string text = srcManifold.textOf(srcRef, srcStore);
     CellRef dstRef   = core_.arena().makeCell(text);
     if (slot.valueKind != 0) {
-      core_.arena().setValueBits(dstRef,
-                                 static_cast<xanadu::ValueKind>(slot.valueKind),
-                                 slot.valueBits);
+      zigzag::expectWritten(core_.arena().setValueBits(
+          dstRef, static_cast<xanadu::ValueKind>(slot.valueKind),
+          slot.valueBits));
     }
     cellMapping[srcRef] = dstRef;
   }
@@ -4075,12 +3895,12 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
       }
       DimRef dstDim = cellMapping[link.dim];
       if (link.pos != noCell && cellMapping.contains(link.pos)) {
-        core_.arena().link(dstRef, dstDim, DimVector::POS,
-                           cellMapping[link.pos]);
+        zigzag::expectWritten(core_.arena().link(dstRef, dstDim, DimVector::POS,
+                                                 cellMapping[link.pos]));
       }
       if (link.neg != noCell && cellMapping.contains(link.neg)) {
-        core_.arena().link(dstRef, dstDim, DimVector::NEG,
-                           cellMapping[link.neg]);
+        zigzag::expectWritten(core_.arena().link(dstRef, dstDim, DimVector::NEG,
+                                                 cellMapping[link.neg]));
       }
     }
   }
@@ -4101,7 +3921,8 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
         }
       }
       if (tail != dstRef) {
-        core_.arena().link(tail, core_.dims().stdlib, DimVector::POS, dstRef);
+        zigzag::expectWritten(core_.arena().link(tail, core_.dims().stdlib,
+                                                 DimVector::POS, dstRef));
       }
     }
   }

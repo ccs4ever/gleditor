@@ -6,6 +6,7 @@
 #define GLEDITOR_IMAGE_CACHE_HPP
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -15,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gleditor/decode_error.hpp>
 #include <gleditor/mimetype.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
@@ -67,19 +69,22 @@ struct ImageResource {
   }
 };
 
+/// A decoded bitmap, or why there is none.
+using DecodeResult = std::expected<DecodedImage, DecodeError>;
+
 /**
  * @brief Decode an image from an in-memory buffer.
  */
-[[nodiscard]] DecodedImage
+[[nodiscard]] DecodeResult
 decodeImageBuffer(std::span<const std::uint8_t> bytes,
                   const MimeType &mime = MimeType{});
-[[nodiscard]] DecodedImage decodeImageBuffer(std::string_view bytes,
+[[nodiscard]] DecodeResult decodeImageBuffer(std::string_view bytes,
                                              const MimeType &mime = MimeType{});
 
 /**
  * @brief Decode an image from a file path.
  */
-[[nodiscard]] DecodedImage decodeImageFile(const std::string &filePath);
+[[nodiscard]] DecodeResult decodeImageFile(const std::string &filePath);
 
 /**
  * @class ImageCache
@@ -129,6 +134,10 @@ public:
   [[nodiscard]] int layerCount() const { return allocatedLayers_; }
 
 private:
+  /// Upload @p decoded under @p id, or log why there is nothing to upload.
+  std::optional<ImageResource> uploaded(const std::string &id,
+                                        const DecodeResult &decoded);
+
   void ensureAtlasAllocated();
 
   render::RenderDevice *device_{nullptr};

@@ -3,9 +3,12 @@
 #include <algorithm>
 #include <bit>
 #include <cstddef>
+#include <iterator>
 #include <limits>
+#include <ranges>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag {
@@ -183,10 +186,11 @@ void Manifold::spliceContent(const std::uint32_t dense, const std::uint64_t at,
   setContent(dense, rebuilt);
 }
 
-void Manifold::applyStructure(const std::uint32_t opIndex,
-                              const xanadu::CompactOpNode &node) noexcept {
+FoldResult
+Manifold::applyStructure(const std::uint32_t opIndex,
+                         const xanadu::CompactOpNode &node) noexcept {
   if (xanadu::OpKind::Structure != node.kind) {
-    return;
+    return {};
   }
   foldedThrough_ = std::max(opIndex, foldedThrough_);
 
@@ -199,15 +203,13 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
   // into an address; everything else is refused here. See spool.hpp's
   // scratchScroll and design/vlog-logic-extension.md §5.5.
   if (xanadu::scratchScroll == node.span().scroll) {
-    refusedOps_++;
-    return;
+    return refuse(FoldRefusal::ScratchAddress);
   }
 
   switch (xanadu::structureVerbOf(node.flags)) {
   case xanadu::StructureVerb::MakeCell: {
     if (byRef.contains(opIndex)) {
-      refusedOps_++;
-      return;
+      return refuse(FoldRefusal::DuplicateCell);
     }
     const auto dense = static_cast<std::uint32_t>(slots.size());
     // The empty runs start at the arenas' tails, so this cell's first link and
@@ -237,7 +239,7 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     } else if (noCell == dimsDim_) {
       dimsDim_ = opIndex;
     }
-    return;
+    return {};
   }
 
   case xanadu::StructureVerb::SetLink: {
@@ -248,16 +250,20 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     const auto dense = denseOf(node.sourceOpIndex);
     const DimRef dim = node.linkId;
     const CellRef to = node.to;
-    if (noDense == dense || noDense == denseOf(dim)) {
-      refusedOps_++;
-      return;
+    if (noDense == dense) {
+      return refuse(FoldRefusal::UnknownSubject);
+    }
+    if (noDense == denseOf(dim)) {
+      return refuse(FoldRefusal::UnknownDimension);
     }
     // R8's boundary as a bit: a link into a derived cell cannot be persisted,
     // and a stored link naming a cell this fold does not hold would be a
     // traversal walking into nothing.
-    if (isEphemeral(to) || (noCell != to && noDense == denseOf(to))) {
-      refusedOps_++;
-      return;
+    if (isEphemeral(to)) {
+      return refuse(FoldRefusal::EphemeralTarget);
+    }
+    if (noCell != to && noDense == denseOf(to)) {
+      return refuse(FoldRefusal::UnknownTarget);
     }
 
     const CellRef self  = slots[dense].birthOp;
@@ -300,26 +306,24 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     slots[dense].lastOp = opIndex;
     byRef.emplace(opIndex, dense);
     dimsCacheStale = true;
-    return;
+    return {};
   }
 
   case xanadu::StructureVerb::Splice: {
     const auto dense = denseOf(node.sourceOpIndex);
     if (noDense == dense) {
-      refusedOps_++;
-      return;
+      return refuse(FoldRefusal::UnknownSubject);
     }
     spliceContent(dense, node.at, node.length, node.span());
     slots[dense].lastOp = opIndex;
     byRef.emplace(opIndex, dense);
-    return;
+    return {};
   }
 
   case xanadu::StructureVerb::SetValue: {
     const auto dense = denseOf(node.sourceOpIndex);
     if (noDense == dense) {
-      refusedOps_++;
-      return;
+      return refuse(FoldRefusal::UnknownSubject);
     }
     // States the cell's content and value in full rather than merging with
     // what was there: an operation that reads the state it is applied to would
@@ -333,29 +337,34 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     cell.valueBits = node.value;
     cell.lastOp    = opIndex;
     byRef.emplace(opIndex, dense);
-    return;
+    return {};
   }
   }
 
   // A verb this build does not know. Counted rather than ignored: the whole
   // point of refusedOps() is that a fold cannot throw and still must not
   // silently mean something else.
-  refusedOps_++;
+  return refuse(FoldRefusal::UnknownVerb);
 }
 
-bool Manifold::advance(const xanadu::Store &store,
-                       const xanadu::MicroversionId &version) {
+AdvanceResult Manifold::advance(const xanadu::Store &store,
+                                const xanadu::MicroversionId &version) {
   store_           = const_cast<xanadu::Store *>(&store);
   const auto index = store.segmentedOps().indexOf(version);
   if (0 == index) {
-    return false;
+    return std::unexpected{
+        AdvanceError{.kind = AdvanceError::Kind::UnknownVersion}};
   }
   const auto *const node = store.getCompactOp(index);
   if (nullptr == node) {
-    return false;
+    return std::unexpected{
+        AdvanceError{.kind = AdvanceError::Kind::MissingNode}};
   }
-  applyStructure(index, *node);
-  return true;
+  return applyStructure(index, *node)
+      .transform_error([](const FoldRefusal why) {
+        return AdvanceError{.kind    = AdvanceError::Kind::Refused,
+                            .refusal = why};
+      });
 }
 
 void Manifold::compact() {
@@ -416,42 +425,43 @@ std::span<const DimRef> Manifold::dimensions() const {
     return dimsCache;
   }
   dimsCache.clear();
-  if (noCell != home_ && noCell != dimsDim_) {
-    const CellRef first = linked(home_, dimsDim_, DimVector::POS);
-    walkRank(first, dimsDim_, DimVector::POS, [&](const CellRef cursor) {
-      if (cursor == home_) {
-        return false;
-      }
-      dimsCache.push_back(cursor);
-      return true;
-    });
+  if (noCell != home_) {
+    // From home rather than from its neighbour, so the ring guard is what
+    // stops the walk at home -- the rank is a ring through it.
+    std::ranges::copy(rankAfter(*this, home_, dimsDim_),
+                      std::back_inserter(dimsCache));
   }
   dimsCacheStale = false;
   return dimsCache;
 }
 
-DimRef Manifold::dimensionNamed(const std::string_view name,
-                                const xanadu::SpanReader &reader) const {
+std::optional<DimRef>
+Manifold::dimensionNamed(const std::string_view name,
+                         const xanadu::SpanReader &reader) const {
+  const auto held = [this](const DimRef dim) {
+    return contains(dim) ? std::optional{dim} : std::nullopt;
+  };
   if (nullptr != store_) {
-    const auto fast = DimensionRegistry::instance().get(*store_, name);
-    if (noCell != fast && contains(fast)) {
+    if (const auto fast =
+            DimensionRegistry::instance().get(*store_, name).and_then(held)) {
       return fast;
     }
   }
-  for (const auto dim : dimensions()) {
-    if (textOf(dim, reader) == name) {
-      if (nullptr != store_) {
-        DimensionRegistry::instance().registerDim(*store_, name, dim);
-      }
-      return dim;
+  auto named = dimensions() | std::views::filter([&](const DimRef dim) {
+                 return textOf(dim, reader) == name;
+               });
+  return firstOf(named).transform([&](const DimRef dim) {
+    if (nullptr != store_) {
+      DimensionRegistry::instance().registerDim(*store_, name, dim);
     }
-  }
-  return noCell;
+    return dim;
+  });
 }
 
-DimRef Manifold::dimensionNamed(const std::string_view name) const {
+std::optional<DimRef>
+Manifold::dimensionNamed(const std::string_view name) const {
   if (nullptr == store_) {
-    return noCell;
+    return std::nullopt;
   }
   return dimensionNamed(name, *store_);
 }
@@ -655,23 +665,9 @@ Manifold::handleTarget(const CellRef ref) const noexcept {
   return static_cast<CellRef>(cell->valueBits);
 }
 
-CellRef Manifold::cloneMaster(const CellRef ref,
-                              const DimRef cloneDim) const noexcept {
-  if (noDense == denseOf(ref)) {
-    return noCell;
-  }
-  CellRef result = ref;
-  bool looped    = false;
-  walkRank(ref, cloneDim, DimVector::NEG, [&](const CellRef cursor) {
-    const auto next = linked(cursor, cloneDim, DimVector::NEG);
-    if (next == ref) {
-      looped = true;
-      return false;
-    }
-    result = cursor;
-    return true;
-  });
-  return looped ? ref : result;
+std::optional<CellRef>
+Manifold::cloneMaster(const CellRef ref, const DimRef cloneDim) const noexcept {
+  return rankEnd(*this, ref, cloneDim, DimVector::NEG);
 }
 
 bool Manifold::equivalentTo(const Manifold &other) const {

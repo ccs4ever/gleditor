@@ -371,14 +371,14 @@ Form::Field &Form::field() {
   return fields[focus];
 }
 
-bool Form::complete(std::string &missing) const {
-  for (const auto &one : fields) {
-    if (one.required && one.answer().empty()) {
-      missing = one.label;
-      return false;
-    }
+std::optional<std::string> Form::firstMissing() const {
+  const auto unanswered = std::ranges::find_if(fields, [](const Field &one) {
+    return one.required && one.answer().empty();
+  });
+  if (unanswered == fields.end()) {
+    return std::nullopt;
   }
-  return true;
+  return unanswered->label;
 }
 
 bool Form::listOpen() const {
@@ -481,12 +481,11 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         here.on = !here.on;
         return true;
       }
-      std::string missing;
-      if (!complete(missing)) {
+      if (const auto missing = firstMissing()) {
         // Refused rather than published half-filled: the fields marked
         // required are the ones a reader would otherwise find empty in
         // something signed.
-        trouble = missing + " is needed before this can go out";
+        trouble = *missing + " is needed before this can go out";
         return true;
       }
       // The form comes down first, and the callback runs outside the lock, so

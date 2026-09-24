@@ -93,7 +93,7 @@ TEST(MediaTest, MediaPlayerTimeRangeBoundsAndSeeking) {
   auto memStream =
       std::make_shared<MemoryMediaStream>("DUMMY_AUDIO_DATA_FOR_RANGE");
   auto res = MediaResource::fromStream(memStream, "RangeTrack");
-  player.load(res);
+  EXPECT_TRUE(player.load(res));
 
   // Constrain playback to [10.0s, 30.0s]
   player.setTimeRange(10.0F, 30.0F);

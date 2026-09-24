@@ -29,3 +29,12 @@
 	# libzstd this was verified against -- an ABI mismatch here is a
 	# same-symbol-different-behavior risk, not a compile error, so drifting
 	# the two apart silently is worse than a build failure would be.
+[submodule "thirdparty/nontype_functional"]
+	path = thirdparty/nontype_functional
+	url = https://github.com/zhihaoy/nontype_functional.git
+[submodule "thirdparty/beman_optional"]
+	path = thirdparty/beman_optional
+	url = https://github.com/bemanproject/optional.git
+[submodule "thirdparty/beman_inplace_vector"]
+	path = thirdparty/beman_inplace_vector
+	url = https://github.com/bemanproject/inplace_vector.git

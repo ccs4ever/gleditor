@@ -505,8 +505,8 @@ TEST(VortexStdLibTest, NavModuleActions) {
   CellRef c1 = h.arena.makeCell("Node 1");
   CellRef c2 = h.arena.makeCell("Node 2");
   CellRef c3 = h.arena.makeCell("Node 3");
-  h.arena.link(c1, d1, zigzag::DimVector::POS, c2);
-  h.arena.link(c2, d1, zigzag::DimVector::POS, c3);
+  EXPECT_TRUE(h.arena.link(c1, d1, zigzag::DimVector::POS, c2));
+  EXPECT_TRUE(h.arena.link(c2, d1, zigzag::DimVector::POS, c3));
 
   EXPECT_EQ(h.stdlib.hopHead(c2, d1), c1);
   EXPECT_EQ(h.stdlib.hopHead(c3, d1), c1);
@@ -518,7 +518,7 @@ TEST(VortexStdLibTest, NavModuleActions) {
 TEST(VortexStdLibTest, ZzDuplicate) {
   TestHarness h;
   CellRef original = h.arena.makeCell("Original Content");
-  h.arena.setValueBits(original, xanadu::ValueKind::Int64, 42);
+  EXPECT_TRUE(h.arena.setValueBits(original, xanadu::ValueKind::Int64, 42));
 
   CellRef dup = h.stdlib.zzDuplicate(original);
   EXPECT_NE(dup, noCell);

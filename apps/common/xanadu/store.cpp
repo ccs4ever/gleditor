@@ -272,7 +272,9 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   folded.setStore(const_cast<Store *>(this));
   OsmicWalker::walkAncestral(
       opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
-        folded.applyStructure(idx, node);
+        // A cold fold keeps going past a refusal: the manifold counts it in
+        // refusedOps(), which is where a caller checking honesty looks.
+        static_cast<void>(folded.applyStructure(idx, node));
       });
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
@@ -291,7 +293,8 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   folded.setStore(const_cast<Store *>(this));
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
-      folded.applyStructure(opsSpool.indexOf(step), *node);
+      // As above: refusals are counted, not fatal to the fold.
+      static_cast<void>(folded.applyStructure(opsSpool.indexOf(step), *node));
     }
   }
   folded.compact();
@@ -1263,27 +1266,15 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   return apply(parent, op);
 }
 
-std::vector<const Link *> Store::linksTouching(const PrimediaSpan &span) const {
-  std::vector<const Link *> found;
-  for (const auto &[id, link] : linkTable) {
-    if (link.touches(span)) {
-      found.push_back(&link);
-    }
-  }
-  return found;
-}
-
 std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
   if (LinkType::Format != link.type || link.right.empty()) {
     return std::nullopt;
   }
   const auto &named = link.right.front();
-  for (const auto attribute : allFormatAttributes) {
-    if (named == vocabularySpanFor(attribute)) {
-      return attribute;
-    }
-  }
-  return std::nullopt;
+  return firstOf(allFormatAttributes |
+                 std::views::filter([&named](const FormatAttribute attribute) {
+                   return named == vocabularySpanFor(attribute);
+                 }));
 }
 
 std::vector<MicroversionId> Store::children(const MicroversionId &id) const {

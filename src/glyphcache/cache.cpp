@@ -6,6 +6,7 @@
  * the device array texture, and pack glyphs into palettes and lanes.
  */
 #include <gleditor/glyphcache/cache.hpp> // IWYU pragma: associated
+#include <gleditor/logging.hpp>
 
 #include <algorithm> // for min, sort
 #include <cstddef>   // for byte
@@ -197,14 +198,15 @@ resolveRealVariant(const FontPtr &font,
     spec += ":italic";
   }
 
-  FontPtr candidate;
-  try {
-    candidate = text::FontManager::instance().getFont(spec);
-  } catch (const std::exception &error) {
-    std::cerr << "glyph cache: could not resolve \"" << spec
-              << "\", synthesising instead: " << error.what() << "\n";
+  const auto found = text::FontManager::instance().findFont(spec);
+  if (!found) {
+    GLEDITOR_LOG_DEBUG("text.font",
+                       "could not resolve \"{}\" ({}); "
+                       "synthesising instead",
+                       spec, toString(found.error()));
     return {.font = font, .stillSynthetic = decorations};
   }
+  const FontPtr &candidate = *found;
   if (!candidate || nullptr == candidate->face()) {
     return {.font = font, .stillSynthetic = decorations};
   }
@@ -331,14 +333,14 @@ void GlyphCache::reallocate(const int newSize, const int newLayers) {
   atlasDirty = true;
 }
 
-void GlyphCache::makeRoomFor(const Rect &padded) {
+std::expected<void, GlyphError> GlyphCache::makeRoomFor(const Rect &padded) {
   const auto needed = std::max(std::to_underlying(padded.width),
                                std::to_underlying(padded.height));
   while (true) {
     // A glyph wider or taller than a whole layer can only be housed by a
     // larger layer, however many layers there are.
     if (needed <= size && palettes.end() != getBestPalette(padded)) {
-      return;
+      return {};
     }
     // Size first: a layer twice as wide holds four times as much, where a
     // second layer only doubles it, and layers are the scarcer resource --
@@ -355,15 +357,16 @@ void GlyphCache::makeRoomFor(const Rect &padded) {
       reallocate(size, std::min(maxLayers, layerCount * 2));
       continue;
     }
-    throw std::overflow_error(std::format(
-        "GlyphCache: the atlas is full at {}x{} across {} layers, and a "
-        "{}x{} glyph will not fit",
-        size, size, layerCount, std::to_underlying(padded.width),
-        std::to_underlying(padded.height)));
+    GLEDITOR_LOG_DEBUG("render.glyphs",
+                       "atlas full at {}x{} across {} layers; a {}x{} glyph "
+                       "will not fit",
+                       size, size, layerCount, std::to_underlying(padded.width),
+                       std::to_underlying(padded.height));
+    return std::unexpected{GlyphError::AtlasFull};
   }
 }
 
-GlyphCache::Sizes
+std::expected<GlyphCache::Sizes, GlyphError>
 GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
                        const std::unordered_set<Decoration> &decorations) {
   if (!font || chr.empty()) {
@@ -456,10 +459,10 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
       if (cp > 32) {
         if (auto fallback =
                 text::FontManager::instance().getFallbackFont(useFont, cp);
-            fallback && fallback->face()) {
-          const auto fbIdx = FT_Get_Char_Index(fallback->face(), cp);
+            fallback && (*fallback)->face()) {
+          const auto fbIdx = FT_Get_Char_Index((*fallback)->face(), cp);
           if (fbIdx != 0) {
-            glyphFace = fallback->face();
+            glyphFace = (*fallback)->face();
             glyphCode = fbIdx;
             if (advX == 0 && glyphFace->glyph) {
               advX = static_cast<int>(glyphFace->glyph->advance.x >> 6);
@@ -633,17 +636,17 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   // itself below, so nothing downstream sees the border either.
   const auto padded = Rect{.width  = Length{width + (2 * glyphPadding)},
                            .height = Length{height + (2 * glyphPadding)}};
-  makeRoomFor(padded);
+  if (auto room = makeRoomFor(padded); !room) {
+    return std::unexpected{room.error()};
+  }
   const auto palette = getBestPalette(padded);
   if (palettes.end() == palette) {
-    throw std::overflow_error(
-        std::format("GlyphCache: no palette has room for glyph: {}", chr));
+    return std::unexpected{GlyphError::AtlasFull};
   }
   auto paddedCoverage = extractPaddedCoverage(data, width, height, stride);
   const auto placed   = palette->put(padded, paddedCoverage.data);
   if (!placed.has_value()) {
-    throw std::overflow_error(
-        std::format("GlyphCache: failed to place glyph: {}", chr));
+    return std::unexpected{GlyphError::AtlasFull};
   }
   const auto inked = paddedCoverage.meanInk;
   // Remembered so that growing the atlas can put it back exactly here.
@@ -682,7 +685,7 @@ const FontMapKeyAdapter &GlyphCache::keyFor(const FontPtr &font) {
   return fontKeys.emplace(font.get(), FontMapKeyAdapter(font)).first->second;
 }
 
-GlyphCache::Sizes
+std::expected<GlyphCache::Sizes, GlyphError>
 GlyphCache::put(const std::string_view &chr, const FontPtr &font,
                 const std::unordered_set<Decoration> &decorations) {
   // A whole shaped cluster is cached, not a single codepoint: a ligature or a
@@ -692,9 +695,7 @@ GlyphCache::put(const std::string_view &chr, const FontPtr &font,
   // zero-width joiners, and exists only so that a pathological run cannot
   // become a cache key.
   if (chr.size() > maxClusterBytes) {
-    throw std::invalid_argument(
-        std::format("GlyphCache: cluster of {} bytes exceeds the {}-byte limit",
-                    chr.size(), maxClusterBytes));
+    return std::unexpected{GlyphError::ClusterTooLong};
   }
   if (const auto &chrToFontMap = glyphs.find(chr);
       chrToFontMap != glyphs.cend()) {
@@ -702,11 +703,13 @@ GlyphCache::put(const std::string_view &chr, const FontPtr &font,
         variants != chrToFontMap->second.cend()) {
       // Size first, so the common case of "no decorations at all" on either
       // side is settled without comparing a single element.
-      for (const auto &variant : variants->second) {
-        if (variant.decorations.size() == decorations.size() &&
-            variant.decorations == decorations) {
-          return variant.sizes;
-        }
+      const auto hit = std::ranges::find_if(
+          variants->second, [&decorations](const DecoratedSizes &variant) {
+            return variant.decorations.size() == decorations.size() &&
+                   variant.decorations == decorations;
+          });
+      if (hit != variants->second.end()) {
+        return hit->sizes;
       }
     }
   }

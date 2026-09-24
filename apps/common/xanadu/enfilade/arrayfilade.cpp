@@ -8,6 +8,9 @@
 #include <cmath>
 #include <limits>
 #include <queue>
+#include <ranges>
+
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::enfilade {
 
@@ -88,57 +91,60 @@ Arrayfilade Arrayfilade::fromEntries(std::span<const ArrayCellEntry> entries,
   return filade;
 }
 
+namespace {
+
+using Coords = std::array<std::int64_t, MaxValence>;
+
+/// @p cell as an array entry at @p coords. Only for a cell @p m holds a slot
+/// for; the callers filter on that first.
+template <zigzag::CellGraph M, typename TextOf>
+ArrayCellEntry entryOf(const M &m, const zigzag::CellRef cell,
+                       const Coords &coords, const TextOf &textOf) {
+  const auto &slot = *m.slot(cell);
+  return ArrayCellEntry::fromCell(
+      cell, coords, static_cast<xanadu::ValueKind>(slot.valueKind),
+      slot.valueBits, textOf(cell));
+}
+
+template <zigzag::CellGraph M> auto holdsSlot(const M &m) {
+  return [&m](const zigzag::CellRef cell) { return nullptr != m.slot(cell); };
+}
+
+/// A rank as a one-dimensional array: its cells in order, up to the first one
+/// @p m has no slot for.
+template <zigzag::CellGraph M, typename TextOf>
+std::vector<ArrayCellEntry> rankEntries(const M &m, const zigzag::CellRef head,
+                                        const zigzag::DimRef dim,
+                                        const TextOf &textOf) {
+  return zigzag::rank(m, head, dim) | std::views::take_while(holdsSlot(m)) |
+         std::views::enumerate | std::views::transform([&](const auto indexed) {
+           const auto [index, cell] = indexed;
+           return entryOf(m, cell, Coords{static_cast<std::int64_t>(index)},
+                          textOf);
+         }) |
+         std::ranges::to<std::vector>();
+}
+
+} // namespace
+
 Arrayfilade Arrayfilade::fromRank(const zigzag::Manifold &m,
                                   const zigzag::CellRef head,
                                   const zigzag::DimRef dim,
                                   const xanadu::SpanReader *reader) {
-  std::vector<ArrayCellEntry> entries{};
-  std::int64_t idx = 0;
-
-  m.walkRank(head, dim, [&](const zigzag::CellRef cur) {
-    const auto *slot = m.slot(cur);
-    if (nullptr == slot) {
-      return false;
-    }
-    const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
-    std::string text{};
-    if (nullptr != reader) {
-      text = m.textOf(cur, *reader);
-    }
-    std::array<std::int64_t, MaxValence> coords{};
-    coords[0] = idx++;
-
-    entries.push_back(
-        ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
-    return true;
-  });
-
-  return fromEntries(entries, 1);
+  const auto textOf = [&](const zigzag::CellRef cell) {
+    return nullptr == reader ? std::string{} : m.textOf(cell, *reader);
+  };
+  return fromEntries(rankEntries(m, head, dim, textOf), 1);
 }
 
 Arrayfilade Arrayfilade::fromArenaRank(const zigzag::ArenaManifold &am,
                                        const zigzag::CellRef head,
                                        const zigzag::DimRef dim,
                                        const xanadu::SpanReader *reader) {
-  std::vector<ArrayCellEntry> entries{};
-  std::int64_t idx = 0;
-
-  am.walkRank(head, dim, [&](const zigzag::CellRef cur) {
-    const auto *slot = am.slot(cur);
-    if (nullptr == slot) {
-      return false;
-    }
-    const auto kind        = static_cast<xanadu::ValueKind>(slot->valueKind);
-    const std::string text = am.textOf(cur, reader);
-    std::array<std::int64_t, MaxValence> coords{};
-    coords[0] = idx++;
-
-    entries.push_back(
-        ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
-    return true;
-  });
-
-  return fromEntries(entries, 1);
+  const auto textOf = [&](const zigzag::CellRef cell) {
+    return am.textOf(cell, reader);
+  };
+  return fromEntries(rankEntries(am, head, dim, textOf), 1);
 }
 
 Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
@@ -146,31 +152,28 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
                                     const zigzag::DimRef rowDim,
                                     const zigzag::DimRef colDim,
                                     const xanadu::SpanReader *reader) {
-  std::vector<ArrayCellEntry> entries{};
-  std::int64_t r = 0;
-
-  m.walkRank(origin, rowDim, [&](const zigzag::CellRef rowCur) {
-    std::int64_t c = 0;
-    m.walkRank(rowCur, colDim, [&](const zigzag::CellRef colCur) {
-      const auto *slot = m.slot(colCur);
-      if (nullptr != slot) {
-        const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
-        std::string text{};
-        if (nullptr != reader) {
-          text = m.textOf(colCur, *reader);
-        }
-        std::array<std::int64_t, MaxValence> coords{};
-        coords[0] = r;
-        coords[1] = c++;
-
-        entries.push_back(ArrayCellEntry::fromCell(colCur, coords, kind,
-                                                   slot->valueBits, text));
-      }
-    });
-    ++r;
-  });
-
-  return fromEntries(entries, 2);
+  const auto textOf = [&](const zigzag::CellRef cell) {
+    return nullptr == reader ? std::string{} : m.textOf(cell, *reader);
+  };
+  // Rows along rowDim from the origin, each row's cells along colDim. A cell
+  // with no slot is skipped without taking a column index, so a hole in a row
+  // closes up rather than leaving a gap.
+  const auto row = [&](const auto indexedRow) {
+    const auto [r, rowHead] = indexedRow;
+    return zigzag::rank(m, rowHead, colDim) | std::views::filter(holdsSlot(m)) |
+           std::views::enumerate |
+           std::views::transform([&m, &textOf, r](const auto indexedCol) {
+             const auto [c, cell] = indexedCol;
+             return entryOf(m, cell,
+                            Coords{static_cast<std::int64_t>(r),
+                                   static_cast<std::int64_t>(c)},
+                            textOf);
+           });
+  };
+  return fromEntries(zigzag::rank(m, origin, rowDim) | std::views::enumerate |
+                         std::views::transform(row) | std::views::join |
+                         std::ranges::to<std::vector>(),
+                     2);
 }
 
 void Arrayfilade::buildTree(std::span<const ArrayCellEntry> entries) {

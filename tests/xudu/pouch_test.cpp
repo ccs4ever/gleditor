@@ -181,13 +181,13 @@ TEST(PouchTest, ForgeClaspCreatesBidirectionalCompoundLink) {
   EXPECT_NE(vLinked, vA);
 
   // Verify link exists and touches both ends
-  const auto touchingLeft = st.linksTouching(leftSpans.front());
+  auto touchingLeft = st.linksTouching(leftSpans.front());
   ASSERT_FALSE(touchingLeft.empty());
-  EXPECT_EQ(touchingLeft.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingLeft.front().type, LinkType::Comment);
 
-  const auto touchingRight = st.linksTouching(rightSpans.front());
+  auto touchingRight = st.linksTouching(rightSpans.front());
   ASSERT_FALSE(touchingRight.empty());
-  EXPECT_EQ(touchingRight.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingRight.front().type, LinkType::Comment);
 }
 
 TEST(PouchTest, SwingBackResolvesExactByteSpan) {

@@ -5,11 +5,14 @@
 #include "xudu/tenuous_tether.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
+#include <span>
 #include <utility>
+#include <vector>
 
 #include <gleditor/render/types.hpp>
+
+#include "common/cpp26_inplace_vector.hpp"
 
 namespace xudu {
 
@@ -47,8 +50,9 @@ bool TenuousTetherOverlay::hasActiveTethers() const noexcept {
       tethers_, [](const FlyingTetherAnchor &t) { return t.active; });
 }
 
-void TenuousTetherOverlay::deviceReady(render::RenderDevice &device,
-                                       const render::PipelineDesc &) {
+void TenuousTetherOverlay::deviceReady(
+    render::RenderDevice &device,
+    [[maybe_unused]] const render::PipelineDesc &documentPipeline) {
   device_ = &device;
   beams_  = std::make_unique<gleditor::Beams>(&device, 256);
   beams_->createPipeline("assets/shaders", "assets/shaders/vulkan", false);
@@ -61,8 +65,22 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
   beams_->clear();
 
-  const std::size_t kSegments = segments_ > 0 ? segments_ : 16;
-  std::vector<glm::vec3> curve(kSegments + 1);
+  const std::size_t segments =
+      segments_ > 0 ? segments_ : defaultTessellationSegments;
+
+  // The default curve fits inline; larger user-configured curves retain the
+  // dynamic path rather than changing their tessellation.
+  common::cpp26::inplace_vector<glm::vec3, defaultTessellationSegments + 1>
+      inlineCurve;
+  std::vector<glm::vec3> largeCurve;
+  std::span<glm::vec3> curve;
+  if (segments <= defaultTessellationSegments) {
+    inlineCurve.resize(segments + 1);
+    curve = std::span(inlineCurve.data(), inlineCurve.size());
+  } else {
+    largeCurve.resize(segments + 1);
+    curve = std::span(largeCurve.data(), largeCurve.size());
+  }
 
   for (const auto &t : tethers_) {
     if (!t.active) {
@@ -72,8 +90,8 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const glm::vec3 ctrl =
         computeControlPoint(t.originPos, t.currentPos, controlDepth_);
 
-    for (std::size_t i = 0; i <= kSegments; ++i) {
-      const float param = static_cast<float>(i) / static_cast<float>(kSegments);
+    for (std::size_t i = 0; i <= segments; ++i) {
+      const float param = static_cast<float>(i) / static_cast<float>(segments);
       curve[i] = evaluateBezier(t.originPos, ctrl, t.currentPos, param);
     }
 

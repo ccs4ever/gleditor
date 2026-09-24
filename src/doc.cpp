@@ -22,6 +22,7 @@
 #include <limits>
 #include <memory> // for __shared_ptr_access, shared...
 #include <mutex>
+#include <ranges>
 #include <span>          // for span
 #include <stdexcept>     // for logic_error
 #include <string>        // for char_traits, basic_string
@@ -40,6 +41,34 @@
 #include <glm/geometric.hpp>             // for dot, normalize
 #include <glm/gtx/string_cast.hpp>
 #include <glm/trigonometric.hpp> // for radians
+
+namespace {
+/// @p ranges clipped to [@p pageStart, @p pageEnd) and rebased to the page's
+/// own coordinates, dropping those that miss it: what layoutPage() is handed
+/// for a page, since it only ever sees that page's slice of the text.
+template <typename Range>
+std::vector<Range> clippedToPage(const std::vector<Range> &ranges,
+                                 const std::uint32_t pageStart,
+                                 const std::uint32_t pageEnd) {
+  const auto clipped = [=](Range range) -> std::optional<Range> {
+    const auto from = std::max(range.start, pageStart);
+    const auto to   = std::min(range.end, pageEnd);
+    if (from >= to) {
+      return std::nullopt;
+    }
+    range.start = from - pageStart;
+    range.end   = to - pageStart;
+    return range;
+  };
+  std::vector<Range> out;
+  for (auto &&range : ranges | std::views::transform(clipped)) {
+    if (range) {
+      out.push_back(*std::move(range));
+    }
+  }
+  return out;
+}
+} // namespace
 
 namespace {
 
@@ -256,9 +285,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   std::vector<float> lineInk(aShaping.lineCount, 0.0F);
 
   for (std::size_t gi = 0; gi < aShaping.glyphs.size(); ++gi) {
-    const auto &g    = aShaping.glyphs[gi];
-    const auto glyph = state.glyphCache.put(
+    const auto &g          = aShaping.glyphs[gi];
+    const auto glyphPlaced = state.glyphCache.put(
         g.chr, font, gleditor::decorationSetFor(g.decorations));
+    if (!glyphPlaced) {
+      // One glyph the atlas cannot take is one glyph not drawn; the rest of
+      // the page still is.
+      GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
+                         toString(glyphPlaced.error()));
+      continue;
+    }
+    const auto &glyph   = *glyphPlaced;
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
@@ -352,97 +389,105 @@ std::string_view Page::pageText() const {
 
 PageShaping Page::ensureShaping() const { return doc->layoutFrom(textOffset); }
 
-bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
-                         float &posY, float &height) const {
+std::optional<CaretGeometry>
+Page::caretGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
-    return false;
+    return std::nullopt;
   }
   const auto shaped = ensureShaping();
   auto font         = gleditor::text::FontManager::instance().getFont(
       std::string{doc->renderer->defaultFontName()});
-  height = font ? font->metrics().lineHeight : 16.0F;
+  const float height = font ? font->metrics().lineHeight : 16.0F;
 
   const auto relOffset = globalOffset - textOffset;
-  float left           = pageMargin;
-  float top            = pageMargin;
+  // Exclusive upper bound: relOffset sitting exactly on the boundary between
+  // two clusters means "the start of the next one", not "the end of the
+  // previous one". Inclusive matched the previous cluster instead, because
+  // shaped.glyphs is walked in document order and the previous cluster is
+  // seen first -- indistinguishable from the correct answer for two adjacent
+  // visible clusters (same on-screen X either way), but wrong whenever what
+  // follows has no cluster of its own to lose to, the case the line fallback
+  // exists for. A media placeholder's reserved blank lines are exactly that:
+  // relOffset landing on the byte where the preceding paragraph's last cluster
+  // ends *is* where the placeholder begins, and the cluster search must not
+  // claim it first.
+  const auto covers = [relOffset](const std::uint32_t start,
+                                  const std::uint32_t length) {
+    return relOffset >= start && relOffset < start + length;
+  };
+  // Left and top of the caret, relative to the page's text edge.
+  using Spot       = std::pair<float, float>;
+  const auto topOf = [&](const std::size_t lineIndex) {
+    return lineIndex < shaped.lines.size() ? shaped.lines[lineIndex].top : 0.0F;
+  };
+  const auto endOfInk = [](const auto &line) {
+    // Past the end of the line's own ink, which starts at line.left rather
+    // than at the text edge for anything not left-aligned.
+    return Spot{line.left + line.barWidth, line.top};
+  };
 
-  bool found = false;
-  for (const auto &g : shaped.glyphs) {
-    if (g.clusterIndex < shaped.clusters.size()) {
-      const auto &cl = shaped.clusters[g.clusterIndex];
-      // Exclusive upper bound: relOffset sitting exactly on the boundary
-      // between two clusters means "the start of the next one", not "the end
-      // of the previous one". Inclusive matched the previous cluster instead,
-      // because shaped.glyphs is walked in document order and the previous
-      // cluster is seen first -- indistinguishable from the correct answer
-      // for two adjacent visible clusters (same on-screen X either way), but
-      // wrong whenever what follows has no cluster of its own to lose to, the
-      // case the fallback below exists for. A media placeholder's reserved
-      // blank lines are exactly that: relOffset landing on the byte where the
-      // preceding paragraph's last cluster ends *is* where the placeholder
-      // begins, and this loop must not claim it first.
-      if (relOffset >= cl.byteStart &&
-          relOffset < cl.byteStart + cl.byteLength) {
-        left = pageMargin + g.clusterLeft;
-        if (g.lineIndex < shaped.lines.size()) {
-          top = pageMargin + shaped.lines[g.lineIndex].top;
-        }
-        found = true;
-        break;
-      }
+  const auto onCluster = [&]() -> std::optional<Spot> {
+    const auto glyph = std::ranges::find_if(shaped.glyphs, [&](const auto &g) {
+      return g.clusterIndex < shaped.clusters.size() &&
+             covers(shaped.clusters[g.clusterIndex].byteStart,
+                    shaped.clusters[g.clusterIndex].byteLength);
+    });
+    if (glyph == shaped.glyphs.end()) {
+      return std::nullopt;
     }
-  }
-  if (!found) {
-    // No cluster covers this offset -- the common reason is a blank line, a
-    // media placeholder's reserved newlines having no glyph of their own to
-    // match above. Locate the *line* directly by its own byte range instead
-    // of falling back to the page's last line regardless of where relOffset
-    // actually falls: two placeholders on the same page would otherwise both
-    // resolve to that one last line and land on top of each other.
-    for (const auto &ln : shaped.lines) {
-      // Same exclusive-upper-bound reasoning as the cluster loop above: the
-      // line this offset ends still-inclusive would be the *previous* line,
-      // not the blank one this offset actually names.
-      if (relOffset >= ln.byteStart &&
-          relOffset < ln.byteStart + ln.byteLength) {
-        // Past the end of the line's own ink, which starts at ln.left rather
-        // than at the text edge for anything not left-aligned.
-        left  = pageMargin + ln.left + ln.barWidth;
-        top   = pageMargin + ln.top;
-        found = true;
-        break;
-      }
+    return Spot{glyph->clusterLeft, topOf(glyph->lineIndex)};
+  };
+  // No cluster covers this offset -- the common reason is a blank line, a
+  // media placeholder's reserved newlines having no glyph of their own. Locate
+  // the *line* by its own byte range rather than falling back to the page's
+  // last line regardless of where relOffset falls: two placeholders on the
+  // same page would otherwise both land on that one last line.
+  const auto onLine = [&]() -> std::optional<Spot> {
+    const auto line = std::ranges::find_if(shaped.lines, [&](const auto &ln) {
+      return covers(ln.byteStart, ln.byteLength);
+    });
+    if (line == shaped.lines.end()) {
+      return std::nullopt;
     }
-  }
-  if (!found && !shaped.lines.empty()) {
-    const auto &lastLine = shaped.lines.back();
-    left                 = pageMargin + lastLine.left + lastLine.barWidth;
-    top                  = pageMargin + lastLine.top;
-  }
+    return endOfInk(*line);
+  };
+  const auto afterLastLine = [&]() -> std::optional<Spot> {
+    if (shaped.lines.empty()) {
+      return std::nullopt;
+    }
+    return endOfInk(shaped.lines.back());
+  };
 
-  posX = originX + left + (Caret::widthPixels / 2.0F);
-  posY = originY - (top + (height / 2.0F));
-  return true;
+  const auto [left, top] = onCluster()
+                               .or_else(onLine)
+                               .or_else(afterLastLine)
+                               .value_or(Spot{0.0F, 0.0F});
+  return CaretGeometry{
+      .x      = originX + pageMargin + left + (Caret::widthPixels / 2.0F),
+      .y      = originY - (pageMargin + top + (height / 2.0F)),
+      .height = height,
+  };
 }
 
-bool Page::boxGeometry(const std::uint32_t globalOffset, float &posX,
-                       float &posY, float &width, float &height) const {
+std::optional<BoxGeometry>
+Page::boxGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
-    return false;
+    return std::nullopt;
   }
   const auto shaped    = ensureShaping();
   const auto relOffset = globalOffset - textOffset;
-
-  for (const auto &placed : shaped.boxes) {
-    if (placed.anchorByteOffset == relOffset) {
-      posX   = originX + pageMargin + placed.left;
-      posY   = originY - (pageMargin + placed.top + placed.height);
-      width  = placed.width;
-      height = placed.height;
-      return true;
-    }
+  const auto placed    = std::ranges::find(
+      shaped.boxes, relOffset,
+      &std::ranges::range_value_t<decltype(shaped.boxes)>::anchorByteOffset);
+  if (placed == shaped.boxes.end()) {
+    return std::nullopt;
   }
-  return false;
+  return BoxGeometry{
+      .x      = originX + pageMargin + placed->left,
+      .y      = originY - (pageMargin + placed->top + placed->height),
+      .width  = placed->width,
+      .height = placed->height,
+  };
 }
 
 std::optional<std::uint32_t>
@@ -504,14 +549,13 @@ std::uint32_t Page::offsetForPagePoint(const float xFraction,
       continue;
     }
     const auto &cluster = shaped.clusters[glyph.clusterIndex];
-    float right         = line.left + line.barWidth;
-    for (const auto &next : shaped.glyphs) {
-      if (next.lineIndex == line.lineIndex &&
-          next.clusterLeft > glyph.clusterLeft) {
-        right = next.clusterLeft;
-        break;
-      }
-    }
+    // The glyph's right edge is where the next one on its line starts, or the
+    // end of the line's ink for the last.
+    const auto next   = std::ranges::find_if(shaped.glyphs, [&](const auto &n) {
+      return n.lineIndex == line.lineIndex && n.clusterLeft > glyph.clusterLeft;
+    });
+    const float right = next == shaped.glyphs.end() ? line.left + line.barWidth
+                                                    : next->clusterLeft;
     if (x < (glyph.clusterLeft + right) * 0.5F) {
       return textOffset + cluster.byteStart;
     }
@@ -575,11 +619,8 @@ void Doc::collect(std::vector<render::GlyphBatch> &batches,
     return;
   }
   const auto docTransform = viewProjection * modelMatrix();
-  for (const auto &pageSlot : pages) {
-    if (!pageSlot) {
-      continue;
-    }
-    pageSlot->collect(batches, docTransform, opacity(), budget, stats);
+  for (const auto &[index, page] : builtPages()) {
+    page.collect(batches, docTransform, opacity(), budget, stats);
   }
 }
 
@@ -587,50 +628,45 @@ glm::mat4 Doc::modelMatrix() const {
   return glm::translate(glm::mat4(1.0F), position());
 }
 
+std::optional<std::uint32_t> Doc::pageHolding(const std::uint32_t at) const {
+  // The last built page starting at or before @p at. Pages are in document
+  // order, so walking from the back stops at the first that qualifies.
+  auto holding = builtPages() | std::views::reverse |
+                 std::views::filter([at](const auto &indexed) {
+                   return at >= indexed.second.baseOffset();
+                 });
+  if (holding.begin() == holding.end()) {
+    return std::nullopt;
+  }
+  return (*holding.begin()).first;
+}
+
 std::optional<Doc::Anchor>
 Doc::anchorFor(const std::uint32_t globalOffset) const {
-  for (std::size_t i = 0; i < pages.size(); i++) {
-    if (!pages[i]) {
-      continue;
-    }
-    // Asked page by page rather than by searching, because the same call
-    // decides whether the offset is on the page and where -- and the deciding
-    // half is answered without shaping anything.
-    Anchor anchor{.pageIndex = static_cast<std::uint32_t>(i),
-                  .x         = 0.0F,
-                  .y         = 0.0F,
-                  .height    = 0.0F};
-    // pages[i] was just checked truthy above; re-indexing here reaches the
-    // same slot since nothing in this loop body mutates pages.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    if (pages[i]->caretGeometry(globalOffset, anchor.x, anchor.y,
-                                anchor.height)) {
-      return anchor;
-    }
-  }
-  return std::nullopt;
+  // Asked page by page rather than by searching, because the same call
+  // decides whether the offset is on the page and where -- and the deciding
+  // half is answered without shaping anything.
+  return firstBuiltPage([&](const std::uint32_t index, const Page &page) {
+    return page.caretGeometry(globalOffset)
+        .transform([index](const CaretGeometry &at) {
+          return Anchor{
+              .pageIndex = index, .x = at.x, .y = at.y, .height = at.height};
+        });
+  });
 }
 
 std::optional<Doc::BoxRect>
 Doc::boxFor(const std::uint32_t globalOffset) const {
-  for (std::size_t i = 0; i < pages.size(); i++) {
-    if (!pages[i]) {
-      continue;
-    }
-    BoxRect rect{.pageIndex = static_cast<std::uint32_t>(i),
-                 .x         = 0.0F,
-                 .y         = 0.0F,
-                 .width     = 0.0F,
-                 .height    = 0.0F};
-    // pages[i] was just checked truthy above; re-indexing here reaches the
-    // same slot since nothing in this loop body mutates pages.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    if (pages[i]->boxGeometry(globalOffset, rect.x, rect.y, rect.width,
-                              rect.height)) {
-      return rect;
-    }
-  }
-  return std::nullopt;
+  return firstBuiltPage([&](const std::uint32_t index, const Page &page) {
+    return page.boxGeometry(globalOffset)
+        .transform([index](const BoxGeometry &box) {
+          return BoxRect{.pageIndex = index,
+                         .x         = box.x,
+                         .y         = box.y,
+                         .width     = box.width,
+                         .height    = box.height};
+        });
+  });
 }
 
 void Doc::refreshPageIndexFilade() const {
@@ -765,24 +801,22 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
 
   const auto text = pageText();
 
-  std::optional<std::size_t> first;
-  std::size_t last = 0;
-  for (std::size_t i = 0; i < clusters.size(); i++) {
-    const auto &box  = clusters[i];
-    const auto begin = box.byteStart;
-    const auto end   = box.byteStart + box.byteLength;
-    // Half-open overlap: a cluster is covered when any of its bytes are.
-    if (end <= localStart || begin >= localEnd) {
-      continue;
-    }
-    if (!first) {
-      first = i;
-    }
-    last = i;
-  }
-  if (!first) {
+  // Half-open overlap: a cluster is covered when any of its bytes are.
+  const auto covered = [&](const ClusterBox &box) {
+    return box.byteStart + box.byteLength > localStart &&
+           box.byteStart < localEnd;
+  };
+  const auto firstIt = std::ranges::find_if(clusters, covered);
+  if (firstIt == clusters.end()) {
     return std::nullopt;
   }
+  const auto lastIt =
+      std::ranges::find_if(clusters | std::views::reverse, covered);
+  const std::optional<std::size_t> first =
+      static_cast<std::size_t>(firstIt - clusters.begin());
+  const std::size_t last =
+      clusters.size() - 1 -
+      static_cast<std::size_t>(lastIt - std::ranges::rbegin(clusters));
 
   // Where inside the edge clusters the span begins and ends, counted in
   // characters so the edge cannot land mid-glyph of a ligature.
@@ -812,11 +846,8 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
 void Doc::highlightsFor(const std::uint32_t selStart,
                         const std::uint32_t selEnd, const std::uint32_t colour,
                         std::vector<render::HighlightRange> &out) const {
-  for (const auto &pageSlot : pages) {
-    if (!pageSlot) {
-      continue;
-    }
-    if (auto range = pageSlot->highlightFor(selStart, selEnd, colour)) {
+  for (const auto &[index, page] : builtPages()) {
+    if (auto range = page.highlightFor(selStart, selEnd, colour)) {
       out.push_back(*range);
     }
   }
@@ -844,19 +875,12 @@ void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
   if (!caret.active() || caret.documentIndex() != docIndex) {
     return;
   }
-  for (const auto &pageSlot : pages) {
-    if (!pageSlot) {
-      continue;
+  for (const auto &[index, page] : builtPages()) {
+    if (const auto at = page.caretGeometry(caret.byteOffset())) {
+      caret.setGeometry(at->x, at->y, at->height);
+      caret.draw(state, viewProjection * modelMatrix() * page.getModel());
+      return;
     }
-    float posX   = 0.0F;
-    float posY   = 0.0F;
-    float height = 0.0F;
-    if (!pageSlot->caretGeometry(caret.byteOffset(), posX, posY, height)) {
-      continue;
-    }
-    caret.setGeometry(posX, posY, height);
-    caret.draw(state, viewProjection * modelMatrix() * pageSlot->getModel());
-    return;
   }
 }
 
@@ -902,60 +926,39 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   // than offset is the nearest one -- strictly greater, since a break sitting
   // exactly at offset already did its job ending the previous page and says
   // nothing about this one.
-  auto available = text.size() - offset;
-  for (const auto breakAt : forcedBreaks) {
-    if (breakAt > offset) {
-      available = std::min(available, static_cast<std::size_t>(breakAt) -
-                                          static_cast<std::size_t>(offset));
-      break;
-    }
+  auto available       = text.size() - offset;
+  const auto nextBreak = std::ranges::upper_bound(forcedBreaks, offset);
+  if (nextBreak != forcedBreaks.end()) {
+    available = std::min(available, static_cast<std::size_t>(*nextBreak) -
+                                        static_cast<std::size_t>(offset));
   }
 
   // decoratedRanges is in this document's own offsets, same as forcedBreaks,
   // but layoutPage() only ever sees the slice starting at offset -- so each
   // range is clipped to what this page actually covers and rebased to that
   // slice's own coordinates, the same translation forcedBreaks gets above.
-  const auto pageEnd = offset + available;
-  for (const auto &range : decoratedRanges) {
-    const auto from = std::max<std::uint32_t>(range.start, offset);
-    const auto to =
-        std::min<std::uint32_t>(range.end, static_cast<std::uint32_t>(pageEnd));
-    if (from < to) {
-      opts.decoratedRanges.push_back(gleditor::DecoratedRange{
-          .start       = from - offset,
-          .end         = to - offset,
-          .decorations = range.decorations,
-      });
-    }
-  }
+  const auto pageEnd   = static_cast<std::uint32_t>(offset + available);
+  opts.decoratedRanges = clippedToPage(
+      decoratedRanges, static_cast<std::uint32_t>(offset), pageEnd);
 
   // layoutBoxes is a single anchor byte each -- forwarded only when that
   // anchor falls within this page's own slice, the same "start falls on
   // this page or it does not" rule decoratedRanges' clipping does not
   // need, since a box has no length of its own to be truncated.
-  for (const auto &box : layoutBoxes) {
-    if (box.anchor >= offset &&
-        box.anchor < static_cast<std::uint32_t>(pageEnd)) {
-      auto rebased   = box;
-      rebased.anchor = box.anchor - offset;
-      opts.boxes.push_back(rebased);
-    }
-  }
+  opts.boxes = layoutBoxes | std::views::filter([&](const auto &box) {
+                 return box.anchor >= offset && box.anchor < pageEnd;
+               }) |
+               std::views::transform([&](auto box) {
+                 box.anchor -= static_cast<std::uint32_t>(offset);
+                 return box;
+               }) |
+               std::ranges::to<std::vector>();
 
   // blockStyles is clipped and rebased the same way decoratedRanges is
   // above: a paragraph style, unlike an atomic range's height, is not
   // wrong for being truncated to what this page covers.
-  for (const auto &range : blockStyles) {
-    const auto from = std::max<std::uint32_t>(range.start, offset);
-    const auto to =
-        std::min<std::uint32_t>(range.end, static_cast<std::uint32_t>(pageEnd));
-    if (from < to) {
-      auto rebased  = range;
-      rebased.start = from - offset;
-      rebased.end   = to - offset;
-      opts.blockStyles.push_back(rebased);
-    }
-  }
+  opts.blockStyles =
+      clippedToPage(blockStyles, static_cast<std::uint32_t>(offset), pageEnd);
 
   return gleditor::text::TextLayout::layoutPage(
       std::string_view{text.data() + offset, available}, font, opts);
@@ -992,16 +995,11 @@ std::vector<int> lineStartsFromShaping(const PageShaping &shaping) {
 bool sameLineBreaks(const std::vector<int> &before,
                     const std::vector<int> &after, const int at,
                     const int delta) {
-  if (before.size() != after.size()) {
-    return false;
-  }
-  for (std::size_t i = 0; i < before.size(); i++) {
-    const int expected = before[i] <= at ? before[i] : before[i] + delta;
-    if (after[i] != expected) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::equal(
+      before | std::views::transform([at, delta](const int start) {
+        return start <= at ? start : start + delta;
+      }),
+      after);
 }
 
 } // namespace
@@ -1026,24 +1024,13 @@ void Doc::removeObserver(gleditor::DocumentObserver *const observer) {
 }
 
 std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
-  if (pages.empty()) {
-    return {};
-  }
-  std::size_t firstPage = 0;
-  for (std::size_t i = 0; i < pages.size(); i++) {
-    // pages[i] is re-indexed after the truthiness check in the same &&
-    // expression, reaching the same slot.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    if (pages[i] && at >= pages[i]->baseOffset()) {
-      firstPage = i;
-    }
-  }
-  if (!pages[firstPage]) {
-    return {};
-  }
-  // Re-indexing pages[firstPage] here reaches the same slot just checked.
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  return lineStartsFromShaping(pages[firstPage]->ensureShaping());
+  return pageHolding(at)
+      .transform([&](const std::uint32_t index) {
+        // pageHolding() only answers built pages.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        return lineStartsFromShaping(pages[index]->ensureShaping());
+      })
+      .value_or(std::vector<int>{});
 }
 
 void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
@@ -1051,18 +1038,11 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
                          const std::vector<int> &oldStarts) {
   // Which page holds the edit. Everything before it is untouched by
   // construction: text ahead of an edit cannot reflow.
-  std::size_t firstPage = 0;
-  for (std::size_t i = 0; i < pages.size(); i++) {
-    // pages[i] is re-indexed after the truthiness check in the same &&
-    // expression, reaching the same slot.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    if (pages[i] && at >= pages[i]->baseOffset()) {
-      firstPage = i;
-    }
-  }
-  if (pages.empty() || !pages[firstPage]) {
+  const auto holding = pageHolding(at);
+  if (!holding) {
     return;
   }
+  const std::size_t firstPage = *holding;
 
   // Re-indexing pages[firstPage] here reaches the same slot just checked.
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -1727,14 +1707,8 @@ void Doc::ensurePagesBuiltThrough(RenderState &state,
   if (pages.size() < exclusiveEnd) {
     pages.resize(exclusiveEnd);
   }
-  bool anyMissing = false;
-  for (std::size_t i = 0; i < exclusiveEnd; i++) {
-    if (!pages[i]) {
-      anyMissing = true;
-      break;
-    }
-  }
-  if (!anyMissing) {
+  if (std::ranges::all_of(std::span{pages}.first(exclusiveEnd),
+                          &std::optional<Page>::has_value)) {
     return;
   }
 

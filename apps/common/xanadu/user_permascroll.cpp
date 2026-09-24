@@ -106,7 +106,13 @@ DeviceDelegation::fromTsv(const std::string_view tsv) {
       }
       cert.masterFingerprint = *fp;
     } else if (entry.key == kDevicePublicKey) {
-      cert.devicePublicKey = PublicKey::fromHex(entry.value);
+      // fromTsv() answers nullopt for a malformed certificate; a key that is
+      // not hex is one, not an exception.
+      const auto key = PublicKey::parseHex(entry.value);
+      if (!key) {
+        return std::nullopt;
+      }
+      cert.devicePublicKey = *key;
     } else if (entry.key == kDeviceName) {
       cert.deviceName = entry.value;
     } else if (entry.key == kIssuedTimestamp) {

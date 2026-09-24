@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
@@ -114,6 +115,31 @@ private:
 
 using MediaResourcePtr = std::shared_ptr<MediaResource>;
 
+/// Why a MediaPlayer or MediaWidget could not load a resource.
+enum class MediaError : std::uint8_t {
+  InvalidResource, ///< no resource, or one that reports itself invalid
+  NoPlayer,        ///< a widget with no player to load into
+  OpenFailed,      ///< the playback backend could not open the media
+  PlayerFailed,    ///< the backend opened it but could not make a player
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const MediaError error) noexcept {
+  switch (error) {
+  case MediaError::InvalidResource:
+    return "invalid resource";
+  case MediaError::NoPlayer:
+    return "no player";
+  case MediaError::OpenFailed:
+    return "media could not be opened";
+  case MediaError::PlayerFailed:
+    return "player could not be created";
+  }
+  return "media load failed";
+}
+
+using MediaLoad = std::expected<void, MediaError>;
+
 /**
  * @class MediaPlayer
  * @brief Audio and video media player driving LibVLC with support for
@@ -129,7 +155,7 @@ public:
   MediaPlayer(MediaPlayer &&)                 = delete;
   MediaPlayer &operator=(MediaPlayer &&)      = delete;
 
-  bool load(const MediaResourcePtr &resource);
+  MediaLoad load(const MediaResourcePtr &resource);
   void unload();
 
   bool play();

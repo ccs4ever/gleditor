@@ -262,7 +262,7 @@ TEST(ManifoldTest, dimensionsComeBackInTheOrderTheyWereMinted) {
       testing::ElementsAre(manifold.dimsDimension(), first, second, third));
   EXPECT_EQ(manifold.dimensionNamed("d.2", slice.store), second);
   EXPECT_EQ(manifold.dimensionNamed("d.clone", slice.store), third);
-  EXPECT_EQ(manifold.dimensionNamed("d.nothing", slice.store), noCell);
+  EXPECT_EQ(manifold.dimensionNamed("d.nothing", slice.store), std::nullopt);
 }
 
 TEST(ManifoldTest, cloneMasterFollowsTheCloneDimensionNegward) {
@@ -392,8 +392,14 @@ TEST(ManifoldTest, verifyAgainstFullRebuildNoticesAMissedOperation) {
   slice.link(one, dim, DimVector::POS, two);
   // The drift R9 exists to catch: the caller folded the last operation and
   // never folded the one before it, so the view is a state the spool does not
-  // hold. It is the hook that says so, not a crash.
-  ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  // hold. It is the hook that says so, not a crash -- and advance() now says
+  // which rule the skipped operation left it unable to satisfy.
+  const auto advanced = manifold.advance(slice.store, slice.at);
+  ASSERT_FALSE(advanced);
+  EXPECT_EQ(
+      advanced.error(),
+      (zigzag::AdvanceError{.kind    = zigzag::AdvanceError::Kind::Refused,
+                            .refusal = zigzag::FoldRefusal::UnknownTarget}));
   EXPECT_FALSE(manifold.verifyAgainstFullRebuild(slice.store));
 }
 

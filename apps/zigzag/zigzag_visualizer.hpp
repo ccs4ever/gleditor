@@ -348,7 +348,7 @@ public:
   /// operation: "only a user-generated update persists; navigation never does"
   /// (design R8), and drawing a frame is less than navigation. Minting belongs
   /// to the verbs a person invokes -- inserting a cell, making a link.
-  [[nodiscard]] DimRef dimensionRef(const DimID &name) const;
+  [[nodiscard]] std::optional<DimRef> dimensionRef(const DimID &name) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(CellRef cell) const override;

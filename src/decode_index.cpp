@@ -17,6 +17,7 @@
  * and TIFF's strip/tile offset tags are both part of each format's own
  * spec, and libFLAC++/libtiff implement reading and writing them directly.
  */
+#include <gleditor/cpp26_span.hpp>
 #include <gleditor/decode_index.hpp>
 
 #include <algorithm>
@@ -87,12 +88,13 @@ struct PngHeader {
 /// this component bytes it already believes are a PNG (from Store, or a
 /// test fixture) is trusting them the same way ImageCache::decodeImageBuffer()
 /// already does.
-std::optional<PngHeader> parsePng(std::span<const std::uint8_t> file,
-                                  std::vector<std::uint8_t> &outIdat) {
+std::expected<PngHeader, DecodeError>
+parsePng(std::span<const std::uint8_t> file,
+         std::vector<std::uint8_t> &outIdat) {
   static const std::uint8_t signature[8] = {0x89, 'P',  'N',  'G',
                                             0x0D, 0x0A, 0x1A, 0x0A};
   if (file.size() < 8 || 0 != std::memcmp(file.data(), signature, 8)) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   std::optional<PngHeader> header;
@@ -113,7 +115,7 @@ std::optional<PngHeader> parsePng(std::span<const std::uint8_t> file,
       const auto colourType = file[dataStart + 9];
       const auto interlace  = file[dataStart + 12];
       if (8 != bitDepth || 6 != colourType || 0 != interlace) {
-        return std::nullopt;
+        return std::unexpected{DecodeError::UnsupportedShape};
       }
       header = h;
     } else if ("IDAT" == type) {
@@ -124,7 +126,11 @@ std::optional<PngHeader> parsePng(std::span<const std::uint8_t> file,
     }
     pos = dataStart + length + 4; // + 4 for the CRC this does not check.
   }
-  return header;
+  if (!header) {
+    // No IHDR: not a PNG whatever its first eight bytes said.
+    return std::unexpected{DecodeError::Undecodable};
+  }
+  return *header;
 }
 
 std::uint8_t paethPredictor(const int a, const int b, const int c) {
@@ -268,13 +274,13 @@ std::size_t PngCheckpoints::checkpointCount() const {
 
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_ZLIB
 
-std::optional<PngCheckpoints>
+std::expected<PngCheckpoints, DecodeError>
 PngCheckpoints::build(const std::span<const std::uint8_t> pngBytes,
                       const std::uint32_t rowInterval) {
   PngCheckpoints result;
   const auto header = parsePng(pngBytes, result.impl_->idat);
   if (!header.has_value()) {
-    return std::nullopt;
+    return std::unexpected{header.error()};
   }
   const auto width             = header->width;
   const auto height            = header->height;
@@ -293,7 +299,7 @@ PngCheckpoints::build(const std::span<const std::uint8_t> pngBytes,
   strm.next_in  = result.impl_->idat.data();
   strm.avail_in = static_cast<uInt>(result.impl_->idat.size());
   if (Z_OK != inflateInit(&strm)) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   result.width_  = width;
@@ -312,7 +318,7 @@ PngCheckpoints::build(const std::span<const std::uint8_t> pngBytes,
     }
   } catch (const std::runtime_error &) {
     inflateEnd(&strm);
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   inflateEnd(&strm);
   return result;
@@ -397,10 +403,10 @@ DecodeIndex buildPngIndex(const std::span<const std::uint8_t> bytes) {
 
 #else // !GLEDITOR_HAVE_DECODE_INDEX_ZLIB
 
-std::optional<PngCheckpoints>
+std::expected<PngCheckpoints, DecodeError>
 PngCheckpoints::build(std::span<const std::uint8_t> /*pngBytes*/,
                       std::uint32_t /*rowInterval*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 std::optional<std::vector<std::uint8_t>>
@@ -621,12 +627,12 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
 
 } // namespace
 
-std::optional<std::pair<std::uint32_t, std::uint32_t>>
+std::expected<std::pair<std::uint32_t, std::uint32_t>, DecodeError>
 peekVideoSize(const std::span<const std::uint8_t> videoBytes) {
   MemoryReader reader{.data = videoBytes.data(), .size = videoBytes.size()};
   auto handle = openMemoryFormat(reader);
   if (!handle.has_value()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   for (unsigned i = 0; i < handle->fmt->nb_streams; ++i) {
     const auto *const params = handle->fmt->streams[i]->codecpar;
@@ -636,14 +642,14 @@ peekVideoSize(const std::span<const std::uint8_t> videoBytes) {
                             static_cast<std::uint32_t>(params->height));
     }
   }
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoVideoStream};
 }
 
 #else // !GLEDITOR_HAVE_DECODE_INDEX_LIBAV
 
-std::optional<std::pair<std::uint32_t, std::uint32_t>>
+std::expected<std::pair<std::uint32_t, std::uint32_t>, DecodeError>
 peekVideoSize(std::span<const std::uint8_t> /*videoBytes*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_LIBAV
@@ -723,7 +729,7 @@ DecodeIndex buildZstdIndex(const std::span<const std::uint8_t> bytes) {
 
 } // namespace
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
                      const std::uint32_t maxFrameSize) {
   // Decompress fully first, via the plain streaming API rather than trusting
@@ -737,11 +743,11 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   // this same path, not a special case.
   auto *const dstream = ZSTD_createDStream();
   if (nullptr == dstream) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   if (ZSTD_isError(ZSTD_initDStream(dstream))) {
     ZSTD_freeDStream(dstream);
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   std::vector<std::uint8_t> decompressed;
   std::vector<std::uint8_t> ioBuf(1U << 17);
@@ -761,17 +767,17 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   } while (din.pos < din.size);
   ZSTD_freeDStream(dstream);
   if (!decodeOk) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   auto *const cstream = ZSTD_seekable_createCStream();
   if (nullptr == cstream) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::EncodeFailed};
   }
   if (ZSTD_isError(ZSTD_seekable_initCStream(
           cstream, ZSTD_CLEVEL_DEFAULT, /*checksumFlag=*/1, maxFrameSize))) {
     ZSTD_seekable_freeCStream(cstream);
-    return std::nullopt;
+    return std::unexpected{DecodeError::EncodeFailed};
   }
   std::vector<std::uint8_t> result;
   ZSTD_inBuffer cin{
@@ -803,17 +809,17 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   }
   ZSTD_seekable_freeCStream(cstream);
   if (!compressOk) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::EncodeFailed};
   }
   return result;
 }
 
 #else // !GLEDITOR_HAVE_DECODE_INDEX_ZSTD
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeZstdSeekable(std::span<const std::uint8_t> /*zstdBytes*/,
                      std::uint32_t /*maxFrameSize*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_ZSTD
@@ -1009,16 +1015,16 @@ DecodeIndex buildFlacIndex(const std::span<const std::uint8_t> bytes) {
 
 } // namespace
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeFlacSeekable(const std::span<const std::uint8_t> flacBytes,
                      const float secondsPerSeekPoint) {
   MemoryFlacDecoder decoder(flacBytes);
   if (FLAC__STREAM_DECODER_INIT_STATUS_OK != decoder.init()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   if (!decoder.process_until_end_of_stream() || !decoder.sawStreamInfo ||
       0 == decoder.sampleRate || decoder.pcm.empty()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   const auto samplesPerPoint = std::max<FLAC__uint64>(
@@ -1043,7 +1049,7 @@ reencodeFlacSeekable(const std::span<const std::uint8_t> flacBytes,
           static_cast<const ::FLAC__StreamMetadata *>(seekTable))};
   encoder.set_metadata(metadataBlocks, 1);
   if (FLAC__STREAM_ENCODER_INIT_STATUS_OK != encoder.init()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::EncodeFailed};
   }
 
   std::vector<const FLAC__int32 *> channelPointers(decoder.channels);
@@ -1055,7 +1061,7 @@ reencodeFlacSeekable(const std::span<const std::uint8_t> flacBytes,
                       static_cast<std::uint32_t>(decoder.pcm[0].size()));
   encoder.finish();
   if (!ok) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::EncodeFailed};
   }
   return std::move(encoder.output);
 }
@@ -1068,10 +1074,10 @@ DecodeIndex buildFlacIndex(std::span<const std::uint8_t> /*bytes*/) {
 }
 } // namespace
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeFlacSeekable(std::span<const std::uint8_t> /*flacBytes*/,
                      float /*secondsPerSeekPoint*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_FLAC
@@ -1252,13 +1258,13 @@ DecodeIndex buildTiffIndex(const std::span<const std::uint8_t> bytes) {
 
 } // namespace
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
                      const std::uint32_t rowsPerStrip) {
   MemoryTiffReader reader{.bytes = tiffBytes};
   auto srcHandle = openMemoryTiffForRead(reader);
   if (!srcHandle.has_value()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   std::uint32_t width  = 0;
@@ -1266,7 +1272,7 @@ reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
   TIFFGetField(srcHandle->tif, TIFFTAG_IMAGEWIDTH, &width);
   TIFFGetField(srcHandle->tif, TIFFTAG_IMAGELENGTH, &height);
   if (0 == width || 0 == height) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   // TIFFReadRGBAImageOriented() normalises whatever photometric
@@ -1278,7 +1284,7 @@ reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
       srcHandle->tif, width, height, rgba.data(), ORIENTATION_TOPLEFT, 0);
   srcHandle.reset(); // Close the source before opening the destination writer.
   if (!decodedOk) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   MemoryTiffWriter writer;
@@ -1288,7 +1294,7 @@ reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
                              tiffWriterRead, tiffWriterWrite, tiffWriterSeek,
                              tiffWriterClose, tiffWriterSize, nullptr, nullptr);
     if (nullptr == out.tif) {
-      return std::nullopt;
+      return std::unexpected{DecodeError::EncodeFailed};
     }
     TIFFSetField(out.tif, TIFFTAG_IMAGEWIDTH, width);
     TIFFSetField(out.tif, TIFFTAG_IMAGELENGTH, height);
@@ -1318,7 +1324,7 @@ reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
       writeOk = TIFFWriteScanline(out.tif, row.data(), y, 0) >= 0;
     }
     if (!writeOk) {
-      return std::nullopt;
+      return std::unexpected{DecodeError::EncodeFailed};
     }
   } // out's destructor closes the file, flushing the final directory.
 
@@ -1333,10 +1339,10 @@ DecodeIndex buildTiffIndex(std::span<const std::uint8_t> /*bytes*/) {
 }
 } // namespace
 
-std::optional<std::vector<std::uint8_t>>
+std::expected<std::vector<std::uint8_t>, DecodeError>
 reencodeTiffSeekable(std::span<const std::uint8_t> /*tiffBytes*/,
                      std::uint32_t /*rowsPerStrip*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_TIFF
@@ -1353,10 +1359,12 @@ peekGifSize(const std::span<const std::uint8_t> gifBytes) {
   if (sig != "GIF87a" && sig != "GIF89a") {
     return std::nullopt;
   }
-  const auto w = static_cast<std::uint32_t>(gifBytes[6]) |
-                 (static_cast<std::uint32_t>(gifBytes[7]) << 8U);
-  const auto h = static_cast<std::uint32_t>(gifBytes[8]) |
-                 (static_cast<std::uint32_t>(gifBytes[9]) << 8U);
+  const auto w =
+      static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 6)) |
+      (static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 7)) << 8U);
+  const auto h =
+      static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 8)) |
+      (static_cast<std::uint32_t>(cpp26::span_at(gifBytes, 9)) << 8U);
   if (0 == w || 0 == h) {
     return std::nullopt;
   }
@@ -1374,7 +1382,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
   }
 
   // Check Logical Screen Descriptor for Global Color Table
-  const std::uint8_t packed = gifBytes[10];
+  const std::uint8_t packed = cpp26::span_at(gifBytes, 10);
   std::size_t offset        = 13;
   if ((packed & 0x80U) != 0) {
     const std::size_t gctEntries = 1U << ((packed & 0x07U) + 1U);
@@ -1383,7 +1391,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
 
   std::size_t imageCount = 0;
   while (offset < gifBytes.size()) {
-    const std::uint8_t blockType = gifBytes[offset++];
+    const std::uint8_t blockType = cpp26::span_at(gifBytes, offset++);
     if (0x3BU == blockType) { // Trailer ';'
       break;
     }
@@ -1395,7 +1403,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       if (offset + 9 > gifBytes.size()) {
         break;
       }
-      const std::uint8_t imgPacked = gifBytes[offset + 8];
+      const std::uint8_t imgPacked = cpp26::span_at(gifBytes, offset + 8);
       offset += 9;
       if ((imgPacked & 0x80U) != 0) {
         const std::size_t lctEntries = 1U << ((imgPacked & 0x07U) + 1U);
@@ -1408,7 +1416,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       ++offset;
       // Skip sub-blocks
       while (offset < gifBytes.size()) {
-        const std::size_t blockSize = gifBytes[offset++];
+        const std::size_t blockSize = cpp26::span_at(gifBytes, offset++);
         if (0 == blockSize) {
           break;
         }
@@ -1422,7 +1430,7 @@ bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
       ++offset;
       // Skip sub-blocks
       while (offset < gifBytes.size()) {
-        const std::size_t blockSize = gifBytes[offset++];
+        const std::size_t blockSize = cpp26::span_at(gifBytes, offset++);
         if (0 == blockSize) {
           break;
         }

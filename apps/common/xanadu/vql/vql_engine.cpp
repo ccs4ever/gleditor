@@ -8,17 +8,30 @@
 #include <cctype>
 #include <charconv>
 #include <cmath>
+#include <iterator>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
-#include <unordered_set>
 
+#include "common/cpp26_concat.hpp"
 #include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vql {
 using zigzag::DimVector;
 
 namespace {
+
+std::vector<zigzag::CellRef>
+concatCellStreams(const std::span<const zigzag::CellRef> current,
+                  const std::span<const zigzag::CellRef> created) {
+  std::vector<zigzag::CellRef> combined;
+  combined.reserve(current.size() + created.size());
+  auto cells = common::cpp26::views::concat(current, created);
+  std::ranges::copy(cells, std::back_inserter(combined));
+  return combined;
+}
 
 bool stringToDouble(std::string_view sv, double &out) {
   if (sv.empty()) {
@@ -124,9 +137,8 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
     break;
 
   case AnchorKind::NamedStore: {
-    zigzag::CellRef storeHome = coordinator_.resolveNamedStore(anchor.name);
-    if (storeHome != zigzag::noCell) {
-      results.push_back(storeHome);
+    if (const auto storeHome = coordinator_.resolveNamedStore(anchor.name)) {
+      results.push_back(*storeHome);
     }
     break;
   }
@@ -223,35 +235,21 @@ VQLEngine::evaluatePath(const PathExpression &path,
                                 ? zigzag::vortex::CellValue(bc.literal)
                                 : zigzag::vortex::CellValue(""));
           // Link cloneCell as clone to master
-          zigzag::CellRef tail = master;
-          std::unordered_set<zigzag::CellRef> visited;
-          while (true) {
-            visited.insert(tail);
-            zigzag::CellRef next =
-                core_->arena().linked(tail, core_->dims().clone, false);
-            if (next == zigzag::noCell || visited.contains(next)) {
-              break;
-            }
-            tail = next;
-          }
-          core_->arena().link(tail, core_->dims().clone, false, cloneCell);
-          core_->arena().link(cloneCell, core_->dims().clone, true, tail);
+          const zigzag::CellRef tail =
+              zigzag::rankTail(core_->arena(), master, core_->dims().clone);
+          zigzag::expectWritten(
+              core_->arena().link(tail, core_->dims().clone, false, cloneCell));
+          zigzag::expectWritten(
+              core_->arena().link(cloneCell, core_->dims().clone, true, tail));
         } else if (operand.path != nullptr) {
           auto clones = evaluatePath(*operand.path, contextCells);
           for (zigzag::CellRef c : clones) {
-            zigzag::CellRef tail = master;
-            std::unordered_set<zigzag::CellRef> visited;
-            while (true) {
-              visited.insert(tail);
-              zigzag::CellRef next =
-                  core_->arena().linked(tail, core_->dims().clone, false);
-              if (next == zigzag::noCell || visited.contains(next)) {
-                break;
-              }
-              tail = next;
-            }
-            core_->arena().link(tail, core_->dims().clone, false, c);
-            core_->arena().link(c, core_->dims().clone, true, tail);
+            const zigzag::CellRef tail =
+                zigzag::rankTail(core_->arena(), master, core_->dims().clone);
+            zigzag::expectWritten(
+                core_->arena().link(tail, core_->dims().clone, false, c));
+            zigzag::expectWritten(
+                core_->arena().link(c, core_->dims().clone, true, tail));
           }
         }
       }
@@ -277,39 +275,17 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
     case Placement::Default:
     case Placement::From: {
       // Walk outward from context in step's direction
-      zigzag::CellRef curr = core_->arena().linked(in, dim, dir);
-      std::unordered_set<zigzag::CellRef> visited{in};
-      while (curr != zigzag::noCell && !visited.contains(curr)) {
-        visited.insert(curr);
-        results.push_back(curr);
-        curr = core_->arena().linked(curr, dim, dir);
-      }
+      std::ranges::copy(zigzag::rankAfter(core_->arena(), in, dim, dir),
+                        std::back_inserter(results));
       break;
     }
 
     case Placement::Rank: {
       // Seek to head (extreme negward), then stream to tail (extreme posward)
-      zigzag::CellRef head = in;
-      std::unordered_set<zigzag::CellRef> visitedNeg{in};
-      while (true) {
-        zigzag::CellRef prev =
-            core_->arena().linked(head, dim, zigzag::DimVector::NEG);
-        if (prev == zigzag::noCell || visitedNeg.contains(prev)) {
-          break;
-        }
-        visitedNeg.insert(prev);
-        head = prev;
-      }
-
-      std::vector<zigzag::CellRef> rankCells;
-      zigzag::CellRef curr = head;
-      std::unordered_set<zigzag::CellRef> visitedPos;
-      while (curr != zigzag::noCell && !visitedPos.contains(curr)) {
-        visitedPos.insert(curr);
-        rankCells.push_back(curr);
-        curr = core_->arena().linked(curr, dim, zigzag::DimVector::POS);
-      }
-
+      const auto head =
+          zigzag::rankTail(core_->arena(), in, dim, zigzag::Negward);
+      auto rankCells = zigzag::rank(core_->arena(), head, dim) |
+                       std::ranges::to<std::vector>();
       if (dir == zigzag::DimVector::NEG) {
         std::ranges::reverse(rankCells);
       }
@@ -319,35 +295,15 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
 
     case Placement::Head: {
       // Seek to extreme negward
-      zigzag::CellRef head = in;
-      std::unordered_set<zigzag::CellRef> visited{in};
-      while (true) {
-        zigzag::CellRef prev =
-            core_->arena().linked(head, dim, zigzag::DimVector::NEG);
-        if (prev == zigzag::noCell || visited.contains(prev)) {
-          break;
-        }
-        visited.insert(prev);
-        head = prev;
-      }
-      results.push_back(head);
+      results.push_back(
+          zigzag::rankTail(core_->arena(), in, dim, zigzag::Negward));
       break;
     }
 
     case Placement::Tail: {
       // Seek to extreme posward
-      zigzag::CellRef tail = in;
-      std::unordered_set<zigzag::CellRef> visited{in};
-      while (true) {
-        zigzag::CellRef next =
-            core_->arena().linked(tail, dim, zigzag::DimVector::POS);
-        if (next == zigzag::noCell || visited.contains(next)) {
-          break;
-        }
-        visited.insert(next);
-        tail = next;
-      }
-      results.push_back(tail);
+      results.push_back(
+          zigzag::rankTail(core_->arena(), in, dim, zigzag::Posward));
       break;
     }
     }
@@ -374,33 +330,11 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
     }
 
     // Default create seeks to tail; ::head inserts at head
-    bool insertAtHead           = (dimStep.placement == Placement::Head);
-    zigzag::CellRef attachPoint = in;
-
-    if (insertAtHead) {
-      std::unordered_set<zigzag::CellRef> visited{in};
-      while (true) {
-        zigzag::CellRef prev =
-            core_->arena().linked(attachPoint, dim, zigzag::DimVector::NEG);
-        if (prev == zigzag::noCell || visited.contains(prev)) {
-          break;
-        }
-        visited.insert(prev);
-        attachPoint = prev;
-      }
-    } else {
-      // Seek tail posward
-      std::unordered_set<zigzag::CellRef> visited{in};
-      while (true) {
-        zigzag::CellRef next =
-            core_->arena().linked(attachPoint, dim, zigzag::DimVector::POS);
-        if (next == zigzag::noCell || visited.contains(next)) {
-          break;
-        }
-        visited.insert(next);
-        attachPoint = next;
-      }
-    }
+    bool insertAtHead = (dimStep.placement == Placement::Head);
+    // ::head attaches before the rank's head, anything else after its tail.
+    zigzag::CellRef attachPoint =
+        zigzag::rankTail(core_->arena(), in, dim,
+                         insertAtHead ? zigzag::Negward : zigzag::Posward);
 
     std::vector<zigzag::CellRef> created;
     for (const auto &c : dimStep.creates) {
@@ -415,12 +349,16 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
       }
 
       if (insertAtHead) {
-        core_->arena().link(newC, dim, zigzag::DimVector::POS, attachPoint);
-        core_->arena().link(attachPoint, dim, zigzag::DimVector::NEG, newC);
+        zigzag::expectWritten(core_->arena().link(
+            newC, dim, zigzag::DimVector::POS, attachPoint));
+        zigzag::expectWritten(core_->arena().link(
+            attachPoint, dim, zigzag::DimVector::NEG, newC));
         attachPoint = newC;
       } else {
-        core_->arena().link(attachPoint, dim, zigzag::DimVector::POS, newC);
-        core_->arena().link(newC, dim, zigzag::DimVector::NEG, attachPoint);
+        zigzag::expectWritten(core_->arena().link(
+            attachPoint, dim, zigzag::DimVector::POS, newC));
+        zigzag::expectWritten(core_->arena().link(
+            newC, dim, zigzag::DimVector::NEG, attachPoint));
         attachPoint = newC;
       }
       created.push_back(newC);
@@ -461,9 +399,7 @@ VQLEngine::evaluateStep(const PathStep &step,
           stepOutput = {stepOutput.back()};
         }
       } else if (step.yieldMode == YieldMode::Both) {
-        std::vector<zigzag::CellRef> combined = currentCells;
-        combined.insert(combined.end(), stepOutput.begin(), stepOutput.end());
-        stepOutput = std::move(combined);
+        stepOutput = concatCellStreams(currentCells, stepOutput);
       } else if (step.yieldMode == YieldMode::Keep) {
         stepOutput = currentCells;
       }
@@ -590,10 +526,7 @@ VQLEngine::evaluateStep(const PathStep &step,
         }
 
         if (step.yieldMode == YieldMode::Both) {
-          std::vector<zigzag::CellRef> combined = currentCells;
-          combined.insert(combined.end(), attachedClones.begin(),
-                          attachedClones.end());
-          stepOutput = std::move(combined);
+          stepOutput = concatCellStreams(currentCells, attachedClones);
         } else if (step.yieldMode == YieldMode::Keep) {
           stepOutput = currentCells;
         } else if (step.yieldMode == YieldMode::Last) {

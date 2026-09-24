@@ -20,6 +20,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include <gleditor/color.hpp>
@@ -265,35 +266,41 @@ std::vector<std::string> splitTokens(const std::string_view str,
 zigzag::DimRef getOrMakeDim(Store &store, MicroversionId &cur,
                             zigzag::Manifold &manifold,
                             const std::string_view name) {
-  return zigzag::DimensionRegistry::instance().getOrCreate(store, cur, manifold,
-                                                           name);
+  // Only ever called with the kDim* constants, which are not empty, so the
+  // one refusal a store-backed getOrCreate() has cannot happen here.
+  return zigzag::DimensionRegistry::instance()
+      .getOrCreate(store, cur, manifold, name)
+      .value();
 }
 
-zigzag::CellRef findPrototypeCell(const zigzag::Manifold &manifold,
-                                  const zigzag::DimRef schemasDim,
-                                  const std::string_view typeName,
-                                  const SpanReader &reader) {
-  zigzag::CellRef found = zigzag::noCell;
-  const auto norm       = [](const std::string_view t) -> std::string_view {
+/// The cell among @p cells whose text reads @p name.
+template <std::ranges::input_range Cells>
+std::optional<zigzag::CellRef>
+cellNamed(Cells &&cells, const zigzag::Manifold &manifold,
+          const std::string_view name, const SpanReader &reader) {
+  return zigzag::firstOf(std::forward<Cells>(cells) |
+                         std::views::filter([&](const zigzag::CellRef cell) {
+                           return manifold.textOf(cell, reader) == name;
+                         }));
+}
+
+std::optional<zigzag::CellRef>
+findPrototypeCell(const zigzag::Manifold &manifold,
+                  const zigzag::DimRef schemasDim,
+                  const std::string_view typeName, const SpanReader &reader) {
+  const auto norm = [](const std::string_view t) -> std::string_view {
     if (t == "double") return "float";
     if (t == "int" || t == "int64") return "integer";
     if (t == "boolean") return "bool";
     return t;
   };
   const auto targetNorm = norm(typeName);
-  manifold.walkRank(schemasDim, schemasDim, zigzag::DimVector::POS,
-                    [&](const zigzag::CellRef cell) {
-                      if (cell != schemasDim) {
-                        const auto cellType = manifold.textOf(cell, reader);
-                        if (cellType == typeName ||
-                            norm(cellType) == targetNorm) {
-                          found = cell;
-                          return false;
-                        }
-                      }
-                      return true;
-                    });
-  return found;
+  return zigzag::firstOf(zigzag::rankAfter(manifold, schemasDim, schemasDim) |
+                         std::views::filter([&](const zigzag::CellRef cell) {
+                           const auto cellType = manifold.textOf(cell, reader);
+                           return cellType == typeName ||
+                                  norm(cellType) == targetNorm;
+                         }));
 }
 
 MicroversionId makeValueCell(Store &store, MicroversionId cur,
@@ -1277,24 +1284,12 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   const zigzag::Manifold *m = &folded.value();
   const auto &reader        = static_cast<const SpanReader &>(store);
 
-  // Check if master setting cell already exists along d.vars
-  zigzag::CellRef masterCell    = zigzag::noCell;
-  zigzag::CellRef lastMasterVar = store.homeCell();
-  m->walkRank(store.homeCell(), varsDim, zigzag::DimVector::POS,
-              [&](const zigzag::CellRef c) {
-                if (c != store.homeCell()) {
-                  if (m->textOf(c, reader) == spec.name) {
-                    masterCell = c;
-                    return false;
-                  }
-                  lastMasterVar = c;
-                }
-                return true;
-              });
-
-  if (masterCell != zigzag::noCell) {
+  // A master setting cell already on d.vars means there is nothing to mint.
+  if (cellNamed(zigzag::rankAfter(*m, store.homeCell(), varsDim), *m, spec.name,
+                reader)) {
     return cur;
   }
+  const auto lastMasterVar = zigzag::rankTail(*m, store.homeCell(), varsDim);
 
   // Parse group hierarchy tokens
   const auto tokens = splitTokens(spec.name, '.');
@@ -1304,27 +1299,17 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   zigzag::CellRef targetGroupCell = emptyGroupCell;
   if (tokens.size() > 1) {
     // Navigate or mint top group
-    const auto &topGroupName     = tokens[0];
-    zigzag::CellRef topGroupCell = zigzag::noCell;
-    zigzag::CellRef lastTopGroup = emptyGroupCell;
+    const auto &topGroupName = tokens[0];
+    auto topGroup = cellNamed(zigzag::rankAfter(*m, emptyGroupCell, groupsDim),
+                              *m, topGroupName, reader);
 
-    m->walkRank(emptyGroupCell, groupsDim, zigzag::DimVector::POS,
-                [&](const zigzag::CellRef g) {
-                  if (g != emptyGroupCell) {
-                    if (m->textOf(g, reader) == topGroupName) {
-                      topGroupCell = g;
-                      return false;
-                    }
-                    lastTopGroup = g;
-                  }
-                  return true;
-                });
-
-    if (topGroupCell == zigzag::noCell) {
-      cur          = store.makeCell(cur, topGroupName);
-      topGroupCell = store.cellRefOf(cur);
-      folded       = store.rebuildManifold(cur);
-      m            = &folded.value();
+    if (!topGroup) {
+      const auto lastTopGroup = zigzag::rankTail(*m, emptyGroupCell, groupsDim);
+      cur                     = store.makeCell(cur, topGroupName);
+      const auto topGroupCell = store.cellRefOf(cur);
+      topGroup                = topGroupCell;
+      folded                  = store.rebuildManifold(cur);
+      m                       = &folded.value();
       cur = store.setLink(cur, lastTopGroup, groupsDim, zigzag::DimVector::POS,
                           topGroupCell, m);
       folded = store.rebuildManifold(cur);
@@ -1332,34 +1317,21 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
     }
 
     // Subgroups
-    zigzag::CellRef currentGroup = topGroupCell;
+    zigzag::CellRef currentGroup = *topGroup;
     for (std::size_t k = 1; k < tokens.size() - 1; ++k) {
       const auto &subName = tokens[k];
       const auto firstChild =
           m->linked(currentGroup, subgroupsDim, zigzag::DimVector::POS);
 
-      zigzag::CellRef matchedSub = zigzag::noCell;
-      zigzag::CellRef lastSub    = firstChild;
-
-      if (firstChild != zigzag::noCell) {
-        m->walkRank(firstChild, groupsDim, zigzag::DimVector::POS,
-                    [&](const zigzag::CellRef s) {
-                      if (m->textOf(s, reader) == subName) {
-                        matchedSub = s;
-                        return false;
-                      }
-                      lastSub = s;
-                      return true;
-                    });
-      }
-
-      if (matchedSub != zigzag::noCell) {
-        currentGroup = matchedSub;
+      if (const auto matched = cellNamed(
+              zigzag::rank(*m, firstChild, groupsDim), *m, subName, reader)) {
+        currentGroup = *matched;
       } else {
-        cur        = store.makeCell(cur, subName);
-        matchedSub = store.cellRefOf(cur);
-        folded     = store.rebuildManifold(cur);
-        m          = &folded.value();
+        const auto lastSub    = zigzag::rankTail(*m, firstChild, groupsDim);
+        cur                   = store.makeCell(cur, subName);
+        const auto matchedSub = store.cellRefOf(cur);
+        folded                = store.rebuildManifold(cur);
+        m                     = &folded.value();
         if (firstChild == zigzag::noCell) {
           cur = store.setLink(cur, currentGroup, subgroupsDim,
                               zigzag::DimVector::POS, matchedSub, m);
@@ -1376,22 +1348,17 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   }
 
   // Mint master setting cell on d.vars from home
-  cur        = store.makeCell(cur, spec.name);
-  masterCell = store.cellRefOf(cur);
-  folded     = store.rebuildManifold(cur);
-  m          = &folded.value();
+  cur                   = store.makeCell(cur, spec.name);
+  const auto masterCell = store.cellRefOf(cur);
+  folded                = store.rebuildManifold(cur);
+  m                     = &folded.value();
   cur    = store.setLink(cur, lastMasterVar, varsDim, zigzag::DimVector::POS,
                          masterCell, m);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
 
   // Mint setting clone on d.vars from targetGroupCell
-  zigzag::CellRef lastGroupVar = targetGroupCell;
-  m->walkRank(targetGroupCell, varsDim, zigzag::DimVector::POS,
-              [&](const zigzag::CellRef v) {
-                lastGroupVar = v;
-                return true;
-              });
+  const auto lastGroupVar = zigzag::rankTail(*m, targetGroupCell, varsDim);
 
   const auto &leafName = tokens.back();
   cur                  = store.makeCell(cur, leafName);
@@ -1461,11 +1428,10 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       prevTypeClone = typeRef;
 
       // Link to prototype type cell on d.clone
-      const auto protoCell =
-          findPrototypeCell(*m, schemasDim, typeName, reader);
-      if (protoCell != zigzag::noCell) {
-        cur    = store.setLink(cur, protoCell, cloneDim, zigzag::DimVector::POS,
-                               typeRef, m);
+      if (const auto protoCell =
+              findPrototypeCell(*m, schemasDim, typeName, reader)) {
+        cur = store.setLink(cur, *protoCell, cloneDim, zigzag::DimVector::POS,
+                            typeRef, m);
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
       }
@@ -1624,6 +1590,19 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
 }
 
 namespace {
+/// A cell's value as settings read it: its typed bits when it carries them
+/// (R6), its text otherwise. Never parses the text.
+CellValue cellValueOf(const zigzag::Manifold &manifold,
+                      const zigzag::CellRef cell, const SpanReader &reader) {
+  const auto asValue = [](const auto bits) { return CellValue{bits}; };
+  const auto typed =
+      manifold.asDouble(cell)
+          .transform(asValue)
+          .or_else([&] { return manifold.asInt64(cell).transform(asValue); })
+          .or_else([&] { return manifold.asBool(cell).transform(asValue); });
+  return typed ? *typed : CellValue{manifold.textOf(cell, reader)};
+}
+
 struct NullSpanReader final : public SpanReader {
   [[nodiscard]] std::string read(const PrimediaSpan & /*span*/) const override {
     return {};
@@ -1660,193 +1639,115 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
     return model;
   }
 
-  const auto varsDim      = manifold.dimensionNamed(kDimVars, *reader);
-  const auto valuesDim    = manifold.dimensionNamed(kDimValues, *reader);
-  const auto groupsDim    = manifold.dimensionNamed(kDimGroups, *reader);
-  const auto subgroupsDim = manifold.dimensionNamed(kDimSubgroups, *reader);
-  const auto notesDim     = manifold.dimensionNamed(kDimNotes, *reader);
-  const auto schemasDim   = manifold.dimensionNamed(kDimSchemas, *reader);
-  const auto altsDim      = manifold.dimensionNamed(kDimAlternates, *reader);
-  const auto defaultDim   = manifold.dimensionNamed(kDimDefault, *reader);
+  // An absent dimension reads as noCell, which every rank and step below
+  // treats as empty: a store without d.notes simply has no notes, rather than
+  // needing a guard at each place a note could be.
+  const auto dim = [&](const std::string_view name) {
+    return manifold.dimensionNamed(name, *reader).value_or(zigzag::noCell);
+  };
+  const auto varsDim      = dim(kDimVars);
+  const auto valuesDim    = dim(kDimValues);
+  const auto groupsDim    = dim(kDimGroups);
+  const auto subgroupsDim = dim(kDimSubgroups);
+  const auto notesDim     = dim(kDimNotes);
+  const auto schemasDim   = dim(kDimSchemas);
+  const auto altsDim      = dim(kDimAlternates);
+  const auto defaultDim   = dim(kDimDefault);
 
-  if (varsDim != zigzag::noCell) {
-    while (true) {
-      const auto prev =
-          manifold.linked(homeCell, varsDim, zigzag::DimVector::NEG);
-      if (prev == zigzag::noCell || prev == homeCell) {
-        break;
-      }
-      homeCell = prev;
-    }
-  }
+  const auto text = [&](const zigzag::CellRef cell) {
+    return manifold.textOf(cell, *reader);
+  };
+  const auto noteOf = [&](const zigzag::CellRef cell) {
+    return zigzag::step(manifold, cell, notesDim).transform(text);
+  };
+  const auto valueOf = [&](const zigzag::CellRef cell) {
+    return cellValueOf(manifold, cell, *reader);
+  };
 
-  model.storeDesc_ = manifold.textOf(homeCell, *reader);
+  // The home cell is the head of the d.vars rank, wherever the caller
+  // pointed into it.
+  homeCell = zigzag::rankTail(manifold, homeCell, varsDim, zigzag::Negward);
 
-  if (notesDim != zigzag::noCell) {
-    const auto noteCell =
-        manifold.linked(homeCell, notesDim, zigzag::DimVector::POS);
-    if (noteCell != zigzag::noCell) {
-      model.storeDesc_ = manifold.textOf(noteCell, *reader);
-    }
-  }
+  model.storeDesc_ = noteOf(homeCell).value_or(text(homeCell));
 
   // Read group hierarchy recursively
   std::function<SettingGroup(zigzag::CellRef)> readGroupNode =
       [&](const zigzag::CellRef gCell) -> SettingGroup {
-    SettingGroup grp;
-    grp.groupCell = gCell;
-    grp.name      = manifold.textOf(gCell, *reader);
-
-    if (varsDim != zigzag::noCell) {
-      manifold.walkRank(gCell, varsDim, zigzag::DimVector::POS,
-                        [&](const zigzag::CellRef cloneCell) {
-                          if (cloneCell != gCell) {
-                            grp.memberSettingNames.push_back(
-                                manifold.textOf(cloneCell, *reader));
-                          }
-                        });
-    }
-
-    if (subgroupsDim != zigzag::noCell) {
-      const auto firstChild =
-          manifold.linked(gCell, subgroupsDim, zigzag::DimVector::POS);
-      if (firstChild != zigzag::noCell) {
-        manifold.walkRank(firstChild, groupsDim, zigzag::DimVector::POS,
-                          [&](const zigzag::CellRef subCell) {
-                            grp.childSubgroups.push_back(
-                                readGroupNode(subCell));
-                          });
-      }
-    }
-    return grp;
+    return SettingGroup{
+        .name               = text(gCell),
+        .groupCell          = gCell,
+        .memberSettingNames = zigzag::rankAfter(manifold, gCell, varsDim) |
+                              std::views::transform(text) |
+                              std::ranges::to<std::vector>(),
+        .childSubgroups =
+            zigzag::rank(manifold, manifold.linked(gCell, subgroupsDim),
+                         groupsDim) |
+            std::views::transform(readGroupNode) |
+            std::ranges::to<std::vector>(),
+    };
   };
 
-  if (groupsDim != zigzag::noCell) {
-    manifold.walkRank(homeCell, groupsDim, zigzag::DimVector::POS,
-                      [&](const zigzag::CellRef gCell) {
-                        if (gCell != homeCell) {
-                          model.groups_.push_back(readGroupNode(gCell));
-                        }
-                      });
-  }
+  model.groups_ = zigzag::rankAfter(manifold, homeCell, groupsDim) |
+                  std::views::transform(readGroupNode) |
+                  std::ranges::to<std::vector>();
+
+  // One alternative schema: the type clones on d.schemas after its blank
+  // cell, each with its default on d.default when it has one.
+  const auto shapeOf = [&](const zigzag::CellRef blank) {
+    SettingSchemaShape shape;
+    for (const auto typeClone :
+         zigzag::rankAfter(manifold, blank, schemasDim)) {
+      shape.expectedTypes.push_back(text(typeClone));
+      if (const auto def = zigzag::step(manifold, typeClone, defaultDim)) {
+        shape.defaultValues.push_back(valueOf(*def));
+      }
+    }
+    return shape;
+  };
 
   // Read master settings along d.vars
-  if (varsDim != zigzag::noCell) {
-    manifold.walkRank(
-        homeCell, varsDim, zigzag::DimVector::POS,
-        [&](const zigzag::CellRef setCell) {
-          if (setCell == homeCell) {
-            return;
-          }
-          SettingEntry entry;
-          entry.nameCell  = setCell;
-          entry.name      = manifold.textOf(setCell, *reader);
-          entry.groupPath = splitTokens(entry.name, '.');
-          if (!entry.groupPath.empty()) {
-            entry.groupPath.pop_back();
-          }
+  for (const auto setCell : zigzag::rankAfter(manifold, homeCell, varsDim)) {
+    SettingEntry entry;
+    entry.nameCell  = setCell;
+    entry.name      = text(setCell);
+    entry.groupPath = splitTokens(entry.name, '.');
+    if (!entry.groupPath.empty()) {
+      entry.groupPath.pop_back();
+    }
+    entry.notes = noteOf(setCell).value_or(std::string{});
 
-          // Notes
-          if (notesDim != zigzag::noCell) {
-            const auto noteCell =
-                manifold.linked(setCell, notesDim, zigzag::DimVector::POS);
-            if (noteCell != zigzag::noCell) {
-              entry.notes = manifold.textOf(noteCell, *reader);
-            }
-          }
+    // The alternatives hang off the first blank on d.schemas, chained along
+    // d.alternates. A store without d.alternates still has its first one.
+    const auto firstBlank = manifold.linked(setCell, schemasDim);
+    if (zigzag::noCell == altsDim) {
+      if (const auto only = zigzag::present(firstBlank)) {
+        entry.schema.alternatives.push_back(shapeOf(*only));
+      }
+    } else {
+      entry.schema.alternatives = zigzag::rank(manifold, firstBlank, altsDim) |
+                                  std::views::transform(shapeOf) |
+                                  std::ranges::to<std::vector>();
+    }
 
-          // Schemas & defaults
-          if (schemasDim != zigzag::noCell) {
-            const auto firstBlank =
-                manifold.linked(setCell, schemasDim, zigzag::DimVector::POS);
-            auto curBlank = firstBlank;
-            while (curBlank != zigzag::noCell) {
-              SettingSchemaShape shape;
-              manifold.walkRank(
-                  curBlank, schemasDim, zigzag::DimVector::POS,
-                  [&](const zigzag::CellRef typeClone) {
-                    if (typeClone != curBlank) {
-                      shape.expectedTypes.push_back(
-                          manifold.textOf(typeClone, *reader));
-                      if (defaultDim != zigzag::noCell) {
-                        const auto defCell = manifold.linked(
-                            typeClone, defaultDim, zigzag::DimVector::POS);
-                        if (defCell != zigzag::noCell) {
-                          if (manifold.valueKindOf(defCell) ==
-                                  ValueKind::Double &&
-                              manifold.asDouble(defCell)) {
-                            shape.defaultValues.emplace_back(
-                                *manifold.asDouble(defCell));
-                          } else if (manifold.valueKindOf(defCell) ==
-                                         ValueKind::Int64 &&
-                                     manifold.asInt64(defCell)) {
-                            shape.defaultValues.emplace_back(
-                                *manifold.asInt64(defCell));
-                          } else if (manifold.valueKindOf(defCell) ==
-                                         ValueKind::Bool &&
-                                     manifold.asBool(defCell)) {
-                            shape.defaultValues.emplace_back(
-                                *manifold.asBool(defCell));
-                          } else {
-                            shape.defaultValues.emplace_back(
-                                manifold.textOf(defCell, *reader));
-                          }
-                        }
-                      }
-                    }
-                  });
-              entry.schema.alternatives.push_back(std::move(shape));
-              if (altsDim != zigzag::noCell) {
-                curBlank =
-                    manifold.linked(curBlank, altsDim, zigzag::DimVector::POS);
-              } else {
-                break;
-              }
-            }
-          }
+    // Active values along d.values
+    entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
+                             std::ranges::to<std::vector>();
+    entry.value.elements   = entry.value.valueCells |
+                             std::views::transform(valueOf) |
+                             std::ranges::to<std::vector>();
 
-          // Active values along d.values
-          if (valuesDim != zigzag::noCell) {
-            manifold.walkRank(setCell, valuesDim, zigzag::DimVector::POS,
-                              [&](const zigzag::CellRef valCell) {
-                                if (valCell != setCell) {
-                                  entry.value.valueCells.push_back(valCell);
-                                  if (manifold.valueKindOf(valCell) ==
-                                          ValueKind::Double &&
-                                      manifold.asDouble(valCell)) {
-                                    entry.value.elements.emplace_back(
-                                        *manifold.asDouble(valCell));
-                                  } else if (manifold.valueKindOf(valCell) ==
-                                                 ValueKind::Int64 &&
-                                             manifold.asInt64(valCell)) {
-                                    entry.value.elements.emplace_back(
-                                        *manifold.asInt64(valCell));
-                                  } else if (manifold.valueKindOf(valCell) ==
-                                                 ValueKind::Bool &&
-                                             manifold.asBool(valCell)) {
-                                    entry.value.elements.emplace_back(
-                                        *manifold.asBool(valCell));
-                                  } else {
-                                    entry.value.elements.emplace_back(
-                                        manifold.textOf(valCell, *reader));
-                                  }
-                                }
-                              });
-          }
+    // Validate
+    std::string err;
+    if (!validate(entry.schema, entry.value, &err)) {
+      entry.isValid         = false;
+      entry.validationError = err;
+      model.isValid_        = false;
+      if (model.error_.empty()) {
+        model.error_ = "Setting '" + entry.name + "': " + err;
+      }
+    }
 
-          // Validate
-          std::string err;
-          if (!validate(entry.schema, entry.value, &err)) {
-            entry.isValid         = false;
-            entry.validationError = err;
-            model.isValid_        = false;
-            if (model.error_.empty()) {
-              model.error_ = "Setting '" + entry.name + "': " + err;
-            }
-          }
-
-          model.settings_.push_back(std::move(entry));
-        });
+    model.settings_.push_back(std::move(entry));
   }
 
   return model;
@@ -2117,15 +2018,21 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       m      = &folded.value();
     }
   } else {
-    // Relink rank of values
+    // Relink rank of values. Without d.values there is no rank to relink
+    // onto, and a SetLink along noCell is an operation every fold refuses.
+    if (!valuesDim) {
+      throw std::invalid_argument("Setting '" + std::string(name) +
+                                  "': store has no " + std::string(kDimValues) +
+                                  " dimension");
+    }
     auto prev = entry->nameCell;
     for (const auto &v : values) {
       zigzag::CellRef valRef{zigzag::noCell};
       cur    = makeValueCell(store, cur, v, valRef);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
-      cur  = store.setLink(cur, prev, valuesDim, zigzag::DimVector::POS, valRef,
-                           m);
+      cur = store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS, valRef,
+                          m);
       prev = valRef;
     }
   }

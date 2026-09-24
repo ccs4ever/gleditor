@@ -36,6 +36,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/media.hpp>
 #include <gleditor/media_stream.hpp>
 #include <gleditor/media_widget.hpp>
@@ -362,11 +363,17 @@ public:
         // common case) behaves exactly like load(); only a span narrower
         // than its container -- a temporal transclusion -- ends up deferring
         // a setTimeRange() call until playback reports a real duration.
-        widget->loadFragment(
-            gleditor::MediaResource::fromStream(stream, mSpan.label),
-            gleditor::ByteRange{.start  = mSpan.containerOffset,
-                                .length = mSpan.span.length},
-            mSpan.containerLength);
+        if (const auto loaded = widget->loadFragment(
+                gleditor::MediaResource::fromStream(stream, mSpan.label),
+                gleditor::ByteRange{.start  = mSpan.containerOffset,
+                                    .length = mSpan.span.length},
+                mSpan.containerLength);
+            !loaded) {
+          // Still placed: an unplayable span keeps its card and title, so
+          // the reader sees something is there rather than a gap.
+          GLEDITOR_LOG_WARN("xudu.media", "cannot play {}: {}", mSpan.label,
+                            gleditor::toString(loaded.error()));
+        }
         widget->setTitle(mSpan.label);
         widget->attachToDocument(rState.docs[dIdx], mSpan.docOffset);
         // mSpan.widgetWidth/widgetHeight is exactly what
@@ -531,19 +538,24 @@ public:
       for (std::size_t docIdx = 0; docIdx < session.views().size(); ++docIdx) {
         const auto &vInfo = session.views()[docIdx];
         const auto &st    = session.store(vInfo.storeIndex);
-        for (const auto &[linkId, link] : st.links()) {
-          for (const auto &lSpan : link.left) {
-            const auto occs = st.rebuild(vInfo.version).occurrencesOf(lSpan);
-            if (!occs.empty()) {
-              auto *const caret = renderer->editCaret();
-              if (caret) {
-                caret->placeAt(static_cast<std::uint32_t>(docIdx),
-                               occs.front().start);
-                caret->extendTo(occs.front().end);
-              }
-              return;
-            }
+        const auto shown  = st.rebuild(vInfo.version);
+        // The first left end of any link that this view shows.
+        auto shownEnds =
+            st.linkView() | std::views::transform(&xudu::Link::left) |
+            std::views::join |
+            std::views::transform([&](const xudu::PrimediaSpan &end) {
+              return shown.occurrencesOf(end);
+            }) |
+            std::views::filter(
+                [](const auto &occurrences) { return !occurrences.empty(); });
+        if (const auto occs = xanadu::firstOf(shownEnds)) {
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(static_cast<std::uint32_t>(docIdx),
+                           occs->front().start);
+            caret->extendTo(occs->front().end);
           }
+          return;
         }
       }
     });
@@ -3021,6 +3033,16 @@ int main(const int argc, char **argv) {
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
+    // A widget that cannot load still appears, titled, so a mistyped path
+    // shows up as an empty card rather than as nothing at all.
+    const auto loadOrWarn = [](auto &widget,
+                               const gleditor::MediaResourcePtr &resource,
+                               const std::string_view mrl) {
+      if (const auto loaded = widget.load(resource); !loaded) {
+        GLEDITOR_LOG_WARN("xudu.media", "cannot load {}: {}", mrl,
+                          gleditor::toString(loaded.error()));
+      }
+    };
     if (parser.present<std::vector<std::string>>("--audio")) {
       for (const auto &mrl : parser.get<std::vector<std::string>>("--audio")) {
         auto w = std::make_shared<gleditor::AudioWidget>("Sans 11");
@@ -3028,10 +3050,12 @@ int main(const int argc, char **argv) {
           std::vector<std::byte> dummy(1024, std::byte{0x55});
           auto stream =
               std::make_shared<gleditor::MemoryMediaStream>(std::move(dummy));
-          w->load(gleditor::MediaResource::fromStream(stream,
-                                                      "White Noise (48 kHz)"));
+          loadOrWarn(*w,
+                     gleditor::MediaResource::fromStream(
+                         stream, "White Noise (48 kHz)"),
+                     mrl);
         } else {
-          w->load(gleditor::MediaResource::fromFile(mrl));
+          loadOrWarn(*w, gleditor::MediaResource::fromFile(mrl), mrl);
         }
         w->setTitle(std::filesystem::path(mrl).filename().string());
         w->setVisible(true);
@@ -3050,10 +3074,12 @@ int main(const int argc, char **argv) {
           std::vector<std::byte> dummy(2048, std::byte{0xAA});
           auto stream =
               std::make_shared<gleditor::MemoryMediaStream>(std::move(dummy));
-          w->load(gleditor::MediaResource::fromStream(stream,
-                                                      "Sample Video (1080p)"));
+          loadOrWarn(*w,
+                     gleditor::MediaResource::fromStream(
+                         stream, "Sample Video (1080p)"),
+                     mrl);
         } else {
-          w->load(gleditor::MediaResource::fromFile(mrl));
+          loadOrWarn(*w, gleditor::MediaResource::fromFile(mrl), mrl);
         }
         w->setTitle(std::filesystem::path(mrl).filename().string());
         w->setVisible(true);

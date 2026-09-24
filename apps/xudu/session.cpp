@@ -1282,13 +1282,15 @@ ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
     return videoFitSize(natW, natH);
   }
   if (gleditor::MagicMimeDetector::isImageMime(mime)) {
-    const auto decoded =
-        gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime});
-    const float natW =
-        decoded.valid() ? static_cast<float>(decoded.width) : 1.0F;
-    const float natH =
-        decoded.valid() ? static_cast<float>(decoded.height) : 1.0F;
-    return imageFitSize(natW, natH);
+    // An image that will not decode still gets a placeholder, square.
+    const auto natural =
+        gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime})
+            .transform([](const gleditor::DecodedImage &decoded) {
+              return std::pair{static_cast<float>(decoded.width),
+                               static_cast<float>(decoded.height)};
+            })
+            .value_or(std::pair{1.0F, 1.0F});
+    return imageFitSize(natural.first, natural.second);
   }
   if (gleditor::MagicMimeDetector::isVideoMime(mime)) {
     const auto [natW, natH] = videoNaturalSizeFor(bytes);

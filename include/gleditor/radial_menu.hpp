@@ -150,8 +150,10 @@ public:
   }
 
   // -- Geometry Helper --------------------------------------------------------
-  [[nodiscard]] static int resolveSector(float dx, float dy,
-                                         std::size_t count) noexcept;
+  /// The sector of @p count, clockwise from North, that the direction
+  /// (@p dx, @p dy) points into; nullopt for a menu with no sectors.
+  [[nodiscard]] static std::optional<std::size_t>
+  resolveSector(float dx, float dy, std::size_t count) noexcept;
 
 private:
   struct PodLayout {

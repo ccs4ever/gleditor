@@ -97,10 +97,31 @@ void Renderer::newDoc(RenderState &state) {
   state.pickTargets.push_back({});
 }
 
+namespace {
+/// Read a finished (or finishing) background load. A SourceError was already
+/// logged by the load itself; anything else it threw is logged here rather
+/// than left in a future nobody reads, which is where it used to go.
+void settleDocLoad(
+    std::future<std::expected<void, gleditor::SourceError>> &load) {
+  try {
+    static_cast<void>(load.get());
+  } catch (const std::exception &failure) {
+    GLEDITOR_LOG_ERROR("render.scene", "background page build failed: {}",
+                       failure.what());
+  }
+}
+} // namespace
+
 void Renderer::reapFinishedDocLoads() {
   const auto done = std::ranges::remove_if(pendingDocLoads, [](auto &fut) {
-    return !fut.valid() ||
-           std::future_status::ready == fut.wait_for(std::chrono::seconds{0});
+    if (!fut.valid()) {
+      return true;
+    }
+    if (std::future_status::ready != fut.wait_for(std::chrono::seconds{0})) {
+      return false;
+    }
+    settleDocLoad(fut);
+    return true;
   });
   pendingDocLoads.erase(done.begin(), done.end());
 }
@@ -275,8 +296,19 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   }
   docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
-  pendingDocLoads.push_back(
-      std::async(std::launch::async, [docPtr] { docPtr->makePages(); }));
+  pendingDocLoads.push_back(std::async(
+      std::launch::async,
+      [docPtr,
+       name = source.name()]() -> std::expected<void, gleditor::SourceError> {
+        try {
+          docPtr->makePages();
+          return {};
+        } catch (const gleditor::SourceLoadError &refused) {
+          GLEDITOR_LOG_ERROR("render.scene", "cannot open {}: {}", name,
+                             toString(refused.error()));
+          return std::unexpected{refused.error()};
+        }
+      }));
   state.docs.push_back(docPtr->getPtr());
   state.pickTargets.push_back(source.pickSemanticTarget());
 }
@@ -1098,7 +1130,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   // frame, so none of them may outlive this function.
   for (auto &fut : pendingDocLoads) {
     if (fut.valid()) {
-      fut.wait();
+      settleDocLoad(fut);
     }
   }
   pendingDocLoads.clear();

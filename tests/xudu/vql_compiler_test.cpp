@@ -188,7 +188,7 @@ TEST_F(VQLCompilerTest, ExportToStorePersistence) {
 TEST_F(VQLCompilerTest, VortexVMExecutionEquivalence) {
   // Pre-seed arena with items on +d.step
   CellRef c1 = core->arena().makeCell("item1");
-  core->arena().link(core->home(), core->dims().step, false, c1);
+  EXPECT_TRUE(core->arena().link(core->home(), core->dims().step, false, c1));
 
   VQLCompiler compiler(*core, *vm);
   CompilationOptions opts;

@@ -45,7 +45,7 @@ protected:
     auto memStream =
         std::make_shared<MemoryMediaStream>("AUDIO_DATA_FOR_SPEED_TEST");
     auto res = MediaResource::fromStream(memStream, "SpeedTrack");
-    player->load(res);
+    EXPECT_TRUE(player->load(res));
 
     widget = std::make_unique<MediaWidget>("Monospace 10", player);
   }

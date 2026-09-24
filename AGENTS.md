@@ -22,11 +22,11 @@ before a non-trivial change in that area.
 
 ## Setup: submodules
 
-`thirdparty/argparse`, `Choreograph`, `merklecpp`, `SDL`, `zstd` are git submodules; the tree does
-not build without them. Run `git submodule update --init --recursive` first in any fresh clone or
-worktree, and re-run it before investigating any build failure with missing headers under
-`thirdparty/`. Never vendor or hand-edit under `thirdparty/`; bump the submodule pointer and commit
-the gitlink.
+`thirdparty/argparse`, `Choreograph`, `merklecpp`, `SDL`, `zstd`, `nontype_functional`,
+`beman_optional`, and `beman_inplace_vector` are git submodules; the tree does not build without
+them. Run `git submodule update --init --recursive` first in any fresh clone or worktree, and re-run
+it before investigating any build failure with missing headers under `thirdparty/`. Never vendor or
+hand-edit under `thirdparty/`; bump the submodule pointer and commit the gitlink.
 
 ## Build
 

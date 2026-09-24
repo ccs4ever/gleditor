@@ -34,6 +34,7 @@
 #include <iosfwd>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,7 @@
 #include "common/xanadu/enfilade/chronofilade.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
+#include "link_views.hpp"
 #include "microversion.hpp"
 #include "ops.hpp"
 #include "provenance.hpp"
@@ -577,11 +579,36 @@ public:
    */
   MicroversionId addLink(const MicroversionId &parent, Link link);
 
-  /// Every link with an end covering any of @p span.
-  [[nodiscard]] std::vector<const Link *>
-  linksTouching(const PrimediaSpan &span) const;
   [[nodiscard]] const std::map<std::uint64_t, Link> &links() const {
     return linkTable;
+  }
+
+  /// Every link, in id order, as a view of Links rather than of id pairs.
+  [[nodiscard]] auto linkView() const noexcept {
+    return std::views::values(linkTable);
+  }
+
+  /// Every link with an end covering any of @p span, lazily. A linear filter
+  /// over the table, as it always was; what changed is that a caller wanting
+  /// the first match no longer pays for collecting the rest.
+  [[nodiscard]] auto linksTouching(const PrimediaSpan &span) const {
+    return linkView() | std::views::filter(links::touching(span));
+  }
+
+  /// Every recognised format link with the attribute it names. A Format link
+  /// that names no attribute (see formatAttributeOf()) is left out.
+  [[nodiscard]] auto formatLinks() const {
+    return linkView() | std::views::filter(links::ofType(LinkType::Format)) |
+           std::views::transform([](const Link &link) {
+             return std::pair<const Link *, std::optional<FormatAttribute>>{
+                 &link, formatAttributeOf(link)};
+           }) |
+           std::views::filter(
+               [](const auto &named) { return named.second.has_value(); }) |
+           std::views::transform([](const auto &named) {
+             return std::pair<const Link &, FormatAttribute>{*named.first,
+                                                             *named.second};
+           });
   }
 
   // -- formatting -------------------------------------------------------------

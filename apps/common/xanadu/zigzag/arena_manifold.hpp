@@ -49,7 +49,9 @@
 #define ZIGZAG_ARENA_MANIFOLD_HPP
 
 #include <cstdint>
+#include <expected>
 #include <optional>
+#include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
@@ -117,6 +119,45 @@ struct Mark {
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
 /// unbounded number of operations into a document.
+/// Why an ArenaManifold write changed nothing.
+enum class ArenaRefusal : std::uint8_t {
+  UnknownCell,      ///< the subject is not a cell this arena can reach
+  UnknownDimension, ///< the dimension is not a cell this arena can reach
+  UnknownTarget,    ///< the far end is not a cell this arena can reach
+  MarksOutstanding, ///< compact() inside a choice point would corrupt undo
+};
+
+/// An arena write: nothing on success, the reason it changed nothing if not.
+using ArenaResult = std::expected<void, ArenaRefusal>;
+
+[[nodiscard]] constexpr std::string_view
+toString(const ArenaRefusal refusal) noexcept {
+  switch (refusal) {
+  case ArenaRefusal::UnknownCell:
+    return "unknown cell";
+  case ArenaRefusal::UnknownDimension:
+    return "unknown dimension";
+  case ArenaRefusal::UnknownTarget:
+    return "unknown target";
+  case ArenaRefusal::MarksOutstanding:
+    return "marks outstanding";
+  }
+  return "unknown refusal";
+}
+
+/**
+ * @brief Accept a write the caller has already made valid -- linking cells it
+ *        just minted, say -- where a refusal would be the caller's bug.
+ *
+ * The alternative at such a site was to drop the result, which is exactly the
+ * silence ArenaResult exists to end. A refusal here is logged on
+ * `zigzag.arena` with the call site, so the bug shows up under SPDLOG_LEVEL
+ * rather than as a structure quietly missing an edge.
+ */
+void expectWritten(
+    const ArenaResult &result,
+    std::source_location where = std::source_location::current()) noexcept;
+
 struct PromotionBudget {
   std::uint32_t maxOps{65536};
 };
@@ -190,6 +231,13 @@ public:
 
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots_.size(); }
 
+  /// How many cells a walk through this arena could visit: its own and every
+  /// base cell it reads through. cellCount() alone would cut a walk over base
+  /// cells short at the arena's own size.
+  [[nodiscard]] std::size_t traversalBound() const noexcept {
+    return slots_.size() + (nullptr == base_ ? 0 : base_->cellCount());
+  }
+
   [[nodiscard]] std::span<const CellSlot> cells() const noexcept {
     return slots_;
   }
@@ -222,8 +270,8 @@ public:
    * included, because a rational term is a rank that loops and an engine over
    * one meets cycles in ordinary operation.
    */
-  [[nodiscard]] CellRef cloneMaster(CellRef ref,
-                                    DimRef cloneDim) const noexcept;
+  [[nodiscard]] std::optional<CellRef>
+  cloneMaster(CellRef ref, DimRef cloneDim) const noexcept;
 
   [[nodiscard]] xanadu::ValueKind valueKindOf(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<double> asDouble(CellRef ref) const noexcept;
@@ -239,21 +287,6 @@ public:
   /// The bytes @p span names, when it is a scratch span this arena holds.
   [[nodiscard]] std::string_view
   scratchTextOf(const xanadu::PrimediaSpan &span) const noexcept;
-
-  template <typename Fn>
-  void
-  walkRank(const CellRef start, const DimRef dim, const DimVector dir, Fn &&fn,
-           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
-    zigzag::walkRank(*this, start, dim, dir, std::forward<Fn>(fn), maxSteps);
-  }
-
-  template <typename Fn>
-  void
-  walkRank(const CellRef start, const DimRef dim, Fn &&fn,
-           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
-    zigzag::walkRank(*this, start, dim, DimVector::POS, std::forward<Fn>(fn),
-                     maxSteps);
-  }
 
   // -- write path: no operations, no names -----------------------------------
 
@@ -287,10 +320,12 @@ public:
 
   /// Restate @p cell's content as @p spans. A run, not one span: U3's reason
   /// applies here too, and an arena cell can hold one where an op cannot yet.
-  bool setContent(CellRef cell, std::span<const xanadu::PrimediaSpan> spans);
+  ArenaResult setContent(CellRef cell,
+                         std::span<const xanadu::PrimediaSpan> spans);
 
   /// Restate @p cell's typed value, leaving its content alone.
-  bool setValueBits(CellRef cell, xanadu::ValueKind kind, std::uint64_t bits);
+  ArenaResult setValueBits(CellRef cell, xanadu::ValueKind kind,
+                           std::uint64_t bits);
 
   /**
    * @brief Point @p from's @p dim-ward neighbour at @p to. noCell clears it.
@@ -300,13 +335,14 @@ public:
    * "unification is one link" literally one call rather than three and a
    * repair.
    *
-   * @return false, changing nothing, if a ref is not a cell this arena holds.
+   * @return an ArenaRefusal naming the ref this arena does not hold, having
+   *         changed nothing.
    */
-  bool link(CellRef from, DimRef dim, DimVector dir, CellRef to);
-  bool link(CellRef from, DirectedDim target, CellRef to) {
+  ArenaResult link(CellRef from, DimRef dim, DimVector dir, CellRef to);
+  ArenaResult link(CellRef from, DirectedDim target, CellRef to) {
     return link(from, target.dim, target.dir, to);
   }
-  bool link(CellRef from, DimRef dim, bool negward, CellRef to) {
+  ArenaResult link(CellRef from, DimRef dim, bool negward, CellRef to) {
     return link(from, dim, fromNegward(negward), to);
   }
 
@@ -342,9 +378,9 @@ public:
    * release() truncates the dead runs away by itself, so the runs a failed
    * branch left behind cost nothing to reclaim.
    *
-   * @return false if it refused.
+   * @return ArenaRefusal::MarksOutstanding if it refused.
    */
-  bool compact();
+  ArenaResult compact();
 
   /// Dead entries compact() would reclaim, for a test or a diagnostic.
   [[nodiscard]] std::size_t deadLinks() const noexcept {

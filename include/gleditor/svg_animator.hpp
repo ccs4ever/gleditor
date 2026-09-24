@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <memory>
 #include <span>
 #include <vector>
+
+#include <gleditor/decode_error.hpp>
 
 namespace gleditor {
 
@@ -26,9 +29,10 @@ public:
   /**
    * @brief Parse and create an SvgAnimator instance from @p bytes.
    *
-   * Returns nullptr if the input is not a valid or animatable vector document.
+   * @return the animator, or why there is none: not a valid document, one
+   *         with nothing to animate, or a build without ThorVG.
    */
-  [[nodiscard]] static std::unique_ptr<SvgAnimator>
+  [[nodiscard]] static std::expected<std::unique_ptr<SvgAnimator>, DecodeError>
   load(std::span<const std::uint8_t> bytes);
 
   [[nodiscard]] virtual int width() const      = 0;

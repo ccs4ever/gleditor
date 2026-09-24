@@ -146,9 +146,9 @@ TEST(StoreFormatTest, aFormatLinkIsFoundByTouchingTheFormattedContent) {
   link.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
   store.addLink(version, link);
 
-  const auto touching = store.linksTouching(content.front());
-  ASSERT_EQ(touching.size(), 1U);
-  EXPECT_EQ(store.formatAttributeOf(*touching.front()), FormatAttribute::Bold);
+  auto touching = store.linksTouching(content.front());
+  ASSERT_EQ(std::ranges::distance(touching), 1);
+  EXPECT_EQ(store.formatAttributeOf(touching.front()), FormatAttribute::Bold);
 }
 
 TEST(StoreFormatTest, aFormatLinkSurvivesQuotingItsContentElsewhere) {
@@ -172,10 +172,9 @@ TEST(StoreFormatTest, aFormatLinkSurvivesQuotingItsContentElsewhere) {
   // following the "see: " prefix typed ahead of it.
   const auto quotedSpans = store.rebuild(quoted).spansFor(5, 5);
   ASSERT_FALSE(quotedSpans.empty());
-  const auto touching = store.linksTouching(quotedSpans.front());
-  ASSERT_EQ(touching.size(), 1U);
-  EXPECT_EQ(store.formatAttributeOf(*touching.front()),
-            FormatAttribute::Italic);
+  auto touching = store.linksTouching(quotedSpans.front());
+  ASSERT_EQ(std::ranges::distance(touching), 1);
+  EXPECT_EQ(store.formatAttributeOf(touching.front()), FormatAttribute::Italic);
 }
 
 TEST(StoreFormatTest, aFormatLinkMadeInOneStoreIsRecognisedInAnother) {

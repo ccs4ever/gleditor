@@ -50,7 +50,8 @@ Compiler::lowerTerm(const Term &term,
     }
     zigzag::CellRef freshVar = vlog_.makeVar();
     zigzag::CellRef nameCell = core_.arena().makeCell(var->name);
-    core_.arena().link(freshVar, core_.dims().name, false, nameCell);
+    zigzag::expectWritten(
+        core_.arena().link(freshVar, core_.dims().name, false, nameCell));
     varMap[var->name] = freshVar;
     return freshVar;
   }
@@ -116,20 +117,24 @@ zigzag::CellRef Compiler::compileClause(const Clause &clause) {
   }
 
   zigzag::CellRef clauseCell = core_.arena().makeCell();
-  core_.arena().link(clauseCell, core_.dims().grab, false, headCell);
+  zigzag::expectWritten(
+      core_.arena().link(clauseCell, core_.dims().grab, false, headCell));
 
   zigzag::CellRef prevGoal = zigzag::noCell;
   for (zigzag::CellRef goal : bodyGoals) {
     if (prevGoal == zigzag::noCell) {
-      core_.arena().link(clauseCell, core_.dims().spin, false, goal);
+      zigzag::expectWritten(
+          core_.arena().link(clauseCell, core_.dims().spin, false, goal));
     } else {
-      core_.arena().link(prevGoal, core_.dims().spin, false, goal);
+      zigzag::expectWritten(
+          core_.arena().link(prevGoal, core_.dims().spin, false, goal));
     }
     prevGoal = goal;
   }
 
   zigzag::CellRef end = vlog_.endOfRank(predCell, core_.dims().clause, false);
-  core_.arena().link(end, core_.dims().clause, false, clauseCell);
+  zigzag::expectWritten(
+      core_.arena().link(end, core_.dims().clause, false, clauseCell));
 
   return clauseCell;
 }
