@@ -911,8 +911,8 @@ void applyOpsSegment(const std::string_view sealed, Store &history,
                       record.op.span.scroll));
     }
     record.op.span.scroll = at->second;
-    history.putOp(record.produces, record.op);
   }
+  history.adoptOpRecords(records);
 }
 
 } // namespace

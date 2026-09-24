@@ -40,6 +40,7 @@
 
 #include "binary_ops.hpp"
 #include "common/xanadu/enfilade/chronofilade.hpp"
+#include "common/xanadu/extern_ref.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "link_views.hpp"
@@ -812,6 +813,32 @@ public:
   linkScrollRef(const MicroversionId &parent, zigzag::CellRef scrollCell,
                 zigzag::CellRef placeholderCell,
                 const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Mint a persistent placeholder cell for a foreign cell reference
+   * (§5.5).
+   *
+   * Reuses the existing placeholder cell if one is already recorded for
+   * target in the scroll registry's replay index.
+   */
+  [[nodiscard]] MicroversionId
+  makeExternRef(const MicroversionId &parent, const ExternOpRef &target,
+                const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Decode the foreign reference target of @p placeholder.
+   */
+  [[nodiscard]] std::optional<ExternOpRef>
+  externTarget(zigzag::CellRef placeholder, const SpanReader &reader) const;
+
+  [[nodiscard]] std::optional<ExternOpRef>
+  externTarget(zigzag::CellRef placeholder) const;
+
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  placeholderForExtern(const ExternOpRef &ref) const noexcept {
+    return scrollRegistry_.placeholderForExtern(ref);
+  }
+
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);
 

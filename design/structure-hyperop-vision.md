@@ -116,15 +116,13 @@ Nothing in the tree publishes a Structure operation and folds a `Manifold` on th
 OSMIC *text* encoding is unaffected (`writeOsmicTextOpsSpool` emits `source`, `at` and `length` as
 columns for every kind).
 
-**The existing Structure fields need a `CompactBinaryV4` fix now; they do not depend on §5.2 or
-§5.5.** The writer already has stable operation names. V4 writes `source` by `MicroversionId`, and
-must do the same for a `SetLink`'s dimension and target and an `OpHandle` target: all are
-publisher-local indices today, and all may renumber when `opRecords()` orders records or a foreign
-history gains a branch. The same record adds varint `at` and `length` for `Splice` (U3.4 already
-owes this; export currently throws rather than corrupts). Ingestion first schedules records by all
-named dependencies, including a handle that targets a lexically later branch, then resolves each
-name through `indexOf()` before `putOp`. **The required test publishes a branched slice with links
-and handles, ingests it, folds, and asserts `refusedOps() == 0` and `equivalentTo()` the original.**
+**The existing Structure fields have been resolved in `CompactBinaryV4` (see
+[`structure-hyperop/5.06-compact-binary-v4.md`](structure-hyperop/5.06-compact-binary-v4.md)).** The
+writer carries stable operation names (`MicroversionId` for `source`, conditional `SetLink`
+dimension and target names, `Splice` `at` and `length`, and `OpHandle` value target name). Ingestion
+schedules records by Kahn's topological sort on dependency DAG and resolves names through
+`indexOf()` before `putOp()`. Slices publish with links, cell edits, and handles intact across
+reordering and foreign branches.
 
 Two further items were listed here in draft and did not survive the code review in
 [`structure-hyperop/5.06-compact-binary-v4.md`](structure-hyperop/5.06-compact-binary-v4.md) §2. The
@@ -133,17 +131,16 @@ wire kind field is **not** full: `CompactBinaryV3` already widened it to four bi
 version 2 and was carried forward stale. What *is* full is the tag byte, four kind bits plus four
 flags, held by a `static_assert`; a new *flag* needs a second byte, and V4 needs no new flag. And
 `storeToLinkPackage()`'s first-span-only defect is a change to `LinkPackage`'s own wire format in
-`link_package.cpp`, not to the ops spool — still owed, but not in this bump, because moving two
-formats' versions in lockstep couples things that have no reason to agree.
+`link_package.cpp`, not to the ops spool — carried forward, because moving two formats' versions in
+lockstep couples things that have no reason to agree.
 
 A length-prefixed, skippable extension record was proposed for the same bump, on the ground that
 R11's "no compatibility" is about files on this machine rather than a wire two peers negotiate. The
-plan recommends deferring it: §5.5 stores variable-length reference descriptors as ordinary cell
-content, so the ops wire needs only the address names it can test today.
+plan deferred it: §5.5 stores variable-length reference descriptors as ordinary cell content, so the
+ops wire needs only the address names it can test today. Carried forward.
 
-Every cross-store proposal below is gated on this. So, today, is publishing any ZigZag slice. Fix
-the live `source`/dimension/target/`Splice` wire fields and both ingestion paths first; reserve the
-conditional handle-target field in the V4 grammar so §5.2 can use it without another bump.
+With `CompactBinaryV4` landed, publishing ZigZag slices functions end-to-end, unlocking cross-store
+proposals below.
 
 ## 4. The principle the proposals share
 

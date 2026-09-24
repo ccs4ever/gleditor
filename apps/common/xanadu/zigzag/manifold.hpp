@@ -33,6 +33,7 @@
 
 #include "common/cpp26.hpp"
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/extern_ref.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -60,6 +61,8 @@ struct ScrollRegistry {
   std::vector<ScrollRecord> scrolls;
   std::unordered_map<std::string, xanadu::ScrollId> byKey;
   std::unordered_map<CellRef, xanadu::ScrollId> byCell;
+  std::map<xanadu::ExternOpRef, CellRef> byExtern;
+  std::unordered_map<CellRef, xanadu::ExternOpRef> externByCell;
 
   [[nodiscard]] bool empty() const noexcept { return scrolls.empty(); }
   [[nodiscard]] std::size_t size() const noexcept { return scrolls.size(); }
@@ -88,6 +91,41 @@ struct ScrollRegistry {
       return nullptr;
     }
     return &scrolls[id - 1];
+  }
+
+  [[nodiscard]] common::cpp26::optional<const ScrollRecord &>
+  findRecord(const xanadu::ScrollId id) const noexcept {
+    if (id == 0 || id > scrolls.size()) {
+      return common::cpp26::nullopt;
+    }
+    return scrolls[id - 1];
+  }
+
+  [[nodiscard]] std::optional<CellRef>
+  placeholderForExtern(const xanadu::ExternOpRef &ref) const noexcept {
+    const auto it = byExtern.find(ref);
+    if (it != byExtern.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] std::optional<xanadu::ExternOpRef>
+  externForPlaceholder(const CellRef cell) const noexcept {
+    const auto it = externByCell.find(cell);
+    if (it != externByCell.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] common::cpp26::optional<const xanadu::ExternOpRef &>
+  findExternForPlaceholder(const CellRef cell) const noexcept {
+    const auto it = externByCell.find(cell);
+    if (it != externByCell.end()) {
+      return it->second;
+    }
+    return common::cpp26::nullopt;
   }
 };
 
@@ -509,6 +547,16 @@ public:
     return refusedOps_;
   }
 
+  /// All external reference placeholder cells folded in this manifold.
+  [[nodiscard]] std::span<const CellRef> externalCells() const noexcept {
+    return externalCells_;
+  }
+
+  /// How many unresolved external cell references exist in this folded state.
+  [[nodiscard]] std::uint32_t unresolvedExternals() const noexcept {
+    return unresolvedExternals_;
+  }
+
   // -- fold path: driven only by Store ---------------------------------------
 
   /**
@@ -622,6 +670,8 @@ private:
   DimRef dimsDim_{noCell};
   std::uint32_t foldedThrough_{0};
   std::uint32_t refusedOps_{0};
+  std::vector<CellRef> externalCells_;
+  std::uint32_t unresolvedExternals_{0};
 
   /// dimensions() is a rank walk, and a span has to point at something.
   mutable std::vector<DimRef> dimsCache;

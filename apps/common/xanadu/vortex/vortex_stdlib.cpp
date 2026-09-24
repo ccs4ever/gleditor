@@ -3827,7 +3827,7 @@ bool VortexStdLib::exportModuleToStore(std::string_view modulePath,
   }
   const CellRef mod = *resolved;
   auto parent       = destStore.allVersions().empty()
-                          ? xanadu::MicroversionId::parse("1")
+                          ? xanadu::MicroversionId{}
                           : destStore.primaryCurrentVersion();
   zigzag::PromotionBudget budget{.maxOps = 100000};
   auto promoted =
@@ -3847,7 +3847,7 @@ bool VortexStdLib::exportStandardLibraryToStore(
     stdlibRoot = core_.home();
   }
   auto parent = destStore.allVersions().empty()
-                    ? xanadu::MicroversionId::parse("1")
+                    ? xanadu::MicroversionId{}
                     : destStore.primaryCurrentVersion();
   zigzag::PromotionBudget budget{.maxOps = 200000};
   auto promoted =
@@ -3860,7 +3860,7 @@ bool VortexStdLib::exportStandardLibraryToStore(
 }
 
 CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
-  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId{}
                                             : srcStore.primaryCurrentVersion();
   auto srcManifold = srcStore.rebuildManifold(ver);
   if (srcManifold.cellCount() == 0) {
@@ -3933,14 +3933,14 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
 }
 
 CellRef VortexStdLib::bridgeDocText(const xanadu::Store &store) {
-  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
-                                         : store.primaryCurrentVersion();
+  auto ver        = store.allVersions().empty() ? xanadu::MicroversionId{}
+                                                : store.primaryCurrentVersion();
   std::string txt = store.textOf(ver);
   return core_.arena().makeCell(txt);
 }
 
 CellRef VortexStdLib::bridgeStoreVersion(const xanadu::Store &store) {
-  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
                                          : store.primaryCurrentVersion();
   return core_.arena().makeCell(ver.str());
 }
@@ -3951,7 +3951,7 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
     return false;
   }
   std::string text = core_.arena().textOf(cell);
-  auto parent = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+  auto parent = store.allVersions().empty() ? xanadu::MicroversionId{}
                                             : store.primaryCurrentVersion();
   auto newVer = store.insert(parent, docOffset, text);
   store.repointCurrentVersion(newVer);
@@ -3961,7 +3961,7 @@ bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
 CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
                                       std::uint32_t docOffset,
                                       std::uint32_t length) {
-  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId{}
                                          : store.primaryCurrentVersion();
   std::string docText = store.textOf(ver);
   if (docOffset >= docText.size()) {

@@ -246,6 +246,10 @@ Manifold::applyStructure(const std::uint32_t opIndex,
     } else if (noCell == dimsDim_) {
       dimsDim_ = opIndex;
     }
+    if (xanadu::valueKindOf(node.flags) == xanadu::ValueKind::ExternRef) {
+      externalCells_.push_back(opIndex);
+      unresolvedExternals_++;
+    }
     return {};
   }
 
@@ -681,7 +685,9 @@ Manifold::cloneMaster(const CellRef ref, const DimRef cloneDim) const noexcept {
 
 bool Manifold::equivalentTo(const Manifold &other) const {
   if (slots.size() != other.slots.size() || home_ != other.home_ ||
-      dimsDim_ != other.dimsDim_) {
+      dimsDim_ != other.dimsDim_ ||
+      unresolvedExternals_ != other.unresolvedExternals_ ||
+      externalCells_ != other.externalCells_) {
     return false;
   }
   for (const auto &cell : slots) {
@@ -1071,13 +1077,29 @@ Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
     registry.byCell[cell] = id;
   }
 
-  // 4. Map placeholders along d.scroll-refs (§6)
+  // 4. Map placeholders along d.scroll-refs (§6, §5.5)
   const auto dimScrollRefs = store_ ? dimensionNamed("d.scroll-refs", *store_)
                                     : dimensionNamed("d.scroll-refs");
   if (dimScrollRefs) {
     for (const auto &rec : registry.scrolls) {
       for (const auto p : rankAfter(*this, rec.cell, *dimScrollRefs)) {
         registry.byCell[p] = rec.id;
+      }
+      for (const auto p :
+           rankAfter(*this, rec.cell, *dimScrollRefs) |
+               std::views::filter([this](const auto cell) noexcept {
+                 return valueKindOf(cell) == xanadu::ValueKind::ExternRef;
+               })) {
+        const auto text = textOf(p, reader);
+        if (!text.empty()) {
+          try {
+            const auto parsed = xanadu::MicroversionId::parse(text);
+            const xanadu::ExternOpRef ref{.scroll = rec.id, .produces = parsed};
+            registry.byExtern[ref]   = p;
+            registry.externByCell[p] = ref;
+          } catch (...) {
+          }
+        }
       }
     }
   }
