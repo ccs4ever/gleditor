@@ -6,6 +6,10 @@ what a reader should experience and the model each prototype would need. None is
 end. The [navigation workflow](../../ui_workflow_xuzz_navigation.md) is the shared command and
 verification contract.
 
+The images on the prototype pages are generated interaction mock-ups. They show intended states and
+transitions, not screenshots of an implemented Xuzz interface; each caption states the behavior the
+image is meant to highlight.
+
 | Prototype                                               | Reader question                                           | Main technical question                                                              |
 | ------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | [Selected link context](link-context.md)                | What whole link am I exploring?                           | Can one navigation session preserve both ordered endsets and exact occurrences?      |

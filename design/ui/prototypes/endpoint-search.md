@@ -3,6 +3,16 @@
 **Status:** Proposed large-endset navigation surface.\
 **Depends on:** [selected link context](link-context.md) and its exact occurrence query.
 
+## Interaction mock-ups
+
+![Endpoint browser groups document and cell occurrences for one selected link](images/endpoint-groups.png)
+
+*Browse: group large endsets by manifestation while keeping stored member positions visible.*
+
+![A search result offers two exact occurrences of the same right member](images/endpoint-filtered.png)
+
+*Filter: the reader previews occurrence 2 of 2, then may Enter that exact range.*
+
 ## Reader walkthrough
 
 1. A reader opens a link with dozens of left members and hundreds of right manifestations. The

@@ -3,6 +3,16 @@
 **Status:** Proposed disambiguation surface.\
 **Depends on:** [selected link context](link-context.md).
 
+## Interaction mock-ups
+
+![Three distinct link candidates appear beside one overlapping passage](images/overlap-candidates.png)
+
+*Preview: a shared passage offers separate link identities without activating any of them.*
+
+![One disagreement link is selected while the other overlapping marks remain subdued](images/overlap-selected.png)
+
+*Select: the chosen link is pinned; Enter remains a separate action.*
+
 ## Reader walkthrough
 
 1. A reader hovers a passage touched by three links: a comment, a disagreement, and a citation. A

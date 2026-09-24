@@ -4,6 +4,20 @@
 **Depends on:** [navigation vision](../../xuzz-unified-link-traversal-vision.md) and a reader-owned
 `system://activity` Store.
 
+## Interaction mock-ups
+
+![Activity Forward presents two preserved child visits and highlights the last followed route](images/activity-forward.png)
+
+*Forward at a fork: both futures remain selectable; the last followed route is only a hint.*
+
+![Walks view shows two roots, a fork, a current visit, and a saved link context](images/activity-walks.png)
+
+*Explore Walks: visits form persistent branching routes, with a preview beside the selected node.*
+
+![A note and reference attach to an old visit while Enter Visit stays explicit](images/activity-annotate.png)
+
+*Annotate: add context to a saved visit without creating another navigation step.*
+
 ## Reader walkthrough
 
 1. A reader enters a cell through a link, walks one rank, then returns with **Activity Back** to the

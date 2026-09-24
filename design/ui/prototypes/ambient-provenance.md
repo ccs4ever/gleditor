@@ -3,6 +3,16 @@
 **Status:** Proposed on-demand explanation of a link and its content.\
 **Depends on:** [selected link context](link-context.md) and exact occurrences.
 
+## Interaction mock-ups
+
+![A small provenance hint separates link owner from content source beside a linked span](images/provenance-hint.png)
+
+*Reveal on demand: a compact hint leaves the page and link context readable.*
+
+![Expanded provenance card separates link author, primedia source, and this manifestation's version](images/provenance-details.png)
+
+*Inspect: link attribution, original content source, and current version are distinct claims.*
+
 ## Reader walkthrough
 
 1. A reader selects a link whose right member quotes primedia from another author's document into

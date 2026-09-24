@@ -3,6 +3,16 @@
 **Status:** Proposed foundation for the other Xuzz navigation prototypes.\
 **Depends on:** [navigation workflow](../../ui_workflow_xuzz_navigation.md).
 
+## Interaction mock-ups
+
+![A selected link panel retains separate left and right member lists above a document and cell](images/link-context-selected.png)
+
+*Select: link 42 stays whole, with two independent endset cursors and an explicit Enter target.*
+
+![After entry, the cell is foremost while the source page, origin, and link panel remain visible](images/link-context-entered.png)
+
+*Enter: exact cell content takes focus; the source and both endsets remain available.*
+
 ## Reader walkthrough
 
 1. A reader selects a marked passage, cell content range, margin bracket, or beam. A compact panel

@@ -4,6 +4,20 @@
 **Context:** [Xuzz unified link traversal](../../xuzz-unified-link-traversal-vision.md) and its
 [workflow](../../ui_workflow_xuzz_navigation.md).
 
+## Interaction mock-ups
+
+![The Flap opens two branch-aware version wings around one fixed link hinge](images/flap-open.png)
+
+*Open Flap: document and cell manifestations fan backward and forward on independent wings.*
+
+![Selected left and right versions form one pinned reader comparison amid translucent history leaves](images/flap-compare.png)
+
+*Scrub and pin: the two wing selections move independently; the line is a reader comparison.*
+
+![After Enter, a cell version takes focus while source, history leaves, and link identity remain](images/flap-enter.png)
+
+*Enter leaf: exact cell content takes focus and one activity visit is saved.*
+
 ## The gesture
 
 With one butterfly link selected, **Flap** opens its left and right endsets like wings around a
