@@ -12,7 +12,8 @@ The reader can inspect either side, move among discontinuous spans, enter a chos
 onward through a xanadoc or ZigZag rank, and return with the link still intelligible. A document
 passage and a cell's content use the same gestures and the same link context. The interface
 preserves where the reader came from even when the destination's shape changes from a page to a cell
-neighborhood.
+neighborhood. Each completed journey becomes part of a reader-owned tree of walks that can be
+reopened, branched, referenced, and annotated across sessions.
 
 This follows the stored [`Link`](../apps/common/xanadu/ops.hpp): one ID, type, attribution, and two
 ordered lists of `PrimediaSpan`. Left and right are endset names; neither list is intrinsically a
@@ -38,6 +39,8 @@ source to the shared publisher. The navigation behavior is narrower:
   [`Views::focusSpan`](../apps/xudu/main.cpp) chooses the first matching document occurrence and can
   fall back to a left end of another link. A cell outside the current ZigZag neighborhood has no
   visible anchor; link-driven materialization is proposed below.
+- Xudu's current Back and Forward actions walk document microversions. They do not record where the
+  reader traveled. Xuzz has no persistent, branchable record of reading activity.
 
 These are implementation facts, not the intended reader experience. The bridge supplies a shared
 scene; the proposed traversal supplies a shared interaction language.
@@ -73,16 +76,73 @@ Left  [1/2] [2/2 ◉]         Comment · owner · origin         Right [—/3] C
    page. A content-anchored connection and origin marker keep the relationship visible while the
    reader walks dimensions or changes projection. The link context stays pinned until dismissed;
    when focus leaves the linked range, it says so without pretending the new cell is an endpoint.
-1. **Return or continue.** Back within the pinned context reverses the last Enter or link selection
-   and restores its saved camera, document or cell focus, active side, and both member cursors.
-   Preview and member changes do not add a location to that history; ordinary rank walking retains
-   its own local navigation. Return to origin always goes to the selection point. The reader can
-   instead cross, choose a document occurrence, Enter, or dismiss the context while leaving reading
-   focus where it is.
+1. **Return or continue.** Activity Back follows the current visit's parent and restores its saved
+   document or cell focus, link context, and view. Activity Forward follows a chosen child. When a
+   visit has several children, a branch chooser shows every future and remembers the last one
+   followed without hiding its siblings. Returning to an earlier visit and entering a new endpoint
+   adds a child while preserving its existing futures. The reader can also cross, choose a document
+   occurrence, Enter, or dismiss the pinned link context.
 
 An unambiguous single member and occurrence may be preselected for preview, but Enter remains an
 explicit action. When a span occurs in several versions or cells, the reader chooses an occurrence
 before Enter. No proximity heuristic silently assigns a target to a many-to-many link.
+
+## Walks are part of the docuverse
+
+The reader's route is a persistent tree of visits, with multiple roots for independent walks. A
+visit names the place reached, the action that reached it, and its parent visit. Its children are
+all the directions the reader later took from that point. Following a link, moving to another cell
+on a rank, opening a document or version, and jumping to a passage create visits after arrival.
+Hover, endpoint preview, camera motion, and scrolling stay transient; the current view is captured
+when a visit is completed or checkpointed. A failed or cancelled entry does not create a visit.
+
+```text
+Walk A:  v1 open page ── v2 enter cell ── v3 follow rank
+                         ├────────────── v4 cross link into document
+                         └────────────── v5 explore another rank
+Walk B:  v6 open another source ── v7 inspect its linked cell
+```
+
+Each visit has a stable activity identity, a parent, ordered children, an exact document
+version/range or cell/range target, and the active dimension or projection. When a link led there,
+the visit also records that link's authority and ID, both endset member/occurrence selections, and
+the source companion. The saved view includes enough camera and reading context to make restoration
+recognizable. Revisiting the same content along another route creates another visit, since the route
+and link context are part of what the reader may want to remember.
+
+Activity Back selects the parent visit. Activity Forward selects a child; a fork opens a chooser
+with previews of every child. The last followed child may be highlighted as a convenience, but no
+branch disappears. Choosing an old visit previews its place in the tree; Enter restores it without
+rewriting history. The next new transition from that visit appends another child. Return to origin
+selects the origin visit recorded for the active link, rather than reconstructing a temporary stack.
+Existing document hypertime controls still navigate *document versions* and need distinct labels and
+sovereign keymap actions from Activity Back and Forward.
+
+A **Walks** view exposes roots, branches, the current visit, and short previews. A reader can open
+any walk, resume the last active one after restart, name a walk, bookmark a visit, attach a note,
+and refer to a visit or walk from another activity note. The tree's edges describe the reader's
+movement; Xanadu link beams describe authored relationships between content. The two use distinct
+visual marks, and selecting a visit reveals the link context saved with that visit. A visit whose
+target has moved or is unavailable stays in the tree with its original address and a clear recovery
+choice; restoration never silently targets current content elsewhere.
+
+### Reader-owned activity store
+
+The proposed `system://activity` is a separate, private-by-default system store, not another
+document's hypertime branch. It stores activity visits as persistent structure with stable IDs,
+ordered child branches, walk roots, references, annotations, and view checkpoints. Its tree takes
+OSMIC's nondestructive branching as an interaction model; activity IDs and edges remain distinct
+from `MicroversionId` and from a document's operation ancestry. Durable targets name their store
+authority and version as well as the exact span or cell; a session-local store index or `CellRef`
+alone is insufficient across sessions or stores.
+
+This is a deliberate extension to [R8](store-slice-convergence.md): live cursor and camera state
+remain ephemeral, and visiting content appends nothing to the visited document or slice. Completed
+reader transitions append only to the separate activity store. Its record is user data, so an
+unreadable activity store must be preserved and reported, not replaced with generated defaults as
+configuration stores can be. Recording is local and private until the reader explicitly publishes or
+exports a walk. Cross-store references from ordinary xanadocs to activity visits depend on the
+federated reference work; references and annotations within the activity store can precede it.
 
 ## The visible language
 
@@ -107,19 +167,19 @@ editing caret untouched. Pending and unavailable states are announced alongside 
 The sovereign keymap binds the same semantic actions without fixing their chords in the interface
 design.
 
-The context is view-local and ephemeral. Browsing, camera movement, rank changes, and Back append no
-operations under R8 of [`store-slice-convergence.md`](store-slice-convergence.md). Link content and
-attribution remain distinct: endpoint spans address primedia, while type, owner, and curator stay
-with the link identity. Explicit stored links retain their own visual identity; transclusion prisms
-and format links do not open a link traversal session merely because they are hovered.
+The live link context is view-local; its selected state is captured in completed activity visits.
+Link content and attribution remain distinct: endpoint spans address primedia, while type, owner,
+and curator stay with the link identity. Explicit stored links retain their own visual identity;
+transclusion prisms and format links do not open a link traversal session merely because they are
+hovered.
 
 ## Concepts considered
 
-| Concept                                    | Useful quality                                               | Cost                                                                  | Decision                                                                         |
-| ------------------------------------------ | ------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Direct jump with a breadcrumb              | Fast for a one-to-one link                                   | A many-to-many link's other members disappear at the moment of travel | Use only as the explicit Enter action after an exact occurrence has been chosen  |
-| Spatial overview of endpoint groups        | Makes topology apparent at small scale                       | Dense links can still obscure text                                    | Offer an optional overview of groups and the reader's current comparison         |
-| Two endset lists beside the active content | Keeps the whole link available while either side is explored | Needs careful sizing and a stable origin marker                       | Adopt as the default context, emphasizing the chosen two occurrences plus counts |
+| Concept                                    | Useful quality                                               | Cost                                               | Decision                                                                         |
+| ------------------------------------------ | ------------------------------------------------------------ | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Direct jump with a linear breadcrumb       | Fast for a one-to-one link                                   | Revisiting a prior point can discard other futures | Use explicit Enter, with every completed route retained in the activity tree     |
+| Spatial overview of endpoint groups        | Makes topology apparent at small scale                       | Dense links can still obscure text                 | Offer an optional overview of groups and the reader's current comparison         |
+| Two endset lists beside the active content | Keeps the whole link available while either side is explored | Needs careful sizing and a stable origin marker    | Adopt as the default context, emphasizing the chosen two occurrences plus counts |
 
 The following ideas merit prototypes within that default model:
 
@@ -132,8 +192,8 @@ The following ideas merit prototypes within that default model:
 - **On-demand whole-link overview:** Temporarily pull back to show all member clusters and the
   reader's current comparison. Keep the link context in place so overview never becomes a second
   navigation mode.
-- **Reading trail:** Show a small reversible sequence of entered occurrences. The trail expresses
-  the reader's path, while the endsets express the author's link; keep those meanings distinct.
+- **Branch previews:** Show a child's destination, link type, and note in the Forward chooser. A
+  compact preview gives rapid access to a known route while the Walks view shows the full tree.
 - **Ambient provenance:** Let an endpoint reveal its author, version, and primedia source on demand
   without adding permanent chrome to every page and cell.
 
@@ -147,7 +207,8 @@ visible-cell anchor would never bring it into range. Resolution performs no bloc
 UI thread, and focus changes only when that exact target is ready. Cancellation or switching links
 invalidates the pending request so a late result cannot redirect focus. Retry and
 choose-another-member actions preserve the same link ID. No failure path substitutes the first
-available occurrence.
+available occurrence. A saved visit to unavailable content remains addressable and annotatable in
+Walks even while its destination cannot be opened.
 
 ## Roadmap and evidence
 
@@ -155,8 +216,13 @@ available occurrence.
    side, member order, version, and document or cell range. A 2×3 link remains one link even when
    the visible occurrences multiply.
 1. **Unify actions.** Route beam, margin, text, cell, keymap, and accessible input through one
-   select/choose/cross/enter/back command boundary. Use one stable accessible node per link with
-   side, member, and occurrence choices; focusing that node never moves the editing caret.
+   select/choose/cross/enter command boundary. Use one stable accessible node per link with side,
+   member, and occurrence choices; focusing that node never moves the editing caret.
+1. **Persist branching walks.** Add a reader-owned `system://activity` store and a visit recorder
+   that appends successful focus transitions, preserves siblings when a reader branches, and
+   restores the last active walk after restart. Build Activity Back/Forward, branch selection,
+   Walks, references, and annotations over stable visit IDs. Keep this store out of
+   default-regeneration recovery and separate its actions from document hypertime.
 1. **Complete the bridge journey.** Carry exact occurrence identity through `BridgeCoordinator`,
    materialize out-of-radius cell neighborhoods, and preserve the source companion and pinned link
    context across document/cell transitions and dimension changes.
@@ -169,7 +235,9 @@ The implementation is successful when a reader can select one of several overlap
 both sides of a discontinuous 2×3 link independently, choose an exact repeated occurrence, enter a
 cell and return through a document, and still identify the same link and origin at every step.
 Pointer, keymap, and accessibility paths must reach the same occurrence. Missing targets remain
-visible and cancellable; rapid link switching does not redirect a pending entry. These journeys are
+visible and cancellable; rapid link switching does not redirect a pending entry. From an earlier
+visit, taking a new route must create a sibling while both old and new futures survive restart. The
+reader must be able to preview, revisit, reference, and annotate either branch. These journeys are
 the acceptance stories for the companion [workflow](ui_workflow_xuzz_navigation.md).
 
 The first implementation uses the primary store (store index 0), which currently supplies both the
