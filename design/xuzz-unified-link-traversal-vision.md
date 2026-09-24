@@ -183,6 +183,10 @@ hovered.
 
 The following ideas merit prototypes within that default model:
 
+- **The Flap:** Fan the document and cell versions that still manifest the selected link's spans
+  into two branch-aware onion-skin wings. Keep the link as a fixed hinge while each side scrubs
+  independently. The [concept note](xuzz-flap-concept.md) defines the reader journey, exact
+  membership, activity behavior, and prototype questions.
 - **Overlap preview:** A small stack of link summaries at a shared span helps a reader choose a link
   before its full context opens. Test whether type and attribution are enough to distinguish links
   without filling the margin.
