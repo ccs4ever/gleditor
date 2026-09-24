@@ -206,25 +206,28 @@ hovered.
 | Spatial overview of endpoint groups        | Makes topology apparent at small scale                       | Dense links can still obscure text                 | Offer an optional overview of groups and the reader's current comparison         |
 | Two endset lists beside the active content | Keeps the whole link available while either side is explored | Needs careful sizing and a stable origin marker    | Adopt as the default context, emphasizing the chosen two occurrences plus counts |
 
-The following ideas merit prototypes within that default model:
+The [prototype collection](ui/prototypes/README.md) expands the reader walkthrough and technical
+model for each idea within that default context:
 
 - **The Flap:** Fan the document and cell versions that still manifest the selected link's spans
   into two branch-aware onion-skin wings. Keep the link as a fixed hinge while each side scrubs
-  independently. The [concept note](xuzz-flap-concept.md) defines the reader journey, exact
+  independently. The [prototype](ui/prototypes/flap.md) defines the reader journey, exact
   membership, activity behavior, and prototype questions.
 - **Overlap preview:** A small stack of link summaries at a shared span helps a reader choose a link
   before its full context opens. Test whether type and attribution are enough to distinguish links
-  without filling the margin.
+  without filling the margin. See [Overlap preview](ui/prototypes/overlap-preview.md).
 - **Endpoint search and grouping:** For a large endset, group occurrences by document/version or
   cell neighborhood and allow a text search inside the context. Preserve stored member order when
-  the search is cleared.
+  the search is cleared. See [Endpoint search](ui/prototypes/endpoint-search.md).
 - **On-demand whole-link overview:** Temporarily pull back to show all member clusters and the
   reader's current comparison. Keep the link context in place so overview never becomes a second
-  navigation mode.
+  navigation mode. See [Whole-link overview](ui/prototypes/whole-link-overview.md).
 - **Branch previews:** Show a child's destination, link type, and note in the Forward chooser. A
-  compact preview gives rapid access to a known route while the Walks view shows the full tree.
+  compact preview gives rapid access to a known route while the Walks view shows the full tree. See
+  [Activity walks](ui/prototypes/activity-walks.md).
 - **Ambient provenance:** Let an endpoint reveal its author, version, and primedia source on demand
-  without adding permanent chrome to every page and cell.
+  without adding permanent chrome to every page and cell. See
+  [Ambient provenance](ui/prototypes/ambient-provenance.md).
 
 ## Missing and distant targets
 
