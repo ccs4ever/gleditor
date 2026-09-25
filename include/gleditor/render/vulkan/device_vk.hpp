@@ -149,16 +149,17 @@ private:
    * makes *two* -- its own glyph pipeline plus an image pipeline, since the
    * image atlas work gave every canvas an image-drawing pipeline alongside
    * its text one, whether or not that particular canvas ever draws an image.
-   * Xudu keeps four Canvas-owning singletons alive for the whole session
-   * (the hypertime map, the image overlay, the document switcher, and the
-   * publish form) at 2 each, plus Beams' own single non-Canvas pipeline for
-   * the 3D links between documents: 3 + 4*2 + 1 = 12 before a single
-   * document or media widget is open. Each open MediaWidget (audio or
-   * video) adds another 2 on top of that fixed floor. 32 leaves comfortable
-   * room for several concurrently open media widgets without this having to
-   * move again for a while.
+   * Xudu's session-long overlays each own a Canvas -- the hypertime map,
+   * image overlay, document switcher, publish form, radial menu, pouch
+   * drawer, telescope, transcopyright badges, the selected-link panel and
+   * more -- at 2 each, plus Beams' own pipeline, and each open MediaWidget
+   * (audio or video) adds 2 more. The E2E scenarios reached 32 when the
+   * link panel was added (2026-09-24), with no media widget open, so 64
+   * restores the headroom for media the earlier sizing meant to leave. The
+   * price is descriptor sets, maxPipelines * framesInFlight of them, which
+   * is small beside any texture.
    */
-  static constexpr std::uint32_t maxPipelines = 32;
+  static constexpr std::uint32_t maxPipelines = 64;
 
   struct BufferRecord {
     VkBuffer buffer{VK_NULL_HANDLE};
