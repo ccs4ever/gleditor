@@ -112,7 +112,8 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
   canvas_->clear();
 
-  for (const auto &s : satelloids_) {
+  for (std::size_t index = 0; index < satelloids_.size(); ++index) {
+    const auto &s = satelloids_[index];
     if (s.alpha <= 0.01F && s.pulseAlpha <= 0.01F) {
       continue;
     }
@@ -128,8 +129,11 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
     // Card background quad
     const auto bgA            = static_cast<std::uint8_t>(220.0F * s.alpha);
     const std::uint32_t bgCol = 0x0F172A00U | bgA;
+    // Tagged by position in this overlay's own list rather than by cell: a
+    // cell reference is unbounded, and base-plus-cell ran into every other
+    // overlay's tag range once a manifold passed a thousand cells.
     canvas_->setTag(render::tagKindOverlay,
-                    kTagSatelloidBase + static_cast<std::uint32_t>(s.cellRef));
+                    kTagSatelloidBase + static_cast<std::uint32_t>(index));
     canvas_->addRect(x0, y0, cardW, cardH, bgCol);
 
     // Border with primary dimension accent color
@@ -190,11 +194,12 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
 bool SatelloidOverlay::picked(const render::PickingResult &pick,
                               RenderState & /*state*/) {
   if (render::tagKindOverlay != pick.tag.kind ||
-      pick.tag.clusterIndex < kTagSatelloidBase) {
+      pick.tag.clusterIndex < kTagSatelloidBase ||
+      pick.tag.clusterIndex - kTagSatelloidBase >= satelloids_.size()) {
     return false;
   }
   const auto cellRef =
-      static_cast<zigzag::CellRef>(pick.tag.clusterIndex - kTagSatelloidBase);
+      satelloids_[pick.tag.clusterIndex - kTagSatelloidBase].cellRef;
   triggerPulse(cellRef);
   if (navigationCb_) {
     navigationCb_(cellRef, false);
