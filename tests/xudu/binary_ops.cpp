@@ -10,57 +10,59 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/spool.hpp>
-#include <xudu/core/store.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
-using xudu::historyFromSeal;
-using xudu::localScroll;
-using xudu::MicroversionId;
-using xudu::Op;
-using xudu::OpKind;
-using xudu::PrimediaSpan;
-using xudu::readBinaryOpsSpool;
-using xudu::readMicroversionId;
-using xudu::readOpsSpool;
-using xudu::readOsmicTextOpsSpool;
-using xudu::readVarint;
-using xudu::Scroll;
-using xudu::sealableOps;
-using xudu::Store;
-using xudu::ValueKind;
-using xudu::writeBinaryOpsSpool;
-using xudu::writeMicroversionId;
-using xudu::writeOsmicTextOpsSpool;
+using xanadu::historyFromSeal;
+using xanadu::localScroll;
+using xanadu::MicroversionId;
+using xanadu::Op;
+using xanadu::OpKind;
+using xanadu::PrimediaSpan;
+using xanadu::readBinaryOpsSpool;
+using xanadu::readMicroversionId;
+using xanadu::readOpsSpool;
+using xanadu::readOsmicTextOpsSpool;
+using xanadu::readVarint;
+using xanadu::Scroll;
+using xanadu::sealableOps;
+using xanadu::Store;
+using xanadu::ValueKind;
+using xanadu::writeBinaryOpsSpool;
+using xanadu::writeMicroversionId;
+using xanadu::writeOsmicTextOpsSpool;
 
 /// The serializers take a sequence now rather than a map, because the order
 /// records are written in is part of the format -- FLAG_SEQUENTIAL drops a
 /// record's name when it continues the one before it. These tests still say
 /// what they expect as "an operation filed under this state", so they convert
 /// at the call and go on describing it that way.
-std::vector<xudu::OpRecord> asRecords(const std::map<MicroversionId, Op> &ops) {
-  std::vector<xudu::OpRecord> records;
+std::vector<xanadu::OpRecord>
+asRecords(const std::map<MicroversionId, Op> &ops) {
+  std::vector<xanadu::OpRecord> records;
   records.reserve(ops.size());
   for (const auto &[id, op] : ops) {
-    records.push_back(xudu::OpRecord{id, op});
+    records.push_back(xanadu::OpRecord{id, op});
   }
   return records;
 }
 
-std::map<MicroversionId, Op> asMap(const std::vector<xudu::OpRecord> &records) {
+std::map<MicroversionId, Op>
+asMap(const std::vector<xanadu::OpRecord> &records) {
   std::map<MicroversionId, Op> ops;
   for (const auto &record : records) {
     ops.emplace(record.produces, record.op);
   }
   return ops;
 }
-using xudu::writeVarint;
+using xanadu::writeVarint;
 
 TEST(BinaryOpsTest, varintEncodesAndDecodesCorrectly) {
   const std::vector<std::uint64_t> numbers = {
@@ -210,7 +212,7 @@ TEST(BinaryOpsTest, allOpKindsBinaryRoundTrip) {
   ASSERT_GE(binaryData.size(), 5U);
   std::stringstream payload(binaryData.substr(5));
 
-  std::vector<xudu::OpRecord> decodedRecords;
+  std::vector<xanadu::OpRecord> decodedRecords;
   readBinaryOpsSpool(payload, decodedRecords);
   const auto decoded = asMap(decodedRecords);
 
@@ -278,7 +280,7 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   {
     std::stringstream ss;
     writeBinaryOpsSpool(ss, asRecords(original));
-    std::vector<xudu::OpRecord> decodedRecords;
+    std::vector<xanadu::OpRecord> decodedRecords;
     readOpsSpool(ss, decodedRecords);
     const auto decoded = asMap(decodedRecords);
     ASSERT_EQ(decoded.size(), 1U);
@@ -290,7 +292,7 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   {
     std::stringstream ss;
     writeOsmicTextOpsSpool(ss, asRecords(original));
-    std::vector<xudu::OpRecord> decodedRecords;
+    std::vector<xanadu::OpRecord> decodedRecords;
     readOpsSpool(ss, decodedRecords);
     const auto decoded = asMap(decodedRecords);
     ASSERT_EQ(decoded.size(), 1U);
@@ -319,7 +321,7 @@ TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
     bytes.push_back(static_cast<char>(0x00));
 
     std::stringstream ss(bytes);
-    std::vector<xudu::OpRecord> decoded;
+    std::vector<xanadu::OpRecord> decoded;
     try {
       readOpsSpool(ss, decoded);
       FAIL() << "version " << static_cast<int>(version) << " must not be read";
@@ -341,30 +343,30 @@ TEST(BinaryOpsTest, theTagByteGivesTheKindFourBitsAndTheFlagsTheRest) {
   //
   // Asserted on the bytes rather than through a round trip, because a round
   // trip agrees with itself whichever layout both halves happen to use.
-  std::vector<xudu::OpRecord> records;
+  std::vector<xanadu::OpRecord> records;
   Op insert;
   insert.kind = OpKind::Insert;
   insert.at   = 0;
   insert.span = PrimediaSpan{localScroll, 0, 1};
-  records.push_back(xudu::OpRecord{MicroversionId::parse("1"), insert});
+  records.push_back(xanadu::OpRecord{MicroversionId::parse("1"), insert});
 
   std::stringstream out;
   writeBinaryOpsSpool(out, records);
   const auto bytes = out.str();
-  ASSERT_GT(bytes.size(), xudu::binaryOpsMagic.size());
+  ASSERT_GT(bytes.size(), xanadu::binaryOpsMagic.size());
 
   // A local single-byte insert at the span's start, sequential off state
   // zero: every flag set and kind 0. Under version 2 that byte was 0x78.
   const auto tag =
-      static_cast<unsigned char>(bytes[xudu::binaryOpsMagic.size()]);
+      static_cast<unsigned char>(bytes[xanadu::binaryOpsMagic.size()]);
   EXPECT_EQ(tag & 0x0F, 0U) << "BinInsert is kind 0 in the low four bits";
   EXPECT_EQ(tag, 0xF0U) << "sequential, local scroll, at==start, single byte";
 }
 
 TEST(BinaryOpsTest, versioningAndDetection) {
-  using xudu::detectOpsSpoolVersion;
-  using xudu::OpsSpoolVersion;
-  using xudu::opsSpoolVersionName;
+  using xanadu::detectOpsSpoolVersion;
+  using xanadu::OpsSpoolVersion;
+  using xanadu::opsSpoolVersionName;
 
   EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::StandardOsmicText),
                "OSMIC text (v0)");
@@ -402,8 +404,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
   // and source travel.
   Op setLink;
   setLink.kind   = OpKind::Structure;
-  setLink.flags  = xudu::structureFlags(xudu::StructureVerb::SetLink, true,
-                                        xudu::ValueKind::Double);
+  setLink.flags  = xanadu::structureFlags(xanadu::StructureVerb::SetLink, true,
+                                          xanadu::ValueKind::Double);
   setLink.to     = 41;
   setLink.link   = 9;
   setLink.source = MicroversionId::parse("1a1");
@@ -412,7 +414,7 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
 
   Op splice;
   splice.kind   = OpKind::Structure;
-  splice.flags  = xudu::structureFlags(xudu::StructureVerb::Splice);
+  splice.flags  = xanadu::structureFlags(xanadu::StructureVerb::Splice);
   splice.at     = 5;
   splice.length = 10;
   splice.source = MicroversionId::parse("1a2");
@@ -421,33 +423,34 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
   const auto dimId    = MicroversionId::parse("1a10");
   const auto targetId = MicroversionId::parse("1a20");
 
-  const std::vector<xudu::OpRecord> original = {
-      xudu::OpRecord{.produces             = MicroversionId::parse("1a3"),
-                     .op                   = setLink,
-                     .structureDimension   = dimId,
-                     .structureTarget      = targetId,
-                     .structureValueTarget = MicroversionId{}},
-      xudu::OpRecord{.produces             = MicroversionId::parse("1a4"),
-                     .op                   = splice,
-                     .structureDimension   = MicroversionId{},
-                     .structureTarget      = MicroversionId{},
-                     .structureValueTarget = MicroversionId{}},
+  const std::vector<xanadu::OpRecord> original = {
+      xanadu::OpRecord{.produces             = MicroversionId::parse("1a3"),
+                       .op                   = setLink,
+                       .structureDimension   = dimId,
+                       .structureTarget      = targetId,
+                       .structureValueTarget = MicroversionId{}},
+      xanadu::OpRecord{.produces             = MicroversionId::parse("1a4"),
+                       .op                   = splice,
+                       .structureDimension   = MicroversionId{},
+                       .structureTarget      = MicroversionId{},
+                       .structureValueTarget = MicroversionId{}},
   };
 
   {
     std::stringstream binary;
     writeBinaryOpsSpool(binary, original);
-    std::vector<xudu::OpRecord> decoded;
+    std::vector<xanadu::OpRecord> decoded;
     readOpsSpool(binary, decoded);
     ASSERT_EQ(decoded.size(), 2U);
 
     EXPECT_EQ(decoded[0].produces.str(), "1a3");
     EXPECT_EQ(decoded[0].op.kind, OpKind::Structure);
     EXPECT_EQ(decoded[0].op.flags, setLink.flags);
-    EXPECT_EQ(xudu::structureVerbOf(decoded[0].op.flags),
-              xudu::StructureVerb::SetLink);
-    EXPECT_TRUE(xudu::structureIsNegward(decoded[0].op.flags));
-    EXPECT_EQ(xudu::valueKindOf(decoded[0].op.flags), xudu::ValueKind::Double);
+    EXPECT_EQ(xanadu::structureVerbOf(decoded[0].op.flags),
+              xanadu::StructureVerb::SetLink);
+    EXPECT_TRUE(xanadu::structureIsNegward(decoded[0].op.flags));
+    EXPECT_EQ(xanadu::valueKindOf(decoded[0].op.flags),
+              xanadu::ValueKind::Double);
     EXPECT_EQ(decoded[0].op.source, setLink.source);
     EXPECT_EQ(decoded[0].structureDimension, dimId);
     EXPECT_EQ(decoded[0].structureTarget, targetId);
@@ -457,8 +460,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     EXPECT_EQ(decoded[1].produces.str(), "1a4");
     EXPECT_EQ(decoded[1].op.kind, OpKind::Structure);
     EXPECT_EQ(decoded[1].op.flags, splice.flags);
-    EXPECT_EQ(xudu::structureVerbOf(decoded[1].op.flags),
-              xudu::StructureVerb::Splice);
+    EXPECT_EQ(xanadu::structureVerbOf(decoded[1].op.flags),
+              xanadu::StructureVerb::Splice);
     EXPECT_EQ(decoded[1].op.at, 5U);
     EXPECT_EQ(decoded[1].op.length, 10U);
     EXPECT_EQ(decoded[1].op.source, splice.source);
@@ -468,7 +471,7 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     std::stringstream text;
     writeOsmicTextOpsSpool(text, original);
     EXPECT_THAT(text.str(), testing::HasSubstr(" structure "));
-    std::vector<xudu::OpRecord> decoded;
+    std::vector<xanadu::OpRecord> decoded;
     readOsmicTextOpsSpool(text, decoded);
     ASSERT_EQ(decoded.size(), 2U);
 
@@ -515,11 +518,11 @@ TEST(BinaryOpsTest, aPublishedSliceFoldsWithItsLinksIntact) {
   EXPECT_EQ(pubManifold.textOf(c2, publisher), "splnd");
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "slice";
 
-  const auto sealed  = xudu::sealableOps(publisher);
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto sealed  = xanadu::sealableOps(publisher);
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
@@ -540,11 +543,11 @@ TEST(BinaryOpsTest, aSpliceOperationSurvivesPublication) {
   at              = publisher.spliceCell(at, cell, 2, 4, "XYZ");
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "splice-test";
 
-  const auto sealed  = xudu::sealableOps(publisher);
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto sealed  = xanadu::sealableOps(publisher);
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
@@ -578,11 +581,11 @@ TEST(BinaryOpsTest, structureAddressesSurviveBranchDrivenReordering) {
   const auto handleCell = publisher.cellRefOf(at);
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "reorder";
 
-  const auto sealed  = xudu::sealableOps(publisher);
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto sealed  = xanadu::sealableOps(publisher);
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   const auto histManifold = history->rebuildManifold(at);
@@ -616,11 +619,11 @@ TEST(BinaryOpsTest, aHandleMayTargetALexicallyLaterBranch) {
   const auto handleCell = publisher.cellRefOf(at);
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "handle-dep";
 
-  const auto sealed  = xudu::sealableOps(publisher);
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto sealed  = xanadu::sealableOps(publisher);
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   const auto histManifold = history->rebuildManifold(at);
@@ -651,11 +654,11 @@ TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
   at = publisher.setCellText(at, cB, "cell_b updated");
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "sealed-loc";
 
-  const auto sealed  = xudu::sealableOps(publisher);
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto sealed  = xanadu::sealableOps(publisher);
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   const auto key = "btpk:" + became.publisher.hex() + ":" + became.salt;
@@ -691,11 +694,11 @@ TEST(BinaryOpsTest, sealedHistoryUsesTheSameAddressLocalization) {
   // become zero
   Op badOp;
   badOp.kind   = OpKind::Structure;
-  badOp.flags  = xudu::structureFlags(xudu::StructureVerb::SetValue);
+  badOp.flags  = xanadu::structureFlags(xanadu::StructureVerb::SetValue);
   badOp.source = MicroversionId::parse("9999");
   EXPECT_THROW(history->putOp(at.next(), badOp), std::invalid_argument);
 
-  xudu::OpRecord badRecord{
+  xanadu::OpRecord badRecord{
       .produces             = MicroversionId::parse("8888"),
       .op                   = badOp,
       .structureDimension   = MicroversionId{},
@@ -712,7 +715,7 @@ TEST(BinaryOpsTest, anOsmicTextLineWithoutItsOptionalColumnsStillReads) {
   // trying an optional column answered yes for every line that simply did not
   // have one: the scroll fallback beside it had been unreachable.
   std::stringstream eleven("1 insert 0 5 0 0 5 0 0 0 0\n");
-  std::vector<xudu::OpRecord> decoded;
+  std::vector<xanadu::OpRecord> decoded;
   readOsmicTextOpsSpool(eleven, decoded);
   ASSERT_EQ(decoded.size(), 1U);
   EXPECT_EQ(decoded.front().op.kind, OpKind::Insert);
@@ -723,7 +726,7 @@ TEST(BinaryOpsTest, anOsmicTextLineWithoutItsOptionalColumnsStillReads) {
 
   // A line that really is malformed still says so.
   std::stringstream ragged("1 insert 0\n");
-  std::vector<xudu::OpRecord> nothing;
+  std::vector<xanadu::OpRecord> nothing;
   EXPECT_THROW(readOsmicTextOpsSpool(ragged, nothing), std::runtime_error);
 }
 

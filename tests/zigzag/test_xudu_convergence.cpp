@@ -8,43 +8,43 @@
 #include <stdexcept>
 #include <variant>
 
-#include "xudu/core/link_package.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/scroll.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/swarm.hpp"
-#include "zigzag/core/manifold.hpp"
-#include "zigzag/core/zz_xudu_projector.hpp"
-#include "zigzag/core/zzcore.hpp"
-#include "zigzag/core/zzstructure.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 
 using namespace zigzag;
 
 TEST(ZzXuduConvergenceTest, ProjectXuduDocsToZigzag) {
   // Document A and Document B share a transcluded span and have a link
-  const xudu::PrimediaSpan spanA{1, 0, 20};
-  const xudu::PrimediaSpan spanB{1, 10, 30}; // Overlaps spanA
-  const xudu::PrimediaSpan spanC{2, 0, 15};
+  const xanadu::PrimediaSpan spanA{1, 0, 20};
+  const xanadu::PrimediaSpan spanB{1, 10, 30}; // Overlaps spanA
+  const xanadu::PrimediaSpan spanC{2, 0, 15};
 
   std::vector<XuduDocInput> docs;
   docs.push_back(XuduDocInput{
       .name    = "doc_a",
       .text    = "Introduction paragraph\n\nSecond paragraph of doc A",
-      .version = xudu::MicroversionId::parse("1"),
+      .version = xanadu::MicroversionId::parse("1"),
       .spans   = {spanA, spanC},
   });
 
   docs.push_back(XuduDocInput{
       .name    = "doc_b",
       .text    = "Transcluded intro\n\nIndependent conclusion",
-      .version = xudu::MicroversionId::parse("1"),
+      .version = xanadu::MicroversionId::parse("1"),
       .spans   = {spanB, spanC},
   });
 
-  xudu::Link xLink;
+  xanadu::Link xLink;
   xLink.id    = 100;
-  xLink.type  = xudu::LinkType::Comment;
+  xLink.type  = xanadu::LinkType::Comment;
   xLink.left  = {spanA};
   xLink.right = {spanC};
 
@@ -121,12 +121,12 @@ TEST(ZzXuduConvergenceTest, LinkPackageRoundTrip) {
   doc.cells[1] = c1;
   doc.cells[2] = c2;
 
-  const auto keys = xudu::createMutableKeys();
+  const auto keys = xanadu::createMutableKeys();
   const auto pkg  = zzStructureToLinkPackage(doc, keys, "slice_salt", 1);
 
   EXPECT_EQ(pkg.title, "Test Convergence Slice");
   EXPECT_EQ(pkg.links.size(), 1U);
-  EXPECT_EQ(pkg.links.front().type, xudu::LinkType::Dimension);
+  EXPECT_EQ(pkg.links.front().type, xanadu::LinkType::Dimension);
   EXPECT_EQ(pkg.links.front().owner, "dim:d.1");
 
   // Reconstruct back to Zigzag space
@@ -164,22 +164,22 @@ TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
   // Version 1: Paragraph 1 (spool 1, offset 0, len 20), Paragraph 2 (spool 1,
   // offset 20, len 20) Version 2: Paragraph 1 (spool 1, offset 0, len 20 -
   // UNCHANGED), Paragraph 3 (spool 2, offset 0, len 25 - EDITED)
-  const xudu::PrimediaSpan span1{1, 0, 20};
-  const xudu::PrimediaSpan span2{1, 20, 20};
-  const xudu::PrimediaSpan span3{2, 0, 25};
+  const xanadu::PrimediaSpan span1{1, 0, 20};
+  const xanadu::PrimediaSpan span2{1, 20, 20};
+  const xanadu::PrimediaSpan span3{2, 0, 25};
 
   std::vector<XuduDocInput> docs;
   docs.push_back(XuduDocInput{
       .name    = "v1",
       .text    = "First unchanged text\n\nOriginal second text",
-      .version = xudu::MicroversionId::parse("1"),
+      .version = xanadu::MicroversionId::parse("1"),
       .spans   = {span1, span2},
   });
 
   docs.push_back(XuduDocInput{
       .name    = "v2",
       .text    = "First unchanged text\n\nEdited second text here",
-      .version = xudu::MicroversionId::parse("2"),
+      .version = xanadu::MicroversionId::parse("2"),
       .spans   = {span1, span3},
   });
 
@@ -272,31 +272,31 @@ TEST(ZzXuduConvergenceTest, RasterizeZzStructureWithCloneCells) {
 }
 
 TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
-  xudu::Store store;
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "Public Intro. ");
+  xanadu::Store store;
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, "Public Intro. ");
 
   // Add external scroll with withheld and locked segments
-  xudu::Scroll extScroll;
-  xudu::ScrollSegment segWithheld;
+  xanadu::Scroll extScroll;
+  xanadu::ScrollSegment segWithheld;
   segWithheld.at     = 0;
   segWithheld.length = 30;
-  segWithheld.kind   = xudu::SegmentKind::Withheld;
-  xudu::PublishedHoleRecord hole1;
+  segWithheld.kind   = xanadu::SegmentKind::Withheld;
+  xanadu::PublishedHoleRecord hole1;
   hole1.at               = 0;
   hole1.length           = 30;
-  hole1.reason           = xudu::HoleReason::Withheld;
+  hole1.reason           = xanadu::HoleReason::Withheld;
   segWithheld.holeRecord = hole1;
   extScroll.segments.push_back(segWithheld);
 
-  xudu::ScrollSegment segLocked;
+  xanadu::ScrollSegment segLocked;
   segLocked.at     = 30;
   segLocked.length = 40;
-  segLocked.kind   = xudu::SegmentKind::Withheld;
-  xudu::PublishedHoleRecord hole2;
+  segLocked.kind   = xanadu::SegmentKind::Withheld;
+  xanadu::PublishedHoleRecord hole2;
   hole2.at     = 30;
   hole2.length = 40;
-  hole2.reason = xudu::HoleReason::TranscopyrightLock;
-  xudu::TranscopyrightDescriptor tc;
+  hole2.reason = xanadu::HoleReason::TranscopyrightLock;
+  xanadu::TranscopyrightDescriptor tc;
   tc.priceAtomicUnits  = 75;
   tc.currencySymbol    = "XU";
   hole2.transcopyright = tc;
@@ -316,9 +316,9 @@ TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
 }
 
 TEST(ZzXuduConvergenceTest, StoreProjectionRetainsSourceDocumentAndSpan) {
-  xudu::Store store;
+  xanadu::Store store;
   const auto version =
-      store.insert(xudu::MicroversionId{}, 0, "First paragraph.\n\nSecond.");
+      store.insert(xanadu::MicroversionId{}, 0, "First paragraph.\n\nSecond.");
 
   const auto projected = projectStoreWithProvenance(store, {version});
   ASSERT_FALSE(projected.document.cells.empty());
@@ -383,9 +383,9 @@ ZzStructureDocument sampleSlice() {
 } // namespace
 
 TEST(SliceToStoreTest, aSliceBecomesOperationsAndFoldsBackToItself) {
-  xudu::Store store;
+  xanadu::Store store;
   const auto doc    = sampleSlice();
-  const auto minted = sliceToStore(doc, store, xudu::MicroversionId{});
+  const auto minted = sliceToStore(doc, store, xanadu::MicroversionId{});
 
   // Genesis plus a cell per YAML cell plus the attribute cells, so the store
   // holds strictly more cells than the document had -- the metadata became
@@ -422,9 +422,9 @@ TEST(SliceToStoreTest, aSliceBecomesOperationsAndFoldsBackToItself) {
 }
 
 TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {
-  xudu::Store store;
+  xanadu::Store store;
   const auto doc      = sampleSlice();
-  const auto minted   = sliceToStore(doc, store, xudu::MicroversionId{});
+  const auto minted   = sliceToStore(doc, store, xanadu::MicroversionId{});
   const auto manifold = store.rebuildManifold(minted.version);
 
   const auto back = storeToSlice(store, manifold, minted.focus);
@@ -466,10 +466,10 @@ TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {
 TEST(SliceToStoreTest, mintingTheSameSliceTwiceMintsTheSameOperations) {
   const auto doc = sampleSlice();
 
-  xudu::Store first;
-  const auto mintedFirst = sliceToStore(doc, first, xudu::MicroversionId{});
-  xudu::Store second;
-  const auto mintedSecond = sliceToStore(doc, second, xudu::MicroversionId{});
+  xanadu::Store first;
+  const auto mintedFirst = sliceToStore(doc, first, xanadu::MicroversionId{});
+  xanadu::Store second;
+  const auto mintedSecond = sliceToStore(doc, second, xanadu::MicroversionId{});
 
   // Determinism is what makes a store fixture regenerable and diffable: the
   // conversion sorts rather than iterating hash tables.
@@ -485,9 +485,9 @@ TEST(SliceToStoreTest, mintingTheSameSliceTwiceMintsTheSameOperations) {
 }
 
 TEST(SliceToStoreTest, aSecondSliceReusesTheDimensionsAlreadyMinted) {
-  xudu::Store store;
+  xanadu::Store store;
   const auto doc = sampleSlice();
-  const auto one = sliceToStore(doc, store, xudu::MicroversionId{});
+  const auto one = sliceToStore(doc, store, xanadu::MicroversionId{});
   const auto two = sliceToStore(doc, store, one.version);
 
   // Genesis happens once, and a dimension is found by name rather than minted
@@ -532,9 +532,9 @@ TEST(XuduProjectionTest, AParagraphNeverBorrowsAnotherParagraphsAddress) {
   // paragraphs have no covering piece -- and three spans, so the old fallback
   // had an entry to hand each of them. The last two are identical, which is
   // what turned a borrowed address into a fabricated clone.
-  doc.spans.push_back(xudu::PrimediaSpan{1, 100, 2});
-  doc.spans.push_back(xudu::PrimediaSpan{1, 500, 2});
-  doc.spans.push_back(xudu::PrimediaSpan{1, 500, 2});
+  doc.spans.push_back(xanadu::PrimediaSpan{1, 100, 2});
+  doc.spans.push_back(xanadu::PrimediaSpan{1, 500, 2});
+  doc.spans.push_back(xanadu::PrimediaSpan{1, 500, 2});
 
   const auto projected = projectXuduToZigzag({doc}, {});
 

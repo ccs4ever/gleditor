@@ -24,27 +24,27 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <common/xanadu/zigzag/arena_manifold.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::Op;
-using xudu::OpKind;
-using xudu::PrimediaSpan;
-using xudu::ProminenceTier;
-using xudu::Store;
-using xudu::StructureVerb;
-using xudu::ValueKind;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::Op;
+using xanadu::OpKind;
+using xanadu::PrimediaSpan;
+using xanadu::ProminenceTier;
+using xanadu::Store;
+using xanadu::StructureVerb;
+using xanadu::ValueKind;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -425,7 +425,7 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
   // round, because the API above will not write one.
   Op op;
   op.kind   = OpKind::Structure;
-  op.flags  = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = ephemeralBit | 3U;
   op.link   = dim;
   op.source = slice.store.segmentedOps().idOf(cell);
@@ -470,7 +470,7 @@ TEST(ManifoldTest, aLinkNamingACellTheFoldDoesNotHoldIsRefused) {
 
   Op op;
   op.kind   = OpKind::Structure;
-  op.flags  = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = 9999; // no operation, let alone a cell
   op.link   = dim;
   op.source = slice.store.segmentedOps().idOf(cell);
@@ -489,7 +489,7 @@ TEST(ManifoldTest, aSetLinkWithNoChainHasNoSubjectAndIsRefused) {
 
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags = xanadu::structureFlags(StructureVerb::SetLink);
   op.to    = two;
   op.link  = dim;
   // op.source is empty, so it names no subject
@@ -749,7 +749,7 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   // One permascroll, shared: a store holds no primedia, so a reloaded slice
   // reads its cell names out of the scroll the first one typed them into.
-  const auto permascroll = std::make_shared<xudu::UserPermascroll>();
+  const auto permascroll = std::make_shared<xanadu::UserPermascroll>();
 
   CellRef dim{noCell};
   CellRef head{noCell};
@@ -1314,8 +1314,8 @@ TEST(ManifoldTest, theFoldedRegistryMatchesAColdRebuild) {
 
   const auto reg = slice.store.scrollRegistry();
   ASSERT_EQ(reg.size(), 2U);
-  EXPECT_EQ(reg.scrollIdForKey(key1), std::optional<xudu::ScrollId>{1});
-  EXPECT_EQ(reg.scrollIdForKey(key2), std::optional<xudu::ScrollId>{2});
+  EXPECT_EQ(reg.scrollIdForKey(key1), std::optional<xanadu::ScrollId>{1});
+  EXPECT_EQ(reg.scrollIdForKey(key2), std::optional<xanadu::ScrollId>{2});
   ASSERT_NE(reg.recordForId(1), nullptr);
   EXPECT_EQ(reg.recordForId(1)->globalKey, key1);
   ASSERT_NE(reg.recordForId(2), nullptr);
@@ -1337,7 +1337,7 @@ TEST(ManifoldTest, aRegistryCellMayUseAnAlreadyMappedNonZeroScroll) {
   // Mint a second cell on d.scrolls whose content span points into scroll 1!
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = xudu::structureFlags(StructureVerb::MakeCell);
+  op.flags = xanadu::structureFlags(StructureVerb::MakeCell);
   op.span =
       PrimediaSpan{.scroll = scroll1Id, .start = 0, .length = key2.size()};
   slice.at         = slice.store.apply(slice.at, op);
@@ -1349,13 +1349,13 @@ TEST(ManifoldTest, aRegistryCellMayUseAnAlreadyMappedNonZeroScroll) {
 
   // Define a mock reader that resolves scroll 0 (from store) and scroll 1
   // (key2)
-  struct MockReader : public xudu::SpanReader {
+  struct MockReader : public xanadu::SpanReader {
     const Store &store;
     std::string key2Content;
     MockReader(const Store &s, std::string k2)
         : store(s), key2Content(std::move(k2)) {}
     std::string read(const PrimediaSpan &span) const override {
-      if (span.scroll == xudu::localScroll) {
+      if (span.scroll == xanadu::localScroll) {
         return store.read(span);
       }
       if (span.scroll == 1) {
@@ -1383,7 +1383,7 @@ TEST(ManifoldTest, anUnrootedRegistryDependencyIsRefused) {
   // Mint an unrooted cell referencing unmapped scroll 99
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = xudu::structureFlags(StructureVerb::MakeCell);
+  op.flags = xanadu::structureFlags(StructureVerb::MakeCell);
   op.span  = PrimediaSpan{.scroll = 99, .start = 0, .length = 10};
   slice.at = slice.store.apply(slice.at, op);
   const auto unrootedCell = slice.store.cellRefOf(slice.at);
@@ -1418,14 +1418,14 @@ TEST(ManifoldTest, aPlaceholderLinksToItsScrollCell) {
 
   // Placeholders resolve in O(1) byCell lookup to the parent scroll's id
   EXPECT_EQ(activeReg.scrollIdForCell(p1),
-            std::optional<xudu::ScrollId>{expectedId});
+            std::optional<xanadu::ScrollId>{expectedId});
   EXPECT_EQ(activeReg.scrollIdForCell(p2),
-            std::optional<xudu::ScrollId>{expectedId});
+            std::optional<xanadu::ScrollId>{expectedId});
 }
 
 TEST(ManifoldTest, publishedHistoryBootstrapsThroughAuthorship) {
   // Author side: create document and register a scroll
-  const auto authorPerma = std::make_shared<xudu::UserPermascroll>();
+  const auto authorPerma = std::make_shared<xanadu::UserPermascroll>();
   Store authorStore(authorPerma);
   auto at                    = authorStore.sliceGenesis(MicroversionId{});
   const auto authorGlobalKey = "btpk:" + std::string(64, 'a') + ":permascroll";
@@ -1441,23 +1441,23 @@ TEST(ManifoldTest, publishedHistoryBootstrapsThroughAuthorship) {
   authorStore.save(scratchDir.string());
 
   // Opener side: fresh opener with their own empty permascroll
-  const auto openerPerma = std::make_shared<xudu::UserPermascroll>();
+  const auto openerPerma = std::make_shared<xanadu::UserPermascroll>();
   Store openerStore(openerPerma);
   // Configure bootstrap reader for author's global permascroll
   openerStore.setBootstrapPermascroll(
       authorGlobalKey, [&](const PrimediaSpan &span) {
-        return xudu::ResolveResult{.status =
-                                       xudu::ResolutionStatus::VerifiedBytes,
-                                   .text       = authorPerma->read(span),
-                                   .lockInfo   = std::nullopt,
-                                   .holeRecord = std::nullopt};
+        return xanadu::ResolveResult{
+            .status     = xanadu::ResolutionStatus::VerifiedBytes,
+            .text       = authorPerma->read(span),
+            .lockInfo   = std::nullopt,
+            .holeRecord = std::nullopt};
       });
 
   openerStore.load(scratchDir.string());
   const auto reg = openerStore.scrollRegistry();
   ASSERT_EQ(reg.size(), 1U);
   EXPECT_EQ(reg.scrolls.front().globalKey, targetKey);
-  EXPECT_EQ(reg.scrollIdForKey(targetKey), std::optional<xudu::ScrollId>{1});
+  EXPECT_EQ(reg.scrollIdForKey(targetKey), std::optional<xanadu::ScrollId>{1});
 }
 
 TEST(ManifoldTest, aStoreDirectoryHoldsOnlyOpsAndLocalFacts) {
@@ -1468,22 +1468,22 @@ TEST(ManifoldTest, aStoreDirectoryHoldsOnlyOpsAndLocalFacts) {
            std::chrono::steady_clock::now().time_since_epoch().count()));
   std::filesystem::create_directories(dir);
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   const auto key   = "btpk:" + std::string(64, 'c') + ":scroll";
   {
     Store store(perma);
     auto at = store.sliceGenesis(MicroversionId{});
     at      = store.registerScroll(at, key);
-    xudu::ScrollSegment seg;
+    xanadu::ScrollSegment seg;
     seg.at       = 0;
     seg.length   = 100;
     seg.mimeType = "text/plain";
-    store.addSegment(xudu::localScroll, seg);
+    store.addSegment(xanadu::localScroll, seg);
     store.save(dir.string());
   }
 
   // Inspect the store.tables file directly
-  const auto tables = xudu::readStoreTables(dir / "store.tables");
+  const auto tables = xanadu::readStoreTables(dir / "store.tables");
   EXPECT_FALSE(tables.documentId.str().empty());
   EXPECT_EQ(tables.localSegments.size(), 1U);
 
@@ -1537,8 +1537,8 @@ private:
   bool made{};
 };
 
-xudu::Provenance sampleProv() {
-  xudu::Provenance record;
+xanadu::Provenance sampleProv() {
+  xanadu::Provenance record;
   record.author.name   = "Ada Lovelace";
   record.author.email  = "ada@example.org";
   record.author.gpgKey = "ada@example.org";
@@ -1561,21 +1561,21 @@ TEST(ManifoldTest, verifiedAuthorshipAppearsAsEphemeralArenaCells) {
   }
 
   const auto record     = sampleProv();
-  const auto signedProv = xudu::signProvenance(record);
+  const auto signedProv = xanadu::signProvenance(record);
   ASSERT_FALSE(signedProv.signature.empty());
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
   at      = store.registerScroll(at, record.permascroll);
 
   store.setBootstrapPermascroll(
       record.permascroll, [perma](const PrimediaSpan &span) {
-        return xudu::ResolveResult{.status =
-                                       xudu::ResolutionStatus::VerifiedBytes,
-                                   .text       = perma->read(span),
-                                   .lockInfo   = std::nullopt,
-                                   .holeRecord = std::nullopt};
+        return xanadu::ResolveResult{
+            .status     = xanadu::ResolutionStatus::VerifiedBytes,
+            .text       = perma->read(span),
+            .lockInfo   = std::nullopt,
+            .holeRecord = std::nullopt};
       });
   store.setProvenance(signedProv);
 
@@ -1662,10 +1662,10 @@ TEST(ManifoldTest, authorshipProjectionNeverMintsPersistentOps) {
   }
 
   const auto record     = sampleProv();
-  const auto signedProv = xudu::signProvenance(record);
+  const auto signedProv = xanadu::signProvenance(record);
   ASSERT_FALSE(signedProv.signature.empty());
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
   at      = store.registerScroll(at, record.permascroll);
@@ -1708,13 +1708,13 @@ TEST(ManifoldTest, tamperedAuthorshipIsNotProjected) {
   }
 
   const auto record = sampleProv();
-  auto signedProv   = xudu::signProvenance(record);
+  auto signedProv   = xanadu::signProvenance(record);
   ASSERT_FALSE(signedProv.signature.empty());
 
   // Tamper with the TSV content
   signedProv.tsv += "tampered\ttrue\n";
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
   at      = store.registerScroll(at, record.permascroll);
@@ -1733,7 +1733,7 @@ TEST(ManifoldTest, tamperedAuthorshipIsNotProjected) {
 }
 
 TEST(ManifoldTest, aLinkIsACellWithAnAddress) {
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
   auto at = store.sliceGenesis(MicroversionId{});
 
@@ -1796,7 +1796,7 @@ TEST(ManifoldTest, aMultiSpanLinkSurvivesPublicationAndTransclusion) {
            std::chrono::steady_clock::now().time_since_epoch().count()));
   std::filesystem::create_directories(dir);
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Link originalLink;
   {
     Store store(perma);
@@ -1846,7 +1846,7 @@ TEST(ManifoldTest, aMultiSpanLinkSurvivesPublicationAndTransclusion) {
 }
 
 TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
 
   Store storeMine(perma);
   auto atMine          = storeMine.sliceGenesis(MicroversionId{});

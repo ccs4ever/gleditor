@@ -13,13 +13,14 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/render/types.hpp>
 
-#include "core/ops.hpp"
-#include "core/pouch_zone.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
 struct RenderState;
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class LinkForgeWidget

@@ -31,10 +31,10 @@
 #include <gleditor/svg_animator.hpp>
 #include <gleditor/text_source.hpp>
 
-#include "xudu/core/format.hpp"
-#include "xudu/core/format_resolver.hpp"
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/provenance.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/provenance.hpp"
 
 namespace xudu {
 

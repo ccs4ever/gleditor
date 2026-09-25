@@ -23,7 +23,7 @@
 #include <gleditor/state.hpp>
 
 #include "common/xanadu/system_docs.hpp"
-#include "core/zzcore.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
 #include "zigzag_visualizer.hpp"
 
 #ifdef __ANDROID__

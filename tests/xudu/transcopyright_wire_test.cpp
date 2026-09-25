@@ -11,9 +11,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/identity/identity_network_controller.hpp>
-#include <xudu/core/identity/payment_verifier.hpp>
-#include <xudu/core/transcopyright_crypto.hpp>
+#include "common/xanadu/identity/identity_network_controller.hpp"
+#include "common/xanadu/identity/payment_verifier.hpp"
+#include "common/xanadu/transcopyright_crypto.hpp"
 
 namespace xanadu::identity {
 namespace {

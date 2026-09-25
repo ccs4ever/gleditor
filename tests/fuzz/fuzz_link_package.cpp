@@ -7,11 +7,11 @@
 #include <cstdint>
 #include <string_view>
 
-#include <xudu/core/bencode.hpp>
-#include <xudu/core/blessing.hpp>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/mutable_link.hpp>
-#include <xudu/core/publication.hpp>
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/blessing.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/publication.hpp"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (0 == size) {
@@ -20,17 +20,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   const std::string_view sv(reinterpret_cast<const char *>(data), size);
 
   try {
-    static_cast<void>(xudu::bencode::decode(sv));
+    static_cast<void>(xanadu::bencode::decode(sv));
   } catch (...) {
   }
 
-  static_cast<void>(xudu::decodeLinkPackage(sv));
-  static_cast<void>(xudu::decodeBlessing(sv));
-  static_cast<void>(xudu::decodePublication(sv));
-  static_cast<void>(xudu::decodeMutablePointer(sv));
+  static_cast<void>(xanadu::decodeLinkPackage(sv));
+  static_cast<void>(xanadu::decodeBlessing(sv));
+  static_cast<void>(xanadu::decodePublication(sv));
+  static_cast<void>(xanadu::decodeMutablePointer(sv));
 
   try {
-    static_cast<void>(xudu::MutableLink::parse(sv));
+    static_cast<void>(xanadu::MutableLink::parse(sv));
   } catch (...) {
   }
 

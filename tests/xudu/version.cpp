@@ -8,16 +8,16 @@
 #include <stdexcept>
 #include <string>
 
-#include <xudu/core/spool.hpp>
-#include <xudu/core/version.hpp>
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/version.hpp"
 
 namespace {
 
-using xudu::Extent;
-using xudu::localScroll;
-using xudu::PrimediaSpan;
-using xudu::PrimediaSpool;
-using xudu::Version;
+using xanadu::Extent;
+using xanadu::localScroll;
+using xanadu::PrimediaSpan;
+using xanadu::PrimediaSpool;
+using xanadu::Version;
 
 TEST(PrimediaSpanTest, intersectionIsTheSharedPart) {
   const PrimediaSpan left{localScroll, 10, 10};  // [10, 20)

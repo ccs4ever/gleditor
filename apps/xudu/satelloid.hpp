@@ -33,6 +33,7 @@
 #include "common/xanadu/universal_link_endpoint.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @struct CellSatelloid

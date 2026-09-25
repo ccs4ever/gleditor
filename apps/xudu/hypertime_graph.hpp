@@ -29,13 +29,14 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
 
-#include "core/microversion.hpp"
-#include "core/ops.hpp"
-#include "core/store.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 
 struct RenderState;
 
 namespace xudu {
+using namespace ::xanadu;
 
 class Session;
 

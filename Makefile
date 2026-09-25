@@ -568,10 +568,11 @@ GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
-ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
-ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
+ZIGZAG_CORE_SRCS :=
+ZIGZAG_SRCS      := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
-                    apps/zigzag/zigzag_visualizer.cpp
+                    apps/zigzag/zigzag_visualizer.cpp \
+                    apps/zigzag/unified_transclusion_engine.cpp
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
@@ -1266,6 +1267,8 @@ ifdef MDL
 	# it mdl reads the closing "---" as a second thematic break and flags
 	# MD035 against the "______" mdformat renders for real horizontal rules
 	# in the body.
+	GEM_HOME="$${GEM_HOME:-$$(unset XDG_DATA_HOME; ruby -e 'puts Gem.user_dir' 2>/dev/null)}" \
+	GEM_PATH="$${GEM_PATH:-$$(unset XDG_DATA_HOME; ruby -e 'puts Gem.path.join(":")' 2>/dev/null)}" \
 	$(MDL) -i $(MD_FORMAT_FILES)
 else
 	@echo "mdl not found, skipping Markdown lint"

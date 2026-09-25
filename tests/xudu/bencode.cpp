@@ -8,12 +8,12 @@
 #include <stdexcept>
 #include <string>
 
-#include <xudu/core/bencode.hpp>
+#include "common/xanadu/bencode.hpp"
 
 namespace {
 
-using xudu::bencode::decode;
-using xudu::bencode::Value;
+using xanadu::bencode::decode;
+using xanadu::bencode::Value;
 
 TEST(BencodeTest, integers) {
   EXPECT_EQ(decode("i3e").asInteger(), 3);

@@ -11,12 +11,12 @@
 #include <memory>
 #include <string>
 
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace fs = std::filesystem;
-using namespace xudu;
+using namespace xanadu;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
@@ -132,7 +132,7 @@ TEST_F(PageBreakTest, TranscludedPassageExcludesBreaks) {
 TEST_F(PageBreakTest, StoreSaveAndReloadPreservesBreaks) {
   // Both stores share one permascroll: a document's local spans are addresses
   // in the author's, and it keeps no copy of the bytes itself.
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   MicroversionId savedVer;
   {
     Store store(perma);

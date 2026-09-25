@@ -26,9 +26,9 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
-#include "xudu/core/anchor_lanes.hpp"
-#include "xudu/core/framing.hpp"
+#include "common/xanadu/framing.hpp"
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
