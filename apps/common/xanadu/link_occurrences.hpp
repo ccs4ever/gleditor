@@ -119,7 +119,7 @@ struct LinkMember {
   /// Position in the stored endset, which is the order the author gave.
   std::uint32_t index{};
   PrimediaSpan span;
-  std::vector<Occurrence> occurrences;
+  std::vector<Occurrence> occurrences{};
 
   [[nodiscard]] bool inView() const noexcept { return !occurrences.empty(); }
 };

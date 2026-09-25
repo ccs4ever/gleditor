@@ -408,6 +408,26 @@ inline constexpr std::string_view kKeymapZigzagStepZPos =
 inline constexpr std::string_view kKeymapZigzagStepZNeg =
     "std:nav/zigzag_step_z_neg";
 
+// Keymap - Xuzz selected-link navigation. Activity Back is its own name,
+// apart from kKeymapBack/kKeymapForward, which walk document microversions.
+inline constexpr std::string_view kKeymapLinkNext = "std:xuzz/link_next";
+inline constexpr std::string_view kKeymapLinkPrevious =
+    "std:xuzz/link_previous";
+inline constexpr std::string_view kKeymapLinkMemberNext =
+    "std:xuzz/link_member_next";
+inline constexpr std::string_view kKeymapLinkMemberPrevious =
+    "std:xuzz/link_member_previous";
+inline constexpr std::string_view kKeymapLinkOccurrenceNext =
+    "std:xuzz/link_occurrence_next";
+inline constexpr std::string_view kKeymapLinkOccurrencePrevious =
+    "std:xuzz/link_occurrence_previous";
+inline constexpr std::string_view kKeymapLinkCross   = "std:xuzz/link_cross";
+inline constexpr std::string_view kKeymapLinkEnter   = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
+inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
+inline constexpr std::string_view kKeymapActivityBack =
+    "std:xuzz/activity_back";
+
 // Pouches
 inline constexpr std::string_view kPouchZoneToLinkLeft  = "zone.to_link_left";
 inline constexpr std::string_view kPouchZoneToLinkRight = "zone.to_link_right";
