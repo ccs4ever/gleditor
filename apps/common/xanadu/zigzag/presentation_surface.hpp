@@ -67,6 +67,17 @@ public:
   cellAnchor(zigzag::CellRef cell) const = 0;
 
   /**
+   * @brief Where the focused cell's card settles, in world space: what a host
+   *        centres the camera on to show a cell it has just focused.
+   *
+   * Unlike cellAnchor(), known before the card has faded in. Nothing when the
+   * surface has no placement yet.
+   */
+  [[nodiscard]] virtual std::optional<glm::vec3> focusCentre() const {
+    return std::nullopt;
+  }
+
+  /**
    * @brief Mark @p highlights in their cells' text, and outline those cells in
    *        @p borderColour. Replaces the previous set; an empty one clears it.
    *
