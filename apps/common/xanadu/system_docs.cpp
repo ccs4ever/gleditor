@@ -159,7 +159,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "4.0.\n"
            "zigzag: System-slice presentation policy for cell card padding, "
            "content width limits, rank clearance, HUD spacing, and "
-           "connection beam width. All lengths are logical pixels.\n";
+           "connection beam width. All lengths are logical pixels.\n"
+           "zigzag.minReadableTextPx: Smallest on-screen height, in screen "
+           "pixels, of a line of card text when the presentation sits beside "
+           "a page; below it the presentation is scaled up, never down. Zero "
+           "keeps the page's own scale. Default is 14.\n";
   case SystemDocKind::UI:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -565,6 +569,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kZigzagConnectionBeamWidthPx),
          .notes   = "Connection beam line width",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {4.0}}}},
+        {.name    = std::string(settings::kZigzagMinReadableTextPx),
+         .notes   = "Smallest on-screen line of embedded card text, in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          ZigzagPresentationConfig{}.minReadableTextPx}}}}},
         {.name    = std::string(settings::kBridgeCellRadius),
          .notes   = "Discovery and visual neighborhood cell radius",
          .schemas = {{.expectedTypes = {"integer"},
@@ -2488,6 +2497,9 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.zigzag.connectionBeamWidthPx = static_cast<float>(
       model.getDouble(settings::kZigzagConnectionBeamWidthPx,
                       static_cast<double>(cfg.zigzag.connectionBeamWidthPx)));
+  cfg.zigzag.minReadableTextPx = static_cast<float>(
+      model.getDouble(settings::kZigzagMinReadableTextPx,
+                      static_cast<double>(cfg.zigzag.minReadableTextPx)));
 
   cfg.bridge = BridgeRuntimeConfig::fromSystemDocs(store);
 

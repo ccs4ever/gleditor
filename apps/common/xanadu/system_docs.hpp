@@ -179,6 +179,8 @@ inline constexpr std::string_view kZigzagHudVerticalPaddingPx =
     "zigzag.hudVerticalPaddingPx";
 inline constexpr std::string_view kZigzagHudColumnGapPx =
     "zigzag.hudColumnGapPx";
+inline constexpr std::string_view kZigzagMinReadableTextPx =
+    "zigzag.minReadableTextPx";
 inline constexpr std::string_view kZigzagConnectionBeamWidthPx =
     "zigzag.connectionBeamWidthPx";
 
@@ -820,6 +822,10 @@ struct ZigzagPresentationConfig {
   float hudVerticalPaddingPx{8.0F};
   float hudColumnGapPx{8.0F};
   float connectionBeamWidthPx{4.0F};
+  /// Smallest on-screen height, in screen pixels, of a line of card text in
+  /// a presentation embedded beside a page. Below it the presentation is
+  /// scaled up; zero leaves it at the page's own scale.
+  float minReadableTextPx{14.0F};
 
   // A byte-wise memcmp is unsafe here: +0.0F and -0.0F compare equal but
   // have different bit patterns, so field-wise == is the correct notion of
@@ -834,7 +840,8 @@ struct ZigzagPresentationConfig {
            hudHorizontalPaddingPx == other.hudHorizontalPaddingPx &&
            hudVerticalPaddingPx == other.hudVerticalPaddingPx &&
            hudColumnGapPx == other.hudColumnGapPx &&
-           connectionBeamWidthPx == other.connectionBeamWidthPx;
+           connectionBeamWidthPx == other.connectionBeamWidthPx &&
+           minReadableTextPx == other.minReadableTextPx;
   }
 };
 

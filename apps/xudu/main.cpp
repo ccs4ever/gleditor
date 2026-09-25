@@ -2721,8 +2721,19 @@ int main(const int argc, char **argv) {
     bridgeCoordinator.attach(*zigzagPresentation);
     linkContext.setManifold(bridgeCoordinator.manifold());
     linkContext.setFocusCell(
-        [&bridgeCoordinator](const zigzag::CellRef cell, xanadu::Extent) {
+        [&bridgeCoordinator, &zigzagPresentation, &renderer,
+         &state](const zigzag::CellRef cell, xanadu::Extent) {
           bridgeCoordinator.onDocumentLinkActivated(cell);
+          // Entering a cell brings it into view, as entering a passage does:
+          // the card sits beside the page and would otherwise be off screen.
+          // Queued so the presentation has placed the new focus first.
+          renderer->runWithState([&zigzagPresentation, &state](RenderState &) {
+            if (const auto centre = zigzagPresentation->focusCentre()) {
+              std::scoped_lock locker(state->view);
+              state->view.pos.x = centre->x;
+              state->view.pos.y = centre->y;
+            }
+          });
         });
     linkContext.setCellFocusQuery(
         [&zigzagPresentation] { return zigzagPresentation->focusCell(); });

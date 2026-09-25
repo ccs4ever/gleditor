@@ -31,6 +31,24 @@ namespace zigzag {
 
 namespace {
 
+/**
+ * Whether a card is drawn: on its way in or staying, not on its way out.
+ *
+ * The canvas takes opacity per draw, not per quad -- a colour's alpha byte
+ * never reaches the glyph shader -- so a card fading out is drawn fully
+ * opaque until it is removed. At the focus that put the old card on top of
+ * the new one, which sits in the same place: focusing a cell with no rank to
+ * the old focus still showed the old focus. A leaving card is simply not
+ * drawn.
+ */
+bool shown(const RenderStateCell &cell) noexcept {
+  return cell.target_alpha > 0.0F && cell.current_alpha >= 0.02F;
+}
+
+} // namespace
+
+namespace {
+
 using gleditor::color::packRgba;
 
 } // namespace
@@ -79,6 +97,7 @@ void ZigzagVisualizer::deviceReady(
 
   hudCanvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
   hudCanvas_->createPipeline(documentPipeline, false);
+  card_line_px_ = worldCanvas_->measureText("Ag").height;
 
   beams_ = std::make_unique<gleditor::Beams>(&device);
   beams_->createPipeline(gleditor::assetPath("shaders"),
@@ -933,6 +952,8 @@ void ZigzagVisualizer::refreshCellLayouts() {
 }
 
 void ZigzagVisualizer::rebuildActiveViewTopology() {
+  GLEDITOR_LOG_TRACE("zigzag.view", "rebuild around #{}, {} cards before",
+                     accursed_cell_focus_, visible_cells_.size());
   cell_layouts_dirty_ = true;
   for (auto &[id, render_cell] : visible_cells_) {
     render_cell.target_alpha = 0.0F;
@@ -1185,6 +1206,8 @@ void ZigzagVisualizer::navigateFocusTo(const CellID id) {
   if (!engine_ || id == 0 || !engine_->findCell(ref)) {
     return;
   }
+  GLEDITOR_LOG_DEBUG("zigzag.view", "focus #{} -> #{}", accursed_cell_focus_,
+                     id);
   accursed_cell_focus_ = id;
   rebuildActiveViewTopology();
   invalidateAccessibility();
@@ -1269,6 +1292,64 @@ bool ZigzagVisualizer::picked(const render::PickingResult &pick,
   return false;
 }
 
+float ZigzagVisualizer::readableScaleFor(const float lineOnScreenPx,
+                                         const float wantedPx) noexcept {
+  if (lineOnScreenPx <= 0.0F || wantedPx <= 0.0F) {
+    return 1.0F;
+  }
+  constexpr float kSteps = 4.0F;
+  return std::max(1.0F, std::ceil(wantedPx / lineOnScreenPx * kSteps) / kSteps);
+}
+
+void ZigzagVisualizer::applyReadableScale(const gleditor::FrameContext &ctx) {
+  const float wanted = presentation_config_.minReadableTextPx;
+  const auto settle  = [this](const float scale) {
+    if (scale != readable_scale_) {
+      readable_scale_ = scale;
+      ++revision_;
+      if (bridgeInvalidationCallback_) {
+        bridgeInvalidationCallback_(revision_);
+      }
+    }
+  };
+  if (wanted <= 0.0F) {
+    settle(1.0F);
+  } else if (card_line_px_ > 0.0F && ctx.screenHeight > 0) {
+    // How tall one line of card text lands on screen at the page's scale,
+    // measured at the focused card, where the reader is looking.
+    const auto focus = visible_cells_.find(accursed_cell_focus_);
+    const glm::vec3 at =
+        visible_cells_.end() != focus ? focus->second.current_pos : glm::vec3{};
+    const auto clip = [&](const glm::vec3 &p) {
+      return ctx.viewProjection * presentation_transform_ * glm::vec4(p, 1.0F);
+    };
+    const auto top    = clip(at + glm::vec3{0.0F, card_line_px_, 0.0F});
+    const auto bottom = clip(at);
+    if (top.w > 0.0F && bottom.w > 0.0F) {
+      const float lineOnScreen =
+          std::abs((top.y / top.w) - (bottom.y / bottom.w)) * 0.5F *
+          static_cast<float>(ctx.screenHeight);
+      if (lineOnScreen > 0.0F) {
+        settle(readableScaleFor(lineOnScreen, wanted));
+      }
+    }
+  }
+  // The host's origin is where the presentation may begin -- the page's
+  // margin -- but cards are centred on their positions, so the focused card
+  // is moved right by half its width rather than straddling the page edge.
+  float halfFocus = 0.0F;
+  if (const auto focus = visible_cells_.find(accursed_cell_focus_);
+      visible_cells_.end() != focus) {
+    halfFocus = cellLayout(focus->first, focus->second, true).width * 0.5F;
+  }
+  presentation_transform_ =
+      presentation_transform_ *
+      glm::translate(glm::mat4{1.0F},
+                     glm::vec3{halfFocus * readable_scale_, 0.0F, 0.0F}) *
+      glm::scale(glm::mat4{1.0F},
+                 glm::vec3{readable_scale_, readable_scale_, 1.0F});
+}
+
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   if (presentationTransformResolver_) {
     const auto transform = presentationTransformResolver_();
@@ -1277,6 +1358,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     }
     presentation_transform_ = *transform;
     presentation_origin_    = glm::vec3(presentation_transform_[3]);
+    applyReadableScale(ctx);
   }
   if (presentationOriginResolver_) {
     if (const auto origin = presentationOriginResolver_();
@@ -1335,6 +1417,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     };
 
     for (const auto &[id, cell] : visible_cells_) {
+      if (!shown(cell)) {
+        continue;
+      }
       const auto cellRef = static_cast<CellRef>(id);
 
       // 1) View dimensions (covers ephemeral meta-dims and clones as well)
@@ -1345,7 +1430,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         for (const auto dir : {DimVector::POS, DimVector::NEG}) {
           const auto neighborId = engine_->linked(cellRef, dimRef, dir);
           if (neighborId == 0 || neighborId == cellRef ||
-              !visible_cells_.contains(neighborId)) {
+              !visible_cells_.contains(neighborId) ||
+              !shown(visible_cells_.at(neighborId))) {
             continue;
           }
           const auto edge =
@@ -1425,7 +1511,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   for (const auto &[id, cell] : visible_cells_) {
-    if (cell.current_alpha < 0.02F) {
+    if (!shown(cell)) {
       continue;
     }
 
@@ -1527,7 +1613,6 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     worldCanvas_->addText(
         ctx.state, left + presentation_config_.cellHorizontalPaddingPx,
         bottom + layout.titleTop, layout.idText, borderCol, bgCol);
-
     // Label Text
     worldCanvas_->setTextWidthLimit(static_cast<int>(layout.labelWidthLimit));
     const auto textMetrics = worldCanvas_->measureText(cell.text);
@@ -2017,7 +2102,7 @@ ZigzagVisualizer::cellAnchor(const CellRef cell) const {
     return std::nullopt;
   }
   const auto &c = it->second;
-  if (c.current_alpha < 0.02F && c.target_alpha < 0.02F) {
+  if (!shown(c)) {
     return std::nullopt;
   }
   const auto &layout =

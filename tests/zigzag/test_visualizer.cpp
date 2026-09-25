@@ -1064,3 +1064,36 @@ TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
   EXPECT_FALSE(viz.visibleCells().at(root).link_highlighted);
   EXPECT_TRUE(viz.visibleCells().at(root).decorated_ranges.empty());
 }
+
+TEST(ZigzagVisualizerTest, FocusingAnUnconnectedCellShowsIt) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto home = viz.focusCellId();
+  // Minted through the store directly, so no rank connects it to home.
+  auto &store     = *viz.store();
+  const auto made = store.makeCell(store.latest(), "island");
+  const auto cell = store.cellRefOf(made);
+  viz.engine()->syncTo(made);
+
+  viz.focusCell(cell);
+
+  EXPECT_EQ(viz.focusCellId(), cell);
+  const auto &shown = viz.visibleCells();
+  ASSERT_TRUE(shown.contains(cell)) << "the focused cell has no card";
+  EXPECT_GT(shown.at(cell).target_alpha, 0.0F);
+  EXPECT_EQ(shown.at(cell).text, "island");
+  if (shown.contains(home)) {
+    EXPECT_EQ(shown.at(home).target_alpha, 0.0F) << "home should fade out";
+  }
+}
+
+TEST(ZigzagVisualizerTest, ReadableScaleOnlyEnlargesInQuarterSteps) {
+  // The default overview draws a line of card text about 6 px tall.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 14.0F), 2.5F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(7.0F, 14.0F), 2.0F);
+  // Already readable, or zoomed in: never shrunk.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(14.0F, 14.0F), 1.0F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(40.0F, 14.0F), 1.0F);
+  // Turned off, or nothing measurable yet.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 0.0F), 1.0F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(0.0F, 14.0F), 1.0F);
+}

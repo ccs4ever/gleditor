@@ -385,6 +385,22 @@ public:
     return engine_ ? engine_->cellRoyalty(cell) : std::nullopt;
   }
   bool unlockCell(CellRef cell) override;
+  [[nodiscard]] std::optional<glm::vec3> focusCentre() const override {
+    // The focused card always settles at the presentation's origin, on the
+    // current depth tier; see rebuildActiveViewTopology().
+    return glm::vec3(presentation_transform_ *
+                     glm::vec4(0.0F, 0.0F, depth_tier_, 1.0F));
+  }
+  /**
+   * @brief The enlargement that brings a line of card text drawn
+   *        @p lineOnScreenPx tall up to @p wantedPx: never below 1, in quarter
+   *        steps so a zoom re-lays the cards a few times rather than every
+   *        frame.
+   */
+  [[nodiscard]] static float readableScaleFor(float lineOnScreenPx,
+                                              float wantedPx) noexcept;
+  /// The factor the embedded presentation is currently enlarged by.
+  [[nodiscard]] float readableScale() const noexcept { return readable_scale_; }
   void setCellHighlights(std::vector<xanadu::CellHighlight> highlights,
                          std::uint32_t borderColour) override;
 
@@ -463,6 +479,16 @@ private:
   std::uint64_t revision_{1};
   /// The host's selected-link marks, folded into each cell's decorations
   /// when the view is rebuilt rather than per frame.
+  /// Enlarge the embedded presentation, when its text would draw below
+  /// minReadableTextPx, and fold that into presentation_transform_.
+  void applyReadableScale(const gleditor::FrameContext &ctx);
+  /// Factor the embedded presentation is enlarged by so its text meets
+  /// minReadableTextPx on screen, in quarter steps so a zoom re-lays the
+  /// cards a few times rather than every frame. Kept out of the host's
+  /// transform so anchors and picking see the same scale the cards draw at.
+  float readable_scale_{1.0F};
+  /// One line of card text, in layout pixels, measured once per canvas.
+  float card_line_px_{};
   std::vector<xanadu::CellHighlight> linkHighlights_;
   std::uint32_t linkHighlightBorder_{};
   xanadu::ZigzagPresentationSurface::InvalidationCallback
