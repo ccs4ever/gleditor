@@ -802,11 +802,9 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   depthStencil.depthTestEnable  = desc.depthTest ? VK_TRUE : VK_FALSE;
   depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
   // Equal depths pass, and the later draw wins -- see the matching note in the
-  // GL backend. A page's glyphs sit a tenth of a unit in front of its paper,
-  // which is finer than a depth step is at the distance documents are read
-  // from, so under a strict less-than they were discarded and the page came out
-  // blank.
-  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+  // GL backend. Greater rather than less because this backend's depth is
+  // reversed (see DeviceVK::recordBatch()): nearer is larger.
+  depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
 
   // One blend state per colour attachment. The colour target blends on alpha,
   // which is what lets a draw fade; the picking target must not, and not only

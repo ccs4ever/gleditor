@@ -103,8 +103,9 @@ bool DeviceVK::beginFrame() {
   clears[0].color = VkClearColorValue{.float32 = {0.0F, 0.0F, 0.0F, 1.0F}};
   // The picking attachment is an unsigned integer target, so it takes an
   // integer clear rather than the float one the colour target uses.
-  clears[1].color        = VkClearColorValue{.uint32 = {0, 0, 0, 0}};
-  clears[2].depthStencil = {.depth = 1.0F, .stencil = 0};
+  clears[1].color = VkClearColorValue{.uint32 = {0, 0, 0, 0}};
+  // Reversed Z (see recordBatch()): the far plane is 0.
+  clears[2].depthStencil = {.depth = 0.0F, .stencil = 0};
 
   VkRenderPassBeginInfo passInfo{};
   passInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -314,9 +315,21 @@ void DeviceVK::recordBatch(const VkCommandBuffer commands,
   // the other backends, which is what makes their output directly comparable.
   // In the column-major layout that row is elements 1, 5, 9 and 13. Winding is
   // unaffected in practice because the glyph pipeline does not cull.
+  //
+  // Depth is adapted here too, to reversed Z: clip z' = (w - z) / 2 maps the
+  // OpenGL range [-w, w] onto [w, 0], near plane to 1 and far plane to 0, over
+  // exactly the same clip volume. The depth attachment is a float, and with
+  // the conventional mapping every distant depth crowds just under 1.0 where
+  // a float has fewest steps: a page's glyphs, a tenth of a unit in front of
+  // its paper, then interpolated to within a step of it either way and lost
+  // the test, so a document at the default field of view drew blank. Reversed
+  // Z puts distant depths near n/d instead, where a float keeps its full
+  // relative precision. In the column-major layout rows z and w are elements
+  // 2, 6, 10, 14 and 3, 7, 11, 15.
   DrawUniforms flipped = batch.uniforms;
-  for (std::size_t i = 1; i < flipped.mvp.size(); i += 4) {
-    flipped.mvp[i] = -flipped.mvp[i];
+  for (std::size_t i = 0; i < flipped.mvp.size(); i += 4) {
+    flipped.mvp[i + 1] = -flipped.mvp[i + 1];
+    flipped.mvp[i + 2] = 0.5F * (flipped.mvp[i + 3] - flipped.mvp[i + 2]);
   }
 
   vkCmdPushConstants(commands, pipelineIt->second.layout,
