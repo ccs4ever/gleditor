@@ -1029,8 +1029,14 @@ test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
+# Programs the suites run as child processes (the E2E tests look for them
+# under build/), so a fresh checkout's `make test` builds them rather than
+# failing with "binary not found".
+TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
+	xudu-swarm-peer vquery vpl vplc vprolog)
+
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/xuzz $(OBJDIR)/zigzag $(OBJDIR)/xudu-dump $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
+test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
