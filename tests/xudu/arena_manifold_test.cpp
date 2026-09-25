@@ -23,19 +23,19 @@
 #include <string_view>
 #include <vector>
 
-#include <xudu/core/compact_op.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <zigzag/core/arena_manifold.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::Store;
-using xudu::ValueKind;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::Store;
+using xanadu::ValueKind;
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
 using zigzag::DimRef;
@@ -370,12 +370,12 @@ TEST(ArenaManifoldTest, constructedTextLandsInTheScratchScroll) {
   Arena arena;
   const auto span = arena.m.intern("concatenated");
 
-  EXPECT_EQ(span.scroll, xudu::scratchScroll);
+  EXPECT_EQ(span.scroll, xanadu::scratchScroll);
   EXPECT_EQ(arena.m.scratchTextOf(span), "concatenated");
 
   const auto cell = arena.m.makeCell("atom");
   ASSERT_EQ(arena.m.contentOf(cell).size(), 1U);
-  EXPECT_EQ(arena.m.contentOf(cell).front().scroll, xudu::scratchScroll);
+  EXPECT_EQ(arena.m.contentOf(cell).front().scroll, xanadu::scratchScroll);
   EXPECT_EQ(arena.m.textOf(cell), "atom");
 }
 
@@ -383,7 +383,7 @@ TEST(ArenaManifoldTest, theApiRefusesToRecordAScratchSpan) {
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
   const PrimediaSpan scratch{
-      .scroll = xudu::scratchScroll, .start = 0, .length = 4};
+      .scroll = xanadu::scratchScroll, .start = 0, .length = 4};
 
   // An address a failed branch throws away was never permanent, so it may not
   // reach an operation by any route.
@@ -401,11 +401,11 @@ TEST(ArenaManifoldTest, theFoldRefusesAScratchSpanByNumber) {
   auto manifold     = store.rebuildManifold(at);
   const auto before = manifold.cellCount();
 
-  xudu::CompactOpNode node;
-  node.kind  = xudu::OpKind::Structure;
-  node.flags = xudu::structureFlags(xudu::StructureVerb::MakeCell);
+  xanadu::CompactOpNode node;
+  node.kind  = xanadu::OpKind::Structure;
+  node.flags = xanadu::structureFlags(xanadu::StructureVerb::MakeCell);
   node.setSpan(
-      PrimediaSpan{.scroll = xudu::scratchScroll, .start = 0, .length = 4});
+      PrimediaSpan{.scroll = xanadu::scratchScroll, .start = 0, .length = 4});
 
   // The fold cannot throw, so a refusal is a count and a named reason -- the
   // same mechanism an ephemeral link target gets.
@@ -452,7 +452,7 @@ TEST(ArenaManifoldTest, promoteWritesTheReachableAnswerAndNothingElse) {
     // The bytes have a real address now, which is the whole point of the road
     // going through here.
     for (const auto &span : manifold.contentOf(cell)) {
-      EXPECT_NE(span.scroll, xudu::scratchScroll);
+      EXPECT_NE(span.scroll, xanadu::scratchScroll);
     }
   }
 }

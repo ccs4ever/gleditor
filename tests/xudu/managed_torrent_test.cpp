@@ -8,10 +8,12 @@
 #include <filesystem>
 #include <fstream>
 
-#include <xudu/core/managed_torrent.hpp>
-#include <xudu/core/merkle_ledger.hpp>
+#include "common/xanadu/managed_torrent.hpp"
+#include "common/xanadu/merkle_ledger.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 namespace fs = std::filesystem;

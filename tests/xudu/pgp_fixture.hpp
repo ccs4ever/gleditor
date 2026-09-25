@@ -18,7 +18,7 @@
 
 #include <string_view>
 
-namespace xudu::testing {
+namespace xanadu::testing {
 
 inline constexpr std::string_view kAuthorFingerprint =
     "2151B04ADF99D0AB9886CCD5AB83CC2E0A1D80F0";
@@ -144,6 +144,6 @@ uAyesf9Z1vKqi3u/xC9ckuxQpRjVEQ==
 -----END PGP SIGNATURE-----
 )PGP";
 
-} // namespace xudu::testing
+} // namespace xanadu::testing
 
 #endif // XUDU_TESTS_PGP_FIXTURE_HPP

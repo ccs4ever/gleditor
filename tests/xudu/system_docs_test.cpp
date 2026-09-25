@@ -13,35 +13,35 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/system_docs.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::HoleReason;
-using xudu::InfoHash;
-using xudu::KeymapConfig;
-using xudu::LayoutConfig;
-using xudu::LinkType;
-using xudu::PouchDock;
-using xudu::PublishedHoleRecord;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::SettingsConfig;
-using xudu::SignedProvenance;
-using xudu::Store;
-using xudu::SystemDocKind;
-using xudu::ToastAnchor;
-using xudu::UIConfig;
-using xudu::UserPermascroll;
+using xanadu::FormatAttribute;
+using xanadu::HoleReason;
+using xanadu::InfoHash;
+using xanadu::KeymapConfig;
+using xanadu::LayoutConfig;
+using xanadu::LinkType;
+using xanadu::PouchDock;
+using xanadu::PublishedHoleRecord;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::SettingsConfig;
+using xanadu::SignedProvenance;
+using xanadu::Store;
+using xanadu::SystemDocKind;
+using xanadu::ToastAnchor;
+using xanadu::UIConfig;
+using xanadu::UserPermascroll;
 
 SignedProvenance makeTestProvenance() {
   SignedProvenance prov;
@@ -61,48 +61,48 @@ std::string readFileContent(const std::filesystem::path &filePath) {
 }
 
 TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Keymap), "keymap");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Settings), "settings");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Layout), "layout");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::UI), "ui");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Pouches), "pouches");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Keymap), "keymap");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Settings), "settings");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Layout), "layout");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::UI), "ui");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Pouches), "pouches");
 
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Settings), "system://settings");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Layout), "system://layout");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::UI), "system://ui");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Settings), "system://settings");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Layout), "system://layout");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::UI), "system://ui");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
 
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://keymap"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://keymap"),
             SystemDocKind::Keymap);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://settings"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://settings"),
             SystemDocKind::Settings);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://layout"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://layout"),
             SystemDocKind::Layout);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://pouches"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://pouches"),
             SystemDocKind::Pouches);
 
-  EXPECT_FALSE(xudu::systemDocKindFromUri("system://invalid").has_value());
-  EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path/to/doc").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("system://invalid").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("file:///path/to/doc").has_value());
 
   // Check that default setting specifications exist for every kind
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
         SystemDocKind::UI, SystemDocKind::Pouches}) {
-    const auto specs = xudu::defaultSettingSpecs(kind);
+    const auto specs = xanadu::defaultSettingSpecs(kind);
     EXPECT_FALSE(specs.empty());
   }
 
   // Check directory helper returns valid path
-  const auto keymapDir = xudu::systemDocDirectory(SystemDocKind::Keymap);
+  const auto keymapDir = xanadu::systemDocDirectory(SystemDocKind::Keymap);
   EXPECT_EQ(keymapDir.filename(), "keymap");
 }
 
 TEST(SystemDocsTest, SystemStoreGenesisTopology) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
+  xanadu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
   EXPECT_FALSE(store.currentVersions().empty());
   const auto head     = store.primaryCurrentVersion();
@@ -113,20 +113,22 @@ TEST(SystemDocsTest, SystemStoreGenesisTopology) {
   EXPECT_EQ(manifold.home(), store.homeCell());
 
   // 10 Dimensions registered
-  const auto dDims   = manifold.dimensionNamed(xudu::kDimDims, store).value();
-  const auto dVars   = manifold.dimensionNamed(xudu::kDimVars, store).value();
-  const auto dValues = manifold.dimensionNamed(xudu::kDimValues, store).value();
-  const auto dGroups = manifold.dimensionNamed(xudu::kDimGroups, store).value();
+  const auto dDims = manifold.dimensionNamed(xanadu::kDimDims, store).value();
+  const auto dVars = manifold.dimensionNamed(xanadu::kDimVars, store).value();
+  const auto dValues =
+      manifold.dimensionNamed(xanadu::kDimValues, store).value();
+  const auto dGroups =
+      manifold.dimensionNamed(xanadu::kDimGroups, store).value();
   const auto dSubgroups =
-      manifold.dimensionNamed(xudu::kDimSubgroups, store).value();
-  const auto dClone = manifold.dimensionNamed(xudu::kDimClone, store).value();
-  const auto dNotes = manifold.dimensionNamed(xudu::kDimNotes, store).value();
+      manifold.dimensionNamed(xanadu::kDimSubgroups, store).value();
+  const auto dClone = manifold.dimensionNamed(xanadu::kDimClone, store).value();
+  const auto dNotes = manifold.dimensionNamed(xanadu::kDimNotes, store).value();
   const auto dSchemas =
-      manifold.dimensionNamed(xudu::kDimSchemas, store).value();
+      manifold.dimensionNamed(xanadu::kDimSchemas, store).value();
   const auto dAlternates =
-      manifold.dimensionNamed(xudu::kDimAlternates, store).value();
+      manifold.dimensionNamed(xanadu::kDimAlternates, store).value();
   const auto dDefault =
-      manifold.dimensionNamed(xudu::kDimDefault, store).value();
+      manifold.dimensionNamed(xanadu::kDimDefault, store).value();
 
   EXPECT_NE(dDims, 0U);
   EXPECT_NE(dVars, 0U);
@@ -159,29 +161,30 @@ TEST(SystemDocsTest, SystemStoreGenesisTopology) {
 TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
+  xanadu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
   // Add an ungrouped setting (hangs off blank cell "")
-  xudu::SettingSpec ungroupedSpec;
+  xanadu::SettingSpec ungroupedSpec;
   ungroupedSpec.name  = "flat_option";
   ungroupedSpec.notes = "A setting without any dots in its name";
   ungroupedSpec.schemas.push_back({{"string"}, {std::string{"unspecified"}}});
   auto head = store.primaryCurrentVersion();
-  head      = xudu::ensureSetting(store, head, ungroupedSpec);
+  head      = xanadu::ensureSetting(store, head, ungroupedSpec);
 
   // Add a hierarchical setting with multiple levels ("hud.velocity.x")
-  xudu::SettingSpec hierSpec;
+  xanadu::SettingSpec hierSpec;
   hierSpec.name  = "hud.velocity.x";
   hierSpec.notes = "X velocity component";
   hierSpec.schemas.push_back({{"double"}, {0.0}});
-  head = xudu::ensureSetting(store, head, hierSpec);
+  head = xanadu::ensureSetting(store, head, hierSpec);
   store.repointCurrentVersion(head);
   const auto manifold = store.rebuildManifold(head);
-  const auto dVars    = manifold.dimensionNamed(xudu::kDimVars, store).value();
-  const auto dGroups = manifold.dimensionNamed(xudu::kDimGroups, store).value();
+  const auto dVars = manifold.dimensionNamed(xanadu::kDimVars, store).value();
+  const auto dGroups =
+      manifold.dimensionNamed(xanadu::kDimGroups, store).value();
   const auto dSubgroups =
-      manifold.dimensionNamed(xudu::kDimSubgroups, store).value();
-  const auto dClone = manifold.dimensionNamed(xudu::kDimClone, store).value();
+      manifold.dimensionNamed(xanadu::kDimSubgroups, store).value();
+  const auto dClone = manifold.dimensionNamed(xanadu::kDimClone, store).value();
 
   // Blank group cell off home
   const auto blankCell = manifold.linked(manifold.home(), dGroups);
@@ -235,27 +238,30 @@ TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
 TEST(SystemDocsTest, SchemaAndDefaultValuesAndReset) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Settings);
+  xanadu::initializeSystemStore(store, SystemDocKind::Settings);
 
-  const auto initialVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  const auto initialVals =
+      xanadu::getSetting(store, xanadu::settings::kFontSize);
   ASSERT_FALSE(initialVals.empty());
   EXPECT_DOUBLE_EQ(std::get<double>(initialVals[0]), 16.0);
 
   // Mutate setting value
-  const auto newVer = xudu::setSetting(store, store.primaryCurrentVersion(),
-                                       xudu::settings::kFontSize, 24.5);
+  const auto newVer = xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                         xanadu::settings::kFontSize, 24.5);
   store.repointCurrentVersion(newVer);
 
-  const auto updatedVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  const auto updatedVals =
+      xanadu::getSetting(store, xanadu::settings::kFontSize);
   ASSERT_FALSE(updatedVals.empty());
   EXPECT_DOUBLE_EQ(std::get<double>(updatedVals[0]), 24.5);
 
   // Reset back to default
-  const auto resetVer = xudu::resetSettingToDefault(
-      store, store.primaryCurrentVersion(), xudu::settings::kFontSize);
+  const auto resetVer = xanadu::resetSettingToDefault(
+      store, store.primaryCurrentVersion(), xanadu::settings::kFontSize);
   store.repointCurrentVersion(resetVer);
 
-  const auto restoredVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  const auto restoredVals =
+      xanadu::getSetting(store, xanadu::settings::kFontSize);
   ASSERT_FALSE(restoredVals.empty());
   EXPECT_DOUBLE_EQ(std::get<double>(restoredVals[0]), 16.0);
 }
@@ -263,34 +269,34 @@ TEST(SystemDocsTest, SchemaAndDefaultValuesAndReset) {
 TEST(SystemDocsTest, MultiSchemaAlternativeValidation) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Settings);
+  xanadu::initializeSystemStore(store, SystemDocKind::Settings);
 
   // kThemeBackground accepts either 3 doubles (normalized [0, 1]) or 3 int64s
   // ([0, 255])
   const auto vDoubles =
-      xudu::setSetting(store, store.primaryCurrentVersion(),
-                       xudu::settings::kThemeBackground, 0.15, 0.25, 0.35);
+      xanadu::setSetting(store, store.primaryCurrentVersion(),
+                         xanadu::settings::kThemeBackground, 0.15, 0.25, 0.35);
   store.repointCurrentVersion(vDoubles);
 
-  const auto model1 = xudu::SystemStoreModel::fromStore(store);
+  const auto model1 = xanadu::SystemStoreModel::fromStore(store);
   EXPECT_TRUE(model1.isValid());
   const auto rgbDoubles =
-      model1.getDoubleList(xudu::settings::kThemeBackground);
+      model1.getDoubleList(xanadu::settings::kThemeBackground);
   ASSERT_EQ(rgbDoubles.size(), 3U);
   EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[0]), 0.15F);
   EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[1]), 0.25F);
   EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[2]), 0.35F);
 
   // Now set to 3 int64 bytes (the alternate schema shape)
-  const auto vInts = xudu::setSetting(
-      store, store.primaryCurrentVersion(), xudu::settings::kThemeBackground,
+  const auto vInts = xanadu::setSetting(
+      store, store.primaryCurrentVersion(), xanadu::settings::kThemeBackground,
       static_cast<std::int64_t>(32), static_cast<std::int64_t>(64),
       static_cast<std::int64_t>(128));
   store.repointCurrentVersion(vInts);
 
-  const auto model2 = xudu::SystemStoreModel::fromStore(store);
+  const auto model2 = xanadu::SystemStoreModel::fromStore(store);
   EXPECT_TRUE(model2.isValid());
-  const auto rgbInts = model2.getInt64List(xudu::settings::kThemeBackground);
+  const auto rgbInts = model2.getInt64List(xanadu::settings::kThemeBackground);
   ASSERT_EQ(rgbInts.size(), 3U);
   EXPECT_EQ(rgbInts[0], 32);
   EXPECT_EQ(rgbInts[1], 64);
@@ -298,65 +304,71 @@ TEST(SystemDocsTest, MultiSchemaAlternativeValidation) {
 
   // Attempt invalid shape (e.g. only 2 values, or a string) -> throws
   // invalid_argument
-  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
-                                xudu::settings::kThemeBackground, 0.5, 0.5),
+  EXPECT_THROW(xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                  xanadu::settings::kThemeBackground, 0.5, 0.5),
                std::invalid_argument);
 
-  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
-                                xudu::settings::kThemeBackground,
-                                std::string{"invalid-color-string"}),
+  EXPECT_THROW(xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                  xanadu::settings::kThemeBackground,
+                                  std::string{"invalid-color-string"}),
                std::invalid_argument);
 }
 
 TEST(SystemDocsTest, SchemaViolationRejection) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
 
   // kColumns expects an integer >= 1
-  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
-                                xudu::settings::kColumns, std::string{"three"}),
+  EXPECT_THROW(xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                  xanadu::settings::kColumns,
+                                  std::string{"three"}),
                std::invalid_argument);
 
-  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
-                                xudu::settings::kColumns, 3.14159),
+  EXPECT_THROW(xanadu::setSetting(store, store.primaryCurrentVersion(),
+                                  xanadu::settings::kColumns, 3.14159),
                std::invalid_argument);
 
   // Verify store remains in valid state with previous value
-  const auto loCfg = xudu::LayoutConfig::fromStore(store);
+  const auto loCfg = xanadu::LayoutConfig::fromStore(store);
   EXPECT_EQ(loCfg.columns, 2U);
 }
 
 TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
 
   // Set customized physics and beam parameters
   auto head = store.primaryCurrentVersion();
-  head = xudu::setSetting(store, head, xudu::settings::kPhysicsKRepel, 520.0);
-  head = xudu::setSetting(store, head, xudu::settings::kPhysicsMaxForce, 600.0);
   head =
-      xudu::setSetting(store, head, xudu::settings::kPhysicsMaxVelocity, 180.0);
-  head = xudu::setSetting(store, head, xudu::settings::kPhysicsTimeStep, 0.8);
-  head = xudu::setSetting(store, head, xudu::settings::kBeamsBandStrandLimit,
-                          static_cast<std::int64_t>(12));
+      xanadu::setSetting(store, head, xanadu::settings::kPhysicsKRepel, 520.0);
+  head = xanadu::setSetting(store, head, xanadu::settings::kPhysicsMaxForce,
+                            600.0);
+  head = xanadu::setSetting(store, head, xanadu::settings::kPhysicsMaxVelocity,
+                            180.0);
   head =
-      xudu::setSetting(store, head, xudu::settings::kBeamsBandStrandPitch, 7.5);
+      xanadu::setSetting(store, head, xanadu::settings::kPhysicsTimeStep, 0.8);
   head =
-      xudu::setSetting(store, head, xudu::settings::kBeamsBandFillAlpha, 0.15);
-  head = xudu::setSetting(store, head, xudu::settings::kBeamsStubWidthOfBeam,
-                          0.45);
-  head =
-      xudu::setSetting(store, head, xudu::settings::kBeamsStubMinOfLine, 0.95);
-  head = xudu::setSetting(store, head, xudu::settings::kBeamsBypassSegments,
-                          static_cast<std::int64_t>(18));
-  head = xudu::setSetting(store, head,
-                          xudu::settings::kBeamsZFightJitterAmplitude, 1.2);
-  head = xudu::setSetting(store, head, xudu::settings::kBeamsActiveZBoost, 9.0);
+      xanadu::setSetting(store, head, xanadu::settings::kBeamsBandStrandLimit,
+                         static_cast<std::int64_t>(12));
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kBeamsBandStrandPitch, 7.5);
+  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsBandFillAlpha,
+                            0.15);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kBeamsStubWidthOfBeam, 0.45);
+  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsStubMinOfLine,
+                            0.95);
+  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsBypassSegments,
+                            static_cast<std::int64_t>(18));
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kBeamsZFightJitterAmplitude, 1.2);
+  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsActiveZBoost,
+                            9.0);
   store.repointCurrentVersion(head);
 
-  const auto cfg = xudu::LayoutConfig::fromStore(store);
+  const auto cfg = xanadu::LayoutConfig::fromStore(store);
   EXPECT_FLOAT_EQ(cfg.physics.kRepel, 520.0F);
   EXPECT_FLOAT_EQ(cfg.physics.maxForce, 600.0F);
   EXPECT_FLOAT_EQ(cfg.physics.maxVelocity, 180.0F);
@@ -378,7 +390,7 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
   EXPECT_FLOAT_EQ(tension.timeStep, 0.8F);
 
   // Roundtrip back from tension params
-  const auto roundtrip = xudu::PhysicsConfig::fromTensionParams(tension);
+  const auto roundtrip = xanadu::PhysicsConfig::fromTensionParams(tension);
   EXPECT_FLOAT_EQ(roundtrip.kRepel, 520.0F);
   EXPECT_FLOAT_EQ(roundtrip.maxForce, 600.0F);
   EXPECT_FLOAT_EQ(roundtrip.maxVelocity, 180.0F);
@@ -388,19 +400,19 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
 TEST(SystemDocsTest, GetSetVaryingCellValues) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
+  xanadu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
-  xudu::SettingSpec spec;
+  xanadu::SettingSpec spec;
   spec.name  = "test.multitype";
   spec.notes = "Test multi-type value tuple";
   spec.schemas.push_back(
       {{"double", "int64", "bool", "string"},
        {1.5, static_cast<std::int64_t>(42), true, std::string{"initial"}}});
   const auto head =
-      xudu::ensureSetting(store, store.primaryCurrentVersion(), spec);
+      xanadu::ensureSetting(store, store.primaryCurrentVersion(), spec);
   store.repointCurrentVersion(head);
 
-  const auto initial = xudu::getSetting(store, "test.multitype");
+  const auto initial = xanadu::getSetting(store, "test.multitype");
   ASSERT_EQ(initial.size(), 4U);
   EXPECT_DOUBLE_EQ(std::get<double>(initial[0]), 1.5);
   EXPECT_EQ(std::get<std::int64_t>(initial[1]), 42);
@@ -408,12 +420,12 @@ TEST(SystemDocsTest, GetSetVaryingCellValues) {
   EXPECT_EQ(std::get<std::string>(initial[3]), "initial");
 
   // Update using variadic setSetting
-  const auto updatedVer = xudu::setSetting(
+  const auto updatedVer = xanadu::setSetting(
       store, store.primaryCurrentVersion(), "test.multitype", 9.25,
       static_cast<std::int64_t>(100), false, std::string{"updated"});
   store.repointCurrentVersion(updatedVer);
 
-  const auto updated = xudu::getSetting(store, "test.multitype");
+  const auto updated = xanadu::getSetting(store, "test.multitype");
   ASSERT_EQ(updated.size(), 4U);
   EXPECT_DOUBLE_EQ(std::get<double>(updated[0]), 9.25);
   EXPECT_EQ(std::get<std::int64_t>(updated[1]), 100);
@@ -425,13 +437,13 @@ TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
         SystemDocKind::UI, SystemDocKind::Pouches}) {
-    const std::string schema = xudu::defaultSystemDocSchema(kind);
+    const std::string schema = xanadu::defaultSystemDocSchema(kind);
     EXPECT_FALSE(schema.empty());
     EXPECT_TRUE(schema.starts_with("Schema and Purpose"));
     EXPECT_EQ(schema.find('#'), std::string::npos);
     EXPECT_EQ(schema.find("**"), std::string::npos);
 
-    const std::string notes = xudu::defaultSystemDocNotes(kind);
+    const std::string notes = xanadu::defaultSystemDocNotes(kind);
     EXPECT_FALSE(notes.empty());
     EXPECT_TRUE(notes.starts_with("Notes"));
     EXPECT_EQ(notes.find('#'), std::string::npos);
@@ -445,7 +457,7 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
         SystemDocKind::UI, SystemDocKind::Pouches}) {
     Store store;
     store.setSystem(true);
-    xudu::initializeSystemStore(store, kind);
+    xanadu::initializeSystemStore(store, kind);
 
     // Single author-designated head
     EXPECT_EQ(store.currentVersions().size(), 1U);
@@ -488,7 +500,7 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
 TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
 
   const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
   const auto vars     = manifold.dimensionNamed("d.vars", store).value();
@@ -517,39 +529,39 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
 
 TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   Store kmStore;
-  xudu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
+  xanadu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
   const auto kmCfg = KeymapConfig::fromStore(kmStore);
   EXPECT_FALSE(kmCfg.bindings.empty());
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
-  EXPECT_EQ(kmCfg.bindingFor(xudu::settings::kKeymapNewDoc), "Ctrl+N");
+  EXPECT_EQ(kmCfg.bindingFor(xanadu::settings::kKeymapNewDoc), "Ctrl+N");
   EXPECT_EQ(kmCfg.bindingFor("std:xudu/new_doc"), "Ctrl+N");
-  EXPECT_EQ(xudu::canonicalKeymapAction("new-doc"), "std:xudu/new_doc");
-  EXPECT_EQ(xudu::legacyKeymapAction("std:xudu/new_doc"), "new-doc");
-  EXPECT_EQ(xudu::canonicalKeymapAction("std:xudu/new_doc"),
+  EXPECT_EQ(xanadu::canonicalKeymapAction("new-doc"), "std:xudu/new_doc");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/new_doc"), "new-doc");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/new_doc"),
             "std:xudu/new_doc");
-  EXPECT_EQ(xudu::legacyKeymapAction("new-doc"), "new-doc");
+  EXPECT_EQ(xanadu::legacyKeymapAction("new-doc"), "new-doc");
 
   Store setStore;
-  xudu::initializeSystemStore(setStore, SystemDocKind::Settings);
+  xanadu::initializeSystemStore(setStore, SystemDocKind::Settings);
   const auto setCfg = SettingsConfig::fromStore(setStore);
   EXPECT_FLOAT_EQ(setCfg.fontSize, 16.0F);
   EXPECT_EQ(setCfg.fontFamily, "Monospace");
 
   Store loStore;
-  xudu::initializeSystemStore(loStore, SystemDocKind::Layout);
+  xanadu::initializeSystemStore(loStore, SystemDocKind::Layout);
   const auto loCfg = LayoutConfig::fromStore(loStore);
   EXPECT_EQ(loCfg.columns, 2U);
   EXPECT_FLOAT_EQ(loCfg.pageWidthPx, 800.0F);
 
   Store uiStore;
-  xudu::initializeSystemStore(uiStore, SystemDocKind::UI);
+  xanadu::initializeSystemStore(uiStore, SystemDocKind::UI);
   const auto uiCfg = UIConfig::fromStore(uiStore);
   EXPECT_TRUE(uiCfg.tabBarVisible);
   EXPECT_FLOAT_EQ(uiCfg.radialMenu.radius, 130.0F);
 
   Store poStore;
-  xudu::initializeSystemStore(poStore, SystemDocKind::Pouches);
-  const auto poCfg = xudu::PouchConfig::fromStore(poStore);
+  xanadu::initializeSystemStore(poStore, SystemDocKind::Pouches);
+  const auto poCfg = xanadu::PouchConfig::fromStore(poStore);
   EXPECT_EQ(poCfg.zones.size(), 4U);
 }
 
@@ -598,7 +610,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
 
   // Insert public text into store
   const std::string publicText = "Chapter 1: The Open Docuverse. ";
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, publicText);
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, publicText);
 
   // Insert private system configuration into store (e.g. keymap edits)
   const std::string privateText = "PRIVATE_KEYMAP_SETTINGS_TOKEN_9999";
@@ -620,12 +632,12 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   hole.length = sysLength;
   hole.reason = HoleReason::Withheld;
 
-  const auto keys = xudu::createMutableKeys();
+  const auto keys = xanadu::createMutableKeys();
   const auto prov = makeTestProvenance();
 
   // 1. Seal with WITHHELD hole
   const auto outDirWithheld         = tempDir / "sealed_withheld";
-  [[maybe_unused]] const auto seal1 = xudu::sealLocalSpool(
+  [[maybe_unused]] const auto seal1 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirWithheld.string(), prov, {}, 0, {hole});
 
   const auto primediaWithheldPath = outDirWithheld / "essay" / "primedia";
@@ -647,7 +659,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   // 2. Seal with PUBLISHED status (empty holes -> user explicitly chose to
   // export/publish)
   const auto outDirPublished        = tempDir / "sealed_published";
-  [[maybe_unused]] const auto seal2 = xudu::sealLocalSpool(
+  [[maybe_unused]] const auto seal2 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirPublished.string(), prov, {}, 0, {});
 
   const auto primediaPublishedPath = outDirPublished / "essay" / "primedia";

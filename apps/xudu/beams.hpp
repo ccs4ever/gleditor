@@ -39,16 +39,17 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
 #include "common/xanadu/system_docs.hpp"
-#include "xudu/core/anchor_lanes.hpp"
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/tension_layout.hpp"
+#include "common/xanadu/tension_layout.hpp"
 #include "xudu/session.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 class TenuousTetherOverlay;
 class SatelloidOverlay;

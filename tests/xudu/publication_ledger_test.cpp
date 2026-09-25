@@ -10,9 +10,11 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/publication_ledger.hpp"
+#include "common/xanadu/publication_ledger.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 using ::testing::Eq;

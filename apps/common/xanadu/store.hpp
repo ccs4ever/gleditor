@@ -870,6 +870,49 @@ public:
                    zigzag::CellRef item,
                    const zigzag::Manifold *known = nullptr);
 
+  struct AppendedAnthologyEntry {
+    MicroversionId version;
+    zigzag::CellRef entryCell{zigzag::noCell};
+    zigzag::CellRef placeholderCell{zigzag::noCell};
+    zigzag::CellRef stateCell{zigzag::noCell};
+  };
+
+  /**
+   * @brief Append a foreign member entry onto an anthology rank (§5.9).
+   *
+   * Interns a placeholder for @p memberRef, mints an entry cell linking on
+   * d.member to the placeholder and on d.member-state to @p pinnedState
+   * descriptor, then appends the entry cell onto @p root's d.anthology rank
+   * posward.
+   */
+  [[nodiscard]] AppendedAnthologyEntry appendAnthologyEntry(
+      const MicroversionId &parent, zigzag::CellRef root,
+      const ExternOpRef &memberRef, const GlobalDocumentState &pinnedState,
+      std::string_view label = {}, const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Append a local member cell onto an anthology rank (§5.9).
+   *
+   * Appends @p localCell onto @p root's d.anthology rank posward.
+   */
+  [[nodiscard]] MicroversionId
+  appendAnthologyLocalMember(const MicroversionId &parent, zigzag::CellRef root,
+                             zigzag::CellRef localCell,
+                             const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Refresh an anthology entry's pinned state (§5.9 §3).
+   *
+   * Repoints @p entryCell's d.member-state to a newly minted descriptor for
+   * @p newPinnedState, and optionally repoints d.member if @p optNewMemberRef
+   * is provided. Both mutations are recorded in @p entryCell's R7 chain.
+   */
+  [[nodiscard]] MicroversionId refreshAnthologyEntry(
+      const MicroversionId &parent, zigzag::CellRef entryCell,
+      const GlobalDocumentState &newPinnedState,
+      std::optional<ExternOpRef> optNewMemberRef = std::nullopt,
+      const zigzag::Manifold *known              = nullptr);
+
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);
 

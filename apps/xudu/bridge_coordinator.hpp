@@ -18,6 +18,7 @@
 #include "satelloid.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @brief Connects a presentation surface to Xudu's renderer and LinkBeams.

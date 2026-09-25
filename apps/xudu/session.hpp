@@ -41,23 +41,24 @@
 #include <gleditor/svg_cache.hpp>
 #include <gleditor/text_source.hpp>
 
-#include "core/anchor_lanes.hpp"
-#include "core/mutable_link.hpp"
-#include "core/provenance.hpp"
-#include "core/swarm.hpp"
-#include "core/system_docs.hpp"
-#include "core/transcopyright_logic.hpp"
-#include "core/uncommitted_op_log.hpp"
+#include "common/xanadu/anchor_lanes.hpp"
+#include "common/xanadu/config.hpp"
+#include "common/xanadu/media_manager.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
+#include "common/xanadu/uncommitted_op_log.hpp"
 #include "hypertime_graph.hpp"
-#include "xudu/core/config.hpp"
-#include "xudu/core/media_manager.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/publication.hpp"
 
 class Caret;
 class Doc;
 
 namespace xudu {
+using namespace ::xanadu;
 
 class Session;
 

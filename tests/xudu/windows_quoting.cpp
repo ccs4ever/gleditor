@@ -12,10 +12,10 @@
  */
 #include <gtest/gtest.h>
 
-#include <xudu/core/windows_quoting.hpp>
+#include "common/xanadu/windows_quoting.hpp"
 
 namespace {
-using xudu::quoteWindowsArgument;
+using xanadu::quoteWindowsArgument;
 }
 
 TEST(WindowsQuotingTest, aPlainWordNeedsNoQuoting) {

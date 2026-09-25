@@ -12,8 +12,8 @@
 
 #include <string>
 
-#include <zigzag/core/arena_manifold.hpp>
-#include <zigzag/core/vlog.hpp>
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/vlog.hpp"
 
 namespace {
 

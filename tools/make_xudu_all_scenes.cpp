@@ -1,13 +1,13 @@
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
 #include <xudu/session.hpp>
 
-using namespace xudu;
+using namespace xanadu;
 
 int main() {
   std::filesystem::create_directories("scratch");

@@ -3,9 +3,9 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
+#include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
-#include "core/format_resolver.hpp"
-#include "core/zzcore.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
 
 #include <algorithm>
 #include <cmath>

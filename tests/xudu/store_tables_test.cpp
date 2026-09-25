@@ -16,25 +16,25 @@
 #include <memory>
 #include <string>
 
-#include <xudu/core/store.hpp>
-#include <xudu/core/store_tables.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
-using xudu::HoleReason;
-using xudu::InfoHash;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::ProminenceTier;
-using xudu::PublishedHoleRecord;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::Store;
-using xudu::StoreTables;
+using xanadu::HoleReason;
+using xanadu::InfoHash;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::ProminenceTier;
+using xanadu::PublishedHoleRecord;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::Store;
+using xanadu::StoreTables;
 
 fs::path scratch(const std::string &name) {
   const auto dir = fs::temp_directory_path() / ("xudu_tables_" + name);
@@ -60,8 +60,8 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   const auto dir  = scratch("roundtrip");
   const auto path = dir / "store.tables";
   const auto sent = everything();
-  xudu::writeStoreTables(path, sent);
-  const auto back = xudu::readStoreTables(path);
+  xanadu::writeStoreTables(path, sent);
+  const auto back = xanadu::readStoreTables(path);
 
   EXPECT_EQ(back.documentId, sent.documentId);
 
@@ -80,9 +80,9 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
     out << "scroll 1 - - text/plain\n";
   }
   try {
-    static_cast<void>(xudu::readStoreTables(dir / "store.tables"));
+    static_cast<void>(xanadu::readStoreTables(dir / "store.tables"));
     FAIL() << "a file with no signature must not be read as side tables";
-  } catch (const xudu::StoreTablesUnreadable &e) {
+  } catch (const xanadu::StoreTablesUnreadable &e) {
     EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("signature"));
     EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("XUDUTBL"));
   }
@@ -90,39 +90,40 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
   // A version this build does not know, refused by number the way an ops
   // segment and a binary ops spool both are.
   {
-    xudu::writeStoreTables(dir / "future.tables", StoreTables{});
+    xanadu::writeStoreTables(dir / "future.tables", StoreTables{});
     std::fstream out(dir / "future.tables",
                      std::ios::binary | std::ios::in | std::ios::out);
-    out.seekp(static_cast<std::streamoff>(xudu::storeTablesSignature.size()));
-    const std::uint32_t later = xudu::storeTablesFormatVersion + 1;
+    out.seekp(static_cast<std::streamoff>(xanadu::storeTablesSignature.size()));
+    const std::uint32_t later = xanadu::storeTablesFormatVersion + 1;
     out.write(reinterpret_cast<const char *>(&later), sizeof(later));
   }
   try {
-    static_cast<void>(xudu::readStoreTables(dir / "future.tables"));
+    static_cast<void>(xanadu::readStoreTables(dir / "future.tables"));
     FAIL() << "a version this build does not know must not be guessed at";
-  } catch (const xudu::StoreTablesUnreadable &e) {
+  } catch (const xanadu::StoreTablesUnreadable &e) {
     EXPECT_THAT(
         std::string{e.what()},
-        testing::HasSubstr("version " +
-                           std::to_string(xudu::storeTablesFormatVersion + 1)));
+        testing::HasSubstr(
+            "version " + std::to_string(xanadu::storeTablesFormatVersion + 1)));
     EXPECT_THAT(
         std::string{e.what()},
         testing::HasSubstr("reads version " +
-                           std::to_string(xudu::storeTablesFormatVersion)));
+                           std::to_string(xanadu::storeTablesFormatVersion)));
   }
 
   // A header with rubbish behind it, which is a corrupt file rather than a
   // foreign one and still must not be read as an empty store.
   {
     std::ofstream out(dir / "torn.tables", std::ios::binary);
-    out.write(reinterpret_cast<const char *>(xudu::storeTablesSignature.data()),
-              static_cast<std::streamsize>(xudu::storeTablesSignature.size()));
-    const auto version = xudu::storeTablesFormatVersion;
+    out.write(
+        reinterpret_cast<const char *>(xanadu::storeTablesSignature.data()),
+        static_cast<std::streamsize>(xanadu::storeTablesSignature.size()));
+    const auto version = xanadu::storeTablesFormatVersion;
     out.write(reinterpret_cast<const char *>(&version), sizeof(version));
     out << "not bencode";
   }
-  EXPECT_THROW(static_cast<void>(xudu::readStoreTables(dir / "torn.tables")),
-               xudu::StoreTablesUnreadable);
+  EXPECT_THROW(static_cast<void>(xanadu::readStoreTables(dir / "torn.tables")),
+               xanadu::StoreTablesUnreadable);
 }
 
 TEST(StoreTablesTest, aStoresLinksAndScrollsSurviveBeingSavedAndReopened) {
@@ -137,7 +138,7 @@ TEST(StoreTablesTest, aStoresLinksAndScrollsSurviveBeingSavedAndReopened) {
 
   // One permascroll across both, because a store holds no primedia of its own
   // and its local spans are addresses in the author's.
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   MicroversionId at;
   {
     Store store(perma);

@@ -7,8 +7,8 @@
 
 #include <gleditor/doc.hpp>
 
-#include "xudu/core/format.hpp"
-#include "zigzag/core/zzstructure.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
 
 using namespace zigzag;
@@ -527,12 +527,13 @@ TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
   ASSERT_FALSE(spans.empty());
 
   // Attach an Italic format link to root's spans
-  xudu::Link italicLink;
-  italicLink.type = xudu::LinkType::Format;
-  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  xanadu::Link italicLink;
+  italicLink.type = xanadu::LinkType::Format;
+  italicLink.left =
+      std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
   italicLink.right.push_back(
-      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
-  viz.store()->addLink(xudu::MicroversionId{}, italicLink);
+      xanadu::vocabularySpanFor(xanadu::FormatAttribute::Italic));
+  viz.store()->addLink(xanadu::MicroversionId{}, italicLink);
 
   viz.engine()->updateFormatFlags();
   viz.cycleDimensions(true);

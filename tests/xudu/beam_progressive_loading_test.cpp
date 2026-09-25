@@ -28,23 +28,23 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::Store;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::Store;
 
-std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
-  xudu::UserPermascroll::Config config;
+std::shared_ptr<xanadu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xanadu::UserPermascroll::Config config;
   config.storageDir = dir;
-  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  return std::make_shared<xanadu::UserPermascroll>(std::move(config));
 }
 
 struct ExecutionResult {

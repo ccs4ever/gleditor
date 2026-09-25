@@ -7,17 +7,17 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/resolver.hpp"
-#include "xudu/core/scroll.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/torrent.hpp"
-#include "xudu/core/transcopyright_crypto.hpp"
-#include "xudu/core/transcopyright_logic.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/transcopyright_crypto.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(TranscopyrightUiTest, mapsHoleReasonsToLabelsAndColors) {
   EXPECT_EQ(TranscopyrightLogic::reasonLabel(HoleReason::Withheld), "WITHHELD");
@@ -200,9 +200,9 @@ TEST(TranscopyrightUiTest,
   spoolBytes += cipher;
   spoolBytes += publicOutro;
 
-  const std::array<xudu::TorrentContent, 1> files{
-      xudu::TorrentContent{"spool", spoolBytes}};
-  const auto torrent = xudu::makeTorrent(files, "tc_test_torrent", 16384);
+  const std::array<xanadu::TorrentContent, 1> files{
+      xanadu::TorrentContent{"spool", spoolBytes}};
+  const auto torrent = xanadu::makeTorrent(files, "tc_test_torrent", 16384);
 
   std::ofstream spoolOut(tempDir / "spool", std::ios::binary);
   spoolOut.write(spoolBytes.data(),

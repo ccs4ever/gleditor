@@ -18,10 +18,11 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
-#include "core/transcopyright_logic.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
 #include "session.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class TranscopyrightOverlay
