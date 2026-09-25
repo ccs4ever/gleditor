@@ -477,46 +477,62 @@ DimRef ArenaManifold::dimIn(const std::uint32_t space,
   if (space == 0 || space > spaces_.size() || dim == noCell) {
     return noCell;
   }
-  if (const auto it = boundDimensions_.find(dim);
-      it != boundDimensions_.end()) {
-    for (const auto &member : it->second.members) {
-      if (member.space == space) {
-        return member.dim;
+  for (const auto &[arenaDim, bSet] : boundDimensions_) {
+    bool matches = (arenaDim == dim);
+    if (!matches) {
+      for (const auto &member : bSet.members) {
+        if (member.dim == dim) {
+          matches = true;
+          break;
+        }
+      }
+    }
+    if (matches) {
+      for (const auto &member : bSet.members) {
+        if (member.space == space) {
+          return member.dim;
+        }
       }
     }
   }
+
   const auto s = spaceAt(space);
   if (!s || !s->manifold) {
     return noCell;
   }
-  if (s->manifold->contains(dim)) {
-    return dim;
-  }
-  std::string_view name;
-  for (const auto &[k, v] : arenaDims_) {
-    if (v == dim) {
-      name = k;
-      break;
+
+  if (spaces_.size() == 1) {
+    const auto dims = s->manifold->dimensions();
+    if (std::ranges::find(dims, dim) != dims.end()) {
+      return dim;
+    }
+    std::string_view name;
+    for (const auto &[k, v] : arenaDims_) {
+      if (v == dim) {
+        name = k;
+        break;
+      }
+    }
+    std::string nameBuf;
+    if (name.empty()) {
+      nameBuf = textOf(dim);
+      name    = nameBuf;
+    }
+    if (!name.empty()) {
+      std::optional<DimRef> fDim;
+      if (s->reader != nullptr) {
+        fDim = s->manifold->dimensionNamed(name, *s->reader);
+      } else if (s->store != nullptr) {
+        fDim = s->manifold->dimensionNamed(name, *s->store);
+      } else if (s->manifold->store() != nullptr) {
+        fDim = s->manifold->dimensionNamed(name);
+      }
+      if (fDim.has_value()) {
+        return *fDim;
+      }
     }
   }
-  std::string nameBuf;
-  if (name.empty()) {
-    nameBuf = textOf(dim);
-    name    = nameBuf;
-  }
-  if (!name.empty()) {
-    std::optional<DimRef> fDim;
-    if (s->reader != nullptr) {
-      fDim = s->manifold->dimensionNamed(name, *s->reader);
-    } else if (s->store != nullptr) {
-      fDim = s->manifold->dimensionNamed(name, *s->store);
-    } else if (s->manifold->store() != nullptr) {
-      fDim = s->manifold->dimensionNamed(name);
-    }
-    if (fDim.has_value()) {
-      return *fDim;
-    }
-  }
+
   return noCell;
 }
 
@@ -538,6 +554,124 @@ void ArenaManifold::bindDimension(const DimRef arenaDim,
   }
   set.members.push_back(
       BoundDimensionMember{.space = space, .dim = foreignDim, .mode = mode});
+}
+
+void ArenaManifold::bindSharedIdentities() {
+  std::map<xanadu::GlobalOpRef, std::vector<std::pair<std::uint32_t, DimRef>>>
+      groups;
+
+  for (std::uint32_t spaceId = 1; spaceId <= spaces_.size(); ++spaceId) {
+    const auto s = spaceAt(spaceId);
+    if (!s || !s->manifold) {
+      continue;
+    }
+    for (const auto dim : s->manifold->dimensions()) {
+      std::optional<xanadu::GlobalOpRef> gRef;
+      if (s->store != nullptr) {
+        if (const auto ext = s->store->externTarget(dim); ext.has_value()) {
+          const auto rec = s->store->scrollRegistry().findRecord(ext->scroll);
+          if (rec.has_value()) {
+            gRef = xanadu::GlobalOpRef{.scroll   = rec->globalKey,
+                                       .produces = ext->produces};
+          }
+        } else {
+          const auto slot = s->manifold->slot(dim);
+          if (slot.has_value() && slot->birthOp != 0) {
+            const auto birth = s->store->segmentedOps().idOf(slot->birthOp);
+            std::string sKey = s->sealedAs != nullptr
+                                   ? scrollKey(*s->sealedAs)
+                                   : s->store->bootstrapPermascrollKey();
+            if (sKey.empty()) {
+              sKey = s->label;
+            }
+            if (!sKey.empty() && !birth.isZero()) {
+              gRef = xanadu::GlobalOpRef{.scroll = sKey, .produces = birth};
+            }
+          }
+        }
+      }
+      if (gRef.has_value()) {
+        groups[*gRef].push_back({spaceId, dim});
+      }
+    }
+  }
+
+  for (const auto &[gRef, memberList] : groups) {
+    if (memberList.size() <= 1) {
+      continue;
+    }
+    DimRef targetArenaDim = noCell;
+    for (const auto &[sp, d] : memberList) {
+      for (const auto &[aDim, bSet] : boundDimensions_) {
+        for (const auto &m : bSet.members) {
+          if (m.space == sp && m.dim == d) {
+            targetArenaDim = aDim;
+            break;
+          }
+        }
+        if (targetArenaDim != noCell) {
+          break;
+        }
+      }
+      if (targetArenaDim != noCell) {
+        break;
+      }
+    }
+
+    if (targetArenaDim == noCell) {
+      std::string name;
+      const auto firstSp = spaceAt(memberList.front().first);
+      if (firstSp && firstSp->manifold) {
+        if (firstSp->reader) {
+          name = firstSp->manifold->textOf(memberList.front().second,
+                                           *firstSp->reader);
+        } else if (firstSp->store) {
+          name = firstSp->manifold->textOf(memberList.front().second,
+                                           *firstSp->store);
+        }
+      }
+      if (name.empty()) {
+        name = "d.shared_" + gRef.produces.str();
+      }
+      targetArenaDim = ensureDimension(name);
+    }
+
+    for (const auto &[sp, d] : memberList) {
+      bindDimension(targetArenaDim, sp, d,
+                    DimensionBindingMode::SharedIdentity);
+    }
+  }
+}
+
+void ArenaManifold::bindDimensionsByNameMatch() {
+  std::map<std::string, std::vector<std::pair<std::uint32_t, DimRef>>> byName;
+  for (std::uint32_t spaceId = 1; spaceId <= spaces_.size(); ++spaceId) {
+    const auto s = spaceAt(spaceId);
+    if (!s || !s->manifold) {
+      continue;
+    }
+    for (const auto dim : s->manifold->dimensions()) {
+      std::string name;
+      if (s->reader) {
+        name = s->manifold->textOf(dim, *s->reader);
+      } else if (s->store) {
+        name = s->manifold->textOf(dim, *s->store);
+      }
+      if (!name.empty()) {
+        byName[name].push_back({spaceId, dim});
+      }
+    }
+  }
+
+  for (const auto &[name, members] : byName) {
+    if (members.size() <= 1) {
+      continue;
+    }
+    const auto arenaDim = ensureDimension(name);
+    for (const auto &[spaceId, dim] : members) {
+      bindDimension(arenaDim, spaceId, dim, DimensionBindingMode::NameMatch);
+    }
+  }
 }
 
 gleditor::cpp26::optional<const BoundDimensionSet &>
