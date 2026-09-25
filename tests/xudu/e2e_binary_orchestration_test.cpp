@@ -1554,6 +1554,62 @@ TEST(E2EBinaryOrchestrationTest,
 // primedia spool -- instead of Store::insertMedia(). The one directly
 // observable consequence: exactly one image/png entry in the saved store's
 // local segment table, not two, despite the figure rendering on both pages.
+// The structure script's link and cell-quote verbs: a link built from ranges
+// of the document, and a cell that quotes one of those ranges -- sharing its
+// primedia, which is what makes the cell an occurrence of the link's member.
+TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_script_links";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto script = testRoot / "links.xuzz";
+  {
+    std::ofstream out(script);
+    out << "genesis\n"
+           "text Alpha beta gamma delta. one two three.\n"
+           "cell-quote three 32 5\n"
+           "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
+  }
+  const auto storePath = testRoot / "store";
+  const auto res = executeProcess(xuduBin.string() +
+                                  permascrollFlag(testRoot / "permascroll") +
+                                  " --headless --structure-script " +
+                                  script.string() + " " + storePath.string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  Store store(permascrollAt(testRoot / "permascroll"));
+  store.load(storePath.string());
+  ASSERT_EQ(store.links().size(), 1U);
+  const auto &link = store.links().begin()->second;
+  EXPECT_EQ(link.type, LinkType::Comment);
+  ASSERT_EQ(link.left.size(), 2U);
+  ASSERT_EQ(link.right.size(), 3U);
+  EXPECT_EQ(link.right[2].length, 5U);
+
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  const auto quoting  = std::ranges::count_if(
+      manifold.cellsWithinRadius(zigzag::noCell, -1), [&](const auto cell) {
+        const auto content = manifold.contentOf(cell);
+        return 1 == content.size() && content.front() == link.right[2];
+      });
+  EXPECT_EQ(quoting, 1) << "exactly one cell should quote \"three\"";
+
+  // A range that is not one run of the text is refused, naming its line.
+  {
+    std::ofstream out(script);
+    out << "genesis\ntext short\nlink comment 0:99 | 0:1\n";
+  }
+  const auto refused = executeProcess(
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --headless --structure-script " + script.string() + " " +
+      (testRoot / "refused").string());
+  EXPECT_NE(refused.exitCode, 0);
+  EXPECT_NE(refused.output.find(":3:"), std::string::npos) << refused.output;
+}
+
 TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
