@@ -83,6 +83,7 @@ namespace zigzag {
  */
 struct Space {
   const Manifold *manifold{nullptr};
+  std::shared_ptr<const Manifold> ownedManifold{nullptr};
   const xanadu::Store *store{nullptr};
   const xanadu::Scroll *sealedAs{
       nullptr}; ///< opRefOf() needs it; may be null locally
@@ -255,12 +256,20 @@ public:
       : ArenaManifold(base, &store) {}
 
   [[nodiscard]] const Manifold *base() const noexcept { return base_; }
+  [[nodiscard]] const xanadu::Store *store() const noexcept {
+    return store_ != nullptr ? store_
+                             : (base_ != nullptr ? base_->store() : nullptr);
+  }
   [[nodiscard]] CellRef home() const noexcept;
   [[nodiscard]] CellRef homeCell() const noexcept { return home(); }
+
+  [[nodiscard]] std::vector<DimRef> dimensions() const;
 
   [[nodiscard]] DimRef
   dimensionNamed(std::string_view name,
                  const xanadu::SpanReader *reader = nullptr) const;
+  [[nodiscard]] std::optional<DimRef>
+  dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
   DimRef ensureDimension(std::string_view name);
 
   [[nodiscard]] CellRef authorshipRoot() const noexcept {
@@ -429,6 +438,10 @@ public:
   /// buffer; any other span needs @p reader, and is skipped when it is null.
   [[nodiscard]] std::string
   textOf(CellRef ref, const xanadu::SpanReader *reader = nullptr) const;
+  [[nodiscard]] std::string textOf(CellRef ref,
+                                   const xanadu::SpanReader &reader) const {
+    return textOf(ref, &reader);
+  }
 
   /// The bytes @p span names, when it is a scratch span this arena holds.
   [[nodiscard]] std::string_view

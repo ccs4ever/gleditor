@@ -570,8 +570,9 @@ public:
   [[nodiscard]] static SystemStoreModel
   fromStore(const Store &store, const MicroversionId &version = {});
 
+  template <typename ManifoldT>
   [[nodiscard]] static SystemStoreModel
-  fromManifold(const zigzag::Manifold &manifold,
+  fromManifold(const ManifoldT &manifold,
                zigzag::CellRef homeCell = zigzag::noCell,
                const SpanReader *reader = nullptr);
 

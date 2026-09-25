@@ -2332,6 +2332,231 @@ Store::refreshAnthologyEntry(const MicroversionId &parent,
   return curHead;
 }
 
+AppendedQuotation Store::quote(const MicroversionId &parent,
+                               const zigzag::CellRef localRankTail,
+                               const zigzag::DimRef localRankDim,
+                               const std::string_view label,
+                               const GlobalDocumentState &pinnedState,
+                               const SelectorSpec &selector,
+                               const zigzag::Manifold *const known) {
+  if (selector.rootRef.produces != pinnedState.version &&
+      !selector.rootRef.produces.isAncestorOf(pinnedState.version)) {
+    throw std::invalid_argument(
+        "quoted root birth is not an ancestor of pinned state");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimQuotes      = ensureDim(kDimQuotes);
+  const auto dimQuotesState = ensureDim(kDimQuotesState);
+  const auto dimQuotesSel   = ensureDim(kDimQuotesSel);
+
+  // 1. Intern placeholder for foreign root cell
+  curHead     = makeExternRef(curHead, selector.rootRef, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  const auto placeholder =
+      currentFold->scrollRegistry(*this).placeholderForExtern(selector.rootRef);
+  if (!placeholder || *placeholder == zigzag::noCell) {
+    throw std::runtime_error(
+        "failed to intern placeholder for quoted root ref");
+  }
+
+  // 2. Mint the descriptor cell for pinnedState
+  const auto descText  = writeGlobalDocumentState(pinnedState);
+  curHead              = makeCell(curHead, descText);
+  const auto stateCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 3. Mint the selector descriptor cell
+  const auto selText      = writeSelectorDescriptor(selector);
+  curHead                 = makeCell(curHead, selText);
+  const auto selectorCell = cellRefOf(curHead);
+  folded                  = rebuildManifold(curHead);
+  currentFold             = &folded.value();
+
+  if (selector.kind == Selector::Kind::Rank &&
+      selector.rankDimRef.has_value()) {
+    curHead     = makeExternRef(curHead, *selector.rankDimRef, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    const auto dimPh = currentFold->scrollRegistry(*this).placeholderForExtern(
+        *selector.rankDimRef);
+    if (dimPh && *dimPh != zigzag::noCell) {
+      curHead     = setLink(curHead, selectorCell, dimQuotes,
+                            zigzag::DimVector::POS, *dimPh, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+  } else if (selector.kind == Selector::Kind::Closure) {
+    const auto dimQuotesCarry = ensureDim(kDimQuotesCarry);
+    auto prevCarry            = selectorCell;
+    for (const auto &cRef : selector.carryRefs) {
+      curHead     = makeExternRef(curHead, cRef, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+
+      const auto cPh =
+          currentFold->scrollRegistry(*this).placeholderForExtern(cRef);
+      if (cPh && *cPh != zigzag::noCell) {
+        curHead     = setLink(curHead, prevCarry, dimQuotesCarry,
+                              zigzag::DimVector::POS, *cPh, currentFold);
+        folded      = rebuildManifold(curHead);
+        currentFold = &folded.value();
+        prevCarry   = *cPh;
+      }
+    }
+  }
+
+  // 4. Mint quotation cell Q
+  curHead              = makeCell(curHead, label);
+  const auto entryCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 5. Link Q to root placeholder, stateCell, and selectorCell
+  const auto existingNeg =
+      currentFold->linked(*placeholder, dimQuotes, zigzag::DimVector::NEG);
+  if (existingNeg == zigzag::noCell) {
+    curHead     = setLink(curHead, entryCell, dimQuotes, zigzag::DimVector::POS,
+                          *placeholder, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else {
+    curHead = setLink(curHead, existingNeg, dimQuotes, zigzag::DimVector::POS,
+                      entryCell, currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    curHead     = setLink(curHead, entryCell, dimQuotes, zigzag::DimVector::POS,
+                          *placeholder, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  curHead = setLink(curHead, entryCell, dimQuotesState, zigzag::DimVector::POS,
+                    stateCell, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  curHead = setLink(curHead, entryCell, dimQuotesSel, zigzag::DimVector::POS,
+                    selectorCell, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 6. Splice Q into local rank at localRankTail on localRankDim
+  if (localRankTail != zigzag::noCell && localRankDim != zigzag::noCell) {
+    const auto succ = currentFold->linked(localRankTail, localRankDim,
+                                          zigzag::DimVector::POS);
+    curHead         = setLink(curHead, localRankTail, localRankDim,
+                              zigzag::DimVector::POS, entryCell, currentFold);
+    folded          = rebuildManifold(curHead);
+    currentFold     = &folded.value();
+
+    if (succ != zigzag::noCell) {
+      curHead     = setLink(curHead, entryCell, localRankDim,
+                            zigzag::DimVector::POS, succ, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+  }
+
+  return AppendedQuotation{
+      .version         = curHead,
+      .quotationCell   = entryCell,
+      .placeholderCell = *placeholder,
+      .stateCell       = stateCell,
+      .selectorCell    = selectorCell,
+  };
+}
+
+MicroversionId Store::overrideQuotedCell(const MicroversionId &parent,
+                                         const zigzag::CellRef quotationCell,
+                                         const ExternOpRef &foreignTargetRef,
+                                         const std::string_view overrideContent,
+                                         const zigzag::Manifold *const known) {
+  if (zigzag::noCell == quotationCell) {
+    throw std::invalid_argument("cannot override on noCell quotation");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimOverrides = ensureDim(kDimOverrides);
+  const auto dimShadows   = ensureDim(kDimShadows);
+
+  // 1. makeExternRef(target)
+  curHead     = makeExternRef(curHead, foreignTargetRef, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  const auto placeholder =
+      currentFold->scrollRegistry(*this).placeholderForExtern(foreignTargetRef);
+  if (!placeholder || *placeholder == zigzag::noCell) {
+    throw std::runtime_error(
+        "failed to intern placeholder for override target");
+  }
+
+  // 2. makeCell(content)
+  curHead                 = makeCell(curHead, overrideContent);
+  const auto overrideCell = cellRefOf(curHead);
+  folded                  = rebuildManifold(curHead);
+  currentFold             = &folded.value();
+
+  // 3. setLink(O, d.shadows, POS, P_target)
+  curHead = setLink(curHead, overrideCell, dimShadows, zigzag::DimVector::POS,
+                    *placeholder, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 4. setLink(tail, d.overrides, POS, O)
+  const auto tail = zigzag::rankTail(*currentFold, quotationCell, dimOverrides,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimOverrides, zigzag::DimVector::POS,
+                            overrideCell, currentFold);
+  return curHead;
+}
+
 std::vector<Store::EditionInfo>
 Store::editions(const MicroversionId &version) const {
   const auto manifold = rebuildManifold(version);

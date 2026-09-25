@@ -22,6 +22,7 @@
 #include "common/xanadu/version.hpp"
 #include <gleditor/ranges.hpp>
 
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -1594,8 +1595,9 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
 namespace {
 /// A cell's value as settings read it: its typed bits when it carries them
 /// (R6), its text otherwise. Never parses the text.
-CellValue cellValueOf(const zigzag::Manifold &manifold,
-                      const zigzag::CellRef cell, const SpanReader &reader) {
+template <typename ManifoldT>
+CellValue cellValueOf(const ManifoldT &manifold, const zigzag::CellRef cell,
+                      const SpanReader &reader) {
   const auto asValue = [](const auto bits) { return CellValue{bits}; };
   const auto typed =
       manifold.asDouble(cell)
@@ -1612,10 +1614,10 @@ struct NullSpanReader final : public SpanReader {
 };
 } // namespace
 
-SystemStoreModel
-SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
-                               zigzag::CellRef homeCell,
-                               const SpanReader *reader) {
+template <typename ManifoldT>
+SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
+                                                zigzag::CellRef homeCell,
+                                                const SpanReader *reader) {
   SystemStoreModel model;
   if (reader == nullptr && manifold.store() != nullptr) {
     reader = manifold.store();
@@ -1626,14 +1628,15 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
   }
 
   if (homeCell == zigzag::noCell) {
-    if (manifold.contains(1)) {
-      homeCell = 1;
-    } else if (!manifold.cells().empty()) {
-      homeCell = manifold.cells().front().birthOp;
-    } else {
-      model.isValid_ = false;
-      model.error_   = "Manifold has no cells";
-      return model;
+    homeCell = manifold.home();
+    if (homeCell == zigzag::noCell) {
+      if (manifold.contains(1)) {
+        homeCell = 1;
+      } else {
+        model.isValid_ = false;
+        model.error_   = "Manifold has no cells";
+        return model;
+      }
     }
   } else if (!manifold.contains(homeCell)) {
     model.isValid_ = false;
@@ -1754,6 +1757,11 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
 
   return model;
 }
+
+template SystemStoreModel SystemStoreModel::fromManifold<zigzag::Manifold>(
+    const zigzag::Manifold &, zigzag::CellRef, const SpanReader *);
+template SystemStoreModel SystemStoreModel::fromManifold<zigzag::ArenaManifold>(
+    const zigzag::ArenaManifold &, zigzag::CellRef, const SpanReader *);
 
 gleditor::cpp26::optional<const SettingEntry &>
 SystemStoreModel::find(const std::string_view name) const noexcept {
