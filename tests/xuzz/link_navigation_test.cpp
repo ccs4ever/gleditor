@@ -487,3 +487,10 @@ TEST(LinkNavigationTest, PointerKeymapAndAccessibilityAgree) {
     EXPECT_EQ(site.range, first.range) << i;
   }
 }
+
+TEST(LinkNavigationTest, ErrorsAndCommandsHaveNames) {
+  EXPECT_EQ(xanadu::name(NavigationError::NoCandidates), "no links on screen");
+  EXPECT_EQ(xanadu::name(xanadu::NavigationCommand{nav::Dismiss{}}), "dismiss");
+  EXPECT_EQ(xanadu::name(xanadu::NavigationCommand{nav::EnterAt{}}),
+            "enter at");
+}

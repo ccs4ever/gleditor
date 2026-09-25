@@ -50,6 +50,7 @@
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "common/xanadu/link_occurrences.hpp"
 #include "xudu/batch_orchestrator.hpp"
 #include "xudu/beams.hpp"
 #include "xudu/collaborator_overlay.hpp"
@@ -68,6 +69,7 @@
 #include "xudu/core/transcopyright_crypto.hpp"
 #include "xudu/core/transcopyright_logic.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
+#include "xudu/link_context.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
@@ -498,66 +500,21 @@ public:
     });
   }
 
-  void focusSpan(const zigzag::CellRef cell, const PrimediaSpan &span) {
-    renderer->runWithState([this, cell, span](RenderState &rState) {
-      if (session.views().empty()) {
-        return;
-      }
-      if (span.length > 0) {
-        for (std::size_t docIdx = 0; docIdx < session.views().size();
-             ++docIdx) {
-          const auto &vInfo = session.views()[docIdx];
-          const auto &st    = session.store(vInfo.storeIndex);
-          const auto ver    = st.rebuild(vInfo.version);
-          const auto occs   = ver.occurrencesOf(span);
-          if (!occs.empty()) {
-            const auto &occ   = occs.front();
-            auto *const caret = renderer->editCaret();
-            if (caret) {
-              caret->placeAt(static_cast<std::uint32_t>(docIdx), occ.start);
-              caret->extendTo(occ.end);
-            }
-            if (docIdx < rState.docs.size() && rState.docs[docIdx]) {
-              const auto &doc = rState.docs[docIdx];
-              if (const auto anch = doc->anchorFor(occ.start)) {
-                if (const auto wp =
-                        doc->worldPoint(anch->pageIndex, anch->x, anch->y)) {
-                  if (state) {
-                    std::scoped_lock locker(state->view);
-                    state->view.pos.x = wp->x;
-                    state->view.pos.y = wp->y;
-                  }
-                }
-              }
-            }
-            return;
-          }
-        }
-      }
-
+  /// Put the caret on the first open passage made of exactly @p content, a
+  /// cell's run of spans. Nowhere else: a cell whose content is not open is
+  /// not a reason to put the caret on some other link's end.
+  void focusContent(std::vector<PrimediaSpan> content) {
+    renderer->runWithState([this, content = std::move(content)](RenderState &) {
       for (std::size_t docIdx = 0; docIdx < session.views().size(); ++docIdx) {
-        const auto &vInfo = session.views()[docIdx];
-        const auto &st    = session.store(vInfo.storeIndex);
-        const auto shown  = st.rebuild(vInfo.version);
-        // The first left end of any link that this view shows.
-        auto shownEnds =
-            st.linkView() | std::views::transform(&xudu::Link::left) |
-            std::views::join |
-            std::views::transform([&](const xudu::PrimediaSpan &end) {
-              return shown.occurrencesOf(end);
-            }) |
-            std::views::filter(
-                [](const auto &occurrences) { return !occurrences.empty(); });
-        if (const auto occs = gleditor::firstOf(shownEnds)) {
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(static_cast<std::uint32_t>(docIdx),
-                           occs->front().start);
-            caret->extendTo(occs->front().end);
-          }
+        const auto found = xanadu::contentOccurrences(
+            session.views()[docIdx].pieces.pieces(), content);
+        if (!found.empty()) {
+          focusSpan(docIdx, found.front().start, found.front().end);
           return;
         }
       }
+      GLEDITOR_LOG_DEBUG("xudu.links",
+                         "activated cell content is in no open document");
     });
   }
 
@@ -1566,7 +1523,7 @@ private:
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Views &views, HypertimeMap &map, LinkBeams &links,
-                  Session &session,
+                  xudu::LinkContext &linkContext, Session &session,
                   const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
                   const RendererRef &renderer, PouchDrawer &pouchDrawer,
                   SwarmTelescopeOverlay &swarmTelescope,
@@ -1890,6 +1847,38 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         pouchDrawer.forge().clearRight();
         std::cout << "xudu: cleared clasp forge bench\n";
       });
+
+  // Selected-link navigation. commandForAction() is the one table from action
+  // name to command, shared with the tests that hold keymap, pointer and
+  // accessibility to the same outcome.
+  using namespace xanadu::settings;
+  const std::pair<std::string_view, const char *> linkActions[] = {
+      {kKeymapLinkNext, "select the next link on screen"},
+      {kKeymapLinkPrevious, "select the previous link on screen"},
+      {kKeymapLinkMemberNext, "choose the next member on the active side"},
+      {kKeymapLinkMemberPrevious,
+       "choose the previous member on the active side"},
+      {kKeymapLinkOccurrenceNext, "choose the next place the member appears"},
+      {kKeymapLinkOccurrencePrevious,
+       "choose the previous place the member appears"},
+      {kKeymapLinkCross, "make the other side of the link active"},
+      {kKeymapLinkEnter, "go to the chosen place"},
+      {kKeymapLinkOrigin, "return to where the link was selected"},
+      {kKeymapLinkDismiss, "put the selected link away"},
+      {kKeymapActivityBack, "return to the previous visit"},
+  };
+  for (const auto &[name, help] : linkActions) {
+    const auto command = xanadu::commandForAction(name);
+    if (!command) {
+      continue;
+    }
+    app.commands().registerAction(
+        std::string(name), help, [renderer, &linkContext, command = *command] {
+          renderer->runWithState([&linkContext, command](RenderState &) {
+            static_cast<void>(linkContext.execute(command));
+          });
+        });
+  }
 }
 
 } // namespace
@@ -2638,6 +2627,27 @@ int main(const int argc, char **argv) {
         });
 
     LinkBeams links(*session, renderer);
+    xudu::LinkContext linkContext(*session);
+    linkContext.setFocusDocument(
+        [&views](const std::size_t viewIndex, const xanadu::Extent range) {
+          views.focusSpan(viewIndex, range.start, range.end);
+        });
+    // Read on the render thread, from inside LinkContext::execute().
+    linkContext.setCaretSite(
+        [&renderer, &session]() -> std::optional<xanadu::OccurrenceSite> {
+          const auto *const caret = renderer->editCaret();
+          if (nullptr == caret || !caret->active() ||
+              caret->documentIndex() >= session->views().size()) {
+            return std::nullopt;
+          }
+          const auto &view = session->views()[caret->documentIndex()];
+          return xanadu::DocumentSite{
+              .store   = session->store(view.storeIndex).documentId(),
+              .version = view.version,
+              .range   = {.start = caret->byteOffset(),
+                          .end   = caret->byteOffset()}};
+        });
+    links.setLinkContext(&linkContext);
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
     if (parser["--physics"] == true || parser["--tension-layout"] == true) {
@@ -2670,10 +2680,53 @@ int main(const int argc, char **argv) {
                                               *state->accessibility);
     bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
     bridgeCoordinator.setDocumentFocusHandler(
-        [&views](const zigzag::CellRef cell, const PrimediaSpan &span) {
-          views.focusSpan(cell, span);
+        [&views, &linkContext, &renderer,
+         &session](const zigzag::CellRef cell,
+                   const std::span<const PrimediaSpan> content) {
+          std::vector<PrimediaSpan> spans(content.begin(), content.end());
+          renderer->runWithState([&views, &linkContext, &session, cell,
+                                  spans =
+                                      std::move(spans)](RenderState &) mutable {
+            // Activating a cell that holds one of the selected link's
+            // members is choosing that member, the same gesture as picking
+            // it in text; any other cell still jumps to where its content
+            // is open.
+            const auto selected = linkContext.selection();
+            if (selected && selected->occurrences) {
+              std::uint32_t length = 0;
+              for (const auto &span : spans) {
+                length += static_cast<std::uint32_t>(span.length);
+              }
+              const auto &primary = session->store();
+              const xanadu::OccurrenceSite whole =
+                  xanadu::CellSite{.store   = primary.documentId(),
+                                   .version = primary.primaryCurrentVersion(),
+                                   .cell    = cell,
+                                   .range   = {.start = 0, .end = length}};
+              const auto holds = [&](const xanadu::LinkMember &member) {
+                return std::ranges::any_of(
+                    member.occurrences, [&](const xanadu::Occurrence &o) {
+                      const auto *const at =
+                          std::get_if<xanadu::CellSite>(&o.site);
+                      return nullptr != at && at->cell == cell;
+                    });
+              };
+              if (std::ranges::any_of(selected->occurrences->left, holds) ||
+                  std::ranges::any_of(selected->occurrences->right, holds)) {
+                static_cast<void>(linkContext.execute(
+                    xanadu::commandForPick(selected->key, whole)));
+                return;
+              }
+            }
+            views.focusContent(std::move(spans));
+          });
         });
     bridgeCoordinator.attach(*zigzagPresentation);
+    linkContext.setManifold(bridgeCoordinator.manifold());
+    linkContext.setFocusCell(
+        [&bridgeCoordinator](const zigzag::CellRef cell, xanadu::Extent) {
+          bridgeCoordinator.onDocumentLinkActivated(cell);
+        });
     bridgeCoordinator.applyConfig(initialLayout.bridge);
 #endif
     links.setOpener([&views](const MicroversionId &version) {
@@ -3112,8 +3165,8 @@ int main(const int argc, char **argv) {
     });
 
     gleditor::Application app(state, renderer, backend, "Xudu");
-    bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
-                 pouchDrawer, swarmTelescope,
+    bindCommands(app, state, views, map, links, linkContext, *session,
+                 radialMenu, renderer, pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
 #ifdef XUZZ_BUILD
     app.commands().registerAction(

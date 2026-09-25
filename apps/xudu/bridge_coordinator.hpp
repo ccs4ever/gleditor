@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <utility>
 
 #include <gleditor/a11y/publisher.hpp>
@@ -30,8 +31,11 @@ class BridgeCoordinator {
 public:
   using CellActivationHandler =
       std::function<void(zigzag::CellRef cell, bool altHeld)>;
-  using DocumentFocusHandler =
-      std::function<void(zigzag::CellRef cell, const PrimediaSpan &span)>;
+  /// Called with every span of the cell's content, in order: a cell's text is
+  /// a run, and focusing only its first span would find the wrong passage.
+  /// The span is the manifold's; copy it to keep it past the call.
+  using DocumentFocusHandler = std::function<void(
+      zigzag::CellRef cell, std::span<const PrimediaSpan> content)>;
 
   BridgeCoordinator(LinkBeams &links, RendererRef renderer,
                     gleditor::a11y::Publisher &accessibility) noexcept;
@@ -56,6 +60,9 @@ public:
 
   /// Notify that a document link to a Zigzag cell was activated.
   void onDocumentLinkActivated(zigzag::CellRef cell);
+
+  /// The attached surface's manifold, or null when none is attached.
+  [[nodiscard]] const zigzag::Manifold *manifold() const noexcept;
 
   [[nodiscard]] bool isCellLocked(zigzag::CellRef cell) const noexcept;
   [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>

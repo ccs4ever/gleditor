@@ -29,6 +29,7 @@
 #include "common/xanadu/enfilade/spanfilade.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
+#include "xudu/link_context.hpp"
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
@@ -250,6 +251,19 @@ void LinkBeams::rebuildStrands(RenderState &state) {
       });
     }
     strandToLoom_.assign(transclusionStrands.size(), -1);
+  }
+
+  ++described;
+  if (linkContext_ != nullptr) {
+    std::vector<zigzag::CellRef> onScreen;
+    onScreen.reserve(strands.size());
+    for (const auto &strand : strands) {
+      onScreen.push_back(static_cast<zigzag::CellRef>(strand.link));
+    }
+    std::ranges::sort(onScreen);
+    const auto repeats = std::ranges::unique(onScreen);
+    onScreen.erase(repeats.begin(), repeats.end());
+    linkContext_->setCandidates(onScreen);
   }
 }
 
@@ -1266,35 +1280,8 @@ bool LinkBeams::openDangling(RenderState &state) {
   return false;
 }
 
-void LinkBeams::traverse(const Strand &strand, RenderState &state) {
-  auto *const caret = renderer->editCaret();
-  if (nullptr == caret) {
-    return;
-  }
-  // The far end is whichever one the caret is not already in. Following a link
-  // from the end you are at is the useful direction, and it is the only one
-  // the reader can have meant.
-  const bool atFrom = caret->active() && strand.from.isDocument() &&
-                      caret->documentIndex() == strand.from.doc;
-  const auto &there = atFrom ? strand.to : strand.from;
-  if (there.isCell()) {
-    GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to cell #{}", strand.link,
-                       there.cell());
-    if (satelloidOverlay_ != nullptr) {
-      satelloidOverlay_->triggerPulse(there.cell());
-    }
-    alignCellSatelloid(strand, state);
-    return;
-  }
-  if (there.doc >= state.docs.size()) {
-    return;
-  }
-  caret->placeAt(there.doc, there.start);
-  GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to doc {} [{}, {})",
-                     strand.link, there.doc, there.start, there.end);
-}
-
-bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
+bool LinkBeams::picked(const render::PickingResult &pick,
+                       RenderState & /*state*/) {
   if (render::tagKindBeam != pick.tag.kind) {
     return false;
   }
@@ -1319,11 +1306,19 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
     }
     return true;
   }
-  const auto &strand = strands[pick.tag.clusterIndex];
-  traverse(strand, state);
-  // Following a link is a request to see both ends of it, which is the one
+  auto &strand = strands[pick.tag.clusterIndex];
+  if (linkContext_ != nullptr) {
+    // A beam body says which link, not which member: one strand of a 2x3 link
+    // is one of six the renderer happened to draw, so selecting pins the whole
+    // link and leaves the member to the reader.
+    static_cast<void>(linkContext_->execute(xanadu::commandForPick(
+        linkContext_->keyOf(static_cast<zigzag::CellRef>(strand.link)),
+        std::nullopt)));
+  }
+  // Selecting a link is a request to see both ends of it, which is the one
   // case where the far document is moved whether or not the sworph is on.
-  strands[pick.tag.clusterIndex].aligned = false;
+  // That moves the view, not the caret.
+  strand.aligned = false;
   return true;
 }
 
@@ -1404,15 +1399,14 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   // executed on the spot: they come from another thread, and following a link
   // moves the caret and might open a document.
   {
-    std::vector<std::uint64_t> asked;
+    std::vector<xanadu::NavigationCommand> asked;
     {
       const std::scoped_lock locker(askedGuard);
-      asked.swap(askedToFollow);
+      asked.swap(askedFor);
     }
-    for (const auto link : asked) {
-      const auto found = std::ranges::find(strands, link, &Strand::link);
-      if (strands.end() != found) {
-        traverse(*found, state);
+    if (linkContext_ != nullptr) {
+      for (const auto &command : asked) {
+        static_cast<void>(linkContext_->execute(command));
       }
     }
   }
@@ -1958,69 +1952,202 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
               render::packTagIdentity(0, 0, 0));
 }
 
+namespace {
+
+/// Local ids at and above this name members and occurrences; below it, a
+/// link's id plus one names the link, as it always has.
+constexpr std::uint64_t kLinkPartNodeBase = 1ULL << 33U;
+
+std::string describeSite(const xanadu::OccurrenceSite &site,
+                         const Session &session) {
+  return std::visit(
+      [&session]<typename Site>(const Site &at) {
+        const auto bytes = "bytes " + std::to_string(at.range.start) + " to " +
+                           std::to_string(at.range.end);
+        if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
+          const auto &views = session.views();
+          for (std::size_t i = 0; i < views.size(); ++i) {
+            if (views[i].version == at.version &&
+                session.store(views[i].storeIndex).documentId() == at.store) {
+              return "document " + std::to_string(i) + ", " + bytes;
+            }
+          }
+          return "a closed version, " + bytes;
+        } else {
+          return "cell " + std::to_string(at.cell) + ", " + bytes;
+        }
+      },
+      site);
+}
+
+std::string sideName(const xanadu::LinkSide side) {
+  return xanadu::LinkSide::Left == side ? "left" : "right";
+}
+
+} // namespace
+
 void LinkBeams::describe(gleditor::a11y::Builder &into) {
   namespace a11y = gleditor::a11y;
-  if (strands.empty()) {
-    return;
-  }
-
-  auto &group = into.add(0, a11y::Role::List);
-  group.label = "links between the open documents";
-  for (auto &strand : strands) {
-    group.children.push_back(into.id(strand.link + 1));
-  }
-  into.contribute(into.id(0));
-
+  std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>> nodes;
+  std::vector<zigzag::CellRef> onScreen;
+  onScreen.reserve(strands.size());
   for (const auto &strand : strands) {
-    // Numbered by the link rather than by its position, so that a link keeps
-    // its identity as others are found and lost around it -- and so that what
-    // comes back names a link this can look up. Link ids are small sequential
-    // counters from the store, well inside the forty-eight bits a node id
-    // leaves for them.
-    auto &node = into.add(strand.link + 1, a11y::Role::Link);
-    // Named by what it connects rather than by what it looks like. A beam is
-    // a coloured line and its colour is its type, which is exactly the kind
-    // of thing that has to be said in words for anybody who is not looking at
-    // it.
-    node.label = std::string{linkTypeName(strand.type)} + " link, document " +
-                 std::to_string(strand.from.doc) + " to document " +
-                 std::to_string(strand.to.doc);
-    node.description = "bytes " + std::to_string(strand.from.start) + " to " +
-                       std::to_string(strand.from.end) + ", and bytes " +
-                       std::to_string(strand.to.start) + " to " +
-                       std::to_string(strand.to.end);
-    node.focusable   = true;
-    node.actions =
-        a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
+    onScreen.push_back(static_cast<zigzag::CellRef>(strand.link));
   }
+  std::ranges::sort(onScreen);
+  const auto repeats = std::ranges::unique(onScreen);
+  onScreen.erase(repeats.begin(), repeats.end());
+
+  if (!onScreen.empty()) {
+    auto &group = into.add(0, a11y::Role::List);
+    group.label = "links between the open documents";
+    for (const auto link : onScreen) {
+      group.children.push_back(into.id(link + 1ULL));
+    }
+    into.contribute(into.id(0));
+  }
+
+  const auto selected    = nullptr != linkContext_ ? linkContext_->selection()
+                                                   : gleditor::cpp26::nullopt;
+  std::uint64_t nextPart = kLinkPartNodeBase;
+  const auto &table      = session.store().links();
+  for (const auto link : onScreen) {
+    const auto found = table.find(link);
+    if (table.end() == found) {
+      continue;
+    }
+    const auto key =
+        linkContext_ != nullptr
+            ? linkContext_->keyOf(link)
+            : xanadu::LinkKey{.authority = session.store().documentId(),
+                              .id        = link};
+    nodes.emplace_back(link + 1ULL, xanadu::a11y_node::Link{.key = key});
+
+    // One node per link however many strands draw it, so a 2x3 link is one
+    // link to a screen reader rather than six. Its members are listed only
+    // while it is selected, when they have been resolved.
+    const bool open =
+        selected && selected->key == key && selected->occurrences.has_value();
+    struct Part {
+      std::uint64_t local;
+      a11y::Role role;
+      std::string label;
+      std::string value;
+      std::string description;
+      std::vector<std::uint64_t> children;
+    };
+    std::vector<Part> parts;
+    std::vector<std::uint64_t> members;
+    if (open) {
+      for (const auto side :
+           {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
+        const auto &sideMembers = selected->occurrences->members(side);
+        const auto &cursor      = selected->cursor(side);
+        for (const auto &member : sideMembers) {
+          const auto memberLocal = nextPart++;
+          nodes.emplace_back(memberLocal,
+                             xanadu::a11y_node::Member{.key    = key,
+                                                       .side   = side,
+                                                       .member = member.index});
+          members.push_back(into.id(memberLocal));
+          const bool chosen = cursor.member == member.index;
+          Part memberPart{.local = memberLocal,
+                          .role  = a11y::Role::ListItem,
+                          .label = sideName(side) + " member " +
+                                   std::to_string(member.index + 1) + " of " +
+                                   std::to_string(sideMembers.size()),
+                          .value = chosen ? "chosen" : "",
+                          .description =
+                              member.inView()
+                                  ? std::to_string(member.occurrences.size()) +
+                                        " occurrences"
+                                  : "not in any open document or visible cell",
+                          .children = {}};
+          std::vector<Part> occurrenceParts;
+          for (std::uint32_t i = 0; i < member.occurrences.size(); ++i) {
+            const auto &occurrence = member.occurrences[i];
+            const auto local       = nextPart++;
+            nodes.emplace_back(
+                local, xanadu::a11y_node::Occurrence{.key        = key,
+                                                     .side       = side,
+                                                     .member     = member.index,
+                                                     .occurrence = i});
+            memberPart.children.push_back(into.id(local));
+            occurrenceParts.push_back(Part{
+                .local = local,
+                .role  = a11y::Role::ListItem,
+                .label = "occurrence " + std::to_string(i + 1) + " of " +
+                         std::to_string(member.occurrences.size()) + ", " +
+                         describeSite(occurrence.site, session),
+                .value = chosen && cursor.occurrence == i ? "chosen" : "",
+                .description = xanadu::Coverage::Partial == occurrence.coverage
+                                   ? "part of the member"
+                                   : "",
+                .children    = {}});
+          }
+          parts.push_back(std::move(memberPart));
+          std::ranges::move(occurrenceParts, std::back_inserter(parts));
+        }
+      }
+    }
+
+    auto &node = into.add(link + 1ULL, a11y::Role::Link);
+    // Named by what it is and how many ends it has rather than by where one
+    // strand runs: the ends are endsets, and neither is the source.
+    node.label = std::string{linkTypeName(found->second.type)} + " link, " +
+                 std::to_string(found->second.left.size()) + " left and " +
+                 std::to_string(found->second.right.size()) + " right members";
+    node.description = found->second.owner.empty()
+                           ? std::string{}
+                           : "by " + found->second.owner;
+    node.value       = open ? "selected" : "";
+    node.children    = members;
+    node.focusable   = true;
+    node.actions     = a11y::bit(a11y::Action::Click);
+    for (auto &part : parts) {
+      auto &child       = into.add(part.local, part.role);
+      child.label       = std::move(part.label);
+      child.value       = std::move(part.value);
+      child.description = std::move(part.description);
+      child.children    = std::move(part.children);
+      child.focusable   = true;
+      child.actions =
+          a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
+    }
+  }
+
+  const std::scoped_lock locker(askedGuard);
+  accessibleNodes = std::move(nodes);
 }
 
 std::uint64_t LinkBeams::accessibilityRevision() const {
   // Not the strand count alone: two links can be replaced by two others
   // without the count moving. `described` is bumped wherever they are found
-  // again.
-  return described;
+  // again, and the link context's revision whenever a selection changes what
+  // the link nodes say.
+  return described + (linkContext_ != nullptr ? linkContext_->revision() : 0);
 }
 
 bool LinkBeams::performAction(const std::uint64_t nodeId,
                               const gleditor::a11y::Action action,
                               const std::string_view /*value*/) {
-  namespace a11y = gleditor::a11y;
-  if (a11y::Action::Click != action) {
-    // Focus alone moves nothing: a beam is not somewhere the caret can be,
-    // and claiming to have focused it would be a lie an assistive technology
-    // acts on.
-    return false;
-  }
-  const auto link = a11y::Ids::localOf(nodeId);
-  if (0 == link) {
-    return false;
-  }
-  // Under no lock and against nothing: the strand list is the render
-  // thread's, so what is recorded is the link's own identity and the lookup
-  // happens there. A link that has gone by then is simply not found.
+  const auto local = gleditor::a11y::Ids::localOf(nodeId);
+  // Under the lock and against the table describe() last published: the
+  // strands are the render thread's, so what is queued is a command naming
+  // stable identities, carried out there. A link that has gone by then is
+  // refused by the navigator rather than followed somewhere else.
   const std::scoped_lock locker(askedGuard);
-  askedToFollow.push_back(link - 1);
+  const auto found = std::ranges::find(
+      accessibleNodes, local, &decltype(accessibleNodes)::value_type::first);
+  if (accessibleNodes.end() == found) {
+    return false;
+  }
+  const auto command = xanadu::commandForAccessibility(found->second, action);
+  if (!command) {
+    // Focus on a link node reads it; it asks for nothing to be done.
+    return false;
+  }
+  askedFor.push_back(*command);
   return true;
 }
 

@@ -40,6 +40,7 @@
 #include <gleditor/renderer.hpp>
 
 #include "common/xanadu/enfilade/spanfilade.hpp"
+#include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/link_layout.hpp"
@@ -49,6 +50,8 @@
 #include "xudu/session.hpp"
 
 namespace xudu {
+
+class LinkContext;
 
 class TenuousTetherOverlay;
 class SatelloidOverlay;
@@ -165,6 +168,10 @@ public:
                      std::string_view value) override;
 
   void setOpener(Opener aOpener) { opener = std::move(aOpener); }
+
+  /// Where beam picks and accessibility actions on links are sent. Without
+  /// one a beam is only drawn.
+  void setLinkContext(LinkContext *context) noexcept { linkContext_ = context; }
 
   /// Whether beams are drawn at all. They are, by default: a link nobody can
   /// see is most of what Xanadu was arguing against.
@@ -344,9 +351,6 @@ private:
    *         for once it has landed and the strands have been worked out again.
    */
   bool openDangling(RenderState &state);
-  /// Put the caret on the far end of @p strand, whichever end is not the one
-  /// the caret is in.
-  void traverse(const Strand &strand, RenderState &state);
 
   /// World point a beam leaves a document from: the page margin on the side
   /// the other document is on, level with the anchor. @p yOffsetPixels moves
@@ -500,11 +504,16 @@ private:
   /// consider; see busy().
   bool unsettled{true};
 
-  /// Which beam an assistive technology asked to follow, if any. Filled on the
-  /// event thread and taken on the render thread, where following one means
-  /// moving the caret and possibly opening a document.
+  /// What an assistive technology asked for. Filled on the event thread and
+  /// carried out on the render thread, where entering an endpoint moves the
+  /// caret.
   mutable std::mutex askedGuard;
-  std::vector<std::uint64_t> askedToFollow;
+  std::vector<xanadu::NavigationCommand> askedFor;
+  /// What each link, member and occurrence node published by describe()
+  /// stands for, by local node id; guarded by askedGuard.
+  std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>>
+      accessibleNodes;
+  LinkContext *linkContext_{nullptr};
   /// Bumped whenever the strands change, so the description is rebuilt then
   /// and not every frame.
   std::uint64_t described{1};
