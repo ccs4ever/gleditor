@@ -139,19 +139,55 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
   }
 }
 
+std::optional<xanadu::OccurrenceSite> LinkContext::originSite() const {
+  const auto selected = navigator.selection();
+  if (!selected || !selected->origin) {
+    return std::nullopt;
+  }
+  if (const auto visit = activity.find(*selected->origin)) {
+    return visit->target;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::size_t>
+LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
+  const auto &views = session.views();
+  for (std::size_t i = 0; i < views.size(); ++i) {
+    if (views[i].version == site.version &&
+        session.store(views[i].storeIndex).documentId() == site.store) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
+
+std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
+  return std::visit(
+      [this]<typename Site>(const Site &at) {
+        const auto bytes = "bytes " + std::to_string(at.range.start) + " to " +
+                           std::to_string(at.range.end);
+        if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
+          if (const auto view = viewIndexOf(at)) {
+            return "document " + std::to_string(*view) + ", " + bytes;
+          }
+          return "a closed version, " + bytes;
+        } else {
+          return "cell " + std::to_string(at.cell) + ", " + bytes;
+        }
+      },
+      site);
+}
+
 void LinkContext::focus(const xanadu::OccurrenceSite &site) {
   std::visit(
       [this]<typename Site>(const Site &at) {
         if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
-          const auto &views = session.views();
-          for (std::size_t i = 0; i < views.size(); ++i) {
-            if (views[i].version == at.version &&
-                session.store(views[i].storeIndex).documentId() == at.store) {
-              if (focusDocument) {
-                focusDocument(i, at.range);
-              }
-              return;
+          if (const auto view = viewIndexOf(at)) {
+            if (focusDocument) {
+              focusDocument(*view, at.range);
             }
+            return;
           }
           // The version is no longer open. Opening it is the pending-target
           // work of a later stage; landing somewhere else would be worse.

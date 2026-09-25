@@ -178,7 +178,19 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "hypertimeMapVisible: Flag indicating whether hypertime graph "
            "overlay is open. Default is false.\n"
            "radialMenu: Nested configuration dictionary defining action items, "
-           "icons, and radial radius.\n";
+           "icons, and radial radius.\n"
+           "linkPanel.font: Font of the selected-link panel. Default is Sans "
+           "10.\n"
+           "linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, "
+           "linkPanel.lineGapPx: The panel's distance from the window's right "
+           "and top edges, its inner space and its line spacing, in logical "
+           "pixels. Defaults are 16, 44, 10 and 4.\n"
+           "linkPanel.backgroundColour, linkPanel.textColour, "
+           "linkPanel.mutedColour: Panel colours as RGBA integers, the muted "
+           "one for unset choices and members not in view.\n"
+           "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
+           "Highlights behind the chosen occurrence and behind the chosen "
+           "member's other occurrences in the text, as RGBA integers.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -638,7 +650,8 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     };
     break;
 
-  case SystemDocKind::UI:
+  case SystemDocKind::UI: {
+    const LinkPanelConfig panel;
     specs = {
         {.name    = std::string(settings::kTabBarVisible),
          .notes   = "Visibility of the document tab switcher bar",
@@ -663,8 +676,52 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
+        {.name    = std::string(settings::kLinkPanelFont),
+         .notes   = "Font of the selected-link panel",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {panel.font}}}},
+        {.name    = std::string(settings::kLinkPanelMarginPx),
+         .notes   = "Gap between the link panel and the window edge in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.marginPx}}}}},
+        {.name    = std::string(settings::kLinkPanelTopPx),
+         .notes   = "Gap between the link panel and the window top in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.topPx}}}}},
+        {.name    = std::string(settings::kLinkPanelPaddingPx),
+         .notes   = "Space inside the link panel's border in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.paddingPx}}}}},
+        {.name    = std::string(settings::kLinkPanelLineGapPx),
+         .notes   = "Space between the link panel's lines in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.lineGapPx}}}}},
+        {.name    = std::string(settings::kLinkPanelBackgroundColour),
+         .notes   = "Link panel background RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.backgroundColour}}}}},
+        {.name    = std::string(settings::kLinkPanelTextColour),
+         .notes   = "Link panel text RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.textColour}}}}},
+        {.name    = std::string(settings::kLinkPanelMutedColour),
+         .notes   = "Link panel colour for unset and out-of-view entries",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.mutedColour}}}}},
+        {.name    = std::string(settings::kLinkPanelChosenHighlightColour),
+         .notes   = "Highlight behind the chosen occurrence in the text",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.chosenHighlightColour}}}}},
+        {.name    = std::string(settings::kLinkPanelMemberHighlightColour),
+         .notes   = "Highlight behind the chosen member's other occurrences",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.memberHighlightColour}}}}},
     };
     break;
+  }
 
   case SystemDocKind::Keymap:
     specs = {
@@ -2499,6 +2556,26 @@ UIConfig UIConfig::fromStore(const Store &store) {
   cfg.radialMenu.innerRadius = static_cast<float>(
       model.getDouble(settings::kRadialMenuInnerRadius,
                       static_cast<double>(cfg.radialMenu.innerRadius)));
+
+  auto &panel       = cfg.linkPanel;
+  panel.font        = model.getString(settings::kLinkPanelFont, panel.font);
+  const auto length = [&model](std::string_view name, float &into) {
+    into = static_cast<float>(model.getDouble(name, double{into}));
+  };
+  const auto colour = [&model](std::string_view name, std::uint32_t &into) {
+    into = static_cast<std::uint32_t>(model.getInt64(name, std::int64_t{into}));
+  };
+  length(settings::kLinkPanelMarginPx, panel.marginPx);
+  length(settings::kLinkPanelTopPx, panel.topPx);
+  length(settings::kLinkPanelPaddingPx, panel.paddingPx);
+  length(settings::kLinkPanelLineGapPx, panel.lineGapPx);
+  colour(settings::kLinkPanelBackgroundColour, panel.backgroundColour);
+  colour(settings::kLinkPanelTextColour, panel.textColour);
+  colour(settings::kLinkPanelMutedColour, panel.mutedColour);
+  colour(settings::kLinkPanelChosenHighlightColour,
+         panel.chosenHighlightColour);
+  colour(settings::kLinkPanelMemberHighlightColour,
+         panel.memberHighlightColour);
   return cfg;
 }
 

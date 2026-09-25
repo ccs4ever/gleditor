@@ -230,6 +230,21 @@ inline constexpr std::string_view kNotificationDurationMs =
 inline constexpr std::string_view kRadialMenuRadius = "radialMenu.radius";
 inline constexpr std::string_view kRadialMenuInnerRadius =
     "radialMenu.innerRadius";
+// The selected-link panel. Colours are RGBA8, most significant byte red.
+inline constexpr std::string_view kLinkPanelFont      = "linkPanel.font";
+inline constexpr std::string_view kLinkPanelMarginPx  = "linkPanel.marginPx";
+inline constexpr std::string_view kLinkPanelTopPx     = "linkPanel.topPx";
+inline constexpr std::string_view kLinkPanelPaddingPx = "linkPanel.paddingPx";
+inline constexpr std::string_view kLinkPanelLineGapPx = "linkPanel.lineGapPx";
+inline constexpr std::string_view kLinkPanelBackgroundColour =
+    "linkPanel.backgroundColour";
+inline constexpr std::string_view kLinkPanelTextColour = "linkPanel.textColour";
+inline constexpr std::string_view kLinkPanelMutedColour =
+    "linkPanel.mutedColour";
+inline constexpr std::string_view kLinkPanelChosenHighlightColour =
+    "linkPanel.chosenHighlightColour";
+inline constexpr std::string_view kLinkPanelMemberHighlightColour =
+    "linkPanel.memberHighlightColour";
 
 // Keymap - Xudu Core Actions (Sovereign Vortex Function Calls)
 inline constexpr std::string_view kKeymapQuit        = "std:xudu/quit";
@@ -841,6 +856,34 @@ struct LayoutConfig {
   [[nodiscard]] static LayoutConfig fromStore(const Store &store);
 };
 
+/**
+ * @brief How the selected-link panel looks
+ *        (design/ui/prototypes/link-context.md).
+ *
+ * The defaults here are the ones defaultSettingSpecs() seeds system://ui
+ * with, so the two cannot drift.
+ */
+struct LinkPanelConfig {
+  std::string font{"Sans 10"};
+  /// Gap between the panel and the window's right edge.
+  float marginPx{16.0F};
+  /// Gap between the panel and the window's top edge: clear of the document
+  /// tab bar, which the panel must not cover.
+  float topPx{44.0F};
+  float paddingPx{10.0F};
+  float lineGapPx{4.0F};
+  std::uint32_t backgroundColour{0x1E293BE6U};
+  std::uint32_t textColour{0xE2E8F0FFU};
+  /// Unset cursors, members not in view, and the origin line.
+  std::uint32_t mutedColour{0x94A3B8FFU};
+  /// Behind the chosen occurrence in the document text.
+  std::uint32_t chosenHighlightColour{0xFACC1570U};
+  /// Behind the chosen member's other occurrences.
+  std::uint32_t memberHighlightColour{0xFACC1530U};
+
+  bool operator==(const LinkPanelConfig &) const = default;
+};
+
 struct UIConfig {
   bool tabBarVisible{true};
   bool statusBarVisible{true};
@@ -848,6 +891,7 @@ struct UIConfig {
   std::string notificationPosition{"top-right"};
   std::uint32_t notificationDurationMs{3000};
   gleditor::RadialConfig radialMenu;
+  LinkPanelConfig linkPanel;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

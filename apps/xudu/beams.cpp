@@ -1958,28 +1958,6 @@ namespace {
 /// link's id plus one names the link, as it always has.
 constexpr std::uint64_t kLinkPartNodeBase = 1ULL << 33U;
 
-std::string describeSite(const xanadu::OccurrenceSite &site,
-                         const Session &session) {
-  return std::visit(
-      [&session]<typename Site>(const Site &at) {
-        const auto bytes = "bytes " + std::to_string(at.range.start) + " to " +
-                           std::to_string(at.range.end);
-        if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
-          const auto &views = session.views();
-          for (std::size_t i = 0; i < views.size(); ++i) {
-            if (views[i].version == at.version &&
-                session.store(views[i].storeIndex).documentId() == at.store) {
-              return "document " + std::to_string(i) + ", " + bytes;
-            }
-          }
-          return "a closed version, " + bytes;
-        } else {
-          return "cell " + std::to_string(at.cell) + ", " + bytes;
-        }
-      },
-      site);
-}
-
 std::string sideName(const xanadu::LinkSide side) {
   return xanadu::LinkSide::Left == side ? "left" : "right";
 }
@@ -2078,7 +2056,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                 .role  = a11y::Role::ListItem,
                 .label = "occurrence " + std::to_string(i + 1) + " of " +
                          std::to_string(member.occurrences.size()) + ", " +
-                         describeSite(occurrence.site, session),
+                         linkContext_->describe(occurrence.site),
                 .value = chosen && cursor.occurrence == i ? "chosen" : "",
                 .description = xanadu::Coverage::Partial == occurrence.coverage
                                    ? "part of the member"

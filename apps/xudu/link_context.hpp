@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include <gleditor/cpp26.hpp>
@@ -82,6 +83,17 @@ public:
   [[nodiscard]] const std::optional<xanadu::Preview> &preview() const noexcept {
     return previewing;
   }
+  /// Where the selected link was selected from, if that was anywhere.
+  [[nodiscard]] std::optional<xanadu::OccurrenceSite> originSite() const;
+
+  /// The open view showing @p site's version, if one is.
+  [[nodiscard]] std::optional<std::size_t>
+  viewIndexOf(const xanadu::DocumentSite &site) const;
+
+  /// @p site in words: "document 2, bytes 10 to 14" or "cell 7, bytes 0 to
+  /// 5". Shared by the panel and the accessibility tree so both say the same.
+  [[nodiscard]] std::string describe(const xanadu::OccurrenceSite &site) const;
+
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
 

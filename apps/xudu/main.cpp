@@ -70,6 +70,7 @@
 #include "xudu/core/transcopyright_logic.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/link_context.hpp"
+#include "xudu/link_panel_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
@@ -2648,6 +2649,7 @@ int main(const int argc, char **argv) {
                           .end   = caret->byteOffset()}};
         });
     links.setLinkContext(&linkContext);
+    xudu::LinkPanelOverlay linkPanel(linkContext, *session);
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
     if (parser["--physics"] == true || parser["--tension-layout"] == true) {
@@ -2765,6 +2767,8 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&satelloidOverlay);
     renderer->addFrameContributor(&images);
     renderer->addFrameContributor(&views);
+    renderer->addFrameContributor(&linkPanel);
+    renderer->addSpanDecorator(&linkPanel);
     renderer->addFrameContributor(radialMenu.get());
 
     state->accessibility->addSource(docSwitcher.get());
@@ -3231,7 +3235,7 @@ int main(const int argc, char **argv) {
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     session->setSystemDocChangedCallback(
-        [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map
+        [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel
 #ifdef XUZZ_BUILD
          ,
          &zigzagPresentation, &bridgeCoordinator
@@ -3286,6 +3290,7 @@ int main(const int argc, char **argv) {
           case xudu::SystemDocKind::UI: {
             const auto uiCfg = xudu::UIConfig::fromStore(store);
             radialMenu->setConfig(uiCfg.radialMenu);
+            linkPanel.setConfig(uiCfg.linkPanel);
             docSwitcher->setVisible(uiCfg.tabBarVisible);
             map.setVisible(uiCfg.hypertimeMapVisible);
             break;
@@ -3313,6 +3318,7 @@ int main(const int argc, char **argv) {
       if (uiStore.opCount() > 0) {
         const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
         radialMenu->setConfig(uiCfg.radialMenu);
+        linkPanel.setConfig(uiCfg.linkPanel);
         docSwitcher->setVisible(uiCfg.tabBarVisible);
         map.setVisible(uiCfg.hypertimeMapVisible);
       }
