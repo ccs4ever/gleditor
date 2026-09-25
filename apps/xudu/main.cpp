@@ -50,6 +50,7 @@
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "common/ui/quotation_builder_overlay.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/kinetic_tether.hpp"
 #include "common/xanadu/microversion.hpp"
@@ -109,6 +110,7 @@ namespace crypto = xudu::crypto;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
+using xudu::QuotationBuilderOverlay;
 using xudu::SatelloidOverlay;
 using xudu::Session;
 using xudu::SwarmCatalog;
@@ -1570,6 +1572,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
                   const RendererRef &renderer, PouchDrawer &pouchDrawer,
                   SwarmTelescopeOverlay &swarmTelescope,
+                  QuotationBuilderOverlay &quotationOverlay,
                   const std::string &publishAs) {
   app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
                                 "save and close", [state, &session] {
@@ -1666,6 +1669,14 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       std::string(xanadu::settings::kKeymapTelescopeToggleF3),
       "toggle decentralized swarm telescope overlay",
       [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggle),
+      "toggle quoted structure builder overlay",
+      [&quotationOverlay] { quotationOverlay.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggleF9),
+      "toggle quoted structure builder overlay (F9)",
+      [&quotationOverlay] { quotationOverlay.toggle(); });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTensionPhysicsToggle),
       "toggle 3-way tension spring layout simulation",
@@ -2503,6 +2514,26 @@ int main(const int argc, char **argv) {
       swarmTelescope.setVisible(true);
     }
 
+    QuotationBuilderOverlay quotationOverlay(
+        session->store(),
+        session->views().empty() ? MicroversionId{} : session->versionOf(0),
+        renderer, &swarmCatalog, "Sans 10",
+        [&session] {
+          std::vector<xanadu::Store *> openStores;
+          for (std::size_t i = 0; i < session->storeCount(); ++i) {
+            openStores.push_back(&session->store(i));
+          }
+          return openStores;
+        },
+        [&session](const MicroversionId newVersion,
+                   const zigzag::CellRef /*quotationCell*/) {
+          if (!session->views().empty()) {
+            auto &view   = session->views()[0];
+            view.version = newVersion;
+            view.pieces  = session->store().rebuild(newVersion);
+          }
+        });
+
     state->wheelHandler = [&views](float /*wx*/, float wy,
                                    std::uint16_t /*mods*/) -> bool {
       if (!views.onionSkinMode()) {
@@ -2584,10 +2615,10 @@ int main(const int argc, char **argv) {
     }
 
     radialMenu->setActionHandler(
-        [&session, &views](const std::string &id, const std::string &action,
-                           const std::uint32_t docIndex,
-                           const std::uint32_t charOffset,
-                           const std::uint32_t charLength) {
+        [&session, &views, &quotationOverlay](
+            const std::string &id, const std::string &action,
+            const std::uint32_t docIndex, const std::uint32_t charOffset,
+            const std::uint32_t charLength) {
           std::cout << "xudu: radial action: id=" << id << " action=" << action
                     << " doc=" << docIndex << " offset=" << charOffset
                     << " len=" << charLength << "\n";
@@ -2627,6 +2658,8 @@ int main(const int argc, char **argv) {
             session->insertBreak(docIndex, charOffset);
           } else if (id == "op:transclude") {
             views.transcludeSelection();
+          } else if (id == "op:quote") {
+            quotationOverlay.toggle();
           } else if (id == "info:author") {
             std::string authorStr = "Local Sovereign Author";
             if (const auto ps = session->userPermascroll()) {
@@ -2718,6 +2751,7 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&links);
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
+    state->accessibility->addSource(&quotationOverlay);
     state->accessibility->addSource(radialMenu.get());
     state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
@@ -2766,19 +2800,22 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&publishForm);
     renderer->addFrameContributor(&pouchDrawer);
     renderer->addFrameContributor(&swarmTelescope);
+    renderer->addFrameContributor(&quotationOverlay);
 #ifdef XUZZ_BUILD
     gleditor::CompositeModalInput compositeModal(
-        {&publishForm, zigzagPresentation.get()});
-    state->modal = &compositeModal;
+        {&publishForm, zigzagPresentation.get(), &quotationOverlay});
 #else
-    state->modal = &publishForm;
+    gleditor::CompositeModalInput compositeModal(
+        {&publishForm, &quotationOverlay});
 #endif
+    state->modal = &compositeModal;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
     renderer->addPickObserver(&map);
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
+    renderer->addPickObserver(&quotationOverlay);
 
     state->mouseDownHandler = [&kineticTetherEngine, &session, renderer, state
 #ifdef XUZZ_BUILD
@@ -3121,7 +3158,7 @@ int main(const int argc, char **argv) {
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
-                 pouchDrawer, swarmTelescope,
+                 pouchDrawer, swarmTelescope, quotationOverlay,
                  publishAs.empty() ? std::string{"document"} : publishAs);
 #ifdef XUZZ_BUILD
     app.commands().registerAction(

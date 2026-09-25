@@ -285,6 +285,10 @@ inline constexpr std::string_view kKeymapHypertimeMap =
 inline constexpr std::string_view kKeymapMap        = "std:xudu/map";
 inline constexpr std::string_view kKeymapScrubBack  = "std:xudu/scrub_back";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
+inline constexpr std::string_view kKeymapQuotationToggle =
+    "std:xudu/quotation_toggle";
+inline constexpr std::string_view kKeymapQuotationToggleF9 =
+    "std:xudu/quotation_toggle_f9";
 
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
 inline constexpr std::string_view kKeymapViewModeContent1 =

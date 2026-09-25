@@ -566,6 +566,7 @@ GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # The xanalogical engine and common data models are shared between xudu and zigzag
 # under apps/common/xanadu/.
 COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
+COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_CORE_SRCS :=
@@ -584,6 +585,7 @@ objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
 LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
+COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
@@ -666,7 +668,7 @@ endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) $(XUZZ_OBJS) \
-	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
+	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
@@ -797,23 +799,23 @@ $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
 .PHONY: gleditor
 
 xudu: $(OBJDIR)/xudu
-$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
 $(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-                $(ZIGZAG_CORE_OBJS) $(LIBLINK)
+                $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-	  $(ZIGZAG_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+	  $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag
-$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
+$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
 .PHONY: zigzag
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -863,7 +865,7 @@ $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/main.o,$(ZIGZAG_OBJS)) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/main.o,$(ZIGZAG_OBJS)) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 

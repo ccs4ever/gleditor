@@ -251,8 +251,10 @@ void ZigzagVisualizer::adoptXuduStore(
 void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
                                      const xanadu::MicroversionId &version) {
   engine_.reset();
-  ownedStore_.reset();
-  store_          = &store;
+  if (&store != store_) {
+    ownedStore_.reset();
+    store_ = &store;
+  }
   engine_         = std::make_unique<UnifiedTransclusionEngine>(store, version);
   structure_name_ = "Xudu/Zigzag unified store";
   current_slice_path_.clear();
@@ -269,6 +271,20 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   ensureVortexHost();
   invalidateAccessibility();
+}
+
+void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
+                                          const zigzag::CellRef newFocus) {
+  if (!store_) {
+    return;
+  }
+  store_->setCurrentVersions({version});
+  bindXuduStore(*store_, version);
+  if (newFocus != zigzag::noCell) {
+    accursed_cell_focus_ = newFocus;
+    rebuildActiveViewTopology();
+    invalidateAccessibility();
+  }
 }
 
 void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
@@ -617,6 +633,14 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
   if (info.role.empty() && !isEphemeral(id)) {
     info.role = attribute("d.role").value_or(std::string{});
   }
+  if (!isEphemeral(id)) {
+    if (const auto q = xanadu::readQuotation(manifold, store, id)) {
+      info.role         = "quote";
+      info.is_quote     = true;
+      info.quote_label  = q->label;
+      info.quote_target = q->pinnedState.scroll;
+    }
+  }
   if (info.role.empty()) {
     if (const auto cold = engine_->coldOf(id)) {
       info.role = cold->type;
@@ -837,6 +861,27 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
         .label   = "Cache (Memo)",
     };
   }
+  if (dimension == "d.quotes" || dimension == "d.quotes-state") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.22F, 0.74F, 0.97F},
+        .spacing = 180.0F,
+        .label   = "Quotes",
+    };
+  }
+  if (dimension == "d.quotes-sel" || dimension == "d.quotes-carry") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.20F, 0.80F, 0.90F},
+        .spacing = 180.0F,
+        .label   = "Quote Sel",
+    };
+  }
+  if (dimension == "d.overrides" || dimension == "d.shadows") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.95F, 0.60F, 0.25F},
+        .spacing = 180.0F,
+        .label   = "Overrides",
+    };
+  }
   return DimensionVisual{
       .color   = glm::vec3{0.7F, 0.7F, 0.75F},
       .spacing = 200.0F,
@@ -854,7 +899,15 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
 
   CellLayoutMetrics metrics;
   metrics.idText = std::format("#{}", cell.id);
-  if (!cell.type.empty()) {
+  if (cell.is_quote || cell.type == "quote") {
+    metrics.badgeText = "[QUOTE";
+    if (!cell.quote_label.empty()) {
+      metrics.badgeText += ": " + cell.quote_label;
+    } else if (!cell.quote_target.empty()) {
+      metrics.badgeText += ": " + cell.quote_target;
+    }
+    metrics.badgeText += "]";
+  } else if (!cell.type.empty()) {
     metrics.badgeText = "[" + cell.type + "]";
   } else if (!cell.mime_type.empty()) {
     metrics.badgeText = "<" + cell.mime_type + ">";
@@ -955,6 +1008,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .is_image         = focusInfo.is_image,
         .is_clone         = focusInfo.is_clone,
         .clone_master_id  = focusInfo.clone_master_id,
+        .is_quote         = focusInfo.is_quote,
+        .quote_label      = focusInfo.quote_label,
+        .quote_target     = focusInfo.quote_target,
         .current_pos      = {},
         .target_pos       = {},
         .current_alpha    = 0.0F,
@@ -972,6 +1028,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     visible_cells_[accursed_cell_focus_].is_clone   = focusInfo.is_clone;
     visible_cells_[accursed_cell_focus_].clone_master_id =
         focusInfo.clone_master_id;
+    visible_cells_[accursed_cell_focus_].is_quote     = focusInfo.is_quote;
+    visible_cells_[accursed_cell_focus_].quote_label  = focusInfo.quote_label;
+    visible_cells_[accursed_cell_focus_].quote_target = focusInfo.quote_target;
   }
 
   const xanadu::FormatResolver formatResolver(engine_->store());
@@ -990,7 +1049,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
   focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, depth_tier_};
   focusRenderState.target_alpha = depth_tier_opacity_;
-  focusRenderState.base_color   = scene_.focus_color;
+  focusRenderState.base_color =
+      focusInfo.is_quote ? glm::vec3{0.22F, 0.74F, 0.97F} : scene_.focus_color;
   updateCellFormatting(focusRenderState, focusRef);
 
   auto mapNeighbor = [&](const CellRef parentId, const CellRef childId,
@@ -1010,6 +1070,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .is_image         = childInfo.is_image,
           .is_clone         = childInfo.is_clone,
           .clone_master_id  = childInfo.clone_master_id,
+          .is_quote         = childInfo.is_quote,
+          .quote_label      = childInfo.quote_label,
+          .quote_target     = childInfo.quote_target,
           .current_pos      = visible_cells_[parentId].current_pos,
           .target_pos       = {},
           .current_alpha    = 0.0F,
@@ -1027,12 +1090,16 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       visible_cells_[childId].is_image        = childInfo.is_image;
       visible_cells_[childId].is_clone        = childInfo.is_clone;
       visible_cells_[childId].clone_master_id = childInfo.clone_master_id;
+      visible_cells_[childId].is_quote        = childInfo.is_quote;
+      visible_cells_[childId].quote_label     = childInfo.quote_label;
+      visible_cells_[childId].quote_target    = childInfo.quote_target;
     }
 
     auto &childCell        = visible_cells_[childId];
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
     childCell.target_alpha = depth_tier_opacity_;
-    childCell.base_color   = axisColor;
+    childCell.base_color =
+        childInfo.is_quote ? glm::vec3{0.22F, 0.74F, 0.97F} : axisColor;
     updateCellFormatting(childCell, childId);
   };
 
@@ -2914,6 +2981,247 @@ bool ZigzagVisualizer::executeCommandBar() {
       }
     }
     return defineMacro(macroName, vqlExpr, keyBinding);
+  }
+
+  // 7. Quotation Builder dialog (:quote-builder, :quote-dialog, or bare :quote)
+  if (text == ":quote-builder" || text == ":quote-dialog" ||
+      (text == ":quote" && onOpenQuoteBuilder_)) {
+    if (onOpenQuoteBuilder_) {
+      setCommandBarVisible(false);
+      onOpenQuoteBuilder_();
+      commandBarFeedback_        = "Opened Quotation Builder dialog";
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Quotation Builder dialog not available";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 8. Quotation creation (:quote <scrollKey> [version] [rootOp] [localDim]
+  // [label])
+  if (text == ":quote" || text.starts_with(":quote ") ||
+      text.starts_with(":quote\t")) {
+    if (text == ":quote") {
+      commandBarFeedback_ =
+          "Usage: :quote <scrollKey> [version] [rootOp] [localDim] [label]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::string_view rest = text.substr(7);
+    std::istringstream iss{std::string(rest)};
+    std::string scrollKey;
+    if (!(iss >> scrollKey)) {
+      commandBarFeedback_ =
+          "Usage: :quote <scrollKey> [version] [rootOp] [localDim] [label]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::string versionStr;
+    std::string rootStr;
+    std::string dimStr;
+    std::string label;
+    iss >> versionStr;
+    iss >> rootStr;
+    iss >> dimStr;
+    std::getline(iss >> std::ws, label);
+
+    xanadu::MicroversionId pinnedVersion;
+    if (!versionStr.empty()) {
+      try {
+        pinnedVersion = xanadu::MicroversionId::parse(versionStr);
+      } catch (...) {
+      }
+    }
+    xanadu::MicroversionId rootVersion;
+    if (!rootStr.empty()) {
+      try {
+        rootVersion = xanadu::MicroversionId::parse(rootStr);
+      } catch (...) {
+      }
+    }
+    if (rootVersion.isZero()) {
+      rootVersion = xanadu::MicroversionId::parse("1");
+    }
+    std::string localDim = dimStr.empty() ? (current_view_.x_dimension.empty()
+                                                 ? "d.1"
+                                                 : current_view_.x_dimension)
+                                          : dimStr;
+    if (label.empty()) {
+      label = "quote";
+    }
+
+    if (!store_) {
+      commandBarFeedback_        = "No store attached";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    auto commitParent = (engine_ && !engine_->head().isZero())
+                            ? engine_->head()
+                            : store_->primaryCurrentVersion();
+    if (!store_->scrollRegistry().scrollIdForKey(scrollKey)) {
+      commitParent = store_->registerScroll(commitParent, scrollKey);
+    }
+    const auto scrollId = *store_->scrollRegistry().scrollIdForKey(scrollKey);
+
+    const xanadu::GlobalDocumentState pinnedState{
+        .scroll  = scrollKey,
+        .version = pinnedVersion,
+    };
+    xanadu::SelectorSpec selector;
+    selector.kind    = xanadu::Selector::Kind::Closure;
+    selector.rootRef = xanadu::ExternOpRef{
+        .scroll   = scrollId,
+        .produces = rootVersion,
+    };
+    selector.orderPolicy = "identity";
+
+    const auto tailRef = static_cast<CellRef>(accursed_cell_focus_);
+    const auto dimRef =
+        engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
+
+    try {
+      const auto q =
+          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
+                        selector, engine_ ? &engine_->manifold() : nullptr);
+      reloadStoreVersion(q.version, q.quotationCell);
+      commandBarFeedback_ = std::format(
+          "Quoted structure '{}' minted as cell #{}", label, q.quotationCell);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    } catch (const std::exception &ex) {
+      commandBarFeedback_        = std::string("Quote failed: ") + ex.what();
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+  }
+
+  // 9. Quotation query creation (:quote-query <scrollKey> [version] [rootOp]
+  // "<query>" [localDim] [label])
+  if (text == ":quote-query" || text.starts_with(":quote-query ") ||
+      text.starts_with(":quote-query\t")) {
+    if (text == ":quote-query") {
+      commandBarFeedback_        = "Usage: :quote-query <scrollKey> [version] "
+                                   "[rootOp] \"<query>\" [localDim] [label]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::string_view rest = text.substr(13);
+    while (!rest.empty() &&
+           std::isspace(static_cast<unsigned char>(rest.front()))) {
+      rest.remove_prefix(1);
+    }
+    std::istringstream iss{std::string(rest)};
+    std::string scrollKey;
+    if (!(iss >> scrollKey)) {
+      commandBarFeedback_        = "Usage: :quote-query <scrollKey> [version] "
+                                   "[rootOp] \"<query>\" [localDim] [label]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    std::string remaining;
+    std::getline(iss, remaining);
+    while (!remaining.empty() &&
+           std::isspace(static_cast<unsigned char>(remaining.front()))) {
+      remaining.erase(remaining.begin());
+    }
+
+    xanadu::MicroversionId pinnedVersion;
+    xanadu::MicroversionId rootVersion;
+    std::string queryStr;
+    std::string localDim;
+    std::string label = "quote-query";
+
+    auto firstQuote = remaining.find('"');
+    if (firstQuote != std::string::npos) {
+      auto prefix = remaining.substr(0, firstQuote);
+      std::istringstream prefIss{prefix};
+      std::string tok1, tok2;
+      if (prefIss >> tok1) {
+        try {
+          pinnedVersion = xanadu::MicroversionId::parse(tok1);
+        } catch (...) {
+        }
+      }
+      if (prefIss >> tok2) {
+        try {
+          rootVersion = xanadu::MicroversionId::parse(tok2);
+        } catch (...) {
+        }
+      }
+      auto secondQuote = remaining.find('"', firstQuote + 1);
+      if (secondQuote != std::string::npos) {
+        queryStr =
+            remaining.substr(firstQuote + 1, secondQuote - (firstQuote + 1));
+        std::string suffix = remaining.substr(secondQuote + 1);
+        std::istringstream suffIss{suffix};
+        suffIss >> localDim;
+        std::getline(suffIss >> std::ws, label);
+      } else {
+        queryStr = remaining.substr(firstQuote + 1);
+      }
+    } else {
+      queryStr = remaining;
+    }
+
+    if (rootVersion.isZero()) {
+      rootVersion = xanadu::MicroversionId::parse("1");
+    }
+    if (localDim.empty()) {
+      localDim =
+          current_view_.x_dimension.empty() ? "d.1" : current_view_.x_dimension;
+    }
+    if (label.empty()) {
+      label = "quote-query";
+    }
+    if (!store_) {
+      commandBarFeedback_        = "No store attached";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    auto commitParent = (engine_ && !engine_->head().isZero())
+                            ? engine_->head()
+                            : store_->primaryCurrentVersion();
+    if (!store_->scrollRegistry().scrollIdForKey(scrollKey)) {
+      commitParent = store_->registerScroll(commitParent, scrollKey);
+    }
+    const auto scrollId = *store_->scrollRegistry().scrollIdForKey(scrollKey);
+
+    const xanadu::GlobalDocumentState pinnedState{
+        .scroll  = scrollKey,
+        .version = pinnedVersion,
+    };
+    xanadu::SelectorSpec selector;
+    selector.kind    = xanadu::Selector::Kind::Query;
+    selector.rootRef = xanadu::ExternOpRef{
+        .scroll   = scrollId,
+        .produces = rootVersion,
+    };
+    selector.query                = queryStr;
+    selector.queryLanguageVersion = 13;
+    selector.orderPolicy          = "identity";
+
+    const auto tailRef = static_cast<CellRef>(accursed_cell_focus_);
+    const auto dimRef =
+        engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
+
+    try {
+      const auto q =
+          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
+                        selector, engine_ ? &engine_->manifold() : nullptr);
+      reloadStoreVersion(q.version, q.quotationCell);
+      commandBarFeedback_ = std::format("Quoted query '{}' minted as cell #{}",
+                                        label, q.quotationCell);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    } catch (const std::exception &ex) {
+      commandBarFeedback_ = std::string("Quote query failed: ") + ex.what();
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
   }
 
   // 2. Navigation mode (starts with '/' or '##')

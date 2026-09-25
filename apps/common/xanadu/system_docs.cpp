@@ -842,6 +842,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to invoke radial menu",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+M"}}}}},
+        {.name    = std::string(settings::kKeymapQuotationToggle),
+         .notes   = "Shortcut to toggle quotation builder overlay",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+Q"}}}}},
+        {.name    = std::string(settings::kKeymapQuotationToggleF9),
+         .notes   = "Shortcut to toggle quotation builder overlay (F9)",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"F9"}}}}},
 
         // Zigzag Visualizer & Pure Vortex Actions
         {.name    = std::string(settings::kKeymapViewModeContent1),
