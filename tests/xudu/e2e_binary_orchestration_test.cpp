@@ -169,6 +169,56 @@ PpmImageInfo inspectPpm(const fs::path &path) {
   return info;
 }
 
+/**
+ * @brief Pixels of text on paper: dark, with white paper within three pixels
+ *        on both sides of it along the row.
+ *
+ * What a blank page lacks and a page edge against the dark background does
+ * not have, so a document that drew its paper but lost its glyphs reads as
+ * zero however much else of the frame is right. A whole-frame pixel
+ * comparison cannot see that: the glyphs of two small pages are well under
+ * one percent of an 800x600 frame.
+ */
+std::size_t countInkOnPaper(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width  = 0;
+  int height = 0;
+  int maxVal = 0;
+  in >> magic >> width >> height >> maxVal;
+  in.get();
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
+                                 static_cast<std::size_t>(height) * 3U);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if ("P6" != magic || !in) {
+    return 0;
+  }
+  constexpr int kInk   = 160;
+  constexpr int kPaper = 230;
+  constexpr int kReach = 3;
+  const auto luma      = [&](const int x, const int y) {
+    const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
+    return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
+  };
+  std::size_t ink = 0;
+  for (int y = 0; y < height; ++y) {
+    for (int x = kReach; x < width - kReach; ++x) {
+      if (luma(x, y) >= kInk) {
+        continue;
+      }
+      bool left  = false;
+      bool right = false;
+      for (int k = 1; k <= kReach; ++k) {
+        left  = left || luma(x - k, y) >= kPaper;
+        right = right || luma(x + k, y) >= kPaper;
+      }
+      ink += (left && right) ? 1U : 0U;
+    }
+  }
+  return ink;
+}
+
 void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
@@ -553,6 +603,49 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_TRUE(info5.valid) << "Step 5 PPM invalid: " << info5.errorMessage;
   EXPECT_GE(info5.distinctColors, 20U);
   exportToPng(step5Ppm, step5Png);
+}
+
+/**
+ * The many-to-many beam fixture's two documents at the default field of view.
+ * Its layout frames them from far enough away that a page's glyphs and its
+ * paper fall within one step of a conventional float depth buffer, and
+ * Vulkan -- whose depth attachment is a float -- drew both pages white until
+ * it moved to reversed Z. Asserted per backend by what is on the paper rather
+ * than by comparison: a missing glyph layer is well under one percent of the
+ * frame, far inside compare-backends' tolerances.
+ */
+TEST(E2EBinaryOrchestrationTest, textSurvivesAtTheDefaultFieldOfView) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_default_fov";
+  const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+  // Copied so that nothing a run writes lands in the committed fixture.
+  fs::copy(samples / "permascroll", testRoot / "permascroll",
+           fs::copy_options::recursive);
+  fs::copy(samples / "beams" / "02_many_to_many", testRoot / "store",
+           fs::copy_options::recursive);
+
+  const auto ppmPath = screenshotDir / "default_fov_text.ppm";
+  const auto pngPath = screenshotDir / "default_fov_text.png";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --coarse-below 0" +
+      " --version-id 1 --alongside a1 --screenshot " + ppmPath.string() + " " +
+      (testRoot / "store").string();
+
+  const auto res = executeProcess(cmd);
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+  ASSERT_TRUE(fs::exists(ppmPath));
+  // Measured at about 250-290 on a correct frame, and 0 on a blank one.
+  EXPECT_GE(countInkOnPaper(ppmPath), 100U)
+      << "the pages were drawn without their text on " << activeBackend();
+  exportToPng(ppmPath, pngPath);
 }
 
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
