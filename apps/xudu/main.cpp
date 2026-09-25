@@ -2633,20 +2633,15 @@ int main(const int argc, char **argv) {
         [&views](const std::size_t viewIndex, const xanadu::Extent range) {
           views.focusSpan(viewIndex, range.start, range.end);
         });
-    // Read on the render thread, from inside LinkContext::execute().
-    linkContext.setCaretSite(
-        [&renderer, &session]() -> std::optional<xanadu::OccurrenceSite> {
+    // Read on the render thread, from inside LinkContext and the panel.
+    linkContext.setCaretQuery(
+        [&renderer]() -> std::optional<xudu::LinkContext::CaretPosition> {
           const auto *const caret = renderer->editCaret();
-          if (nullptr == caret || !caret->active() ||
-              caret->documentIndex() >= session->views().size()) {
+          if (nullptr == caret || !caret->active()) {
             return std::nullopt;
           }
-          const auto &view = session->views()[caret->documentIndex()];
-          return xanadu::DocumentSite{
-              .store   = session->store(view.storeIndex).documentId(),
-              .version = view.version,
-              .range   = {.start = caret->byteOffset(),
-                          .end   = caret->byteOffset()}};
+          return xudu::LinkContext::CaretPosition{
+              .view = caret->documentIndex(), .offset = caret->byteOffset()};
         });
     links.setLinkContext(&linkContext);
     xudu::LinkPanelOverlay linkPanel(linkContext, *session);
@@ -2729,6 +2724,13 @@ int main(const int argc, char **argv) {
         [&bridgeCoordinator](const zigzag::CellRef cell, xanadu::Extent) {
           bridgeCoordinator.onDocumentLinkActivated(cell);
         });
+    linkContext.setCellFocusQuery(
+        [&zigzagPresentation] { return zigzagPresentation->focusCell(); });
+    linkPanel.setCellHighlighter(
+        [&zigzagPresentation](std::vector<xanadu::CellHighlight> highlights,
+                              const std::uint32_t border) {
+          zigzagPresentation->setCellHighlights(std::move(highlights), border);
+        });
     bridgeCoordinator.applyConfig(initialLayout.bridge);
 #endif
     links.setOpener([&views](const MicroversionId &version) {
@@ -2769,6 +2771,7 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&views);
     renderer->addFrameContributor(&linkPanel);
     renderer->addSpanDecorator(&linkPanel);
+    renderer->addPickObserver(&linkPanel);
     renderer->addFrameContributor(radialMenu.get());
 
     state->accessibility->addSource(docSwitcher.get());

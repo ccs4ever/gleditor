@@ -5,6 +5,8 @@
 #include "common/xanadu/link_occurrences.hpp"
 
 #include <algorithm>
+#include <type_traits>
+#include <variant>
 
 #include <gleditor/logging.hpp>
 
@@ -96,6 +98,29 @@ std::vector<Extent> contentOccurrences(std::span<const PrimediaSpan> pieces,
     }
   }
   return found;
+}
+
+bool lands(const OccurrenceSite &hit, const OccurrenceSite &site) {
+  return std::visit(
+      [&]<typename Site>(const Site &at) {
+        const auto *const other = std::get_if<Site>(&site);
+        if (nullptr == other || at.store != other->store ||
+            at.version != other->version) {
+          return false;
+        }
+        if constexpr (std::is_same_v<Site, CellSite>) {
+          if (at.cell != other->cell) {
+            return false;
+          }
+        }
+        const auto &a = at.range;
+        const auto &b = other->range;
+        if (a.empty()) {
+          return b.start <= a.start && a.start <= b.end;
+        }
+        return a.start < b.end && b.start < a.end;
+      },
+      hit);
 }
 
 namespace {

@@ -985,6 +985,26 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       rc.decorated_ranges.clear();
       rc.block_styles.clear();
     }
+    // The selected link's occurrences in this cell, to their exact bytes:
+    // underlined for the chosen member, boxed for the chosen occurrence.
+    // Decorations rather than a coloured wash because they are what the
+    // glyph pipeline marks per byte; the border carries the colour.
+    rc.link_highlighted = false;
+    for (const auto &mark : linkHighlights_) {
+      if (mark.cell != cr) {
+        continue;
+      }
+      rc.link_highlighted = true;
+      const auto underline =
+          gleditor::decorationBit(gleditor::Decoration::Underline);
+      const auto boxed =
+          underline | gleditor::decorationBit(gleditor::Decoration::Overline);
+      rc.decorated_ranges.push_back(gleditor::DecoratedRange{
+          .start       = mark.start,
+          .end         = mark.end,
+          .decorations = static_cast<gleditor::DecorationMask>(
+              mark.chosen ? boxed : underline)});
+    }
   };
 
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
@@ -1452,8 +1472,11 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         packRgba(cell.base_color.r * 0.25F, cell.base_color.g * 0.25F,
                  cell.base_color.b * 0.25F, cell.current_alpha);
     const std::uint32_t borderCol =
-        packRgba(cell.base_color.r, cell.base_color.g, cell.base_color.b,
-                 cell.current_alpha);
+        cell.link_highlighted
+            ? ((linkHighlightBorder_ & 0xFFFFFF00U) |
+               static_cast<std::uint32_t>(cell.current_alpha * 255.0F))
+            : packRgba(cell.base_color.r, cell.base_color.g, cell.base_color.b,
+                       cell.current_alpha);
     const std::uint32_t textCol =
         isFocus ? 0xFFFFFFFFU : packRgba(0.9F, 0.9F, 0.9F, cell.current_alpha);
 
@@ -1952,6 +1975,17 @@ std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
     };
   }
   return std::nullopt;
+}
+
+void ZigzagVisualizer::setCellHighlights(
+    std::vector<xanadu::CellHighlight> highlights,
+    const std::uint32_t borderColour) {
+  if (highlights == linkHighlights_ && borderColour == linkHighlightBorder_) {
+    return;
+  }
+  linkHighlights_      = std::move(highlights);
+  linkHighlightBorder_ = borderColour;
+  rebuildActiveViewTopology();
 }
 
 bool ZigzagVisualizer::unlockCell(const CellRef cell) {

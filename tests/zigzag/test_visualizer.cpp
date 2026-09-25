@@ -1033,3 +1033,34 @@ TEST(ZigzagVisualizerTest, ZigzagVisualizerTranscopyrightSettlement) {
   EXPECT_EQ(invalidatedRev, viz.bridgeRevision());
   EXPECT_FALSE(viz.isCellLocked(static_cast<CellRef>(focus)));
 }
+
+TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+  const auto cell = static_cast<CellRef>(root);
+
+  viz.setCellHighlights({{.cell = cell, .start = 0, .end = 2, .chosen = false},
+                         {.cell = cell, .start = 2, .end = 4, .chosen = true}},
+                        0xFACC15FFU);
+
+  const auto &shown = viz.visibleCells().at(root);
+  EXPECT_TRUE(shown.link_highlighted);
+  ASSERT_EQ(shown.decorated_ranges.size(), 2U);
+  const auto &member = shown.decorated_ranges[0];
+  const auto &chosen = shown.decorated_ranges[1];
+  EXPECT_EQ(member.start, 0U);
+  EXPECT_EQ(member.end, 2U);
+  EXPECT_TRUE(gleditor::hasDecoration(member.decorations,
+                                      gleditor::Decoration::Underline));
+  EXPECT_FALSE(gleditor::hasDecoration(member.decorations,
+                                       gleditor::Decoration::Overline));
+  EXPECT_EQ(chosen.start, 2U);
+  EXPECT_EQ(chosen.end, 4U);
+  EXPECT_TRUE(gleditor::hasDecoration(chosen.decorations,
+                                      gleditor::Decoration::Overline));
+
+  viz.setCellHighlights({}, 0xFACC15FFU);
+  EXPECT_FALSE(viz.visibleCells().at(root).link_highlighted);
+  EXPECT_TRUE(viz.visibleCells().at(root).decorated_ranges.empty());
+}

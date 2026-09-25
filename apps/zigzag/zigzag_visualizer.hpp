@@ -61,6 +61,9 @@ struct RenderStateCell {
   glm::vec3 base_color{0.7F, 0.7F, 0.75F};
   std::vector<gleditor::DecoratedRange> decorated_ranges;
   std::vector<gleditor::BlockStyleRange> block_styles;
+  /// Holds part of the selected link, so its border is drawn in the host's
+  /// highlight colour.
+  bool link_highlighted{false};
 };
 
 /// Measured presentation geometry shared by drawing, rank layout, and bridge
@@ -382,6 +385,8 @@ public:
     return engine_ ? engine_->cellRoyalty(cell) : std::nullopt;
   }
   bool unlockCell(CellRef cell) override;
+  void setCellHighlights(std::vector<xanadu::CellHighlight> highlights,
+                         std::uint32_t borderColour) override;
 
   [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
     return revision_;
@@ -456,6 +461,10 @@ private:
 
   std::string fontName_;
   std::uint64_t revision_{1};
+  /// The host's selected-link marks, folded into each cell's decorations
+  /// when the view is rebuilt rather than per frame.
+  std::vector<xanadu::CellHighlight> linkHighlights_;
+  std::uint32_t linkHighlightBorder_{};
   xanadu::ZigzagPresentationSurface::InvalidationCallback
       bridgeInvalidationCallback_;
 

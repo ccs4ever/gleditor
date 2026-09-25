@@ -241,6 +241,8 @@ inline constexpr std::string_view kLinkPanelBackgroundColour =
 inline constexpr std::string_view kLinkPanelTextColour = "linkPanel.textColour";
 inline constexpr std::string_view kLinkPanelMutedColour =
     "linkPanel.mutedColour";
+inline constexpr std::string_view kLinkPanelButtonColour =
+    "linkPanel.buttonColour";
 inline constexpr std::string_view kLinkPanelChosenHighlightColour =
     "linkPanel.chosenHighlightColour";
 inline constexpr std::string_view kLinkPanelMemberHighlightColour =
@@ -876,6 +878,8 @@ struct LinkPanelConfig {
   std::uint32_t textColour{0xE2E8F0FFU};
   /// Unset cursors, members not in view, and the origin line.
   std::uint32_t mutedColour{0x94A3B8FFU};
+  /// Behind the panel's buttons.
+  std::uint32_t buttonColour{0x334155FFU};
   /// Behind the chosen occurrence in the document text.
   std::uint32_t chosenHighlightColour{0xFACC1570U};
   /// Behind the chosen member's other occurrences.

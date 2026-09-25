@@ -15,25 +15,43 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
 
+#include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "xudu/link_context.hpp"
 #include "xudu/session.hpp"
 
 namespace xudu {
 
 class LinkPanelOverlay : public gleditor::FrameContributor,
+                         public gleditor::PickObserver,
                          public gleditor::SpanDecorator {
 public:
+  /// Picking tags from here up are the panel's: its background, then one per
+  /// button.
+  static constexpr std::uint32_t kTagPanelBase = 18000U;
+
+  /// Where the chosen member's cell occurrences are sent to be marked; unset
+  /// outside xuzz. Called only when they change.
+  using CellHighlighter = std::function<void(
+      std::vector<xanadu::CellHighlight> highlights, std::uint32_t border)>;
+
   LinkPanelOverlay(LinkContext &context, Session &session) noexcept
       : context(context), session(session) {}
+
+  void setCellHighlighter(CellHighlighter highlighter) {
+    cellHighlighter = std::move(highlighter);
+  }
 
   /// From system://ui; applied at launch and whenever that store changes.
   void setConfig(const xanadu::LinkPanelConfig &next);
@@ -42,6 +60,8 @@ public:
                    const render::PipelineDesc &pipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
   void decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) override;
+  [[nodiscard]] bool picked(const render::PickingResult &pick,
+                            RenderState &state) override;
 
 private:
   /// What the committed geometry and highlights were built from.
@@ -51,6 +71,7 @@ private:
     std::uint64_t config{};
     int width{};
     int height{};
+    LinkContext::ReadingStamp reading;
     bool operator==(const Stamp &) const = default;
   };
 
@@ -69,6 +90,10 @@ private:
   std::optional<Stamp> highlightsBuiltFor;
   /// Open view index and the range to colour in it.
   std::vector<std::pair<std::size_t, gleditor::SpanStyle>> highlights;
+  std::vector<xanadu::CellHighlight> cellHighlights;
+  CellHighlighter cellHighlighter;
+  /// The buttons drawn, in tag order, so a pick can be mapped back.
+  std::vector<xanadu::PanelButton> buttons;
 };
 
 } // namespace xudu

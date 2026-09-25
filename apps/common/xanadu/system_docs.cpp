@@ -186,8 +186,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "and top edges, its inner space and its line spacing, in logical "
            "pixels. Defaults are 16, 44, 10 and 4.\n"
            "linkPanel.backgroundColour, linkPanel.textColour, "
-           "linkPanel.mutedColour: Panel colours as RGBA integers, the muted "
-           "one for unset choices and members not in view.\n"
+           "linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as "
+           "RGBA integers, the muted one for unset choices, members not in "
+           "view and buttons that would be refused.\n"
            "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
            "Highlights behind the chosen occurrence and behind the chosen "
            "member's other occurrences in the text, as RGBA integers.\n";
@@ -709,6 +710,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Link panel colour for unset and out-of-view entries",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{panel.mutedColour}}}}},
+        {.name    = std::string(settings::kLinkPanelButtonColour),
+         .notes   = "Link panel button RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.buttonColour}}}}},
         {.name    = std::string(settings::kLinkPanelChosenHighlightColour),
          .notes   = "Highlight behind the chosen occurrence in the text",
          .schemas = {{.expectedTypes = {"integer"},
@@ -2572,6 +2577,7 @@ UIConfig UIConfig::fromStore(const Store &store) {
   colour(settings::kLinkPanelBackgroundColour, panel.backgroundColour);
   colour(settings::kLinkPanelTextColour, panel.textColour);
   colour(settings::kLinkPanelMutedColour, panel.mutedColour);
+  colour(settings::kLinkPanelButtonColour, panel.buttonColour);
   colour(settings::kLinkPanelChosenHighlightColour,
          panel.chosenHighlightColour);
   colour(settings::kLinkPanelMemberHighlightColour,
