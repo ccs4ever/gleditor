@@ -120,9 +120,12 @@ inline constexpr std::string_view kDimDefault    = "d.default";
 
 namespace settings {
 // Layout
-inline constexpr std::string_view kColumns            = "columns";
-inline constexpr std::string_view kPageWidthPx        = "pageWidthPx";
-inline constexpr std::string_view kPageHeightPx       = "pageHeightPx";
+inline constexpr std::string_view kColumns      = "columns";
+inline constexpr std::string_view kPageWidthPx  = "pageWidthPx";
+inline constexpr std::string_view kPageHeightPx = "pageHeightPx";
+/// On-screen height, in screen pixels, of a line of document text at the
+/// camera's default zoom and wherever it frames a passage for reading.
+inline constexpr std::string_view kReadableTextPx     = "readableTextPx";
 inline constexpr std::string_view kTransclusionPrisms = "transclusionPrisms";
 inline constexpr std::string_view kTransclusionLoom   = "transclusionLoom";
 inline constexpr std::string_view kXanalinkRibbons    = "xanalinkRibbons";
@@ -232,6 +235,18 @@ inline constexpr std::string_view kNotificationDurationMs =
 inline constexpr std::string_view kRadialMenuRadius = "radialMenu.radius";
 inline constexpr std::string_view kRadialMenuInnerRadius =
     "radialMenu.innerRadius";
+// The overview panel. Colours are RGBA8, most significant byte red.
+inline constexpr std::string_view kOverviewVisible  = "overview.visible";
+inline constexpr std::string_view kOverviewWidthPx  = "overview.widthPx";
+inline constexpr std::string_view kOverviewHeightPx = "overview.heightPx";
+inline constexpr std::string_view kOverviewLeftPx   = "overview.leftPx";
+inline constexpr std::string_view kOverviewBottomPx = "overview.bottomPx";
+inline constexpr std::string_view kOverviewBackgroundColour =
+    "overview.backgroundColour";
+inline constexpr std::string_view kOverviewPageColour = "overview.pageColour";
+inline constexpr std::string_view kOverviewViewportColour =
+    "overview.viewportColour";
+inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
 // The selected-link panel. Colours are RGBA8, most significant byte red.
 inline constexpr std::string_view kLinkPanelFont      = "linkPanel.font";
 inline constexpr std::string_view kLinkPanelMarginPx  = "linkPanel.marginPx";
@@ -444,6 +459,8 @@ inline constexpr std::string_view kKeymapLinkCross   = "std:xuzz/link_cross";
 inline constexpr std::string_view kKeymapLinkEnter   = "std:xuzz/link_enter";
 inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
 inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
+inline constexpr std::string_view kKeymapOverviewToggle =
+    "std:xudu/overview_toggle";
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 
@@ -854,6 +871,8 @@ struct LayoutConfig {
   float toastOffsetY{48.0F};
   PouchDock pouchDock{PouchDock::Right};
   float documentSpacingX{70.0F};
+  /// See settings::kReadableTextPx. Zero keeps the old whole-page framing.
+  float readableTextPx{16.0F};
   bool transclusionPrisms{true};
   bool transclusionLoom{true};
   bool xanalinkRibbons{true};
@@ -863,6 +882,32 @@ struct LayoutConfig {
   BridgeRuntimeConfig bridge{};
 
   [[nodiscard]] static LayoutConfig fromStore(const Store &store);
+};
+
+/**
+ * @brief The overview panel: the whole scene condensed into a corner, with
+ *        the camera's view outlined on it.
+ *
+ * The companion of reading-first framing (LayoutConfig::readableTextPx): the
+ * camera stays where text can be read, and this shows what lies around it.
+ * Defaults here are the ones defaultSettingSpecs() seeds system://ui with.
+ */
+struct OverviewConfig {
+  bool visible{true};
+  float widthPx{220.0F};
+  float heightPx{160.0F};
+  /// Gap from the window's left edge.
+  float leftPx{16.0F};
+  /// Gap from the window's bottom edge, clear of a status line.
+  float bottomPx{56.0F};
+  std::uint32_t backgroundColour{0x0F172AE0U};
+  std::uint32_t pageColour{0xCBD5E1FFU};
+  /// The outline of what the camera shows.
+  std::uint32_t viewportColour{0xFACC15FFU};
+  /// The selected link's chosen places and the focused ZigZag card.
+  std::uint32_t markColour{0xF472B6FFU};
+
+  bool operator==(const OverviewConfig &) const = default;
 };
 
 /**
@@ -903,6 +948,7 @@ struct UIConfig {
   std::uint32_t notificationDurationMs{3000};
   gleditor::RadialConfig radialMenu;
   LinkPanelConfig linkPanel;
+  OverviewConfig overview;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

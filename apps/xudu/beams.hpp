@@ -173,6 +173,10 @@ public:
   /// one a beam is only drawn.
   void setLinkContext(LinkContext *context) noexcept { linkContext_ = context; }
 
+  /// See settings::kReadableTextPx: bringing a linked document alongside
+  /// never backs the camera out past where the text reads at this height.
+  void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
+
   /// Whether beams are drawn at all. They are, by default: a link nobody can
   /// see is most of what Xanadu was arguing against.
   void setVisible(const bool shown) { visible = shown; }
@@ -514,6 +518,7 @@ private:
   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>>
       accessibleNodes;
   LinkContext *linkContext_{nullptr};
+  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
   /// Bumped whenever the strands change, so the description is rebuilt then
   /// and not every frame.
   std::uint64_t described{1};

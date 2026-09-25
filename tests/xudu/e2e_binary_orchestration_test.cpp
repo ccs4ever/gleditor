@@ -219,6 +219,60 @@ std::size_t countInkOnPaper(const fs::path &path) {
   return ink;
 }
 
+/**
+ * @brief The typical distance, in screen rows, between the tops of lines of
+ *        text on paper: the median gap between rows where ink starts after a
+ *        row with none. Zero when fewer than two lines were found.
+ */
+int medianLinePitch(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width  = 0;
+  int height = 0;
+  int maxVal = 0;
+  in >> magic >> width >> height >> maxVal;
+  in.get();
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
+                                 static_cast<std::size_t>(height) * 3U);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if ("P6" != magic || !in) {
+    return 0;
+  }
+  const auto luma = [&](const int x, const int y) {
+    const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
+    return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
+  };
+  // A row carries ink when a dark pixel sits between paper on both sides,
+  // which is what countInkOnPaper() counts, row by row.
+  const auto inked = [&](const int y) {
+    for (int x = 3; x < width - 3; ++x) {
+      if (luma(x, y) < 160 && luma(x - 3, y) >= 230 && luma(x + 3, y) >= 230) {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::vector<int> starts;
+  bool previous = false;
+  for (int y = 0; y < height; ++y) {
+    const bool now = inked(y);
+    if (now && !previous) {
+      starts.push_back(y);
+    }
+    previous = now;
+  }
+  std::vector<int> gaps;
+  for (std::size_t i = 1; i < starts.size(); ++i) {
+    gaps.push_back(starts[i] - starts[i - 1]);
+  }
+  if (gaps.empty()) {
+    return 0;
+  }
+  std::ranges::nth_element(gaps, gaps.begin() + (gaps.size() / 2));
+  return gaps[gaps.size() / 2];
+}
+
 void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
@@ -400,12 +454,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step1Ppm = screenshotDir / "step1_source_torrents.ppm";
   const auto step1Png = screenshotDir / "step1_source_torrents.png";
 
-  std::string cmd1 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --version-id " + v1.str() +
-                     " --alongside " + v2.str() + " --screenshot " +
-                     step1Ppm.string() + " " + storeStep1.string();
+  std::string cmd1 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + v1.str() + " --alongside " + v2.str() +
+      " --screenshot " + step1Ppm.string() + " " + storeStep1.string();
 
   const auto res1 = executeProcess(cmd1);
   EXPECT_EQ(res1.exitCode, 0) << "Step 1 process failed: " << res1.output;
@@ -452,12 +506,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step2Ppm    = screenshotDir / "step2_xanadocs_loaded.ppm";
   const auto step2Png    = screenshotDir / "step2_xanadocs_loaded.png";
 
-  std::string cmd2 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --read " + pubAPath.string() + " --read " +
-                     pubBPath.string() + " --screenshot " + step2Ppm.string() +
-                     " " + storeReader.string();
+  std::string cmd2 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --read " + pubAPath.string() + " --read " + pubBPath.string() +
+      " --screenshot " + step2Ppm.string() + " " + storeReader.string();
 
   const auto res2 = executeProcess(cmd2);
   EXPECT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
@@ -489,12 +543,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step3Ppm = screenshotDir / "step3_cross_linking.ppm";
   const auto step3Png = screenshotDir / "step3_cross_linking.png";
 
-  std::string cmd3 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --version-id " + verLinked.str() +
-                     " --alongside " + verB.str() + " --screenshot " +
-                     step3Ppm.string() + " " + storeReader.string();
+  std::string cmd3 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + verLinked.str() + " --alongside " + verB.str() +
+      " --screenshot " + step3Ppm.string() + " " + storeReader.string();
 
   const auto res3 = executeProcess(cmd3);
   EXPECT_EQ(res3.exitCode, 0) << "Step 3 process failed: " << res3.output;
@@ -516,9 +570,10 @@ TEST(E2EBinaryOrchestrationTest,
   std::string cmd4 =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
-      " --profile --fov 7.5 --coarse-below 0" + torrentArgs + " --version-id " +
-      verLinked.str() + " --alongside " + verBTranscluded.str() +
-      " --screenshot " + step4Ppm.string() + " " + storeReader.string();
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + verLinked.str() + " --alongside " +
+      verBTranscluded.str() + " --screenshot " + step4Ppm.string() + " " +
+      storeReader.string();
 
   const auto res4 = executeProcess(cmd4);
   EXPECT_EQ(res4.exitCode, 0) << "Step 4 process failed: " << res4.output;
@@ -590,10 +645,11 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd5 =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      torrentArgs + " --read " + pubAPath.string() + " --read " +
-      pubBPath.string() + " --read " + pubCPath.string() + " --screenshot " +
-      step5Ppm.string() + " " + storeReader.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + torrentArgs +
+      " --read " + pubAPath.string() + " --read " + pubBPath.string() +
+      " --read " + pubCPath.string() + " --screenshot " + step5Ppm.string() +
+      " " + storeReader.string();
 
   const auto res5 = executeProcess(cmd5);
   EXPECT_EQ(res5.exitCode, 0) << "Step 5 process failed: " << res5.output;
@@ -606,15 +662,20 @@ TEST(E2EBinaryOrchestrationTest,
 }
 
 /**
- * The many-to-many beam fixture's two documents at the default field of view.
- * Its layout frames them from far enough away that a page's glyphs and its
- * paper fall within one step of a conventional float depth buffer, and
- * Vulkan -- whose depth attachment is a float -- drew both pages white until
- * it moved to reversed Z. Asserted per backend by what is on the paper rather
- * than by comparison: a missing glyph layer is well under one percent of the
- * frame, far inside compare-backends' tolerances.
+ * The many-to-many beam fixture's two documents framed whole, from far enough
+ * away that a page's glyphs and its paper fall within one step of a
+ * conventional float depth buffer: Vulkan -- whose depth attachment is a
+ * float -- drew both pages white there until it moved to reversed Z.
+ *
+ * That distance was every view's default before framing turned reading-first
+ * (LayoutConfig::readableTextPx), and is still where whole-page framing and a
+ * reader zooming out put the camera; the test asks for it with
+ * --whole-pages. Asserted per backend
+ * by what is on the paper rather than by comparison: a missing glyph layer is
+ * well under one percent of the frame, far inside compare-backends'
+ * tolerances.
  */
-TEST(E2EBinaryOrchestrationTest, textSurvivesAtTheDefaultFieldOfView) {
+TEST(E2EBinaryOrchestrationTest, textSurvivesAtWholePageDistance) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
@@ -635,7 +696,8 @@ TEST(E2EBinaryOrchestrationTest, textSurvivesAtTheDefaultFieldOfView) {
   const auto pngPath = screenshotDir / "default_fov_text.png";
   const std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --coarse-below 0" +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --coarse-below 0" +
       " --version-id 1 --alongside a1 --screenshot " + ppmPath.string() + " " +
       (testRoot / "store").string();
 
@@ -646,6 +708,42 @@ TEST(E2EBinaryOrchestrationTest, textSurvivesAtTheDefaultFieldOfView) {
   EXPECT_GE(countInkOnPaper(ppmPath), 100U)
       << "the pages were drawn without their text on " << activeBackend();
   exportToPng(ppmPath, pngPath);
+}
+
+/**
+ * The default view frames for reading: lines of document text land about
+ * readableTextPx (16 by default) apart on screen, where the old fixed camera
+ * put them about 7 apart. The fixture's lines are separated by blank ones, so
+ * a pitch is one or two lines; either way its size is the text's.
+ */
+TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_readable";
+  const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+  fs::copy(samples / "permascroll", testRoot / "permascroll",
+           fs::copy_options::recursive);
+  fs::copy(samples / "beams" / "02_many_to_many", testRoot / "store",
+           fs::copy_options::recursive);
+
+  const auto ppmPath = screenshotDir / "default_view_readable.ppm";
+  const auto res     = executeProcess(
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --version-id 1 --alongside a1 --screenshot " +
+      ppmPath.string() + " " + (testRoot / "store").string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  const auto pitch = medianLinePitch(ppmPath);
+  EXPECT_GE(pitch, 14) << "lines too close together to read";
+  EXPECT_LE(pitch, 40) << "more than two lines apart";
+  exportToPng(ppmPath, screenshotDir / "default_view_readable.png");
 }
 
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
@@ -696,9 +794,10 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Hypermesh test failed: " << res.output;
@@ -763,9 +862,10 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fan test failed: " << res.output;
@@ -823,9 +923,10 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vCur.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vCur.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Multi-type test failed: " << res.output;
@@ -992,10 +1093,11 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 18 --coarse-below 0" +
-      torrentArgs + " --read " + pub1Path.string() + " --read " +
-      pub2Path.string() + " --read " + pub3Path.string() + " --screenshot " +
-      ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 18 --coarse-below 0" + torrentArgs +
+      " --read " + pub1Path.string() + " --read " + pub2Path.string() +
+      " --read " + pub3Path.string() + " --screenshot " + ppmPath.string() +
+      " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;
@@ -1072,9 +1174,9 @@ TEST(E2EBinaryOrchestrationTest,
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
-        " --profile --fov 15 --coarse-below 0" + " --version-id " +
-        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
-        ppmPath.string() + " " + storePath.string();
+        " --profile --whole-pages --fov 15 --coarse-below 0" +
+        " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+        " --screenshot " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0)
@@ -1148,9 +1250,9 @@ TEST(E2EBinaryOrchestrationTest,
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
-        " --profile --fov 15 --coarse-below 0" + " --version-id " +
-        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
-        ppmPath.string() + " " + storePath.string();
+        " --profile --whole-pages --fov 15 --coarse-below 0" +
+        " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+        " --screenshot " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     std::cout << "ASYMM (" << pagesA << "x" << pagesB << ") OUTPUT:\n"
@@ -1271,13 +1373,13 @@ TEST(E2EBinaryOrchestrationTest,
   // opened alongside it at the same depth, so each starts out part of the
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
-  std::string cmd = "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
-                    permascrollFlag(testRoot / "permascroll") + " --backend " +
-                    activeBackend() + " --profile --fov 15 --coarse-below 0" +
-                    " --version-id " + vLinked.str() + " --background " +
-                    vCorpus.str() + " --background " + vPageTop.str() +
-                    " --background " + vPageBottom.str() + " --screenshot " +
-                    ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
+      permascrollFlag(testRoot / "permascroll") + " --backend " +
+      activeBackend() + " --profile --whole-pages --fov 15 --coarse-below 0" +
+      " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
+      " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
@@ -1366,13 +1468,13 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   const auto ppmPath = screenshotDir / "type_decorated.ppm";
   // Select at offset 0 to position the caret deterministically regardless of
   // window dimensions or display scaling.
-  std::string cmd = xuduBin.string() +
-                    permascrollFlag(testRoot / "permascroll") + " --backend " +
-                    activeBackend() + " --profile --fov 15 --version-id " +
-                    whole.str() +
-                    " --select 0,0 --type '[bold,italic]MARKERWORD' "
-                    "--do save --screenshot " +
-                    ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --version-id " + whole.str() +
+      " --select 0,0 --type '[bold,italic]MARKERWORD' "
+      "--do save --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;

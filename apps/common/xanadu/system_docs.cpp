@@ -95,6 +95,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "Default is right.\n"
            "documentSpacingX: Horizontal gap between parallel document columns "
            "in pixels. Default is 70.\n"
+           "readableTextPx: On-screen height, in screen pixels, of a line of "
+           "document text at the default zoom and wherever the camera frames "
+           "a passage for reading, including bringing a linked document "
+           "alongside; the overview panel shows the whole scene instead. Zero "
+           "frames whole pages. Default is 16.\n"
            "transclusionPrisms: Enable Identity Gold volumetric prisms for "
            "transcluded spans. Default is true.\n"
            "transclusionLoom: Bundle adjacent rank transclusions into "
@@ -183,6 +188,16 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overlay is open. Default is false.\n"
            "radialMenu: Nested configuration dictionary defining action items, "
            "icons, and radial radius.\n"
+           "overview.visible, overview.widthPx, overview.heightPx, "
+           "overview.leftPx, overview.bottomPx: Whether the overview panel "
+           "is shown -- every open page condensed into the lower left, with "
+           "the camera's view outlined -- its size, and its distance from the "
+           "window's left and bottom edges, in logical pixels. Defaults are "
+           "true, 220, 160, 16 and 56.\n"
+           "overview.backgroundColour, overview.pageColour, "
+           "overview.viewportColour, overview.markColour: Its colours as RGBA "
+           "integers; marks show the selected link's chosen places and the "
+           "focused ZigZag card.\n"
            "linkPanel.font: Font of the selected-link panel. Default is Sans "
            "10.\n"
            "linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, "
@@ -441,6 +456,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPageWidthPx),
          .notes   = "Width of each virtual page in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {800.0}}}},
+        {.name    = std::string(settings::kReadableTextPx),
+         .notes   = "On-screen height of a line of text at the default zoom",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          LayoutConfig{}.readableTextPx}}}}},
         {.name    = std::string(settings::kPageHeightPx),
          .notes   = "Height of each virtual page in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1000.0}}}},
@@ -662,7 +682,49 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
 
   case SystemDocKind::UI: {
     const LinkPanelConfig panel;
+    const OverviewConfig overview;
+    const auto colourSpec = [](std::string_view name, const char *notes,
+                               const std::uint32_t colour) {
+      return SettingSpec{
+          .name    = std::string(name),
+          .notes   = notes,
+          .schemas = {{.expectedTypes = {"integer"},
+                       .defaultValues = {std::int64_t{colour}}}}};
+    };
+    const auto lengthSpec = [](std::string_view name, const char *notes,
+                               const float px) {
+      return SettingSpec{.name    = std::string(name),
+                         .notes   = notes,
+                         .schemas = {{.expectedTypes = {"float"},
+                                      .defaultValues = {double{px}}}}};
+    };
     specs = {
+        {.name    = std::string(settings::kOverviewVisible),
+         .notes   = "Whether the overview panel is shown",
+         .schemas = {{.expectedTypes = {"bool"},
+                      .defaultValues = {overview.visible}}}},
+        lengthSpec(settings::kOverviewWidthPx, "Overview panel width in pixels",
+                   overview.widthPx),
+        lengthSpec(settings::kOverviewHeightPx,
+                   "Overview panel height in pixels", overview.heightPx),
+        lengthSpec(settings::kOverviewLeftPx,
+                   "Gap between the overview and the window's left edge",
+                   overview.leftPx),
+        lengthSpec(settings::kOverviewBottomPx,
+                   "Gap between the overview and the window's bottom edge",
+                   overview.bottomPx),
+        colourSpec(settings::kOverviewBackgroundColour,
+                   "Overview background RGBA hexadecimal colour",
+                   overview.backgroundColour),
+        colourSpec(settings::kOverviewPageColour,
+                   "Overview page RGBA hexadecimal colour",
+                   overview.pageColour),
+        colourSpec(settings::kOverviewViewportColour,
+                   "Overview outline of the camera's view, RGBA hexadecimal",
+                   overview.viewportColour),
+        colourSpec(settings::kOverviewMarkColour,
+                   "Overview marks for chosen link places, RGBA hexadecimal",
+                   overview.markColour),
         {.name    = std::string(settings::kTabBarVisible),
          .notes   = "Visibility of the document tab switcher bar",
          .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {true}}}},
@@ -2384,12 +2446,14 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   }
   const auto model = SystemStoreModel::fromStore(store);
 
-  cfg.columns      = static_cast<std::uint32_t>(model.getInt64(
+  cfg.columns        = static_cast<std::uint32_t>(model.getInt64(
       settings::kColumns, static_cast<std::int64_t>(cfg.columns)));
-  cfg.pageWidthPx  = static_cast<float>(model.getDouble(
+  cfg.pageWidthPx    = static_cast<float>(model.getDouble(
       settings::kPageWidthPx, static_cast<double>(cfg.pageWidthPx)));
-  cfg.pageHeightPx = static_cast<float>(model.getDouble(
+  cfg.pageHeightPx   = static_cast<float>(model.getDouble(
       settings::kPageHeightPx, static_cast<double>(cfg.pageHeightPx)));
+  cfg.readableTextPx = static_cast<float>(model.getDouble(
+      settings::kReadableTextPx, static_cast<double>(cfg.readableTextPx)));
   cfg.transclusionPrisms =
       model.getBool(settings::kTransclusionPrisms, cfg.transclusionPrisms);
   cfg.transclusionLoom =
@@ -2573,6 +2637,26 @@ UIConfig UIConfig::fromStore(const Store &store) {
   cfg.radialMenu.innerRadius = static_cast<float>(
       model.getDouble(settings::kRadialMenuInnerRadius,
                       static_cast<double>(cfg.radialMenu.innerRadius)));
+
+  auto &overview = cfg.overview;
+  overview.visible =
+      model.getBool(settings::kOverviewVisible, overview.visible);
+  const auto overviewLength = [&model](std::string_view name, float &into) {
+    into = static_cast<float>(model.getDouble(name, double{into}));
+  };
+  const auto overviewColour = [&model](std::string_view name,
+                                       std::uint32_t &into) {
+    into = static_cast<std::uint32_t>(model.getInt64(name, std::int64_t{into}));
+  };
+  overviewLength(settings::kOverviewWidthPx, overview.widthPx);
+  overviewLength(settings::kOverviewHeightPx, overview.heightPx);
+  overviewLength(settings::kOverviewLeftPx, overview.leftPx);
+  overviewLength(settings::kOverviewBottomPx, overview.bottomPx);
+  overviewColour(settings::kOverviewBackgroundColour,
+                 overview.backgroundColour);
+  overviewColour(settings::kOverviewPageColour, overview.pageColour);
+  overviewColour(settings::kOverviewViewportColour, overview.viewportColour);
+  overviewColour(settings::kOverviewMarkColour, overview.markColour);
 
   auto &panel       = cfg.linkPanel;
   panel.font        = model.getString(settings::kLinkPanelFont, panel.font);

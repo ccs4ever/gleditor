@@ -1064,9 +1064,26 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     const float zFit       = std::max(spanH / (2.0F * tanHalfFov),
                                       spanW / (2.0F * aspect * tanHalfFov));
 
-    const glm::vec3 newCameraPos(
-        center.x, center.y,
-        std::clamp(zFit, minCameraDistance, maxCameraDistance));
+    float distance    = std::clamp(zFit, minCameraDistance, maxCameraDistance);
+    glm::vec3 looking = center;
+    // Reading before fitting: when both documents fit only at a distance
+    // where their text is too small to read, stay at the reading distance and
+    // look at the seam the beams cross, level with the passage the link was
+    // followed from. The overview panel shows the rest of the arrangement.
+    if (const auto readable = readableCameraDistance(
+            fromAnchor.height * Doc::pixelsToWorld,
+            static_cast<float>(view.screenHeight), view.fov, readableTextPx_);
+        readable && *readable < distance) {
+      const float nearX   = docSlots[fromDocIdx];
+      const bool farRight = target.x >= nearX;
+      const float nearEdge =
+          farRight ? nearX + nearHalfWidth : nearX - nearHalfWidth;
+      const float farEdge =
+          farRight ? target.x - farHalfWidth : target.x + farHalfWidth;
+      looking  = glm::vec3(0.5F * (nearEdge + farEdge), nearAt->y, 0.0F);
+      distance = std::max(*readable, minCameraDistance);
+    }
+    const glm::vec3 newCameraPos(looking.x, looking.y, distance);
     // Seeded from where the camera actually is, then ramped like a document
     // move (Doc::animateMoveTo): a direct assignment here would make the
     // camera jump to every new framing target instantly while every document

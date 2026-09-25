@@ -55,6 +55,7 @@
 #include "xudu/beams.hpp"
 #include "xudu/collaborator_overlay.hpp"
 #include "xudu/core/config.hpp"
+#include "xudu/core/framing.hpp"
 #include "xudu/core/kinetic_tether.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
@@ -71,6 +72,7 @@
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/link_context.hpp"
 #include "xudu/link_panel_overlay.hpp"
+#include "xudu/overview_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
@@ -269,7 +271,59 @@ public:
     documentDesc_ = documentPipeline;
   }
 
-  void drawFrame(gleditor::FrameContext & /*ctx*/) override {}
+  void drawFrame(gleditor::FrameContext &ctx) override { frameForReading(ctx); }
+
+  /// See settings::kReadableTextPx.
+  void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
+
+  /**
+   * @brief Put the camera where the first page's text reads at
+   *        readableTextPx, once, as soon as that page and its first line
+   *        exist.
+   *
+   * The camera used to start at a fixed distance that fitted a whole page into
+   * the window, which drew body text about six pixels tall: an overview
+   * nobody could read, standing in for the reading view. Reading is the
+   * default now; the overview panel shows the whole scene. Only the first
+   * framing is taken, so a reader who zooms keeps their zoom.
+   */
+  void frameForReading(const gleditor::FrameContext &ctx) {
+    if (readingFramed_ || readableTextPx_ <= 0.0F || ctx.state.docs.empty() ||
+        !ctx.state.docs.front()) {
+      return;
+    }
+    const auto &doc      = *ctx.state.docs.front();
+    const auto frame     = doc.pageFrame(0);
+    const auto firstLine = doc.anchorFor(0);
+    if (!frame || !firstLine) {
+      return;
+    }
+    const float toWorld = glm::length(glm::vec3(frame->localToWorld[1]));
+    std::scoped_lock locker(state->view);
+    auto &view          = state->view;
+    const auto distance = xudu::readableCameraDistance(
+        firstLine->height * toWorld, static_cast<float>(view.screenHeight),
+        view.fov, readableTextPx_);
+    if (!distance || view.screenWidth <= 0) {
+      return;
+    }
+    const glm::vec3 topLeft(frame->localToWorld *
+                            glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
+    const glm::vec3 topRight(frame->localToWorld * glm::vec4(frame->rightPx,
+                                                             frame->topPx, 0.0F,
+                                                             1.0F));
+    const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+    const float halfW = halfH * static_cast<float>(view.screenWidth) /
+                        static_cast<float>(view.screenHeight);
+    // Centred when the page fits across the view, from its left edge when
+    // it does not -- a line is read from its start. The page's top at the
+    // view's top either way, so reading starts where the text does.
+    const float x  = topRight.x - topLeft.x <= 2.0F * halfW
+                         ? 0.5F * (topLeft.x + topRight.x)
+                         : topLeft.x + halfW;
+    view.pos       = glm::vec3(x, topLeft.y - halfH, topLeft.z + *distance);
+    readingFramed_ = true;
+  }
 
   /// The audio/video widget attached at @p docOffset within @p doc, as an
   /// anchor a beam can use directly -- see MediaWidget::rectFor(), which
@@ -1510,6 +1564,8 @@ private:
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
+  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  bool readingFramed_{false};
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -1920,6 +1976,11 @@ int main(const int argc, char **argv) {
       .implicit_value(true);
   parser.add_argument("--no-sworph")
       .help("do not let a link coming into view bring its far document over")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--whole-pages")
+      .help("frame whole pages, and fit linked documents together, rather than "
+            "framing for reading")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--map")
@@ -2645,8 +2706,50 @@ int main(const int argc, char **argv) {
         });
     links.setLinkContext(&linkContext);
     xudu::LinkPanelOverlay linkPanel(linkContext, *session);
+    xudu::OverviewOverlay overview(state);
+    // The selected link's chosen places, marked on the overview so a reader
+    // at reading zoom can see where the other end of what they chose lies.
+    const auto chosenPlaces = [&linkContext](const RenderState &rState,
+                                             std::vector<glm::vec3> &out) {
+      const auto selected = linkContext.selection();
+      if (!selected || !selected->occurrences) {
+        return;
+      }
+      for (const auto side :
+           {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
+        const auto &cursor = selected->cursor(side);
+        if (!cursor.member || !cursor.occurrence) {
+          continue;
+        }
+        const auto &site = selected->occurrences->members(side)[*cursor.member]
+                               .occurrences[*cursor.occurrence]
+                               .site;
+        const auto *const at = std::get_if<xanadu::DocumentSite>(&site);
+        const auto view      = at ? linkContext.viewIndexOf(*at) : std::nullopt;
+        if (!view || *view >= rState.docs.size() || !rState.docs[*view]) {
+          continue;
+        }
+        const auto &doc = *rState.docs[*view];
+        if (const auto anchor = doc.anchorFor(at->range.start)) {
+          if (const auto point =
+                  doc.worldPoint(anchor->pageIndex, anchor->x, anchor->y)) {
+            out.push_back(*point);
+          }
+        }
+      }
+    };
+    overview.setMarkSource(chosenPlaces,
+                           [&linkContext] { return linkContext.revision(); });
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
+    // Whole-page framing is readableTextPx zero, and the flag outranks the
+    // layout setting wherever that is applied.
+    const bool wholePages = parser["--whole-pages"] == true;
+    const auto readablePx = [wholePages](const float configured) {
+      return wholePages ? 0.0F : configured;
+    };
+    views.setReadableTextPx(readablePx(xudu::LayoutConfig{}.readableTextPx));
+    links.setReadableTextPx(readablePx(xudu::LayoutConfig{}.readableTextPx));
     if (parser["--physics"] == true || parser["--tension-layout"] == true) {
       links.setPhysicsEnabled(true);
     }
@@ -2737,6 +2840,17 @@ int main(const int argc, char **argv) {
         });
     linkContext.setCellFocusQuery(
         [&zigzagPresentation] { return zigzagPresentation->focusCell(); });
+    overview.setMarkSource(
+        [chosenPlaces, &zigzagPresentation](const RenderState &rState,
+                                            std::vector<glm::vec3> &out) {
+          chosenPlaces(rState, out);
+          if (const auto centre = zigzagPresentation->focusCentre()) {
+            out.push_back(*centre);
+          }
+        },
+        [&linkContext, &zigzagPresentation] {
+          return linkContext.revision() + zigzagPresentation->bridgeRevision();
+        });
     linkPanel.setCellHighlighter(
         [&zigzagPresentation](std::vector<xanadu::CellHighlight> highlights,
                               const std::uint32_t border) {
@@ -2783,6 +2897,8 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&linkPanel);
     renderer->addSpanDecorator(&linkPanel);
     renderer->addPickObserver(&linkPanel);
+    renderer->addFrameContributor(&overview);
+    renderer->addPickObserver(&overview);
     renderer->addFrameContributor(radialMenu.get());
 
     state->accessibility->addSource(docSwitcher.get());
@@ -3186,6 +3302,12 @@ int main(const int argc, char **argv) {
     bindCommands(app, state, views, map, links, linkContext, *session,
                  radialMenu, renderer, pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapOverviewToggle),
+        "show or hide the overview of every open page", [&renderer, &overview] {
+          renderer->runWithState(
+              [&overview](RenderState &) { overview.toggle(); });
+        });
 #ifdef XUZZ_BUILD
     app.commands().registerAction(
         std::string(xanadu::settings::kKeymapZigzagTogglePalette),
@@ -3249,7 +3371,8 @@ int main(const int argc, char **argv) {
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     session->setSystemDocChangedCallback(
-        [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel
+        [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
+         &views, &overview, readablePx
 #ifdef XUZZ_BUILD
          ,
          &zigzagPresentation, &bridgeCoordinator
@@ -3289,6 +3412,8 @@ int main(const int argc, char **argv) {
           }
           case xudu::SystemDocKind::Layout: {
             const auto layout = xudu::LayoutConfig::fromStore(store);
+            views.setReadableTextPx(readablePx(layout.readableTextPx));
+            links.setReadableTextPx(readablePx(layout.readableTextPx));
             links.setVisible(layout.xanalinkRibbons);
             links.setBeamConfig(layout.beams);
             links.tensionEngine().setParams(layout.physics.toTensionParams());
@@ -3305,6 +3430,7 @@ int main(const int argc, char **argv) {
             const auto uiCfg = xudu::UIConfig::fromStore(store);
             radialMenu->setConfig(uiCfg.radialMenu);
             linkPanel.setConfig(uiCfg.linkPanel);
+            overview.setConfig(uiCfg.overview);
             docSwitcher->setVisible(uiCfg.tabBarVisible);
             map.setVisible(uiCfg.hypertimeMapVisible);
             break;
@@ -3333,6 +3459,7 @@ int main(const int argc, char **argv) {
         const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
         radialMenu->setConfig(uiCfg.radialMenu);
         linkPanel.setConfig(uiCfg.linkPanel);
+        overview.setConfig(uiCfg.overview);
         docSwitcher->setVisible(uiCfg.tabBarVisible);
         map.setVisible(uiCfg.hypertimeMapVisible);
       }
@@ -3340,6 +3467,8 @@ int main(const int argc, char **argv) {
       const auto &loStore = session->store(loIdx);
       if (loStore.opCount() > 0) {
         const auto loCfg = xudu::LayoutConfig::fromStore(loStore);
+        views.setReadableTextPx(readablePx(loCfg.readableTextPx));
+        links.setReadableTextPx(readablePx(loCfg.readableTextPx));
         links.setVisible(loCfg.xanalinkRibbons);
         links.setBeamConfig(loCfg.beams);
         links.tensionEngine().setParams(loCfg.physics.toTensionParams());
