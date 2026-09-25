@@ -842,6 +842,34 @@ public:
     return scrollRegistry_.placeholderForExtern(ref);
   }
 
+  struct AppendedPouchItem {
+    MicroversionId version;
+    zigzag::CellRef itemCell{zigzag::noCell};
+  };
+
+  /**
+   * @brief Append a pouch item cell with @p content onto @p zone's d.items rank
+   * (§5.8).
+   */
+  [[nodiscard]] AppendedPouchItem
+  appendPouchItemWithRef(const MicroversionId &parent, zigzag::CellRef zone,
+                         const PrimediaSpan &content,
+                         const PouchOrigin &origin     = {},
+                         const zigzag::Manifold *known = nullptr);
+
+  [[nodiscard]] MicroversionId
+  appendPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
+                  const PrimediaSpan &content, const PouchOrigin &origin = {},
+                  const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Dismiss a pouch item from @p zone's d.items onto d.dismissed (§5.8).
+   */
+  [[nodiscard]] MicroversionId
+  dismissPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
+                   zigzag::CellRef item,
+                   const zigzag::Manifold *known = nullptr);
+
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);
 

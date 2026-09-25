@@ -2512,6 +2512,7 @@ PouchConfig PouchConfig::fromStore(const Store &store) {
     if (s.name.starts_with("zone.")) {
       DropZoneSpec spec;
       spec.id    = s.name.substr(5);
+      spec.cell  = s.nameCell;
       spec.label = s.value.asString(0, spec.id);
       if (s.value.elements.size() > 1) {
         spec.auraColor = static_cast<std::uint32_t>(s.value.asInt64(1));
@@ -2524,25 +2525,60 @@ PouchConfig PouchConfig::fromStore(const Store &store) {
   }
   if (cfg.zones.empty()) {
     cfg.zones = {
-        DropZoneSpec{.id           = "to_link_left",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "to_link_left",
                      .label        = "To Link (Left)",
                      .auraColor    = 0x06B6D4FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "to_link_right",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "to_link_right",
                      .label        = "To Link (Right)",
                      .auraColor    = 0xEC4899FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "notes",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "notes",
                      .label        = "Notes",
                      .auraColor    = 0xEAB308FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "scratch",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "scratch",
                      .label        = "Scratch",
                      .auraColor    = 0x10B981FFU,
                      .heightWeight = 1.0F},
     };
   }
   return cfg;
+}
+
+MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
+                            const DropZoneSpec &spec,
+                            zigzag::CellRef *const cellOut) {
+  auto cur = parent.isZero() ? store.primaryCurrentVersion() : parent;
+  if (store.homeCell() == zigzag::noCell) {
+    cur = store.sliceGenesis(cur);
+  }
+  SettingSpec sspec{
+      .name    = "zone." + spec.id,
+      .notes   = spec.label + " drop zone",
+      .schemas = {{.expectedTypes = {"string", "integer", "float"},
+                   .defaultValues = {spec.label,
+                                     static_cast<std::int64_t>(spec.auraColor),
+                                     static_cast<double>(spec.heightWeight)}}},
+  };
+  cur = ensureSetting(store, cur, sspec, nullptr);
+  if (cellOut != nullptr) {
+    const auto m       = store.rebuildManifold(cur);
+    const auto &reader = static_cast<const SpanReader &>(store);
+    const auto varsDim = m.dimensionNamed(kDimVars, reader);
+    if (varsDim) {
+      if (const auto c =
+              cellNamed(zigzag::rankAfter(m, store.homeCell(), *varsDim), m,
+                        sspec.name, reader)) {
+        *cellOut = *c;
+      }
+    }
+  }
+  return cur;
 }
 
 } // namespace xanadu

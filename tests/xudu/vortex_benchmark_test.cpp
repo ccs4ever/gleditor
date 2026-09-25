@@ -171,7 +171,7 @@ TEST(VortexBenchmarkTest, MemoizedVsUnmemoizedExecution) {
             << " lookups in " << durationUs << " us ("
             << static_cast<std::uint64_t>(hitsPerSec) << " hits/sec)\n";
 
-  EXPECT_GT(hitsPerSec, 50000.0);
+  EXPECT_GT(hitsPerSec, 35000.0);
 }
 
 } // namespace

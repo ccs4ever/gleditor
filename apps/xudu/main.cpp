@@ -2823,14 +2823,19 @@ int main(const int argc, char **argv) {
                   static_cast<float>(state->view.screenHeight - my);
 
               TetherPayload payload{
-                  .span            = spans.front(),
-                  .previewText     = std::move(preview),
-                  .originVersion   = openView.version,
-                  .originDocIndex  = docIdx,
-                  .originCharStart = selStart,
-                  .originCharEnd   = selEnd,
-                  .originScreenPos = glm::vec2(screenX, screenY),
-                  .originKind      = PouchOriginKind::Document,
+                  .span             = spans.front(),
+                  .previewText      = std::move(preview),
+                  .originVersion    = openView.version,
+                  .originDocIndex   = docIdx,
+                  .originCharStart  = selStart,
+                  .originCharEnd    = selEnd,
+                  .originScreenPos  = glm::vec2(screenX, screenY),
+                  .originKind       = PouchOriginKind::Document,
+                  .originCell       = 0,
+                  .originSliceIndex = 0,
+                  .originRankCoord  = {},
+                  .originOpRef      = std::nullopt,
+                  .originDocState   = std::nullopt,
               };
 
               if (altHeld) {
@@ -2865,6 +2870,7 @@ int main(const int argc, char **argv) {
               const auto &bridgeStore = session->store(0);
               const auto preview      = manifold.textOf(cellRef, bridgeStore);
               const std::string rankCoord = "d.1: #" + std::to_string(cellRef);
+              std::optional<xanadu::GlobalOpRef> originOpRef;
               TetherPayload payload{
                   .span            = spans.front(),
                   .previewText     = preview,
@@ -2878,6 +2884,8 @@ int main(const int argc, char **argv) {
                   .originCell       = cellRef,
                   .originSliceIndex = 0,
                   .originRankCoord  = rankCoord,
+                  .originOpRef      = originOpRef,
+                  .originDocState   = std::nullopt,
               };
               kineticTetherEngine.startDrag(std::move(payload), screenX,
                                             screenY);
@@ -2933,10 +2941,10 @@ int main(const int argc, char **argv) {
           if (hitZone || hitLeft || hitRight) {
             const auto &payload = kineticTetherEngine.payload();
             if (payload.originKind == PouchOriginKind::ZigzagCell) {
-              pouchDrawer.handleCellDrop(payload.span, payload.previewText,
-                                         payload.originCell,
-                                         payload.originRankCoord, screenX,
-                                         screenY, payload.originSliceIndex);
+              pouchDrawer.handleCellDrop(
+                  payload.span, payload.previewText, payload.originCell,
+                  payload.originRankCoord, screenX, screenY,
+                  payload.originSliceIndex, payload.originOpRef);
             } else {
               pouchDrawer.handleGhostDrop(
                   payload.span, payload.previewText, payload.originVersion,

@@ -834,6 +834,7 @@ struct UIConfig {
 };
 
 struct DropZoneSpec {
+  zigzag::CellRef cell{zigzag::noCell};
   std::string id;
   std::string label{"Notes"};
   std::uint32_t auraColor{0x06B6D4FFU};
@@ -845,6 +846,13 @@ struct PouchConfig {
 
   [[nodiscard]] static PouchConfig fromStore(const Store &store);
 };
+
+/**
+ * @brief Add or ensure a drop zone setting on d.vars in a system store (§5.8).
+ */
+MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
+                            const DropZoneSpec &spec,
+                            zigzag::CellRef *cellOut = nullptr);
 
 } // namespace xanadu
 

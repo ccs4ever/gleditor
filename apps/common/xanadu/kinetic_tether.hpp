@@ -47,6 +47,9 @@ struct TetherPayload {
   std::uint32_t originCell{0};
   std::uint32_t originSliceIndex{0};
   std::string originRankCoord;
+
+  std::optional<GlobalOpRef> originOpRef;
+  std::optional<GlobalDocumentState> originDocState;
 };
 
 /**
