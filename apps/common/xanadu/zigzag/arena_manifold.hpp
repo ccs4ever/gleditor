@@ -327,6 +327,10 @@ public:
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
 
+  /// Resolves the arena dimension bound to @p foreignDim in @p space.
+  [[nodiscard]] DimRef arenaDimFor(std::uint32_t space,
+                                   DimRef foreignDim) const noexcept;
+
   /// Explicitly bind @p arenaDim to @p foreignDim in @p space.
   void
   bindDimension(DimRef arenaDim, std::uint32_t space, DimRef foreignDim,

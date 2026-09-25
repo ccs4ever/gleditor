@@ -536,6 +536,24 @@ DimRef ArenaManifold::dimIn(const std::uint32_t space,
   return noCell;
 }
 
+DimRef ArenaManifold::arenaDimFor(const std::uint32_t space,
+                                  const DimRef foreignDim) const noexcept {
+  if (foreignDim == noCell) {
+    return noCell;
+  }
+  for (const auto &[arenaDim, bSet] : boundDimensions_) {
+    for (const auto &member : bSet.members) {
+      if ((space == 0 || member.space == space) && member.dim == foreignDim) {
+        return arenaDim;
+      }
+    }
+  }
+  if (space == 0 && boundDimensions_.contains(foreignDim)) {
+    return foreignDim;
+  }
+  return noCell;
+}
+
 void ArenaManifold::bindDimension(const DimRef arenaDim,
                                   const std::uint32_t space,
                                   const DimRef foreignDim,

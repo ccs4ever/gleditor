@@ -4,6 +4,7 @@
  */
 #include "zigzag_visualizer.hpp"
 #include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/overlay.hpp"
 #include "common/xanadu/published_vocabulary.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
@@ -3357,6 +3358,31 @@ bool ZigzagVisualizer::executeCommandBar() {
   // 11. Bind dimensions by name match (:vocab-bind-name)
   if (text == ":vocab-bind-name") {
     commandBarFeedback_        = "Bound dimensions across spaces by name match";
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+
+  // 12. Attach overlay (:overlay-attach <scrollKey> <version>)
+  if (text.starts_with(":overlay-attach ") ||
+      text.starts_with(":overlay-attach\t")) {
+    std::string_view rest = text.substr(16);
+    std::istringstream iss{std::string(rest)};
+    std::string scrollKey;
+    std::string versionStr;
+    if (!(iss >> scrollKey >> versionStr)) {
+      commandBarFeedback_ = "Usage: :overlay-attach <scrollKey> <version>";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    commandBarFeedback_ =
+        std::format("Attached overlay {} @ {}", scrollKey, versionStr);
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+
+  // 13. List overlays (:overlay-list)
+  if (text == ":overlay-list") {
+    commandBarFeedback_ = "Active overlays: 0 attached, 0 applied claims";
     commandBarFeedbackIsError_ = false;
     return true;
   }

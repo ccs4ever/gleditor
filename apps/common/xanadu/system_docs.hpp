@@ -107,18 +107,20 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 class Store;
 
 // Standardized dimensional constants for system store cell geometry:
-inline constexpr std::string_view kDimDims       = "d.dims";
-inline constexpr std::string_view kDimVars       = "d.vars";
-inline constexpr std::string_view kDimValues     = "d.values";
-inline constexpr std::string_view kDimGroups     = "d.groups";
-inline constexpr std::string_view kDimSubgroups  = "d.subgroups";
-inline constexpr std::string_view kDimClone      = "d.clone";
-inline constexpr std::string_view kDimNotes      = "d.notes";
-inline constexpr std::string_view kDimAlias      = "d.alias";
-inline constexpr std::string_view kDimVocab      = "d.vocab";
-inline constexpr std::string_view kDimSchemas    = "d.schemas";
-inline constexpr std::string_view kDimAlternates = "d.alternates";
-inline constexpr std::string_view kDimDefault    = "d.default";
+inline constexpr std::string_view kDimDims           = "d.dims";
+inline constexpr std::string_view kDimVars           = "d.vars";
+inline constexpr std::string_view kDimValues         = "d.values";
+inline constexpr std::string_view kDimGroups         = "d.groups";
+inline constexpr std::string_view kDimSubgroups      = "d.subgroups";
+inline constexpr std::string_view kDimClone          = "d.clone";
+inline constexpr std::string_view kDimNotes          = "d.notes";
+inline constexpr std::string_view kDimAlias          = "d.alias";
+inline constexpr std::string_view kDimVocab          = "d.vocab";
+inline constexpr std::string_view kDimOverlayTargets = "d.overlay-targets";
+inline constexpr std::string_view kDimOverlayClaims  = "d.overlay-claims";
+inline constexpr std::string_view kDimSchemas        = "d.schemas";
+inline constexpr std::string_view kDimAlternates     = "d.alternates";
+inline constexpr std::string_view kDimDefault        = "d.default";
 
 namespace settings {
 // Layout
