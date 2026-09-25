@@ -217,6 +217,11 @@ enum class NavigationError : std::uint8_t {
   NoCandidates,
 };
 
+/// @p error's name, for diagnostics.
+[[nodiscard]] std::string_view name(NavigationError error) noexcept;
+/// The name of the command @p command holds, for diagnostics.
+[[nodiscard]] std::string_view name(const NavigationCommand &command) noexcept;
+
 /// Ask the host to resolve @p key and hand the result to supply().
 struct ResolveRequest {
   LinkKey key;

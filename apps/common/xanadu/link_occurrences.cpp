@@ -4,6 +4,8 @@
  */
 #include "common/xanadu/link_occurrences.hpp"
 
+#include <algorithm>
+
 #include <gleditor/logging.hpp>
 
 #include "common/xanadu/store.hpp"
@@ -57,6 +59,43 @@ std::vector<PieceMatch> exactOccurrences(std::span<const PrimediaSpan> pieces,
                    .coverage = whole ? Coverage::Full : Coverage::Partial});
   }
   return matches;
+}
+
+std::vector<Extent> contentOccurrences(std::span<const PrimediaSpan> pieces,
+                                       std::span<const PrimediaSpan> content) {
+  if (content.empty()) {
+    return {};
+  }
+  // Each span's full matches, so the chain below is a lookup per link rather
+  // than a rescan of the pieces.
+  std::vector<std::vector<Extent>> whole;
+  whole.reserve(content.size());
+  for (const auto &span : content) {
+    auto &starts = whole.emplace_back();
+    for (const auto &match : exactOccurrences(pieces, span)) {
+      if (Coverage::Full == match.coverage) {
+        starts.push_back(match.range);
+      }
+    }
+  }
+
+  std::vector<Extent> found;
+  for (const auto &first : whole.front()) {
+    Extent run   = first;
+    bool chained = true;
+    for (std::size_t next = 1; next < whole.size() && chained; ++next) {
+      const auto follows =
+          std::ranges::find(whole[next], run.end, &Extent::start);
+      chained = whole[next].end() != follows;
+      if (chained) {
+        run.end = follows->end;
+      }
+    }
+    if (chained) {
+      found.push_back(run);
+    }
+  }
+  return found;
 }
 
 namespace {

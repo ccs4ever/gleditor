@@ -78,6 +78,18 @@ struct PieceMatch {
 exactOccurrences(std::span<const PrimediaSpan> pieces,
                  const PrimediaSpan &member);
 
+/**
+ * @brief Everywhere the whole of @p content -- a cell's run of spans, in
+ *        order -- appears among @p pieces.
+ *
+ * Every span must be matched in full and each must carry straight on from
+ * the one before, so a document quoting only part of a cell, or its spans in
+ * another order, is not a place the cell's content appears.
+ */
+[[nodiscard]] std::vector<Extent>
+contentOccurrences(std::span<const PrimediaSpan> pieces,
+                   std::span<const PrimediaSpan> content);
+
 /// A member manifested in one state of a document.
 struct DocumentSite {
   DocumentId store;

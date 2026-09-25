@@ -62,15 +62,13 @@ void BridgeCoordinator::activateCell(const zigzag::CellRef cell) {
   if (surface_ == nullptr) {
     return;
   }
-  const auto &manifold = surface_->manifold();
-  const auto spans     = manifold.contentOf(cell);
-  PrimediaSpan primarySpan{};
-  if (!spans.empty()) {
-    primarySpan = spans.front();
-  }
   if (documentFocusHandler_) {
-    documentFocusHandler_(cell, primarySpan);
+    documentFocusHandler_(cell, surface_->manifold().contentOf(cell));
   }
+}
+
+const zigzag::Manifold *BridgeCoordinator::manifold() const noexcept {
+  return surface_ != nullptr ? &surface_->manifold() : nullptr;
 }
 
 bool BridgeCoordinator::isCellLocked(

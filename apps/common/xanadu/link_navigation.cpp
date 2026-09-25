@@ -468,6 +468,53 @@ NavigationResult LinkNavigator::dismiss() {
   return NavigationEffect{.dismissed = had};
 }
 
+std::string_view name(const NavigationError error) noexcept {
+  switch (error) {
+  case NavigationError::NoLinkSelected:
+    return "no link selected";
+  case NavigationError::LinkPending:
+    return "link still resolving";
+  case NavigationError::MemberOutOfRange:
+    return "no such member";
+  case NavigationError::OccurrenceOutOfRange:
+    return "no such occurrence";
+  case NavigationError::NoMemberChosen:
+    return "no member chosen";
+  case NavigationError::NoOccurrenceChosen:
+    return "no occurrence chosen";
+  case NavigationError::MemberNotInView:
+    return "member not in view";
+  case NavigationError::StaleGeneration:
+    return "stale resolution";
+  case NavigationError::LinkNotFound:
+    return "link not found";
+  case NavigationError::NoOrigin:
+    return "no origin";
+  case NavigationError::NoPreviousVisit:
+    return "no previous visit";
+  case NavigationError::NoCandidates:
+    return "no links on screen";
+  }
+  return "unknown";
+}
+
+std::string_view name(const NavigationCommand &command) noexcept {
+  static constexpr std::string_view names[] = {"select link",
+                                               "step link",
+                                               "select member",
+                                               "step member",
+                                               "select occurrence",
+                                               "step occurrence",
+                                               "cross",
+                                               "enter",
+                                               "enter at",
+                                               "activity back",
+                                               "return to origin",
+                                               "dismiss"};
+  static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
+  return names[command.index()];
+}
+
 NavigationCommand commandForPick(const LinkKey &key,
                                  std::optional<OccurrenceSite> hit) {
   return nav::SelectLink{.key = key, .hint = {.hit = std::move(hit)}};

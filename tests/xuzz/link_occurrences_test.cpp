@@ -218,3 +218,26 @@ TEST(LinkOccurrencesTest, UnknownLinkIsRefusedByName) {
   ASSERT_FALSE(resolved.has_value());
   EXPECT_EQ(resolved.error(), xanadu::LinkQueryError::LinkNotFound);
 }
+
+TEST(LinkOccurrencesTest, ContentOccurrencesNeedEverySpanInOrder) {
+  const PrimediaSpan first{.start = 100, .length = 4};
+  const PrimediaSpan second{.start = 300, .length = 2};
+  const std::vector<PrimediaSpan> content{first, second};
+  // The whole content at [0, 6); "first" alone at [7, 11); the two spans
+  // in the wrong order at [12, 18); the whole content again at [18, 24).
+  const std::vector<PrimediaSpan> pieces{first,
+                                         second,
+                                         {.start = 900, .length = 1},
+                                         first,
+                                         {.start = 901, .length = 1},
+                                         second,
+                                         first,
+                                         first,
+                                         second};
+
+  const auto found = xanadu::contentOccurrences(pieces, content);
+
+  EXPECT_EQ(found, (std::vector<Extent>{{.start = 0, .end = 6},
+                                        {.start = 18, .end = 24}}));
+  EXPECT_TRUE(xanadu::contentOccurrences(pieces, {}).empty());
+}
