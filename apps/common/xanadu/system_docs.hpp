@@ -285,6 +285,10 @@ inline constexpr std::string_view kKeymapHypertimeMap =
 inline constexpr std::string_view kKeymapMap        = "std:xudu/map";
 inline constexpr std::string_view kKeymapScrubBack  = "std:xudu/scrub_back";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
+inline constexpr std::string_view kKeymapQuotationToggle =
+    "std:xudu/quotation_toggle";
+inline constexpr std::string_view kKeymapQuotationToggleF9 =
+    "std:xudu/quotation_toggle_f9";
 
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
 inline constexpr std::string_view kKeymapViewModeContent1 =
@@ -570,8 +574,9 @@ public:
   [[nodiscard]] static SystemStoreModel
   fromStore(const Store &store, const MicroversionId &version = {});
 
+  template <typename ManifoldT>
   [[nodiscard]] static SystemStoreModel
-  fromManifold(const zigzag::Manifold &manifold,
+  fromManifold(const ManifoldT &manifold,
                zigzag::CellRef homeCell = zigzag::noCell,
                const SpanReader *reader = nullptr);
 

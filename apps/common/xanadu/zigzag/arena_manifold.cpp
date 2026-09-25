@@ -28,6 +28,30 @@ CellRef ArenaManifold::home() const noexcept {
   return base_ ? base_->home() : noCell;
 }
 
+std::vector<DimRef> ArenaManifold::dimensions() const {
+  std::vector<DimRef> dims;
+  if (base_ != nullptr) {
+    const auto bDims = base_->dimensions();
+    dims.assign(bDims.begin(), bDims.end());
+  }
+  for (const auto &[name, dim] : arenaDims_) {
+    if (std::ranges::find(dims, dim) == dims.end()) {
+      dims.push_back(dim);
+    }
+  }
+  return dims;
+}
+
+std::optional<DimRef>
+ArenaManifold::dimensionNamed(const std::string_view name,
+                              const xanadu::SpanReader &reader) const {
+  const auto d = dimensionNamed(name, &reader);
+  if (d != noCell) {
+    return d;
+  }
+  return std::nullopt;
+}
+
 DimRef ArenaManifold::dimensionNamed(const std::string_view name,
                                      const xanadu::SpanReader *reader) const {
   if (base_ != nullptr) {
@@ -242,6 +266,9 @@ bool ArenaManifold::holdsOwn(const CellRef ref) const noexcept {
 
 std::uint32_t ArenaManifold::attach(Space space) {
   const auto id = static_cast<std::uint32_t>(spaces_.size() + 1);
+  if (space.manifold == nullptr && space.ownedManifold != nullptr) {
+    space.manifold = space.ownedManifold.get();
+  }
   if (base_ == nullptr && space.manifold != nullptr) {
     base_ = space.manifold;
   }
@@ -877,9 +904,9 @@ std::string ArenaManifold::textOf(const CellRef ref,
     if (foreign) {
       const auto s = spaceAt(foreign->space);
       if (s) {
-        const xanadu::SpanReader *useReader = reader;
+        const xanadu::SpanReader *useReader = s->reader;
         if (useReader == nullptr) {
-          useReader = s->reader;
+          useReader = s->store != nullptr ? s->store : reader;
         }
         if (s->manifold != nullptr && useReader != nullptr) {
           return s->manifold->textOf(foreign->index, *useReader);

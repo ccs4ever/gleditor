@@ -16,12 +16,14 @@
 
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/ui/quotation_builder_overlay.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "zigzag_visualizer.hpp"
@@ -123,8 +125,10 @@ std::unique_ptr<xanadu::Store> loadOrCreateKeymapStore() {
   return sysStore;
 }
 
-void bindCommands(gleditor::Application &app, const AppStateRef &state,
-                  const std::shared_ptr<zigzag::ZigzagVisualizer> &viz) {
+void bindCommands(
+    gleditor::Application &app, const AppStateRef &state,
+    const std::shared_ptr<zigzag::ZigzagVisualizer> &viz,
+    const std::shared_ptr<xanadu::QuotationBuilderOverlay> &quotationOverlay) {
   app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
                                 "close the visualizer",
                                 [state] { state->alive = false; });
@@ -362,6 +366,28 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                                         << "Successfully saved ZigZag store.\n";
                                   }
                                 });
+
+  // Quotation Builder Overlay (§5.10)
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggle),
+      "toggle quotation builder dialog", [quotationOverlay] {
+        if (quotationOverlay) {
+          quotationOverlay->toggle();
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggleF9),
+      "toggle quotation builder dialog", [quotationOverlay] {
+        if (quotationOverlay) {
+          quotationOverlay->toggle();
+        }
+      });
+  app.commands().registerAction("op:quote", "toggle quotation builder dialog",
+                                [quotationOverlay] {
+                                  if (quotationOverlay) {
+                                    quotationOverlay->toggle();
+                                  }
+                                });
 }
 
 } // namespace
@@ -464,15 +490,46 @@ int main(const int argc, char **argv) {
       std::cout << "Using built-in sample ZigZag structure\n";
     }
 
+    auto quotationOverlay = std::make_shared<xanadu::QuotationBuilderOverlay>(
+        *viz->store(),
+        viz->engine() ? viz->engine()->head()
+                      : viz->store()->primaryCurrentVersion(),
+        renderer, nullptr, state->defaultFontName,
+        [viz] {
+          std::vector<xanadu::Store *> openStores;
+          if (viz && viz->store()) {
+            openStores.push_back(viz->store());
+          }
+          return openStores;
+        },
+        [viz](const xanadu::MicroversionId newVersion,
+              const zigzag::CellRef quotationCell) {
+          if (viz) {
+            viz->reloadStoreVersion(newVersion, quotationCell);
+          }
+        });
+
+    viz->setOnOpenQuoteBuilder([quotationOverlay] {
+      if (quotationOverlay) {
+        quotationOverlay->toggle();
+      }
+    });
+
     renderer->addFrameContributor(viz.get());
+    renderer->addFrameContributor(quotationOverlay.get());
     renderer->addPickObserver(viz.get());
+    renderer->addPickObserver(quotationOverlay.get());
     state->accessibility->addSource(viz.get());
-    state->modal = viz.get();
+    state->accessibility->addSource(quotationOverlay.get());
+
+    gleditor::CompositeModalInput compositeModal(
+        {viz.get(), quotationOverlay.get()});
+    state->modal = &compositeModal;
 
     gleditor::Application app(state, renderer, backend,
                               "Project Xanadu ZigZag Visualizer");
     app.setTextInputEnabled(false); // Keystrokes map to navigation commands
-    bindCommands(app, state, viz);
+    bindCommands(app, state, viz, quotationOverlay);
 
     auto keymapStore = loadOrCreateKeymapStore();
     if (keymapStore && keymapStore->opCount() > 0) {

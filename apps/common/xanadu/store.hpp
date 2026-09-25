@@ -43,6 +43,7 @@
 #include "binary_ops.hpp"
 #include "common/xanadu/enfilade/chronofilade.hpp"
 #include "common/xanadu/extern_ref.hpp"
+#include "common/xanadu/quoted_structure.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "link_views.hpp"
@@ -912,6 +913,32 @@ public:
       const GlobalDocumentState &newPinnedState,
       std::optional<ExternOpRef> optNewMemberRef = std::nullopt,
       const zigzag::Manifold *known              = nullptr);
+
+  /**
+   * @brief Authored quotation adopting a foreign structure or rank (§5.10).
+   *
+   * Authors Q, links to foreign root placeholder, snapshot state descriptor,
+   * selector cell (and carried dimensions or rank dimension if needed), and
+   * splices Q into local rank at localRankTail preserving any local successor.
+   */
+  [[nodiscard]] AppendedQuotation
+  quote(const MicroversionId &parent, zigzag::CellRef localRankTail,
+        zigzag::DimRef localRankDim, std::string_view label,
+        const GlobalDocumentState &pinnedState, const SelectorSpec &selector,
+        const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Author an override cell shadowing a foreign cell in a quotation
+   * (§5.10 §4).
+   *
+   * Interns placeholder for target, mints override cell O with overrideContent,
+   * links O on d.shadows to the placeholder, and appends O to quotationCell's
+   * d.overrides rank.
+   */
+  [[nodiscard]] MicroversionId overrideQuotedCell(
+      const MicroversionId &parent, zigzag::CellRef quotationCell,
+      const ExternOpRef &foreignTargetRef, std::string_view overrideContent,
+      const zigzag::Manifold *known = nullptr);
 
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);
