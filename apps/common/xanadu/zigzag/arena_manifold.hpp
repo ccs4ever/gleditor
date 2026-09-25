@@ -332,6 +332,14 @@ public:
   bindDimension(DimRef arenaDim, std::uint32_t space, DimRef foreignDim,
                 DimensionBindingMode mode = DimensionBindingMode::Explicit);
 
+  /// Groups dimensions across attached spaces sharing the same published
+  /// GlobalOpRef into BoundDimensionSet with SharedIdentity mode (§5.11 §5).
+  void bindSharedIdentities();
+
+  /// Groups dimensions across attached spaces sharing matching labels
+  /// into BoundDimensionSet with NameMatch mode (§5.11 §5).
+  void bindDimensionsByNameMatch();
+
   [[nodiscard]] gleditor::cpp26::optional<const BoundDimensionSet &>
   boundDimensionSet(DimRef dim) const noexcept;
 

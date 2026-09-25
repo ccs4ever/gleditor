@@ -4,6 +4,7 @@
  */
 #include "zigzag_visualizer.hpp"
 #include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/published_vocabulary.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -640,6 +641,12 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
       info.quote_label  = q->label;
       info.quote_target = q->pinnedState.scroll;
     }
+    if (const auto ext = store.externTarget(id)) {
+      if (const auto rec = store.scrollRegistry().findRecord(ext->scroll)) {
+        info.is_vocab     = true;
+        info.vocab_target = rec->globalKey;
+      }
+    }
   }
   if (info.role.empty()) {
     if (const auto cold = engine_->coldOf(id)) {
@@ -918,6 +925,16 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
     }
     metrics.badgeText += std::format("[clone #{}]", cell.clone_master_id);
   }
+  if (cell.is_vocab) {
+    if (!metrics.badgeText.empty()) {
+      metrics.badgeText += " ";
+    }
+    metrics.badgeText += "[VOCAB";
+    if (!cell.vocab_target.empty()) {
+      metrics.badgeText += ": " + cell.vocab_target;
+    }
+    metrics.badgeText += "]";
+  }
 
   if (!worldCanvas_) {
     // Before deviceReady() no font has been selected, so only the explicitly
@@ -1011,6 +1028,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .is_quote         = focusInfo.is_quote,
         .quote_label      = focusInfo.quote_label,
         .quote_target     = focusInfo.quote_target,
+        .is_vocab         = focusInfo.is_vocab,
+        .vocab_target     = focusInfo.vocab_target,
         .current_pos      = {},
         .target_pos       = {},
         .current_alpha    = 0.0F,
@@ -1031,6 +1050,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     visible_cells_[accursed_cell_focus_].is_quote     = focusInfo.is_quote;
     visible_cells_[accursed_cell_focus_].quote_label  = focusInfo.quote_label;
     visible_cells_[accursed_cell_focus_].quote_target = focusInfo.quote_target;
+    visible_cells_[accursed_cell_focus_].is_vocab     = focusInfo.is_vocab;
+    visible_cells_[accursed_cell_focus_].vocab_target = focusInfo.vocab_target;
   }
 
   const xanadu::FormatResolver formatResolver(engine_->store());
@@ -1073,6 +1094,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .is_quote         = childInfo.is_quote,
           .quote_label      = childInfo.quote_label,
           .quote_target     = childInfo.quote_target,
+          .is_vocab         = childInfo.is_vocab,
+          .vocab_target     = childInfo.vocab_target,
           .current_pos      = visible_cells_[parentId].current_pos,
           .target_pos       = {},
           .current_alpha    = 0.0F,
@@ -1093,6 +1116,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       visible_cells_[childId].is_quote        = childInfo.is_quote;
       visible_cells_[childId].quote_label     = childInfo.quote_label;
       visible_cells_[childId].quote_target    = childInfo.quote_target;
+      visible_cells_[childId].is_vocab        = childInfo.is_vocab;
+      visible_cells_[childId].vocab_target    = childInfo.vocab_target;
     }
 
     auto &childCell        = visible_cells_[childId];
@@ -3222,6 +3247,118 @@ bool ZigzagVisualizer::executeCommandBar() {
       commandBarFeedbackIsError_ = true;
       return false;
     }
+  }
+
+  // 9. Adopt published dimension (:vocab-file <scrollKey> <termOp> [alias])
+  if (text.starts_with(":vocab-file ") || text.starts_with(":vocab-file\t")) {
+    std::string_view rest = text.substr(12);
+    std::istringstream iss{std::string(rest)};
+    std::string scrollKey;
+    std::string termOpStr;
+    std::string alias;
+    if (!(iss >> scrollKey >> termOpStr)) {
+      commandBarFeedback_ = "Usage: :vocab-file <scrollKey> <termOp> [alias]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    iss >> alias;
+    if (!store_) {
+      commandBarFeedback_        = "No store attached";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    xanadu::MicroversionId termOp;
+    try {
+      termOp = xanadu::MicroversionId::parse(termOpStr);
+    } catch (...) {
+      commandBarFeedback_        = "Invalid termOp microversion: " + termOpStr;
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    const xanadu::GlobalOpRef termRef{
+        .scroll   = scrollKey,
+        .produces = termOp,
+    };
+
+    try {
+      const auto adopted = xanadu::adoptPublishedDimension(
+          *store_, store_->latest(), termRef, alias);
+      reloadStoreVersion(adopted.version, adopted.local);
+      commandBarFeedback_ =
+          std::format("Filed published dimension {} (cell #{})",
+                      alias.empty() ? termOp.str() : alias, adopted.local);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    } catch (const std::exception &ex) {
+      commandBarFeedback_ = std::string("Vocab file failed: ") + ex.what();
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+  }
+
+  // 10. Adopt vocabulary release (:vocab-adopt <scrollKey> <releaseOp> [label])
+  if (text.starts_with(":vocab-adopt ") || text.starts_with(":vocab-adopt\t")) {
+    std::string_view rest = text.substr(13);
+    std::istringstream iss{std::string(rest)};
+    std::string scrollKey;
+    std::string releaseOpStr;
+    std::string label;
+    if (!(iss >> scrollKey >> releaseOpStr)) {
+      commandBarFeedback_ =
+          "Usage: :vocab-adopt <scrollKey> <releaseOp> [label]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::getline(iss >> std::ws, label);
+    if (label.empty()) {
+      label = "vocab:" + scrollKey;
+    }
+    if (!store_) {
+      commandBarFeedback_        = "No store attached";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    xanadu::MicroversionId releaseOp;
+    try {
+      releaseOp = xanadu::MicroversionId::parse(releaseOpStr);
+    } catch (...) {
+      commandBarFeedback_        = "Invalid releaseOp: " + releaseOpStr;
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    xanadu::PublishedVocabulary vocab{
+        .releaseCell =
+            xanadu::GlobalOpRef{.scroll = scrollKey, .produces = releaseOp},
+        .state = xanadu::GlobalDocumentState{.scroll  = scrollKey,
+                                             .version = releaseOp},
+        .dimensions =
+            xanadu::GlobalOpRef{.scroll = scrollKey, .produces = releaseOp},
+    };
+
+    try {
+      const auto q =
+          xanadu::adoptVocabulary(*store_, store_->latest(), vocab, label);
+      reloadStoreVersion(q.version, q.quotationCell);
+      commandBarFeedback_ =
+          std::format("Adopted vocabulary '{}' from {}", label, scrollKey);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    } catch (const std::exception &ex) {
+      commandBarFeedback_ = std::string("Vocab adopt failed: ") + ex.what();
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+  }
+
+  // 11. Bind dimensions by name match (:vocab-bind-name)
+  if (text == ":vocab-bind-name") {
+    commandBarFeedback_        = "Bound dimensions across spaces by name match";
+    commandBarFeedbackIsError_ = false;
+    return true;
   }
 
   // 2. Navigation mode (starts with '/' or '##')

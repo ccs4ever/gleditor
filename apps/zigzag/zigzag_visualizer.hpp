@@ -55,6 +55,8 @@ struct RenderStateCell {
   bool is_quote{false};
   std::string quote_label;
   std::string quote_target;
+  bool is_vocab{false};
+  std::string vocab_target;
 
   glm::vec3 current_pos{0.0F, 0.0F, 0.0F};
   glm::vec3 target_pos{0.0F, 0.0F, 0.0F};
@@ -446,6 +448,8 @@ public:
     bool is_quote{false};
     std::string quote_label;
     std::string quote_target;
+    bool is_vocab{false};
+    std::string vocab_target;
   };
 
   [[nodiscard]] CellInfo inspectCell(CellRef id) const;
