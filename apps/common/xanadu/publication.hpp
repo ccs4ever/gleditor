@@ -39,6 +39,7 @@
 #include <string_view>
 #include <vector>
 
+#include "extern_ref.hpp"
 #include "microversion.hpp"
 #include "mutable_link.hpp"
 #include "ops.hpp"
@@ -111,26 +112,10 @@ struct GlobalSpan {
  *
  * What does survive is the name. A microversion is produced by the operation
  * and is derivable from the tree, so the publisher's 2a4 is the reader's 2a4,
- * which is exactly the property historyFromSeal() already relies on and says
- * so in its own comment.
+ * which is exactly the property historyFromSeal() already relies on.
  *
- * The scroll is what stops two documents' names being confused for each other.
- * Every store's op spool is one document's history and "2" means something in
- * each of them, so a name alone is ambiguous the moment a second document is
- * in the room.
+ * GlobalOpRef is defined in extern_ref.hpp.
  */
-struct GlobalOpRef {
-  /// The document's scroll key, spelled as GlobalSpan::scroll is.
-  std::string scroll;
-  /// The state this operation produced, verbatim.
-  MicroversionId produces;
-
-  /// Whether this names nothing, which is what opRefOf() answers for an index
-  /// no operation sits at.
-  [[nodiscard]] bool empty() const { return scroll.empty(); }
-
-  bool operator==(const GlobalOpRef &) const = default;
-};
 
 /// A link with both ends addressed globally. Same shape as Link, which is
 /// addressed for one store.

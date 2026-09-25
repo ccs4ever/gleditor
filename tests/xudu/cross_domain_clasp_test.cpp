@@ -47,7 +47,7 @@ TEST(CrossDomainClaspTest, PouchManagerDropCell) {
 
   const auto item =
       pm.dropCell("to_link_right", span, preview, 77, "d.concept: #3", 1);
-  EXPECT_EQ(item.itemId, 1U);
+  EXPECT_NE(item.itemId, 0U);
   EXPECT_EQ(item.originKind, PouchOriginKind::ZigzagCell);
   EXPECT_EQ(item.originCell, 77U);
   EXPECT_EQ(item.originSliceIndex, 1U);

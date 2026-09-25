@@ -136,12 +136,11 @@ bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
   return false;
 }
 
-bool PouchDrawer::handleCellDrop(const PrimediaSpan &span,
-                                 const std::string &preview,
-                                 const std::uint32_t cellRef,
-                                 const std::string_view rankCoord,
-                                 const float screenX, const float screenY,
-                                 const std::uint32_t sliceIndex) {
+bool PouchDrawer::handleCellDrop(
+    const PrimediaSpan &span, const std::string &preview,
+    const std::uint32_t cellRef, const std::string_view rankCoord,
+    const float screenX, const float screenY, const std::uint32_t sliceIndex,
+    const std::optional<GlobalOpRef> &originOpRef) {
   PouchItem item{
       .itemId           = 0,
       .span             = span,
@@ -155,6 +154,7 @@ bool PouchDrawer::handleCellDrop(const PrimediaSpan &span,
       .originCell       = cellRef,
       .originSliceIndex = sliceIndex,
       .originRankCoord  = std::string(rankCoord),
+      .originOpRef      = originOpRef,
   };
 
   // 1. Check Clasp Forge Homestead (Left) Slot
@@ -172,7 +172,7 @@ bool PouchDrawer::handleCellDrop(const PrimediaSpan &span,
   // 3. Check Partitioned Drop Zones
   if (const auto zone = zoneAt(screenX, screenY)) {
     pouchManager_.dropCell(zone->id(), span, preview, cellRef, rankCoord,
-                           sliceIndex);
+                           sliceIndex, originOpRef);
     return true;
   }
 
