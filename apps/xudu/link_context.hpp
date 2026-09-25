@@ -26,6 +26,7 @@
 #include <gleditor/cpp26.hpp>
 
 #include "common/xanadu/link_navigation.hpp"
+#include "common/xanadu/link_panel.hpp"
 #include "xudu/session.hpp"
 
 namespace zigzag {
@@ -42,8 +43,24 @@ public:
   /// Bring @p cell into focus in the ZigZag presentation.
   using FocusCell =
       std::function<void(zigzag::CellRef cell, xanadu::Extent range)>;
-  /// Where the reader is now, if anywhere a visit can name.
-  using CaretSite = std::function<std::optional<xanadu::OccurrenceSite>()>;
+  /// The caret, as an open view index and a byte offset, when it is showing.
+  struct CaretPosition {
+    std::uint32_t view{};
+    std::uint32_t offset{};
+    bool operator==(const CaretPosition &) const = default;
+  };
+  using CaretQuery = std::function<std::optional<CaretPosition>()>;
+  /// The ZigZag presentation's focused cell, or noCell.
+  using CellFocusQuery = std::function<zigzag::CellRef()>;
+
+  /// What the reading position depends on, as plain values, so a caller can
+  /// tell each frame whether it moved without building the position itself.
+  struct ReadingStamp {
+    std::optional<CaretPosition> caret;
+    zigzag::CellRef cell{zigzag::noCell};
+    std::optional<xanadu::VisitId> visit;
+    bool operator==(const ReadingStamp &) const = default;
+  };
 
   explicit LinkContext(Session &session) : session(session) {}
 
@@ -51,7 +68,10 @@ public:
     focusDocument = std::move(handler);
   }
   void setFocusCell(FocusCell handler) { focusCell = std::move(handler); }
-  void setCaretSite(CaretSite query) { caretSite = std::move(query); }
+  void setCaretQuery(CaretQuery query) { caretQuery = std::move(query); }
+  void setCellFocusQuery(CellFocusQuery query) {
+    cellFocusQuery = std::move(query);
+  }
 
   /// The bridge's manifold, a replay of the primary store, or null outside
   /// xuzz. Every cell in it is searched, so that an endpoint outside the
@@ -83,6 +103,16 @@ public:
   [[nodiscard]] const std::optional<xanadu::Preview> &preview() const noexcept {
     return previewing;
   }
+  [[nodiscard]] ReadingStamp readingStamp() const;
+
+  /**
+   * @brief Where the reader is, for the panel.
+   *
+   * The caret, unless the current visit is a cell, in which case the ZigZag
+   * focus: a reader who entered a cell reads on along its rank.
+   */
+  [[nodiscard]] xanadu::ReadingPosition reading() const;
+
   /// Where the selected link was selected from, if that was anywhere.
   [[nodiscard]] std::optional<xanadu::OccurrenceSite> originSite() const;
 
@@ -101,6 +131,9 @@ private:
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
   resolve(const xanadu::LinkKey &key) const;
   void noteOrigin();
+  [[nodiscard]] std::optional<xanadu::OccurrenceSite> caretSite() const;
+  [[nodiscard]] std::optional<xanadu::OccurrenceSite>
+  cellSite(zigzag::CellRef cell) const;
   void apply(xanadu::NavigationEffect effect);
   void focus(const xanadu::OccurrenceSite &site);
 
@@ -110,7 +143,8 @@ private:
   xanadu::LinkNavigator navigator{activity};
   FocusDocument focusDocument;
   FocusCell focusCell;
-  CaretSite caretSite;
+  CaretQuery caretQuery;
+  CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;
   std::uint64_t changes{};
 };

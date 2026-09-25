@@ -32,30 +32,6 @@ InMemoryActivityLog::find(const VisitId id) const {
 
 namespace {
 
-bool overlaps(const Extent &a, const Extent &b) noexcept {
-  return a.start < b.end && b.start < a.end;
-}
-
-/// Whether @p hit lands inside @p site: same store, state and cell, and
-/// overlapping bytes.
-bool lands(const OccurrenceSite &hit, const OccurrenceSite &site) {
-  return std::visit(
-      [&]<typename Site>(const Site &at) {
-        const auto *const other = std::get_if<Site>(&site);
-        if (nullptr == other || at.store != other->store ||
-            at.version != other->version) {
-          return false;
-        }
-        if constexpr (std::is_same_v<Site, CellSite>) {
-          if (at.cell != other->cell) {
-            return false;
-          }
-        }
-        return overlaps(at.range, other->range);
-      },
-      hit);
-}
-
 /// Step @p at by @p delta through @p count entries, cycling; an unset cursor
 /// steps onto the first entry going forward and the last going back.
 std::uint32_t stepIndex(const std::optional<std::uint32_t> at, const int delta,

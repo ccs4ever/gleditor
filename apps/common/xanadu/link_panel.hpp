@@ -46,15 +46,50 @@ struct PanelLine {
 using SiteNamer =
     gleditor::cpp26::function_ref<std::string(const OccurrenceSite &)>;
 
+/// Where the reader is, for the panel's "reading" line.
+struct ReadingPosition {
+  /// The caret, or the focused cell's content; nothing when neither is known.
+  std::optional<OccurrenceSite> here;
+  /// Whether the reader arrived at the current visit by entering this link,
+  /// which is when moving off its members is worth saying.
+  bool entered{};
+};
+
 /**
- * @brief The panel for @p selected: a heading, one line per side, and where
- *        the selection began.
+ * @brief The panel for @p selected: a heading, one line per side, where the
+ *        reader is relative to the link, and where the selection began.
+ *
+ * The reading line names every member the reader is on. Off all of them it
+ * says "outside the linked range" only after an entry -- a reader who selected
+ * the link from elsewhere is outside it by definition -- and is left out
+ * otherwise.
  *
  * @param origin The origin visit's site, when there is one.
  */
 [[nodiscard]] std::vector<PanelLine>
 linkPanelLines(const SelectedLink &selected,
-               const std::optional<OccurrenceSite> &origin, SiteNamer name);
+               const std::optional<OccurrenceSite> &origin,
+               const ReadingPosition &reading, SiteNamer name);
+
+/// One of the panel's pointer controls: what it says and what it does.
+struct PanelButton {
+  std::string label;
+  NavigationCommand command;
+  /// False when the navigator would refuse the command in this state; drawn
+  /// muted, and still sent if pressed, so the refusal is the navigator's.
+  bool enabled{true};
+
+  bool operator==(const PanelButton &) const = default;
+};
+
+/**
+ * @brief The panel's pointer controls, each the same command a keymap action
+ *        or accessibility action sends.
+ *
+ * @param hasOrigin Whether Return to origin has somewhere to go.
+ */
+[[nodiscard]] std::vector<PanelButton>
+linkPanelButtons(const SelectedLink &selected, bool hasOrigin);
 
 } // namespace xanadu
 

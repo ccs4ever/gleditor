@@ -111,6 +111,16 @@ struct CellSite {
 
 using OccurrenceSite = std::variant<DocumentSite, CellSite>;
 
+/**
+ * @brief Whether @p hit falls on @p site: the same store, state and cell,
+ *        and overlapping bytes.
+ *
+ * An empty @p hit is a caret position, and lands on a site it is inside or at
+ * either end of -- a caret just past the last byte of a passage is still
+ * reading it.
+ */
+[[nodiscard]] bool lands(const OccurrenceSite &hit, const OccurrenceSite &site);
+
 /// One exact place a member appears.
 struct Occurrence {
   OccurrenceSite site;

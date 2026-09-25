@@ -70,10 +70,58 @@ LinkContext::resolve(const xanadu::LinkKey &key) const {
   return xanadu::resolveLinkOccurrences(primary, key.id, documents, cells);
 }
 
-void LinkContext::noteOrigin() {
-  if (!caretSite) {
-    return;
+std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
+  const auto caret = caretQuery ? caretQuery() : std::nullopt;
+  if (!caret || caret->view >= session.views().size()) {
+    return std::nullopt;
   }
+  const auto &view = session.views()[caret->view];
+  return xanadu::DocumentSite{
+      .store   = session.store(view.storeIndex).documentId(),
+      .version = view.version,
+      .range   = {.start = caret->offset, .end = caret->offset}};
+}
+
+std::optional<xanadu::OccurrenceSite>
+LinkContext::cellSite(const zigzag::CellRef cell) const {
+  if (nullptr == manifold || zigzag::noCell == cell) {
+    return std::nullopt;
+  }
+  std::uint32_t length = 0;
+  for (const auto &span : manifold->contentOf(cell)) {
+    length += static_cast<std::uint32_t>(span.length);
+  }
+  const auto &primary = session.store();
+  return xanadu::CellSite{.store   = primary.documentId(),
+                          .version = primary.primaryCurrentVersion(),
+                          .cell    = cell,
+                          .range   = {.start = 0, .end = length}};
+}
+
+LinkContext::ReadingStamp LinkContext::readingStamp() const {
+  return {.caret = caretQuery ? caretQuery() : std::nullopt,
+          .cell  = cellFocusQuery ? cellFocusQuery() : zigzag::noCell,
+          .visit = navigator.currentVisit()};
+}
+
+xanadu::ReadingPosition LinkContext::reading() const {
+  xanadu::ReadingPosition position;
+  const auto current = navigator.currentVisit();
+  const auto visit   = current
+                           ? activity.find(*current)
+                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto selected = navigator.selection();
+  position.entered    = visit && selected &&
+                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                        visit->link && visit->link->key == selected->key;
+  const bool inCell =
+      visit && std::holds_alternative<xanadu::CellSite>(visit->target);
+  position.here =
+      inCell && cellFocusQuery ? cellSite(cellFocusQuery()) : caretSite();
+  return position;
+}
+
+void LinkContext::noteOrigin() {
   const auto here = caretSite();
   if (!here) {
     return;

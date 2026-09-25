@@ -4,6 +4,7 @@
  */
 #include "common/xanadu/link_panel.hpp"
 
+#include <algorithm>
 #include <format>
 
 namespace xanadu {
@@ -55,11 +56,41 @@ PanelLine sideLine(const SelectedLink &selected,
           .active = active};
 }
 
+std::optional<PanelLine> readingLine(const LinkOccurrences &resolved,
+                                     const ReadingPosition &reading) {
+  if (!reading.here) {
+    return std::nullopt;
+  }
+  std::string on;
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    for (const auto &member : resolved.members(side)) {
+      const bool there = std::ranges::any_of(
+          member.occurrences, [&](const Occurrence &occurrence) {
+            return lands(*reading.here, occurrence.site);
+          });
+      if (there) {
+        on += std::format("{}{} member {}", on.empty() ? "" : ", ",
+                          LinkSide::Left == side ? "left" : "right",
+                          member.index + 1);
+      }
+    }
+  }
+  if (!on.empty()) {
+    return PanelLine{.text = "reading: " + on};
+  }
+  if (reading.entered) {
+    return PanelLine{.text = "reading: outside the linked range",
+                     .tone = PanelLine::Tone::Muted};
+  }
+  return std::nullopt;
+}
+
 } // namespace
 
 std::vector<PanelLine>
 linkPanelLines(const SelectedLink &selected,
-               const std::optional<OccurrenceSite> &origin, SiteNamer name) {
+               const std::optional<OccurrenceSite> &origin,
+               const ReadingPosition &reading, SiteNamer name) {
   std::vector<PanelLine> lines;
   if (!selected.occurrences) {
     lines.push_back(
@@ -79,10 +110,45 @@ linkPanelLines(const SelectedLink &selected,
       sideLine(selected, *selected.occurrences, LinkSide::Left, name));
   lines.push_back(
       sideLine(selected, *selected.occurrences, LinkSide::Right, name));
+  if (auto line = readingLine(*selected.occurrences, reading)) {
+    lines.push_back(std::move(*line));
+  }
   lines.push_back(
       {.text = std::format("origin: {}", origin ? name(*origin) : "none"),
        .tone = PanelLine::Tone::Muted});
   return lines;
+}
+
+std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
+                                          const bool hasOrigin) {
+  const bool resolved = selected.occurrences.has_value();
+  const auto &cursor  = selected.cursor(selected.active);
+  const bool places =
+      resolved && cursor.member &&
+      selected.occurrences->members(selected.active)[*cursor.member].inView();
+  return {
+      {.label   = "\u2039 member",
+       .command = nav::StepMember{.delta = -1},
+       .enabled = resolved},
+      {.label   = "member \u203a",
+       .command = nav::StepMember{.delta = 1},
+       .enabled = resolved},
+      {.label   = "\u2039 place",
+       .command = nav::StepOccurrence{.delta = -1},
+       .enabled = places},
+      {.label   = "place \u203a",
+       .command = nav::StepOccurrence{.delta = 1},
+       .enabled = places},
+      {.label = "Cross", .command = nav::Cross{}, .enabled = resolved},
+      {.label   = "Enter",
+       .command = nav::Enter{},
+       .enabled = places && cursor.occurrence.has_value()},
+      {.label   = "Origin",
+       .command = nav::ReturnToOrigin{},
+       .enabled = hasOrigin},
+      {.label = "Back", .command = nav::ActivityBack{}},
+      {.label = "\u00d7", .command = nav::Dismiss{}},
+  };
 }
 
 } // namespace xanadu

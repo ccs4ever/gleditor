@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
@@ -27,6 +28,20 @@ namespace xanadu {
  * anchors and register rendering hooks without including the standalone
  * Zigzag application.
  */
+/**
+ * @brief Part of a cell's content to mark for the selected link, as byte
+ *        offsets into the cell's text.
+ */
+struct CellHighlight {
+  zigzag::CellRef cell{zigzag::noCell};
+  std::uint32_t start{};
+  std::uint32_t end{};
+  /// The chosen occurrence, rather than another of the chosen member's.
+  bool chosen{};
+
+  bool operator==(const CellHighlight &) const = default;
+};
+
 class ZigzagPresentationSurface {
 public:
   using InvalidationCallback   = std::function<void(std::uint64_t revision)>;
@@ -50,6 +65,19 @@ public:
 
   [[nodiscard]] virtual std::optional<CellAnchor>
   cellAnchor(zigzag::CellRef cell) const = 0;
+
+  /**
+   * @brief Mark @p highlights in their cells' text, and outline those cells in
+   *        @p borderColour. Replaces the previous set; an empty one clears it.
+   *
+   * Not pure: a surface that cannot mark text shows the link through the
+   * host's panel alone, which is less but not wrong.
+   */
+  virtual void setCellHighlights(std::vector<CellHighlight> highlights,
+                                 std::uint32_t borderColour) {
+    static_cast<void>(highlights);
+    static_cast<void>(borderColour);
+  }
 
   /**
    * @brief Monotonic presentation revision for host-side cache invalidation.
