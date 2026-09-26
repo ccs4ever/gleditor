@@ -824,6 +824,57 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   EXPECT_THAT(written.output, ::testing::HasSubstr("kept untitled xanadoc"));
 }
 
+// Editing from the keyboard: the audit found no key moved the caret, Return
+// ran a ZigZag action, Backspace needed a selection and typing over one did
+// not replace it. Each step's operation shows where the caret was.
+TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+  const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
+  ASSERT_TRUE(fs::exists(dumpBin)) << "xudu-dump not found at " << dumpBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_caret_keys";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto res = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --chord Ctrl+N --type abc --chord Return --type def"
+      " --chord Up --type 1 --chord Ctrl+End --chord Backspace --chord Home"
+      " --type _ --chord Shift+End --type Z");
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  std::vector<fs::path> untitled;
+  for (const auto &entry :
+       fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+    if (entry.path().filename().string().starts_with("untitled-")) {
+      untitled.push_back(entry.path());
+    }
+  }
+  ASSERT_EQ(untitled.size(), 1U) << res.output;
+  const auto dump = executeProcess(
+      dumpBin.string() + " --section=ops --permascroll=" +
+      (testRoot / "permascroll").string() + " " + untitled.front().string());
+  ASSERT_EQ(dump.exitCode, 0) << dump.output;
+  // "abc\ndef": Up from the end of "def" is the end of "abc".
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=3 [^\n]*text=\"1\""));
+  // Ctrl+End then Backspace: the "f", with nothing selected.
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("kind=delete [^\n]* at=7 len=1"));
+  // Home: the start of the second line.
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=5 [^\n]*text=\"_\""));
+  // Shift+End selects "de" after the "_"; typing replaces it.
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("kind=delete [^\n]* at=6 len=2"));
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""));
+}
+
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;

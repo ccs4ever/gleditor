@@ -459,9 +459,40 @@ inline constexpr std::string_view kKeymapOverviewToggle =
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
-inline constexpr std::string_view kKeymapNewSlice    = "std:xuzz/new_slice";
-inline constexpr std::string_view kKeymapEditCell    = "std:zigzag/edit_cell";
-inline constexpr std::string_view kKeymapMarkCell    = "std:zigzag/mark_cell";
+// Caret movement and editing: the document pane's own keys.
+inline constexpr std::string_view kKeymapCaretLeft  = "std:edit/caret_left";
+inline constexpr std::string_view kKeymapCaretRight = "std:edit/caret_right";
+inline constexpr std::string_view kKeymapCaretUp    = "std:edit/caret_up";
+inline constexpr std::string_view kKeymapCaretDown  = "std:edit/caret_down";
+inline constexpr std::string_view kKeymapCaretWordLeft =
+    "std:edit/caret_word_left";
+inline constexpr std::string_view kKeymapCaretWordRight =
+    "std:edit/caret_word_right";
+inline constexpr std::string_view kKeymapCaretLineStart =
+    "std:edit/caret_line_start";
+inline constexpr std::string_view kKeymapCaretLineEnd =
+    "std:edit/caret_line_end";
+inline constexpr std::string_view kKeymapCaretDocStart =
+    "std:edit/caret_doc_start";
+inline constexpr std::string_view kKeymapCaretDocEnd = "std:edit/caret_doc_end";
+inline constexpr std::string_view kKeymapSelectLeft  = "std:edit/select_left";
+inline constexpr std::string_view kKeymapSelectRight = "std:edit/select_right";
+inline constexpr std::string_view kKeymapSelectUp    = "std:edit/select_up";
+inline constexpr std::string_view kKeymapSelectDown  = "std:edit/select_down";
+inline constexpr std::string_view kKeymapSelectWordLeft =
+    "std:edit/select_word_left";
+inline constexpr std::string_view kKeymapSelectWordRight =
+    "std:edit/select_word_right";
+inline constexpr std::string_view kKeymapSelectLineStart =
+    "std:edit/select_line_start";
+inline constexpr std::string_view kKeymapSelectLineEnd =
+    "std:edit/select_line_end";
+inline constexpr std::string_view kKeymapNewline = "std:edit/newline";
+inline constexpr std::string_view kKeymapDeleteForward =
+    "std:edit/delete_forward";
+inline constexpr std::string_view kKeymapNewSlice = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapEditCell = "std:zigzag/edit_cell";
+inline constexpr std::string_view kKeymapMarkCell = "std:zigzag/mark_cell";
 inline constexpr std::string_view kKeymapLinkMarkedXPos =
     "std:zigzag/link_marked_x_pos";
 inline constexpr std::string_view kKeymapLinkMarkedXNeg =

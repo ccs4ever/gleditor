@@ -23,6 +23,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,7 @@
 #include <gleditor/audio.hpp>
 #include <gleditor/audio_widget.hpp>
 #include <gleditor/caret.hpp>
+#include <gleditor/caret_motion.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
@@ -631,6 +633,45 @@ public:
     bool hasRange{};
   };
 
+  /**
+   * @brief Pan the camera just enough to bring @p offset in @p doc back into
+   *        the middle four fifths of the view, keeping the zoom.
+   */
+  void keepInView(const Doc &doc, const std::uint32_t offset) {
+    const auto anchor = doc.anchorFor(offset);
+    if (!anchor) {
+      return;
+    }
+    const auto found = doc.worldPoint(*anchor);
+    if (!found) {
+      return;
+    }
+    const auto point = *found;
+    std::scoped_lock locker(state->view);
+    auto &view = state->view;
+    if (view.screenHeight <= 0 || view.pos.z <= point.z) {
+      return;
+    }
+    // The central share of the view the caret may sit in before the camera
+    // follows it: enough margin to see what comes next.
+    constexpr float kComfort = 0.8F;
+    const float halfH =
+        (view.pos.z - point.z) * std::tan(glm::radians(view.fov) * 0.5F);
+    const float halfW = halfH * static_cast<float>(view.screenWidth) /
+                        static_cast<float>(view.screenHeight);
+    const auto follow = [kComfort](float &camera, const float at,
+                                   const float half) {
+      const float reach = half * kComfort;
+      if (at > camera + reach) {
+        camera = at - reach;
+      } else if (at < camera - reach) {
+        camera = at + reach;
+      }
+    };
+    follow(view.pos.x, point.x, halfW);
+    follow(view.pos.y, point.y, halfH);
+  }
+
   template <typename Fun> void withCaret(Fun fun) {
     renderer->runWithState([this, fun](RenderState &rState) {
       auto *const caret = renderer->editCaret();
@@ -806,13 +847,63 @@ public:
     });
   }
 
+  /// Backspace: the selection, or the character before the caret.
   void deleteSelection() {
     withCaret([](RenderState &rState, const Where &where, Caret *caret) {
+      auto &doc  = *rState.docs[where.doc];
+      auto start = where.start;
       if (!where.hasRange) {
-        return;
+        start = gleditor::stepCharacter(doc.contents(), where.start, false);
       }
-      rState.docs[where.doc]->erase(rState, where.start,
-                                    where.end - where.start, caret);
+      if (start < where.end) {
+        doc.erase(rState, start, where.end - start, caret);
+      }
+    });
+  }
+
+  /// Delete: the selection, or the character after the caret.
+  void deleteForward() {
+    withCaret([](RenderState &rState, const Where &where, Caret *caret) {
+      auto &doc = *rState.docs[where.doc];
+      auto end  = where.end;
+      if (!where.hasRange) {
+        end = gleditor::stepCharacter(doc.contents(), where.end, true);
+      }
+      if (where.start < end) {
+        doc.erase(rState, where.start, end - where.start, caret);
+      }
+    });
+  }
+
+  /**
+   * @brief Move the caret for a key, extending the selection when
+   *        @p extend, and keep it on screen.
+   *
+   * Without @p extend, Left and Right over a selection collapse it to that
+   * edge rather than stepping from the caret, as every editor does.
+   */
+  void moveCaret(const gleditor::CaretMotion motion, const bool extend) {
+    withCaret([this, motion, extend](RenderState &rState, const Where &where,
+                                     Caret *caret) {
+      const auto &doc = *rState.docs[where.doc];
+      std::uint32_t target{};
+      if (!extend && where.hasRange && gleditor::CaretMotion::Left == motion) {
+        target = where.start;
+      } else if (!extend && where.hasRange &&
+                 gleditor::CaretMotion::Right == motion) {
+        target = where.end;
+      } else {
+        target = gleditor::caretTarget(doc, caret->byteOffset(), motion);
+      }
+      if (extend) {
+        if (!caret->hasSelection()) {
+          caret->anchorSelection();
+        }
+        caret->extendTo(target);
+      } else {
+        caret->placeAt(where.doc, target);
+      }
+      keepInView(doc, target);
     });
   }
 
@@ -1839,6 +1930,61 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().registerAction(std::string(xanadu::settings::kKeymapDelete),
                                 "stop pointing at the selection",
                                 [&views] { views.deleteSelection(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapDeleteForward),
+      "delete the selection or the character after the caret",
+      [&views] { views.deleteForward(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapNewline),
+                                "start a new line at the caret", [state] {
+                                  // The way a typed character goes, so it
+                                  // replaces a selection and meets the same
+                                  // gate: it is typing.
+                                  const std::scoped_lock locker(
+                                      state->typedMutex);
+                                  state->typedText += '\n';
+                                });
+  {
+    using gleditor::CaretMotion;
+    namespace keys = xanadu::settings;
+    const std::tuple<std::string_view, std::string_view, CaretMotion,
+                     const char *>
+        motions[] = {
+            {keys::kKeymapCaretLeft, keys::kKeymapSelectLeft, CaretMotion::Left,
+             "a character left"},
+            {keys::kKeymapCaretRight, keys::kKeymapSelectRight,
+             CaretMotion::Right, "a character right"},
+            {keys::kKeymapCaretUp, keys::kKeymapSelectUp, CaretMotion::Up,
+             "up a line"},
+            {keys::kKeymapCaretDown, keys::kKeymapSelectDown, CaretMotion::Down,
+             "down a line"},
+            {keys::kKeymapCaretWordLeft, keys::kKeymapSelectWordLeft,
+             CaretMotion::WordLeft, "to the previous word"},
+            {keys::kKeymapCaretWordRight, keys::kKeymapSelectWordRight,
+             CaretMotion::WordRight, "to the next word"},
+            {keys::kKeymapCaretLineStart, keys::kKeymapSelectLineStart,
+             CaretMotion::LineStart, "to the start of the line"},
+            {keys::kKeymapCaretLineEnd, keys::kKeymapSelectLineEnd,
+             CaretMotion::LineEnd, "to the end of the line"},
+            {keys::kKeymapCaretDocStart,
+             {},
+             CaretMotion::DocumentStart,
+             "to the start of the document"},
+            {keys::kKeymapCaretDocEnd,
+             {},
+             CaretMotion::DocumentEnd,
+             "to the end of the document"},
+        };
+    for (const auto &[move, select, motion, where] : motions) {
+      app.commands().registerAction(
+          std::string(move), std::string("move the caret ") + where,
+          [&views, motion] { views.moveCaret(motion, false); });
+      if (!select.empty()) {
+        app.commands().registerAction(
+            std::string(select), std::string("extend the selection ") + where,
+            [&views, motion] { views.moveCaret(motion, true); });
+      }
+    }
+  }
   app.commands().registerAction(std::string(xanadu::settings::kKeymapPageBreak),
                                 "insert a page break at the caret position",
                                 [&views] { views.insertPageBreakAtCaret(); });

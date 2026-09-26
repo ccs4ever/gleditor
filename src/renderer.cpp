@@ -827,10 +827,8 @@ void Renderer::advanceScript(RenderState &state) {
                caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
-      // Read before insert() moves the caret past what it is about to place.
-      const auto at  = caret->byteOffset();
       auto &document = *state.docs[caret->documentIndex()];
-      document.insert(state, at, step.text, caret.get());
+      const auto at  = typeAtCaret(state, step.text);
       if (0 != step.decorations && this->state->onDecoratedInsert) {
         this->state->onDecoratedInsert(
             document, at, static_cast<std::uint32_t>(step.text.size()),
@@ -960,8 +958,24 @@ void Renderer::applyTypedText(RenderState &state) {
   if (caret->documentIndex() >= state.docs.size()) {
     return;
   }
-  state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(), typed,
-                                             caret.get());
+  static_cast<void>(typeAtCaret(state, typed));
+}
+
+std::uint32_t Renderer::typeAtCaret(RenderState &state,
+                                    const std::string &text) {
+  auto &document = *state.docs[caret->documentIndex()];
+  // Typing over a selection replaces it, as it does everywhere else: the
+  // selection goes first and the text lands where it began.
+  if (caret->hasSelection()) {
+    const auto start = caret->selectionStart();
+    static_cast<void>(document.erase(
+        state, start, caret->selectionEnd() - start, caret.get()));
+    caret->placeAt(caret->documentIndex(), start);
+  }
+  // Read before insert() moves the caret past what it is about to place.
+  const auto at = caret->byteOffset();
+  document.insert(state, at, text, caret.get());
+  return at;
 }
 
 void Renderer::collectDiagnostics(RenderState &state) {
