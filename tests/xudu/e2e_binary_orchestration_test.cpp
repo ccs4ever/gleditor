@@ -1655,14 +1655,16 @@ TEST(E2EBinaryOrchestrationTest,
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  // Use user-model scripted commands: --select, --do pouch-drop-left, --select,
-  // --do pouch-drop-right, --do forge-clasp, --do save-document
+  // Use user-model scripted commands: --select, --do std:xudu/pouch_drop_left,
+  // --select,
+  // --do std:xudu/pouch_drop_right, --do std:xudu/forge_clasp, --do
+  // save-document
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --version-id " + v0.str() +
-      " --select 0,18 --do pouch-drop-left" +
-      " --select 36,54 --do pouch-drop-right" +
-      " --do forge-clasp --do save-document " + storePath.string();
+      " --select 0,18 --do std:xudu/pouch_drop_left" +
+      " --select 36,54 --do std:xudu/pouch_drop_right" +
+      " --do std:xudu/forge_clasp --do save-document " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "scripted clasp test failed: " << res.output;
