@@ -820,7 +820,11 @@ void Renderer::advanceScript(RenderState &state) {
       finishStepWhenSettled();
       return;
     }
-    if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
+    if (this->state->documentTakesText && !this->state->documentTakesText()) {
+      // The same gate a typed key meets: another pane has the keyboard.
+      std::cerr << "--type while the documents do not have the keyboard\n";
+    } else if (!caret->active() ||
+               caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
       // Read before insert() moves the caret past what it is about to place.

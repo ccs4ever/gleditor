@@ -199,6 +199,10 @@ private:
 [[nodiscard]] std::optional<std::pair<int, Mod>>
 parseKeyCombo(std::string_view combo);
 
+/// A binding written as the keymap writes it, "Ctrl+Shift+N": what a hint on
+/// screen shows, so it names the key the reader's keymap actually has.
+[[nodiscard]] std::string formatKeyCombo(int scancode, Mod mods);
+
 /**
  * @brief Register the options every program built on this library accepts.
  *
