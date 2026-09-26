@@ -15,11 +15,15 @@ selected hypertime version and surface coordinate, which source media contribute
 rules can be supplied by a Slice projection without a separate edit target, keep kind 3 reserved.
 
 `Make(Surface)` would mint a named, persistent coordinate frame. Its op index is the Surface's
-identity; its content span holds its initial local name, as it does for Slice and Xanadoc. A
-`d.alias` annotation could rename it without changing that identity. A Surface may be top-level or
-born inside another structure through the generic Make containment edge. Its coordinates are local
-to its own plane, not document byte offsets, permascroll byte offsets, or screen pixels. The
-viewport, zoom, and pointer focus are reader state and append no operations.
+identity; its content span holds its initial local name, as it does for Slice and Xanadoc. Its axis
+signature is fixed at birth: the initial prototype is `XY`, while `XYZ` and `XYT` are possible later
+signatures. A proposed birth encoding puts the axis signature in `Make(Surface).value` (`0 = XY`,
+`1 = XYZ`, `2 = XYT`) with `ValueKind::None`; other values are refused. Its name remains in the
+span, and no later edit changes the axis signature. A `d.alias` annotation could rename it without
+changing that identity. A Surface may be top-level or born inside another structure through the
+generic Make containment edge. Its coordinates are local to its own frame, not document byte
+offsets, permascroll byte offsets, or screen pixels. The viewport, zoom, and pointer focus are
+reader state and append no operations.
 
 The source media remains in the author's permascroll or a registered external scroll. The Surface
 stores decisions about where that media is shown; it does not rewrite an image whenever the author
@@ -43,6 +47,42 @@ different spatial map; asking for P's history shows the author's decisions witho
 primedia for the unchanged pixels. A later placement Q can quote the same source span and show it
 again at a different size. The two occurrences share source provenance but have distinct placement
 identities and histories.
+
+## A third axis: depth or media time
+
+The same placement idea can select a *range* from a richer source. A spatial `XYZ` Surface can place
+a sub-volume from a scan and transform it into a larger three-dimensional arrangement. An `XYT`
+Surface can place a video interval in a scene, or an audio interval on its time axis. Two branches
+can choose different depth slices or media intervals while referring to the same source blob. The
+Surface's third axis must be typed: spatial depth has length units, while media time has duration
+units. Neither is a `d.created` UTC timestamp; a temporal Surface's zero is local to its own
+arrangement.
+
+| Surface domain | Source selection in a Place                                  | Replay query                                                     |
+| -------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `XY`           | Image crop in intrinsic pixel coordinates                    | At `(x, y)`, ordered image contributors.                         |
+| `XYZ`          | Volume box in intrinsic voxel coordinates                    | At `(x, y, z)`, source voxels and transforms.                    |
+| `XYT`          | Video frame region and time interval, or audio time interval | At `(x, y, t)`, visual contributors; at `t`, audio contributors. |
+
+For example, one branch of an `XYZ` Surface can show source slices `z = [40, 60)` while another
+shows `z = [45, 55)` at the same destination depth. Likewise, an `XYT` Place can map source video
+seconds `[12, 20)` to local seconds `[0, 8)`; a branch can select `[12, 16)` and map it across the
+same destination interval for slower playback. Each result still names the original media span and
+the exact Place birth that made it visible.
+
+The Place operand must declare its source domain and half-open source range, then map that range
+into the Surface's declared domain. Spatial transforms may mix `X`, `Y`, and `Z`. A temporal
+transform maps source media time to destination time with exact rational scale and offset; spatial
+axes do not rotate into time. A Change can alter the selected source range and transform while
+preserving the source media identity and placement birth. Source range selection for compressed
+video or audio needs a decode index; it cannot be implemented by guessing a byte subspan. Audio
+mixing, depth compositing, and effects are separate replay or rendering rules to specify before
+those domains become writable.
+
+This extension also tests the name. If the persistent object becomes a general spatial or
+spatiotemporal field, `Surface` may be too narrow; keep the kind number unallocated until the
+coordinate contract and name are chosen. The two-dimensional raster contract below is the first case
+to prove, not a promise that a depth or time axis is just another layer number.
 
 ## Logical Surface operations
 
@@ -86,10 +126,10 @@ The first milestone admits decoded raster images with finite dimensions. A Place
 - an invertible affine map from those coordinates to local Surface coordinates; and
 - an explicit layer number, with the Place birth's stable microversion name breaking ties.
 
-A Change operand replaces the crop, affine map, and layer together. This is one named edit: replay
-never exposes a half-updated crop or transform. The source span and decoded geometry remain those of
-the Place. Coordinates and affine coefficients require an exact, bounded numeric encoding, not
-host-dependent floating-point serialization. A versioned operand schema should specify rational
+A Change operand replaces the source crop, affine map, and layer together. This is one named edit:
+replay never exposes a half-updated crop or transform. The source span and decoded geometry remain
+those of the Place. Coordinates and affine coefficients require an exact, bounded numeric encoding,
+not host-dependent floating-point serialization. A versioned operand schema should specify rational
 coefficients, half-open boundaries, pixel-center sampling, overflow limits, and rejection of
 singular maps before the wire format is chosen. General warps, masks, blend modes, and vector source
 geometry are later extensions; silently treating them as affine raster placements would change what
@@ -132,6 +172,13 @@ textures are replay caches, never authored Cells or operations. Incremental appl
 with a full ancestral rebuild, including after a fork or a Change that moves a placement across the
 indexed plane.
 
+For a future `XYZ` or `XYT` birth, this fold is still selected by Surface identity and hypertime
+version, but its coverage index has the birth's declared axes. A query supplies a coordinate in
+those axes, inverse-maps through each placement, and returns typed source contributors. The fold
+must not answer a time query with a depth value, or fabricate a pixel result for an audio-only
+placement. A branch-local transform changes only the projection of source samples into that Surface;
+the source stream and its intrinsic coordinates remain fixed.
+
 This contract makes hypertime transforms inspectable: a reader can hold one source region fixed
 while comparing its transformed occurrences at two versions. Undo is selection of an earlier
 version, and an alternate transform is a branch. No operation mutates a prior node or the source
@@ -140,12 +187,12 @@ authored crop, transform, ordering, and source identity must replay identically.
 
 ## Addressability and links
 
-A compressed PNG or JPEG region is generally not a contiguous interval of its encoded bytes. Quoting
-a crop by reusing the whole image's `GlobalSpan` preserves *blob-level* source identity; it does not
-by itself make every pixel a separately addressable primedia span. A Surface occurrence therefore
-needs both the source media span and a decoded source-region coordinate. Link discovery must not
-claim that today's span-only Link endpoint automatically follows an arbitrary pixel rectangle
-through a transform.
+A compressed PNG or JPEG region is generally not a contiguous interval of its encoded bytes. A
+volume box or a video or audio interval may have the same problem. Quoting a crop by reusing the
+whole image's `GlobalSpan` preserves *blob-level* source identity; it does not by itself make every
+pixel a separately addressable primedia span. A Surface occurrence therefore needs both the source
+media span and a decoded source-region coordinate. Link discovery must not claim that today's
+span-only Link endpoint automatically follows an arbitrary pixel rectangle through a transform.
 
 A later media-region endpoint or tile-addressed manifest could make sub-image links precise. It
 would name the source media, a stable intrinsic region, and perhaps the source decoder geometry; the
@@ -170,6 +217,8 @@ The minimum evidence for promotion from vision to implementation plan is:
 - two interleaved Surfaces in one store, each rebuilding only its own placements;
 - forks changing the same placement differently, with replay and incremental results agreeing;
 - crop, translation, scale, and rotation retaining source-span and placement provenance;
+- an exploratory `XYZ` volume box and `XYT` video or audio interval that keep spatial depth and
+  relative media time typed and distinct from UTC annotations;
 - deterministic ordering of overlapping placements before and after export/import renumbers ops;
 - refusal of off-branch targets, wrong-Surface placements, broken context chains, malformed or
   unavailable operands, invalid media geometry, singular transforms, and numeric overflow; and
