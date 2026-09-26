@@ -228,7 +228,7 @@ TEST(XuzzSovereignKeymapTest, SovereignKeymapGovernance) {
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapClose));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapNextDoc));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapPrevDoc));
-  EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapMap));
+  EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapHypertimeMap));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapRadialMenu));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapSworph));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapPublish));

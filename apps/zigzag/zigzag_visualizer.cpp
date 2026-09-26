@@ -1696,15 +1696,15 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   // Right-aligned from the dimensions leftwards, each label only while it
   // still clears the structure name: a narrow window drops the bundle, then
   // the view mode, rather than drawing them over the name and off the edge.
-  const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
-                                    ? "[ View: 📄 Content (1/V) ]"
-                                    : "[ View: 🌐 Topology (2/T) ]";
+  const std::string modeLabel   = (view_mode_ == ViewMode::CellContent)
+                                      ? "[ View: 📄 Content (1/V) ]"
+                                      : "[ View: 🌐 Topology (2/T) ]";
   const std::string bundleLabel = std::format(
       "[ Bundle: {} (Ctrl+1..5) ]", dimensionBundleName(dimension_bundle_));
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
-  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+  float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
   for (const auto &[label, colour] :
        {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
         std::pair{std::cref(modeLabel), 0xF59E0BFFU},

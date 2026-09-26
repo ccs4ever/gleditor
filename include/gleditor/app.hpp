@@ -73,6 +73,16 @@ struct Command {
   /// One line saying what it does.
   std::string help;
   std::function<void()> run;
+  /**
+   * @brief Where the keyboard has to be for the key to reach this command.
+   *
+   * Empty: anywhere. Otherwise only while CommandTable's scope resolver names
+   * this scope -- a pane with keyboard focus -- and then ahead of every
+   * unscoped binding, so a pane can give a key the rest of the program uses
+   * a meaning of its own: arrows that step through cells rather than move a
+   * caret.
+   */
+  std::string scope;
 };
 
 /**
@@ -111,10 +121,11 @@ public:
   /**
    * @brief Run the command bound to @p scancode with @p mods.
    *
-   * Bindings are tried in the order they were added, and the first whose key
-   * and modifiers both match wins. Modifiers must match exactly, so a binding
-   * on a bare key does not fire when it is pressed with control held -- which
-   * is what lets the two be bound to different things.
+   * Bindings in the active scope are tried first, then unscoped ones, each in
+   * the order they were added; the first whose key and modifiers both match
+   * wins. Modifiers must match exactly, so a binding on a bare key does not
+   * fire when it is pressed with control held -- which is what lets the two
+   * be bound to different things.
    *
    * @return Whether anything was bound.
    */
@@ -151,12 +162,34 @@ public:
   [[nodiscard]] std::optional<std::pair<int, Mod>>
   bindingFor(std::string_view name) const;
 
+  /**
+   * @brief Put the command called @p name in @p scope (see Command::scope).
+   *
+   * @return Whether anything is called that.
+   */
+  bool setScope(std::string_view name, std::string scope);
+
+  /**
+   * @brief What names the scope the keyboard is in, asked on every key.
+   *
+   * Unset, or answering empty, means only unscoped bindings are live.
+   */
+  void setScopeResolver(std::function<std::string()> resolver) {
+    scopeResolver = std::move(resolver);
+  }
+
+  /// Pairs of commands the same key reaches in the same scope, of which only
+  /// the first registered can ever run: what a keymap load warns about.
+  [[nodiscard]] std::vector<std::pair<std::string, std::string>>
+  conflicts() const;
+
   [[nodiscard]] const std::vector<Command> &all() const { return bindings; }
   /// The bindings as lines of text, for a program that wants to print them.
   [[nodiscard]] std::string helpText() const;
 
 private:
   std::vector<Command> bindings;
+  std::function<std::string()> scopeResolver;
 };
 
 /**

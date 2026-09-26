@@ -571,7 +571,8 @@ XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
 ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
 XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
-                    apps/zigzag/zigzag_visualizer.cpp
+                    apps/zigzag/zigzag_visualizer.cpp \
+                    apps/zigzag/zigzag_commands.cpp
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)

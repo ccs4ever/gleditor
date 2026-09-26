@@ -880,10 +880,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to open a document",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+O"}}}}},
-        {.name    = std::string(settings::kKeymapCloseDoc),
-         .notes   = "Shortcut to close active document",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+W"}}}}},
         {.name    = std::string(settings::kKeymapOnionSkin),
          .notes   = "Shortcut to toggle 3D onion skinning",
          .schemas = {{.expectedTypes = {"string"},
@@ -908,10 +904,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Function key to toggle 3-way tension spring layout",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"F4"}}}}},
-        {.name    = std::string(settings::kKeymapUnlockTranscopyright),
-         .notes   = "Shortcut to unlock transcopyright span",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+U"}}}}},
         {.name    = std::string(settings::kKeymapUnlockTranscopyrightF5),
          .notes   = "Function key to unlock transcopyright span",
          .schemas = {{.expectedTypes = {"string"},
@@ -980,6 +972,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Return to the previous visit, not the previous version",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+B"}}}}},
+        {.name    = std::string(settings::kKeymapFocusToggle),
+         .notes   = "Shortcut to move the keyboard between the document and "
+                    "ZigZag",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"F6"}}}}},
         {.name    = std::string(settings::kKeymapOverviewToggle),
          .notes   = "Show or hide the overview of every open page",
          .schemas = {{.expectedTypes = {"string"},
@@ -1016,14 +1013,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to toggle hypertime map",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+H"}}}}},
-        {.name    = std::string(settings::kKeymapMap),
-         .notes   = "Shortcut to toggle hypertime map",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+H"}}}}},
-        {.name    = std::string(settings::kKeymapScrubBack),
-         .notes   = "Shortcut to scrub hypertime backward",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+["}}}}},
         {.name    = std::string(settings::kKeymapRadialMenu),
          .notes   = "Shortcut to invoke radial menu",
          .schemas = {{.expectedTypes = {"string"},
@@ -1159,7 +1148,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapExportLinkPackage),
          .notes   = "Shortcut to export current slice as Xudu LinkPackage",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+S"}}}}},
+                      .defaultValues = {std::string{"Ctrl+E"}}}}},
         {.name = std::string(settings::kKeymapInsertCellXPos),
          .notes =
              "Shortcut to insert connected cell positive along X dimension",
@@ -1205,15 +1194,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapZigzagTogglePalette),
          .notes   = "Shortcut to toggle presentation palette HUD in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F4"}}}}},
+                      .defaultValues = {std::string{"Shift+F4"}}}}},
         {.name    = std::string(settings::kKeymapZigzagVqlTranslateAttach),
          .notes   = "Shortcut to translate and attach VQL in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F5"}}}}},
+                      .defaultValues = {std::string{"Shift+F5"}}}}},
         {.name    = std::string(settings::kKeymapZigzagToggleCommandBar),
          .notes   = "Shortcut to toggle Command Omnibar in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F2"}}}}},
+                      .defaultValues = {std::string{"Shift+F2"}}}}},
         {.name    = std::string(settings::kKeymapZigzagOpenCommandBarSlash),
          .notes   = "Shortcut to open Omnibar with / prefix in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
@@ -1257,15 +1246,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapZigzagSwapXY),
          .notes   = "Shortcut to swap X and Y axes in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Space"}}}}},
+                      .defaultValues = {std::string{"Alt+X"}}}}},
         {.name    = std::string(settings::kKeymapZigzagCycleDimsForward),
          .notes   = "Shortcut to cycle active dimensions forward in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Tab"}}}}},
+                      .defaultValues = {std::string{"Alt+]"}}}}},
         {.name    = std::string(settings::kKeymapZigzagCycleDimsBackward),
          .notes   = "Shortcut to cycle active dimensions backward in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Shift+Tab"}}}}},
+                      .defaultValues = {std::string{"Alt+["}}}}},
         {.name    = std::string(settings::kKeymapZigzagJumpHome),
          .notes   = "Shortcut to jump focus to home cell in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
@@ -2293,7 +2282,7 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "new-doc", .canonical = "std:xudu/new_doc"},
     {.legacy = "forward", .canonical = "std:xudu/forward"},
     {.legacy = "open-doc", .canonical = "std:xudu/open_doc"},
-    {.legacy = "close-doc", .canonical = "std:xudu/close_doc"},
+    {.legacy = "close-doc", .canonical = "std:xudu/close"},
     {.legacy = "onion-skin", .canonical = "std:xudu/onion_skin"},
     {.legacy = "pouch-toggle", .canonical = "std:xudu/pouch_toggle"},
     {.legacy = "pouch-toggle-f2", .canonical = "std:xudu/pouch_toggle_f2"},
@@ -2303,7 +2292,7 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy    = "tension-physics-toggle",
      .canonical = "std:xudu/tension_physics_toggle"},
     {.legacy    = "unlock-transcopyright",
-     .canonical = "std:xudu/unlock_transcopyright"},
+     .canonical = "std:xudu/unlock_transcopyright_ctrl_u"},
     {.legacy    = "unlock-transcopyright-f5",
      .canonical = "std:xudu/unlock_transcopyright_f5"},
     {.legacy    = "unlock-transcopyright-ctrl-u",
@@ -2320,8 +2309,8 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "delete", .canonical = "std:xudu/delete"},
     {.legacy = "page-break", .canonical = "std:xudu/page_break"},
     {.legacy = "hypertime-map", .canonical = "std:xudu/hypertime_map"},
-    {.legacy = "map", .canonical = "std:xudu/map"},
-    {.legacy = "scrub-back", .canonical = "std:xudu/scrub_back"},
+    {.legacy = "map", .canonical = "std:xudu/hypertime_map"},
+    {.legacy = "scrub-back", .canonical = "std:xudu/scrub_backward"},
     {.legacy = "radial-menu", .canonical = "std:xudu/radial_menu"},
 
     // Zigzag Visualizer & Pure Vortex Actions
@@ -2428,6 +2417,24 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "zigzag-step-z-neg", .canonical = "std:nav/zigzag_step_z_neg"},
 };
 } // namespace
+
+std::string_view keymapScope(const std::string_view action) {
+  const auto slash = action.find('/');
+  if (std::string_view::npos == slash) {
+    return {};
+  }
+  const auto family = action.substr(0, slash);
+  if (action.substr(slash + 1).starts_with("zigzag_")) {
+    return {};
+  }
+  if ("std:nav" == family || "std:ui" == family || "std:zigzag" == family) {
+    return kKeyScopeZigzag;
+  }
+  if ("std:edit" == family) {
+    return kKeyScopeDocument;
+  }
+  return {};
+}
 
 std::string_view canonicalKeymapAction(const std::string_view action) {
   for (const auto &alias : kActionAliases) {

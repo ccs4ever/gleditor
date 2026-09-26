@@ -7,10 +7,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <xudu/core/format.hpp>
@@ -58,6 +62,64 @@ std::string readFileContent(const std::filesystem::path &filePath) {
   }
   return std::string{std::istreambuf_iterator<char>(in),
                      std::istreambuf_iterator<char>()};
+}
+
+/// A chord as a set of modifiers and a key, so "Shift+Alt+X" and
+/// "alt+shift+x" compare equal. ":" is the shifted semicolon key, as the
+/// keymap parser reads it.
+std::pair<std::vector<std::string>, std::string>
+normalisedChord(const std::string &chord) {
+  std::vector<std::string> parts;
+  std::string part;
+  for (std::size_t i = 0; i < chord.size(); ++i) {
+    // A "+" right after another separator (or first) is the key itself.
+    if ('+' == chord[i] && !part.empty()) {
+      parts.push_back(part);
+      part.clear();
+    } else {
+      part +=
+          static_cast<char>(std::tolower(static_cast<unsigned char>(chord[i])));
+    }
+  }
+  parts.push_back(part);
+  auto key = parts.back();
+  parts.pop_back();
+  if (":" == key) {
+    key = ";";
+    parts.emplace_back("shift");
+  }
+  std::ranges::sort(parts);
+  return {parts, key};
+}
+
+// Two actions on one chord in one scope means one of them can never run from
+// the keyboard; the UX audit found eight. Different scopes are the point of
+// scopes: ZigZag's arrows step cells only while it has the keyboard.
+TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
+  std::map<
+      std::pair<std::string, std::pair<std::vector<std::string>, std::string>>,
+      std::string>
+      seen;
+  for (const auto &spec : xudu::defaultSettingSpecs(SystemDocKind::Keymap)) {
+    ASSERT_FALSE(spec.schemas.empty()) << spec.name;
+    const auto &chord =
+        std::get<std::string>(spec.schemas.front().defaultValues.front());
+    const auto key = std::pair{std::string(xudu::keymapScope(spec.name)),
+                               normalisedChord(chord)};
+    const auto [where, fresh] = seen.emplace(key, spec.name);
+    EXPECT_TRUE(fresh) << chord << " is bound to both " << where->second
+                       << " and " << spec.name;
+  }
+}
+
+TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
+  EXPECT_EQ(xudu::keymapScope("std:nav/step_x_pos"), "zigzag");
+  EXPECT_EQ(xudu::keymapScope("std:zigzag/insert_cell_x_pos"), "zigzag");
+  EXPECT_EQ(xudu::keymapScope("std:ui/confirm_action"), "zigzag");
+  EXPECT_EQ(xudu::keymapScope("std:nav/zigzag_step_x_pos"), "");
+  EXPECT_EQ(xudu::keymapScope("std:edit/caret_left"), "document");
+  EXPECT_EQ(xudu::keymapScope("std:xudu/save"), "");
+  EXPECT_EQ(xudu::keymapScope("std:xuzz/link_next"), "");
 }
 
 TEST(SystemDocsTest, MetadataAndUriRoundTrips) {

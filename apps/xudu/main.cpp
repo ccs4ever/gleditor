@@ -10,6 +10,7 @@
  * logic, the commands and the command-line options.
  */
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <exception>
@@ -77,6 +78,7 @@
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
 #ifdef XUZZ_BUILD
+#include "../zigzag/zigzag_commands.hpp"
 #include "../zigzag/zigzag_visualizer.hpp"
 #include "xudu/bridge_coordinator.hpp"
 #endif
@@ -256,6 +258,98 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
  * canvas_ stays null, and drawFrame() quietly draws nothing forever. Views
  * itself draws nothing; drawFrame() is a deliberate no-op.
  */
+/**
+ * @brief Bind every action @p store's keymap names to its chord.
+ *
+ * The keymap is shared by xudu, zigzag and xuzz, so an action this program
+ * never registered is expected and only logged at debug; a chord that does
+ * not parse, or two actions left on one key in one scope, is the reader's to
+ * fix and is warned about.
+ */
+void applyKeymap(gleditor::CommandTable &commands, const xudu::Store &store) {
+  for (const auto &[act, comboStr] :
+       xudu::KeymapConfig::fromStore(store).bindings) {
+    const auto combo = gleditor::parseKeyCombo(comboStr);
+    if (!combo) {
+      GLEDITOR_LOG_WARN("xudu.keymap", "{}: \"{}\" is not a key combination",
+                        act, comboStr);
+    } else if (commands.rebind(act, combo->first, combo->second)) {
+      GLEDITOR_LOG_DEBUG("xudu.keymap", "{} bound to {}", act, comboStr);
+    } else {
+      GLEDITOR_LOG_DEBUG("xudu.keymap", "{}: not a command in this program",
+                         act);
+    }
+  }
+  for (const auto &[kept, shadowed] : commands.conflicts()) {
+    GLEDITOR_LOG_WARN("xudu.keymap",
+                      "{} and {} are on the same key; only {} can run", kept,
+                      shadowed, kept);
+  }
+}
+
+#ifdef XUZZ_BUILD
+/**
+ * @brief Which of xuzz's two panes has the keyboard: the document or ZigZag.
+ *
+ * ZigZag's bare keys -- arrows, letters, Space, Return -- are a document's
+ * keys too, so they reach ZigZag only while it has the keyboard
+ * (xanadu::keymapScope()). Entering remembers where the camera was and
+ * leaving can go back there, so a visit to the home cell returns the reader
+ * to their place in the text.
+ *
+ * Read on the event thread by the key dispatcher and moved from either
+ * thread, hence the atomic; the camera it keeps is guarded by the view's
+ * own lock, like the camera itself.
+ */
+class KeyboardPane : public gleditor::PickObserver {
+public:
+  explicit KeyboardPane(AppStateRef aState) : state(std::move(aState)) {}
+
+  [[nodiscard]] bool inZigzag() const noexcept { return zigzag.load(); }
+
+  [[nodiscard]] std::string scope() const {
+    return std::string(zigzag.load() ? xanadu::kKeyScopeZigzag
+                                     : xanadu::kKeyScopeDocument);
+  }
+
+  void enterZigzag() {
+    if (!zigzag.exchange(true)) {
+      std::scoped_lock locker(state->view);
+      documentCamera = state->view.pos;
+    }
+  }
+
+  /// @param restoreCamera false when leaving for somewhere that places the
+  ///        camera itself -- following a cell to where its text is.
+  void leaveZigzag(const bool restoreCamera) {
+    if (zigzag.exchange(false) && restoreCamera) {
+      std::scoped_lock locker(state->view);
+      state->view.pos = documentCamera;
+    }
+  }
+
+  /// A click moves the keyboard to what was clicked: text or a page to the
+  /// document, a cell to ZigZag. Never claims the pick, which the page and
+  /// the cell still act on.
+  [[nodiscard]] bool picked(const render::PickingResult &pick,
+                            RenderState & /*state*/) override {
+    if (render::tagKindGlyph == pick.tag.kind ||
+        render::tagKindPage == pick.tag.kind) {
+      leaveZigzag(false);
+    } else if (render::tagKindOverlay == pick.tag.kind && pick.semanticTarget &&
+               pick.semanticTarget->cellRef) {
+      enterZigzag();
+    }
+    return false;
+  }
+
+private:
+  AppStateRef state;
+  std::atomic<bool> zigzag{false};
+  glm::vec3 documentCamera{};
+};
+#endif
+
 class Views : public gleditor::FrameContributor {
 public:
   Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
@@ -1580,9 +1674,6 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         [&views, targetIndex] { views.selectDoc(targetIndex); });
   }
 
-  app.commands().registerAction(std::string(xanadu::settings::kKeymapMap),
-                                "show or hide the hypertime map",
-                                [&map] { map.toggle(); });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapHypertimeMap),
       "show or hide the hypertime map", [&map] { map.toggle(); });
@@ -1662,9 +1753,6 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       std::string(xanadu::settings::kKeymapUnlockTranscopyrightCtrlU),
       "unlock transcopyright span at caret or selection",
       [&views] { views.unlockTranscopyrightAtCaret(); });
-  app.commands().registerAction(std::string(xanadu::settings::kKeymapScrubBack),
-                                "scrub backward in hypertime history",
-                                [&views] { views.scrubHistory(true); });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapScrubBackward),
       "scrub backward in hypertime history",
@@ -2657,10 +2745,23 @@ int main(const int argc, char **argv) {
 
     LinkBeams links(*session, renderer);
     xudu::LinkContext linkContext(*session);
+#ifdef XUZZ_BUILD
+    KeyboardPane keyboardPane(state);
+    // Ahead of every other observer, since the ZigZag presentation claims the
+    // pick of a cell it focuses and this still has to see it.
+    renderer->addPickObserver(&keyboardPane);
+    linkContext.setFocusDocument(
+        [&views, &keyboardPane](const std::size_t viewIndex,
+                                const xanadu::Extent range) {
+          keyboardPane.leaveZigzag(false);
+          views.focusSpan(viewIndex, range.start, range.end);
+        });
+#else
     linkContext.setFocusDocument(
         [&views](const std::size_t viewIndex, const xanadu::Extent range) {
           views.focusSpan(viewIndex, range.start, range.end);
         });
+#endif
     // Read on the render thread, from inside LinkContext and the panel.
     linkContext.setCaretQuery(
         [&renderer]() -> std::optional<xudu::LinkContext::CaretPosition> {
@@ -2788,22 +2889,26 @@ int main(const int argc, char **argv) {
             views.focusContent(std::move(spans));
           });
         });
+    // Entering a cell brings it into view, as entering a passage does: the
+    // card sits beside the page and would otherwise be off screen. Queued so
+    // the presentation has placed the new focus first.
+    const auto showZigzagFocus = [&zigzagPresentation, &renderer, &state] {
+      renderer->runWithState([&zigzagPresentation, &state](RenderState &) {
+        if (const auto centre = zigzagPresentation->focusCentre()) {
+          std::scoped_lock locker(state->view);
+          state->view.pos.x = centre->x;
+          state->view.pos.y = centre->y;
+        }
+      });
+    };
     bridgeCoordinator.attach(*zigzagPresentation);
     linkContext.setManifold(bridgeCoordinator.manifold());
     linkContext.setFocusCell(
-        [&bridgeCoordinator, &zigzagPresentation, &renderer,
-         &state](const zigzag::CellRef cell, xanadu::Extent) {
+        [&bridgeCoordinator, &keyboardPane,
+         &showZigzagFocus](const zigzag::CellRef cell, xanadu::Extent) {
           bridgeCoordinator.onDocumentLinkActivated(cell);
-          // Entering a cell brings it into view, as entering a passage does:
-          // the card sits beside the page and would otherwise be off screen.
-          // Queued so the presentation has placed the new focus first.
-          renderer->runWithState([&zigzagPresentation, &state](RenderState &) {
-            if (const auto centre = zigzagPresentation->focusCentre()) {
-              std::scoped_lock locker(state->view);
-              state->view.pos.x = centre->x;
-              state->view.pos.y = centre->y;
-            }
-          });
+          keyboardPane.enterZigzag();
+          showZigzagFocus();
         });
     linkContext.setCellFocusQuery(
         [&zigzagPresentation] { return zigzagPresentation->focusCell(); });
@@ -3275,65 +3380,41 @@ int main(const int argc, char **argv) {
               [&overview](RenderState &) { overview.toggle(); });
         });
 #ifdef XUZZ_BUILD
+    zigzag::registerZigzagCommands(
+        app.commands(), zigzagPresentation,
+        {.activateFocus =
+             [&keyboardPane, zigzagPresentation, &bridgeCoordinator] {
+               // Following a cell lands on its text, which places the camera.
+               keyboardPane.leaveZigzag(false);
+               bridgeCoordinator.activateCell(zigzagPresentation->focusCell());
+             },
+         .leave = [&keyboardPane] { keyboardPane.leaveZigzag(true); },
+         .focusMoved =
+             [&keyboardPane, &showZigzagFocus] {
+               keyboardPane.enterZigzag();
+               showZigzagFocus();
+             }});
     app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagTogglePalette),
-        "toggle Vortex opcode and library palette HUD",
-        [zigzagPresentation] { zigzagPresentation->togglePalette(); });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleExecution),
-        "switch to Execution dimension bundle (d.spin, d.step, d.branch)",
-        [zigzagPresentation] {
-          zigzagPresentation->setDimensionBundle(
-              zigzag::ZigzagVisualizer::DimensionBundle::Execution);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleScope),
-        "switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)",
-        [zigzagPresentation] {
-          zigzagPresentation->setDimensionBundle(
-              zigzag::ZigzagVisualizer::DimensionBundle::Scope);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleContract),
-        "switch to Contract dimension bundle (d.require, d.ensure, "
-        "d.invariant)",
-        [zigzagPresentation] {
-          zigzagPresentation->setDimensionBundle(
-              zigzag::ZigzagVisualizer::DimensionBundle::Contract);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleLogic),
-        "switch to Logic dimension bundle (d.clause, d.predicate, d.var)",
-        [zigzagPresentation] {
-          zigzagPresentation->setDimensionBundle(
-              zigzag::ZigzagVisualizer::DimensionBundle::Logic);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleStdlib),
-        "switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)",
-        [zigzagPresentation] {
-          zigzagPresentation->setDimensionBundle(
-              zigzag::ZigzagVisualizer::DimensionBundle::Stdlib);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapZigzagBundleCycle),
-        "cycle active dimension bundle forward", [zigzagPresentation] {
-          zigzagPresentation->cycleDimensionBundle(true);
-        });
-    app.commands().registerAction(
-        std::string(xanadu::settings::kKeymapConfirmAction),
-        "activate focused Zigzag cell or execute Omnibar / Palette",
-        [zigzagPresentation, &bridgeCoordinator] {
-          if (zigzagPresentation->isCommandBarVisible()) {
-            zigzagPresentation->executeCommandBar();
-          } else if (zigzagPresentation->isPaletteVisible()) {
-            zigzagPresentation->paletteCloneSelectedToFocus();
-            zigzagPresentation->setPaletteVisible(false);
+        std::string(xanadu::settings::kKeymapFocusToggle),
+        "move the keyboard between the document and ZigZag",
+        [&keyboardPane, &showZigzagFocus] {
+          if (keyboardPane.inZigzag()) {
+            keyboardPane.leaveZigzag(true);
           } else {
-            bridgeCoordinator.activateCell(zigzagPresentation->focusCell());
+            keyboardPane.enterZigzag();
+            showZigzagFocus();
           }
         });
+    app.commands().setScopeResolver(
+        [&keyboardPane] { return keyboardPane.scope(); });
+#else
+    app.commands().setScopeResolver(
+        [] { return std::string(xanadu::kKeyScopeDocument); });
 #endif
+    for (const auto &command : std::vector(app.commands().all())) {
+      app.commands().setScope(command.name,
+                              std::string(xanadu::keymapScope(command.name)));
+    }
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     session->setSystemDocChangedCallback(
@@ -3355,20 +3436,7 @@ int main(const int argc, char **argv) {
           }
           switch (kind) {
           case xudu::SystemDocKind::Keymap: {
-            const auto kmCfg = xudu::KeymapConfig::fromStore(store);
-            for (const auto &[act, comboStr] : kmCfg.bindings) {
-              if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
-                app.commands().rebind(act, combo->first, combo->second);
-                GLEDITOR_LOG_DEBUG("xudu.keymap", "{} bound to {}", act,
-                                   comboStr);
-              } else {
-                // A binding that does not parse leaves its action unreachable
-                // from the keyboard; say so rather than dropping it.
-                GLEDITOR_LOG_WARN("xudu.keymap",
-                                  "{}: \"{}\" is not a key combination", act,
-                                  comboStr);
-              }
-            }
+            applyKeymap(app.commands(), store);
 #ifdef XUZZ_BUILD
             if (auto vHost = zigzagPresentation->vortexHost()) {
               vHost->loadMacrosFromStore(store);
@@ -3420,19 +3488,7 @@ int main(const int argc, char **argv) {
       const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
       const auto &kmStore = session->store(kmIdx);
       if (kmStore.opCount() > 0) {
-        const auto kmCfg = xudu::KeymapConfig::fromStore(kmStore);
-        for (const auto &[act, comboStr] : kmCfg.bindings) {
-          if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
-            app.commands().rebind(act, combo->first, combo->second);
-            GLEDITOR_LOG_DEBUG("xudu.keymap", "{} bound to {}", act, comboStr);
-          } else {
-            // A binding that does not parse leaves its action unreachable from
-            // the keyboard; say so rather than dropping it.
-            GLEDITOR_LOG_WARN("xudu.keymap",
-                              "{}: \"{}\" is not a key combination", act,
-                              comboStr);
-          }
-        }
+        applyKeymap(app.commands(), kmStore);
       }
       const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
       const auto &uiStore = session->store(uiIdx);

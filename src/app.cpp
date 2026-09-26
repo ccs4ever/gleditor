@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <locale>
 #include <mutex>
 #include <optional>
@@ -482,14 +483,49 @@ bool CommandTable::run(const std::string_view name) const {
 }
 
 bool CommandTable::dispatch(const int scancode, const Mod mods) const {
-  const auto found = std::ranges::find_if(bindings, [&](const Command &cmd) {
-    return cmd.scancode == scancode && cmd.mods == mods;
-  });
-  if (found == bindings.end() || !found->run) {
+  const auto active  = scopeResolver ? scopeResolver() : std::string{};
+  const auto inScope = [&](const std::string_view scope) {
+    return std::ranges::find_if(bindings, [&](const Command &cmd) {
+      return cmd.scancode == scancode && cmd.mods == mods && cmd.run &&
+             cmd.scope == scope;
+    });
+  };
+  auto found = active.empty() ? bindings.end() : inScope(active);
+  if (found == bindings.end()) {
+    found = inScope({});
+  }
+  if (found == bindings.end()) {
     return false;
   }
   found->run();
   return true;
+}
+
+bool CommandTable::setScope(const std::string_view name, std::string scope) {
+  const auto found = std::ranges::find_if(
+      bindings, [name](const Command &cmd) { return cmd.name == name; });
+  if (found == bindings.end()) {
+    return false;
+  }
+  found->scope = std::move(scope);
+  return true;
+}
+
+std::vector<std::pair<std::string, std::string>>
+CommandTable::conflicts() const {
+  std::vector<std::pair<std::string, std::string>> found;
+  for (auto first = bindings.begin(); first != bindings.end(); ++first) {
+    if (0 == first->scancode) {
+      continue;
+    }
+    for (auto second = std::next(first); second != bindings.end(); ++second) {
+      if (second->scancode == first->scancode && second->mods == first->mods &&
+          second->scope == first->scope) {
+        found.emplace_back(first->name, second->name);
+      }
+    }
+  }
+  return found;
 }
 
 bool CommandTable::rebind(const std::string_view name, const int scancode,
@@ -664,6 +700,14 @@ std::optional<std::pair<int, Mod>> parseKeyCombo(std::string_view combo) {
     scancode = SDL_SCANCODE_PAGEUP;
   } else if (lowerKey == "pagedown" || lowerKey == "pgdn") {
     scancode = SDL_SCANCODE_PAGEDOWN;
+  } else if (lowerKey == ";" || lowerKey == "semicolon") {
+    scancode = SDL_SCANCODE_SEMICOLON;
+  } else if (lowerKey == ":" || lowerKey == "colon") {
+    // A binding names a key by where it is, and a colon is not a key of its
+    // own: it is the semicolon key shifted, on the layout scancodes are named
+    // for. Without this ":" named nothing and its action went unbound.
+    scancode = SDL_SCANCODE_SEMICOLON;
+    mods     = mods | Mod::Shift;
   } else {
     scancode = SDL_GetScancodeFromName(keyPart.c_str());
     if (scancode == SDL_SCANCODE_UNKNOWN) {

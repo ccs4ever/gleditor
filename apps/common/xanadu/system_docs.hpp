@@ -284,7 +284,6 @@ inline constexpr std::string_view kKeymapBack        = "std:xudu/back";
 inline constexpr std::string_view kKeymapNewDoc      = "std:xudu/new_doc";
 inline constexpr std::string_view kKeymapForward     = "std:xudu/forward";
 inline constexpr std::string_view kKeymapOpenDoc     = "std:xudu/open_doc";
-inline constexpr std::string_view kKeymapCloseDoc    = "std:xudu/close_doc";
 inline constexpr std::string_view kKeymapOnionSkin   = "std:xudu/onion_skin";
 inline constexpr std::string_view kKeymapPouchToggle = "std:xudu/pouch_toggle";
 inline constexpr std::string_view kKeymapPouchToggleF2 =
@@ -295,8 +294,6 @@ inline constexpr std::string_view kKeymapTelescopeToggleF3 =
     "std:xudu/telescope_toggle_f3";
 inline constexpr std::string_view kKeymapTensionPhysicsToggle =
     "std:xudu/tension_physics_toggle";
-inline constexpr std::string_view kKeymapUnlockTranscopyright =
-    "std:xudu/unlock_transcopyright";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
     "std:xudu/unlock_transcopyright_f5";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightCtrlU =
@@ -316,8 +313,6 @@ inline constexpr std::string_view kKeymapDelete     = "std:xudu/delete";
 inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
-inline constexpr std::string_view kKeymapMap        = "std:xudu/map";
-inline constexpr std::string_view kKeymapScrubBack  = "std:xudu/scrub_back";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
 
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
@@ -463,6 +458,7 @@ inline constexpr std::string_view kKeymapOverviewToggle =
     "std:xudu/overview_toggle";
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
+inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
 
 // Pouches
 inline constexpr std::string_view kPouchZoneToLinkLeft  = "zone.to_link_left";
@@ -726,6 +722,22 @@ MicroversionId ensureAllSettings(Store &store, SystemDocKind kind);
 void initializeSystemStore(Store &store, SystemDocKind kind);
 
 [[nodiscard]] std::vector<SettingSpec> defaultSettingSpecs(SystemDocKind kind);
+
+/// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
+/// the pane that has the keyboard.
+inline constexpr std::string_view kKeyScopeDocument = "document";
+inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
+
+/**
+ * @brief The scope @p action's binding is live in; empty for anywhere.
+ *
+ * ZigZag's bare-key set (std:nav/*, std:ui/*, std:zigzag/*) steps, edits and
+ * cycles cells with the arrows, letters and Space a document needs for text,
+ * so in xuzz it only reaches the keyboard while ZigZag has it. Its
+ * Alt-prefixed zigzag_* twins are how a reader in a document reaches ZigZag,
+ * and are live anywhere. std:edit/* is caret movement, a document's.
+ */
+[[nodiscard]] std::string_view keymapScope(std::string_view action);
 
 [[nodiscard]] std::string_view canonicalKeymapAction(std::string_view action);
 [[nodiscard]] std::string_view legacyKeymapAction(std::string_view action);
