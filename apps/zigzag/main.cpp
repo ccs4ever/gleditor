@@ -274,7 +274,10 @@ int main(const int argc, char **argv) {
 
     gleditor::Application app(state, renderer, backend,
                               "Project Xanadu ZigZag Visualizer");
-    app.setTextInputEnabled(false); // Keystrokes map to navigation commands
+    // Text input on for the omnibar and for naming cells, which take it as a
+    // modal while they are open; there is no document for anything else to
+    // be typed into.
+    state->documentTakesText = [] { return false; };
     bindCommands(app, state, viz);
 
     auto keymapStore = loadOrCreateKeymapStore();
@@ -286,6 +289,8 @@ int main(const int argc, char **argv) {
         }
       }
     }
+    auto [hints, unused] = zigzag::zigzagKeyHints(app.commands(), {});
+    viz->setKeyHints(std::move(hints), {});
     return app.run();
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

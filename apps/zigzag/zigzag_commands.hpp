@@ -7,6 +7,9 @@
 
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace gleditor {
 class CommandTable;
@@ -43,6 +46,18 @@ struct ZigzagCommandHooks {
 void registerZigzagCommands(gleditor::CommandTable &table,
                             const std::shared_ptr<ZigzagVisualizer> &viz,
                             ZigzagCommandHooks hooks = {});
+
+/**
+ * @brief The HUD's hint lines, from the chords @p table has now: first for
+ *        while ZigZag has the keyboard, then for while another pane does.
+ *
+ * Built from the bindings rather than written out, so the hint names the key
+ * the reader's keymap has; the UX audit found the old fixed line advertising
+ * keys xuzz had never bound. @p toggle names the command that moves the
+ * keyboard between panes, empty in a program with only one.
+ */
+[[nodiscard]] std::pair<std::string, std::string>
+zigzagKeyHints(const gleditor::CommandTable &table, std::string_view toggle);
 
 } // namespace zigzag
 

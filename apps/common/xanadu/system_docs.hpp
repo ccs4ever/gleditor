@@ -459,6 +459,13 @@ inline constexpr std::string_view kKeymapOverviewToggle =
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
+inline constexpr std::string_view kKeymapNewSlice    = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapEditCell    = "std:zigzag/edit_cell";
+inline constexpr std::string_view kKeymapMarkCell    = "std:zigzag/mark_cell";
+inline constexpr std::string_view kKeymapLinkMarkedXPos =
+    "std:zigzag/link_marked_x_pos";
+inline constexpr std::string_view kKeymapLinkMarkedXNeg =
+    "std:zigzag/link_marked_x_neg";
 
 // Pouches
 inline constexpr std::string_view kPouchZoneToLinkLeft  = "zone.to_link_left";

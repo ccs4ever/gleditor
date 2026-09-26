@@ -1656,6 +1656,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     if (cur.is_clone) {
       focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
     }
+    if (0 != markedCell_) {
+      focusLabel += std::format("  marked #{}", markedCell_);
+    }
   }
 
   const auto structureMetrics = hudCanvas_->measureText(structure_name_);
@@ -1696,11 +1699,11 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   // Right-aligned from the dimensions leftwards, each label only while it
   // still clears the structure name: a narrow window drops the bundle, then
   // the view mode, rather than drawing them over the name and off the edge.
-  const std::string modeLabel   = (view_mode_ == ViewMode::CellContent)
-                                      ? "[ View: 📄 Content (1/V) ]"
-                                      : "[ View: 🌐 Topology (2/T) ]";
-  const std::string bundleLabel = std::format(
-      "[ Bundle: {} (Ctrl+1..5) ]", dimensionBundleName(dimension_bundle_));
+  const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
+                                    ? "[ View: 📄 Content ]"
+                                    : "[ View: 🌐 Topology ]";
+  const std::string bundleLabel =
+      std::format("[ Bundle: {} ]", dimensionBundleName(dimension_bundle_));
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
@@ -1719,10 +1722,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   // Bottom Command Key Hints
-  const std::string hints =
-      "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
-      "N/D: Insert | U: Unlink | Del: Delete | F4: Palette | / or : or F2: "
-      "Omnibar";
+  const std::string &hints =
+      keyboardHere_.load() ? keyHintsHere_ : keyHintsElsewhere_;
   const auto hintsMetrics = hudCanvas_->measureText(hints);
   const float bottomBarHeight =
       hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
@@ -1803,6 +1804,27 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         "Esc: Close";
     hudCanvas_->addText(ctx.state, palX + 16.0F, palY + 24.0F, palHelp,
                         0x94A3B8FFU, 0x141624F0U);
+  }
+
+  // Editing the focused cell's text: the same bar as the omnibar, so the
+  // line being typed is where the eye already goes for typed input.
+  if (cellEditing_) {
+    const float barWidth  = std::min(700.0F, width - 40.0F);
+    const float barHeight = 56.0F;
+    const float barX      = (width - barWidth) * 0.5F;
+    const float barY      = height - topBarBottom - barHeight - 20.0F;
+    hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
+    hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0xF4C542FFU);
+    hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
+                        barY + barHeight, 1.5F, 0xF4C542FFU);
+    hudCanvas_->addText(ctx.state, barX + 16.0F, barY + barHeight - 12.0F,
+                        std::format("Cell #{} -- Return keeps, Esc drops",
+                                    accursed_cell_focus_),
+                        0xF4C542FFU, 0x0F172AF0U);
+    hudCanvas_->addText(ctx.state, barX + 16.0F, barY + 18.0F,
+                        cellEditWhole_ ? "> [" + cellEditText_ + "]"
+                                       : "> " + cellEditText_ + "_",
+                        0xFFFFFFFFU, 0x00000000U);
   }
 
   // Command Omnibar HUD Overlay
@@ -1984,11 +2006,40 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
 }
 
 bool ZigzagVisualizer::grabbing() const {
-  return commandBarVisible_ || paletteVisible_;
+  return commandBarVisible_ || paletteVisible_ || cellEditing_;
 }
 
 bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
                                   const gleditor::KeyMods /*mods*/) {
+  if (cellEditing_) {
+    switch (key) {
+    case gleditor::Key::Return:
+      cellEditing_ = false;
+      updateFocusCellText(cellEditText_);
+      return true;
+    case gleditor::Key::Escape:
+      cellEditing_ = false;
+      return true;
+    case gleditor::Key::Backspace:
+      if (cellEditWhole_) {
+        cellEditWhole_ = false;
+        cellEditText_.clear();
+        return true;
+      }
+      // One character, not one byte: drop UTF-8 continuation bytes with it.
+      while (!cellEditText_.empty() &&
+             0x80 ==
+                 (static_cast<unsigned char>(cellEditText_.back()) & 0xC0)) {
+        cellEditText_.pop_back();
+      }
+      if (!cellEditText_.empty()) {
+        cellEditText_.pop_back();
+      }
+      return true;
+    default:
+      return false;
+    }
+  }
   if (commandBarVisible_) {
     switch (key) {
     case gleditor::Key::Return:
@@ -2038,7 +2089,13 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
 }
 
 void ZigzagVisualizer::textTyped(const std::string &utf8) {
-  if (commandBarVisible_) {
+  if (cellEditing_) {
+    if (cellEditWhole_) {
+      cellEditWhole_ = false;
+      cellEditText_.clear();
+    }
+    cellEditText_ += utf8;
+  } else if (commandBarVisible_) {
     commandBarInputText(utf8);
   } else if (paletteVisible_) {
     paletteInputText(utf8);
@@ -2046,7 +2103,7 @@ void ZigzagVisualizer::textTyped(const std::string &utf8) {
 }
 
 std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
-  if (commandBarVisible_) {
+  if (commandBarVisible_ || cellEditing_) {
     return gleditor::InputArea{
         .x      = 20,
         .y      = 100,
@@ -2731,6 +2788,37 @@ void ZigzagVisualizer::commandBarInputChar(const char ch) {
 
 void ZigzagVisualizer::commandBarInputText(const std::string_view text) {
   commandBarText_.append(text);
+}
+
+void ZigzagVisualizer::setKeyHints(std::string here, std::string elsewhere) {
+  keyHintsHere_      = std::move(here);
+  keyHintsElsewhere_ = std::move(elsewhere);
+}
+
+void ZigzagVisualizer::beginCellEdit() {
+  if (!engine_ || 0 == accursed_cell_focus_ ||
+      !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
+    return;
+  }
+  cellEditText_  = inspectCell(static_cast<CellRef>(accursed_cell_focus_)).text;
+  cellEditing_   = true;
+  cellEditWhole_ = !cellEditText_.empty();
+}
+
+void ZigzagVisualizer::markFocus() noexcept {
+  markedCell_ = accursed_cell_focus_;
+}
+
+bool ZigzagVisualizer::linkMarkedAlongX(const bool positive) {
+  if (0 == markedCell_ || markedCell_ == accursed_cell_focus_) {
+    return false;
+  }
+  const bool linked =
+      linkFocusAlong(current_view_.x_dimension, markedCell_, positive);
+  if (linked) {
+    markedCell_ = 0;
+  }
+  return linked;
 }
 
 void ZigzagVisualizer::commandBarBackspace() {

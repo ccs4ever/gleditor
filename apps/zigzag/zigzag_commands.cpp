@@ -4,6 +4,8 @@
  */
 #include "zigzag_commands.hpp"
 
+#include <format>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -199,10 +201,81 @@ void registerZigzagCommands(gleditor::CommandTable &table,
   both(settings::kKeymapUnlinkXNeg, {},
        "unlink focused cell along negative X dimension",
        moving("unlink-x-neg"));
+  both(settings::kKeymapEditCell, {}, "edit the focused cell's text",
+       [viz] { viz->beginCellEdit(); });
+  both(settings::kKeymapMarkCell, {},
+       "mark the focused cell as the far end of the next link",
+       [viz] { viz->markFocus(); });
+  both(settings::kKeymapLinkMarkedXPos, {},
+       "link the marked cell after the focused one along X",
+       [viz] { viz->linkMarkedAlongX(true); });
+  both(settings::kKeymapLinkMarkedXNeg, {},
+       "link the marked cell before the focused one along X",
+       [viz] { viz->linkMarkedAlongX(false); });
   both(settings::kKeymapDeleteFocusCell, {}, "delete currently focused cell",
        moving("delete-focus-cell"));
   both(settings::kKeymapDeleteFocusCellBksp, {},
        "delete currently focused cell", moving("delete-focus-cell"));
+}
+
+std::pair<std::string, std::string>
+zigzagKeyHints(const gleditor::CommandTable &table,
+               const std::string_view toggle) {
+  const auto key = [&table](const std::string_view name) -> std::string {
+    const auto bound = table.bindingFor(name);
+    if (!bound || 0 == bound->first) {
+      return {};
+    }
+    return gleditor::formatKeyCombo(bound->first, bound->second);
+  };
+  // "Label: A/B" for whichever of the named actions are bound; nothing at
+  // all for a hint with none, rather than advertising a key that is not there.
+  const auto line =
+      [&key](const std::initializer_list<std::pair<
+                 std::string_view, std::initializer_list<std::string_view>>>
+                 entries) {
+        std::string out;
+        for (const auto &[label, names] : entries) {
+          std::string keys;
+          for (const auto name : names) {
+            if (auto chord = key(name); !chord.empty()) {
+              keys += (keys.empty() ? "" : "/") + chord;
+            }
+          }
+          if (!keys.empty()) {
+            out +=
+                std::format("{}{}: {}", out.empty() ? "" : " | ", label, keys);
+          }
+        }
+        return out;
+      };
+  auto here = line({
+      {"Step",
+       {settings::kKeymapStepXNeg, settings::kKeymapStepXPos,
+        settings::kKeymapStepYPos, settings::kKeymapStepYNeg}},
+      {"Home", {settings::kKeymapJumpHome}},
+      {"Insert",
+       {settings::kKeymapInsertCellXPos, settings::kKeymapInsertCellYPos}},
+      {"Edit", {settings::kKeymapEditCell}},
+      {"Mark", {settings::kKeymapMarkCell}},
+      {"Link", {settings::kKeymapLinkMarkedXPos}},
+      {"Delete", {settings::kKeymapDeleteFocusCell}},
+      {"Omnibar", {settings::kKeymapOpenCommandBarSlash}},
+  });
+  if (!toggle.empty()) {
+    const auto back =
+        line({{"Back to text", {settings::kKeymapDismissOverlay, toggle}}});
+    here += (here.empty() ? "" : " | ") + back;
+  }
+  auto elsewhere = line({
+      {"ZigZag", {toggle}},
+      {"New slice", {settings::kKeymapNewSlice}},
+      {"Home", {settings::kKeymapZigzagJumpHome}},
+      {"Step",
+       {settings::kKeymapZigzagStepXNeg, settings::kKeymapZigzagStepXPos,
+        settings::kKeymapZigzagStepYPos, settings::kKeymapZigzagStepYNeg}},
+  });
+  return {std::move(here), std::move(elsewhere)};
 }
 
 } // namespace zigzag

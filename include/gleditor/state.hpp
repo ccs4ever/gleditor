@@ -252,6 +252,14 @@ struct AppState {
    * If set and returns true, consumes the mouse button down event.
    */
   std::function<bool(int mx, int my, std::uint8_t button)> mouseDownHandler;
+  /**
+   * @brief Whether typed text goes to the documents' caret right now.
+   *
+   * Unset means always. A program with a second pane that takes keys -- xuzz's
+   * ZigZag -- answers false while that pane has the keyboard, so that a
+   * letter bound to a command there is not also typed into the text.
+   */
+  std::function<bool()> documentTakesText;
 
   /**
    * @brief Interceptor for mouse motion events on the event thread.

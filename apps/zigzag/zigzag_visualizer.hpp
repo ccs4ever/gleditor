@@ -17,6 +17,7 @@
 #include "core/zzstructure.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -245,6 +246,41 @@ public:
   /// and disassembly.
   [[nodiscard]] xanadu::vql::CompilationResult
   compileVQL(std::string_view vqlQuery) const;
+
+  // -- Key hints ------------------------------------------------------------
+  /**
+   * @brief The hint line along the bottom, built by the host from the
+   *        bindings it actually has: @p here while ZigZag has the keyboard,
+   *        @p elsewhere while another pane does.
+   */
+  void setKeyHints(std::string here, std::string elsewhere);
+  /// Whether ZigZag has the keyboard; always, in a program with no other
+  /// pane.
+  void setHasKeyboard(bool has) noexcept { keyboardHere_ = has; }
+
+  // -- Naming and linking cells from the keyboard ---------------------------
+  /**
+   * @brief Start editing the focused cell's text in place.
+   *
+   * Takes the keyboard (grabbing()) until Return commits the text through
+   * updateFocusCellText() or Escape drops it. The home cell and d.dims keep
+   * their names, as updateFocusCellText() already insists.
+   */
+  void beginCellEdit();
+  [[nodiscard]] bool isCellEditing() const noexcept { return cellEditing_; }
+  [[nodiscard]] const std::string &cellEditText() const noexcept {
+    return cellEditText_;
+  }
+  /// Remember the focused cell as the far end of the next link.
+  void markFocus() noexcept;
+  [[nodiscard]] CellID markedCell() const noexcept { return markedCell_; }
+  /**
+   * @brief Link the focused cell to the marked one along the active X
+   *        dimension, then forget the mark.
+   * @return false with nothing marked, the mark on the focus itself, or a
+   *         link linkFocusAlong() refuses.
+   */
+  bool linkMarkedAlongX(bool positive);
 
   // -- VQL Command Omnibar --------------------------------------------------
   void toggleCommandBar();
@@ -536,6 +572,17 @@ private:
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};
   std::string paletteFilter_;
+
+  std::string keyHintsHere_;
+  std::string keyHintsElsewhere_;
+  std::atomic<bool> keyboardHere_{true};
+
+  bool cellEditing_{false};
+  /// The text starts selected, as a rename does: the first character typed
+  /// replaces it, so a new cell's placeholder is not typed after.
+  bool cellEditWhole_{false};
+  std::string cellEditText_;
+  CellID markedCell_{0};
 
   bool commandBarVisible_{false};
   std::string commandBarText_;

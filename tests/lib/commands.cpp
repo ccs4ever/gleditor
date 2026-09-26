@@ -262,6 +262,18 @@ TEST(CommandTableTest, parseKeyComboVarious) {
   EXPECT_FALSE(c7.has_value());
 }
 
+TEST(CommandTableTest, aFormattedComboParsesBackToItself) {
+  using gleditor::formatKeyCombo;
+  using gleditor::parseKeyCombo;
+  for (const auto *const combo :
+       {"Ctrl+Shift+N", "Alt+Home", "F6", "Shift+F2", "E", ":", "Alt+]"}) {
+    const auto parsed = parseKeyCombo(combo);
+    ASSERT_TRUE(parsed.has_value()) << combo;
+    const auto written = formatKeyCombo(parsed->first, parsed->second);
+    EXPECT_EQ(parseKeyCombo(written), parsed) << combo << " -> " << written;
+  }
+}
+
 TEST(CommandTableTest, aColonIsTheShiftedSemicolonKey) {
   using gleditor::parseKeyCombo;
 

@@ -722,6 +722,25 @@ std::optional<std::pair<int, Mod>> parseKeyCombo(std::string_view combo) {
   return std::pair{scancode, mods};
 }
 
+std::string formatKeyCombo(const int scancode, const Mod mods) {
+  const auto has = [mods](const Mod which) {
+    return 0 != (static_cast<std::uint16_t>(mods) &
+                 static_cast<std::uint16_t>(which));
+  };
+  std::string out;
+  if (has(Mod::Ctrl)) {
+    out += "Ctrl+";
+  }
+  if (has(Mod::Alt)) {
+    out += "Alt+";
+  }
+  if (has(Mod::Shift)) {
+    out += "Shift+";
+  }
+  out += SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+  return out;
+}
+
 std::string CommandTable::helpText() const {
   std::ostringstream out;
   for (const auto &cmd : bindings) {
@@ -1574,7 +1593,8 @@ int Application::run() {
           state->modal->textTyped(evt.text.text);
           break;
         }
-        if (textInput) {
+        if (textInput &&
+            (!state->documentTakesText || state->documentTakesText())) {
           const std::scoped_lock locker(state->typedMutex);
           state->typedText += evt.text.text;
         }

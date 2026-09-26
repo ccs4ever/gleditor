@@ -312,19 +312,35 @@ public:
                                      : xanadu::kKeyScopeDocument);
   }
 
+  /// Told whenever the keyboard changes pane, with whether ZigZag has it.
+  void setChangeHandler(std::function<void(bool)> handler) {
+    changed = std::move(handler);
+  }
+
   void enterZigzag() {
     if (!zigzag.exchange(true)) {
-      std::scoped_lock locker(state->view);
-      documentCamera = state->view.pos;
+      {
+        std::scoped_lock locker(state->view);
+        documentCamera = state->view.pos;
+      }
+      if (changed) {
+        changed(true);
+      }
     }
   }
 
   /// @param restoreCamera false when leaving for somewhere that places the
   ///        camera itself -- following a cell to where its text is.
   void leaveZigzag(const bool restoreCamera) {
-    if (zigzag.exchange(false) && restoreCamera) {
+    if (!zigzag.exchange(false)) {
+      return;
+    }
+    if (restoreCamera) {
       std::scoped_lock locker(state->view);
       state->view.pos = documentCamera;
+    }
+    if (changed) {
+      changed(false);
     }
   }
 
@@ -347,6 +363,7 @@ private:
   AppStateRef state;
   std::atomic<bool> zigzag{false};
   glm::vec3 documentCamera{};
+  std::function<void(bool)> changed;
 };
 #endif
 
@@ -365,7 +382,21 @@ public:
     documentDesc_ = documentPipeline;
   }
 
-  void drawFrame(gleditor::FrameContext &ctx) override { frameForReading(ctx); }
+  void drawFrame(gleditor::FrameContext &ctx) override {
+    frameForReading(ctx);
+    if (pendingCamera_ && pendingCamera_()) {
+      pendingCamera_ = {};
+    }
+  }
+
+  /**
+   * @brief Run @p place on the render thread every frame until it answers
+   *        true: for a camera move that needs something not built yet, such
+   *        as a new store's page and the presentation placed beside it.
+   */
+  void placeCameraWhenReady(std::function<bool()> place) {
+    pendingCamera_ = std::move(place);
+  }
 
   /// See settings::kReadableTextPx.
   void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
@@ -572,7 +603,10 @@ public:
   }
 
   [[nodiscard]] std::optional<glm::mat4> presentationTransform() const {
-    const auto document = primaryDocument_.lock();
+    auto document = presentationAnchor_.lock();
+    if (!document) {
+      document = primaryDocument_.lock();
+    }
     if (!document) {
       return std::nullopt;
     }
@@ -1120,12 +1154,20 @@ public:
     frameTarget_ = rState.docs[index];
   }
 
-  void newDocument() {
+  /// @return The new store's index.
+  std::size_t newDocument() {
     const auto storeIndex = session.createNewStore("");
     showAlongside(MicroversionId{}, 0.0F, storeIndex);
     activateNewest();
     std::cout << "xudu: created new sovereign document (store " << storeIndex
               << ")\n";
+    return storeIndex;
+  }
+
+  /// Place the ZigZag presentation beside @p doc's first page rather than
+  /// the first document's -- the page of the store it is showing.
+  void anchorPresentation(std::weak_ptr<Doc> doc) {
+    presentationAnchor_ = std::move(doc);
   }
 
   void spawnTranscludedDocument(const TetherPayload &payload,
@@ -1630,6 +1672,10 @@ private:
   /// The document activateDocument() last asked the camera to frame, until
   /// it has a page to frame; weak so a document closed first is not kept.
   std::weak_ptr<Doc> frameTarget_;
+  /// See anchorPresentation(); empty for the first document.
+  std::weak_ptr<Doc> presentationAnchor_;
+  /// See placeCameraWhenReady().
+  std::function<bool()> pendingCamera_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -2690,14 +2736,20 @@ int main(const int argc, char **argv) {
     }
 
     radialMenu->setActionHandler(
-        [&session, &views](const std::string &id, const std::string &action,
-                           const std::uint32_t docIndex,
-                           const std::uint32_t charOffset,
-                           const std::uint32_t charLength) {
+        [&session, &views,
+         state](const std::string &id, const std::string &action,
+                const std::uint32_t docIndex, const std::uint32_t charOffset,
+                const std::uint32_t charLength) {
           std::cout << "xudu: radial action: id=" << id << " action=" << action
                     << " doc=" << docIndex << " offset=" << charOffset
                     << " len=" << charLength << "\n";
-          if (id == "format:bold") {
+          if (constexpr std::string_view run = "run:"; id.starts_with(run)) {
+            const auto name = id.substr(run.size());
+            if (!state->runCommand || !state->runCommand(name)) {
+              std::cout << "xudu: " << name
+                        << " is not a command in this program\n";
+            }
+          } else if (id == "format:bold") {
             session->markDecorated(
                 docIndex, charOffset, charLength,
                 gleditor::decorationBit(gleditor::Decoration::Bold));
@@ -3395,6 +3447,46 @@ int main(const int argc, char **argv) {
                showZigzagFocus();
              }});
     app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapNewSlice),
+        "start a new ZigZag slice, in a new xanadoc of its own",
+        [&views, &session, &renderer, &keyboardPane, &linkContext,
+         &bridgeCoordinator, &state, zigzagPresentation] {
+          const auto storeIndex = views.newDocument();
+          renderer->runWithState([&views, &session, &keyboardPane, &linkContext,
+                                  &bridgeCoordinator, &state,
+                                  zigzagPresentation,
+                                  storeIndex](RenderState &rState) {
+            auto &store = session->store(storeIndex);
+            const auto version =
+                store.sliceGenesis(store.primaryCurrentVersion());
+            session->save(storeIndex);
+            zigzagPresentation->bindXuduStore(store, version);
+            linkContext.setManifold(bridgeCoordinator.manifold());
+            bridgeCoordinator.synchronize();
+            if (!rState.docs.empty()) {
+              views.anchorPresentation(rState.docs.back());
+            }
+            keyboardPane.enterZigzag();
+            // The home cell sits beside a page that is still being laid
+            // out: wait for the presentation to be placed there, then one
+            // frame more for it to have drawn at that place.
+            views.placeCameraWhenReady([&views, &state, zigzagPresentation,
+                                        placedFrames = 0]() mutable {
+              if (!views.presentationTransform() || ++placedFrames < 2) {
+                return false;
+              }
+              if (const auto centre = zigzagPresentation->focusCentre()) {
+                std::scoped_lock locker(state->view);
+                state->view.pos.x = centre->x;
+                state->view.pos.y = centre->y;
+              }
+              return true;
+            });
+            std::cout << "xudu: started a new slice (store " << storeIndex
+                      << ")\n";
+          });
+        });
+    app.commands().registerAction(
         std::string(xanadu::settings::kKeymapFocusToggle),
         "move the keyboard between the document and ZigZag",
         [&keyboardPane, &showZigzagFocus] {
@@ -3407,6 +3499,13 @@ int main(const int argc, char **argv) {
         });
     app.commands().setScopeResolver(
         [&keyboardPane] { return keyboardPane.scope(); });
+    state->documentTakesText = [&keyboardPane] {
+      return !keyboardPane.inZigzag();
+    };
+    zigzagPresentation->setHasKeyboard(false);
+    keyboardPane.setChangeHandler([zigzagPresentation](const bool zigzagHas) {
+      zigzagPresentation->setHasKeyboard(zigzagHas);
+    });
 #else
     app.commands().setScopeResolver(
         [] { return std::string(xanadu::kKeyScopeDocument); });
@@ -3417,12 +3516,24 @@ int main(const int argc, char **argv) {
     }
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
+#ifdef XUZZ_BUILD
+    // Handed to the render thread, which draws the strings.
+    const auto showKeyHints = [&app, &renderer, zigzagPresentation] {
+      auto [here, elsewhere] = zigzag::zigzagKeyHints(
+          app.commands(), xanadu::settings::kKeymapFocusToggle);
+      renderer->runWithState([zigzagPresentation, here = std::move(here),
+                              elsewhere =
+                                  std::move(elsewhere)](RenderState &) mutable {
+        zigzagPresentation->setKeyHints(std::move(here), std::move(elsewhere));
+      });
+    };
+#endif
     session->setSystemDocChangedCallback(
         [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
          &views, &overview, readablePx
 #ifdef XUZZ_BUILD
          ,
-         &zigzagPresentation, &bridgeCoordinator
+         &zigzagPresentation, &bridgeCoordinator, &showKeyHints
 #endif
     ](const xudu::SystemDocKind kind, const xudu::Store &store) {
           std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
@@ -3437,6 +3548,9 @@ int main(const int argc, char **argv) {
           switch (kind) {
           case xudu::SystemDocKind::Keymap: {
             applyKeymap(app.commands(), store);
+#ifdef XUZZ_BUILD
+            showKeyHints();
+#endif
 #ifdef XUZZ_BUILD
             if (auto vHost = zigzagPresentation->vortexHost()) {
               vHost->loadMacrosFromStore(store);
@@ -3490,6 +3604,9 @@ int main(const int argc, char **argv) {
       if (kmStore.opCount() > 0) {
         applyKeymap(app.commands(), kmStore);
       }
+#ifdef XUZZ_BUILD
+      showKeyHints();
+#endif
       const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
       const auto &uiStore = session->store(uiIdx);
       if (uiStore.opCount() > 0) {

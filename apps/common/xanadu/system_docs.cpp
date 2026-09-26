@@ -977,6 +977,26 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                     "ZigZag",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"F6"}}}}},
+        {.name    = std::string(settings::kKeymapNewSlice),
+         .notes   = "Shortcut to start a new ZigZag slice in a new store",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+N"}}}}},
+        {.name    = std::string(settings::kKeymapEditCell),
+         .notes   = "Key to edit the focused cell text",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"E"}}}}},
+        {.name    = std::string(settings::kKeymapMarkCell),
+         .notes   = "Key to mark the focused cell as the far end of a link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"M"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMarkedXPos),
+         .notes   = "Key to link the focused cell to the marked one along X",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"L"}}}}},
+        {.name  = std::string(settings::kKeymapLinkMarkedXNeg),
+         .notes = "Key to link the marked cell before the focused one along X",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+L"}}}}},
         {.name    = std::string(settings::kKeymapOverviewToggle),
          .notes   = "Show or hide the overview of every open page",
          .schemas = {{.expectedTypes = {"string"},
@@ -2658,7 +2678,20 @@ gleditor::RadialConfig createDefaultRadialConfig() {
       makeAction("align:justify", "Justify", "|=", "align:justify"),
   };
 
+  // Entries naming a keymap action run it, so a menu and a key reach the
+  // same command and neither can drift from the other.
+  auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
+  fileAction.desc = "New and Open";
+  fileAction.subActions = {
+      makeAction("run:std:xudu/new_doc", "New xanadoc", "+",
+                 "run:std:xudu/new_doc"),
+      makeAction("run:std:xuzz/new_slice", "New slice", "#",
+                 "run:std:xuzz/new_slice"),
+      makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
+  };
+
   cfg.actions = {
+      std::move(fileAction),
       makeAction("format:bold", "Bold", "B", "format:bold"),
       makeAction("format:italic", "Italic", "I", "format:italic"),
       makeAction("format:underline", "Underline", "U", "format:underline"),
