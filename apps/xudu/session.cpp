@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -49,7 +50,36 @@ constexpr std::uint32_t kCollaboratorColors[] = {
     0x06B6D4FF, // Cyan 500
     0xF97316FF, // Orange 500
 };
+/// A fresh directory under xanadocsDirectory(), named @p stem plus the
+/// local time, so a folder of them sorts by when each was started.
+std::filesystem::path untitledStoreDir(const std::string_view stem) {
+  namespace fs    = std::filesystem;
+  const auto base = xanadocsDirectory();
+  // UTC: no time-zone database to depend on, and the names still sort.
+  const auto now = std::chrono::floor<std::chrono::seconds>(
+      std::chrono::system_clock::now());
+  const auto name = std::format("{}-{:%Y%m%d-%H%M%S}", stem, now);
+  auto dir        = base / name;
+  for (int n = 2; fs::exists(dir); ++n) {
+    dir = base / std::format("{}-{}", name, n);
+  }
+  fs::create_directories(dir);
+  return dir;
+}
 } // namespace
+
+std::filesystem::path xanadocsDirectory() {
+  namespace fs = std::filesystem;
+  if (const char *xdgData = std::getenv("XDG_DATA_HOME");
+      nullptr != xdgData && '\0' != *xdgData) {
+    return fs::path(xdgData) / "xudu" / "xanadocs";
+  }
+  if (const char *home = std::getenv("HOME");
+      nullptr != home && '\0' != *home) {
+    return fs::path(home) / ".local" / "share" / "xudu" / "xanadocs";
+  }
+  return fs::temp_directory_path() / "xudu" / "xanadocs";
+}
 
 Session::Session(std::string aStorePath,
                  std::shared_ptr<UserPermascroll> scroll) {
@@ -271,10 +301,19 @@ Session::~Session() {
     std::cerr << "xudu [warning]: failed to flush uncommitted edits on "
                  "session teardown (non-standard exception)\n";
   }
+  // An untitled store is kept once anything was written to it: typing is
+  // saved as it happens, so deleting the directory here would throw away
+  // work the reader never chose to discard. One opened and left alone is
+  // clutter, and goes.
   for (const auto &entry : stores) {
-    if (entry.isTemporary && !entry.path.empty()) {
+    if (!entry.isTemporary || entry.path.empty() || !entry.store) {
+      continue;
+    }
+    if (entry.store->opCount() == entry.opsWhenOpened) {
       std::error_code ec;
       std::filesystem::remove_all(entry.path, ec);
+    } else {
+      std::cout << "xudu: kept untitled xanadoc at " << entry.path << "\n";
     }
   }
 }
@@ -718,21 +757,18 @@ std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
   } else {
     aStore->setContentSource(&contentSource);
   }
-  stores.push_back(StoreEntry{.store       = std::move(aStore),
-                              .path        = std::move(aPath),
-                              .isTemporary = aIsTemporary});
+  const auto opsNow = aStore->opCount();
+  stores.push_back(StoreEntry{.store         = std::move(aStore),
+                              .path          = std::move(aPath),
+                              .isTemporary   = aIsTemporary,
+                              .opsWhenOpened = opsNow});
   return stores.size() - 1U;
 }
 
 std::pair<std::size_t, MicroversionId>
 Session::importFileToTemporaryStore(const std::string &filePath) {
-  namespace fs = std::filesystem;
-  const auto nowNanos =
-      std::chrono::steady_clock::now().time_since_epoch().count();
-  const auto tempDir =
-      fs::temp_directory_path() / ("xudu_temp_" + std::to_string(nowNanos) +
-                                   "_" + std::to_string(stores.size()));
-  fs::create_directories(tempDir);
+  namespace fs       = std::filesystem;
+  const auto tempDir = untitledStoreDir(fs::path(filePath).stem().string());
 
   auto perma    = (stores.empty() || !stores[0].store)
                       ? nullptr
@@ -821,13 +857,7 @@ std::size_t Session::createNewStore(const std::string &aPath) {
   std::string targetDir = aPath;
   bool isTemporary      = false;
   if (targetDir.empty()) {
-    const auto nowNanos =
-        std::chrono::steady_clock::now().time_since_epoch().count();
-    const auto tempDir = fs::temp_directory_path() /
-                         ("xudu_genesis_" + std::to_string(nowNanos) + "_" +
-                          std::to_string(stores.size()));
-    fs::create_directories(tempDir);
-    targetDir   = tempDir.string();
+    targetDir   = untitledStoreDir("untitled").string();
     isTemporary = true;
   } else {
     fs::create_directories(targetDir);

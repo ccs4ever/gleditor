@@ -746,6 +746,84 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
   exportToPng(ppmPath, screenshotDir / "default_view_readable.png");
 }
 
+// A new xanadoc is where a person starts, so it has to settle -- an empty
+// document once counted as still loading, so nothing after Ctrl+N ever ran --
+// show a page, take the caret and the camera, and keep its first line clear
+// of the tab bar. One typed line is all the ink there is: if any of those
+// fails, none of it lands on visible paper.
+TEST(E2EBinaryOrchestrationTest, newDocumentTakesTypingInView) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_new_document";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto ppmPath = screenshotDir / "new_document_typed.ppm";
+  // Bounded: the failure this guards against is a run that never settles.
+  // Its own configuration, since the system xanadocs (the key bindings among
+  // them) are read through this run's permascroll.
+  const auto res = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --chord Ctrl+N --type 'Fresh words' --capture " +
+      ppmPath.string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_THAT(res.output,
+              ::testing::HasSubstr("created new sovereign document"));
+  EXPECT_GT(countInkOnPaper(ppmPath), 0U)
+      << "the typed line is not on visible paper";
+  exportToPng(ppmPath, screenshotDir / "new_document_typed.png");
+}
+
+// Typing is saved as it happens, so an untitled xanadoc that was written to
+// is work: it outlives the session in the xanadocs folder, where it used to be
+// deleted from a temporary directory on quit. One opened and never touched is
+// removed rather than left as clutter.
+TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_untitled";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
+  const auto run      = [&](const std::string &script) {
+    return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                          " timeout 120 " + xuduBin.string() + " --backend " +
+                          activeBackend() + " --profile " + script);
+  };
+  const auto untitled = [&] {
+    std::vector<fs::path> found;
+    if (fs::exists(xanadocs)) {
+      for (const auto &entry : fs::directory_iterator(xanadocs)) {
+        if (entry.path().filename().string().starts_with("untitled-")) {
+          found.push_back(entry.path());
+        }
+      }
+    }
+    return found;
+  };
+
+  const auto untouched = run("--chord Ctrl+N");
+  ASSERT_EQ(untouched.exitCode, 0) << untouched.output;
+  EXPECT_TRUE(untitled().empty()) << "an untouched untitled store was kept";
+
+  const auto written = run("--chord Ctrl+N --type 'Keep these words'");
+  ASSERT_EQ(written.exitCode, 0) << written.output;
+  const auto kept = untitled();
+  ASSERT_EQ(kept.size(), 1U) << written.output;
+  EXPECT_TRUE(fs::exists(kept.front() / "ops.nodes"));
+  EXPECT_THAT(written.output, ::testing::HasSubstr("kept untitled xanadoc"));
+}
+
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;

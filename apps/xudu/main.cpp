@@ -277,22 +277,27 @@ public:
   void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
 
   /**
-   * @brief Put the camera where the first page's text reads at
-   *        readableTextPx, once, as soon as that page and its first line
-   *        exist.
+   * @brief Put the camera where a document's first page reads at
+   *        readableTextPx, as soon as that page and its first line exist:
+   *        the first document at start-up, then whichever one
+   *        activateDocument() last named.
    *
    * The camera used to start at a fixed distance that fitted a whole page into
    * the window, which drew body text about six pixels tall: an overview
    * nobody could read, standing in for the reading view. Reading is the
-   * default now; the overview panel shows the whole scene. Only the first
-   * framing is taken, so a reader who zooms keeps their zoom.
+   * default now; the overview panel shows the whole scene. Only a document
+   * being opened or chosen is framed, so a reader who zooms keeps their zoom
+   * until they move to another.
    */
   void frameForReading(const gleditor::FrameContext &ctx) {
-    if (readingFramed_ || readableTextPx_ <= 0.0F || ctx.state.docs.empty() ||
-        !ctx.state.docs.front()) {
+    auto target = frameTarget_.lock();
+    if (!target && !readingFramed_ && !ctx.state.docs.empty()) {
+      target = ctx.state.docs.front();
+    }
+    if (!target || readableTextPx_ <= 0.0F) {
       return;
     }
-    const auto &doc      = *ctx.state.docs.front();
+    const auto &doc      = *target;
     const auto frame     = doc.pageFrame(0);
     const auto firstLine = doc.anchorFor(0);
     if (!frame || !firstLine) {
@@ -316,13 +321,19 @@ public:
     const float halfW = halfH * static_cast<float>(view.screenWidth) /
                         static_cast<float>(view.screenHeight);
     // Centred when the page fits across the view, from its left edge when
-    // it does not -- a line is read from its start. The page's top at the
-    // view's top either way, so reading starts where the text does.
-    const float x  = topRight.x - topLeft.x <= 2.0F * halfW
-                         ? 0.5F * (topLeft.x + topRight.x)
-                         : topLeft.x + halfW;
-    view.pos       = glm::vec3(x, topLeft.y - halfH, topLeft.z + *distance);
+    // it does not -- a line is read from its start. The page's top just
+    // under the chrome either way, so reading starts where the text does
+    // rather than behind the tab bar.
+    const float x           = topRight.x - topLeft.x <= 2.0F * halfW
+                                  ? 0.5F * (topLeft.x + topRight.x)
+                                  : topLeft.x + halfW;
+    const float chromeTopPx = std::max(ctx.chrome.top, ctx.settledChrome.top);
+    const float worldPerPx =
+        2.0F * halfH / static_cast<float>(view.screenHeight);
+    view.pos = glm::vec3(x, topLeft.y - halfH + (chromeTopPx * worldPerPx),
+                         topLeft.z + *distance);
     readingFramed_ = true;
+    frameTarget_.reset();
   }
 
   /// The audio/video widget attached at @p docOffset within @p doc, as an
@@ -895,11 +906,12 @@ public:
       }
       const auto storeIdx = session.storeIndexOf(which);
       if (session.isTemporaryStore(storeIdx)) {
-        // Open folder dialog to preserve temporary store
-        using Field         = gleditor::Form::Field;
-        namespace fs        = std::filesystem;
-        std::string curDir  = fs::current_path().string();
-        std::string defName = "doc_" + std::to_string(storeIdx) + ".xanadoc";
+        // Untitled: ask where it should live and what to call it
+        using Field  = gleditor::Form::Field;
+        namespace fs = std::filesystem;
+        const fs::path untitled(session.path(storeIdx));
+        std::string curDir  = untitled.parent_path().string();
+        std::string defName = untitled.filename().string();
 
         std::vector<Field> fields{
             Field{.label    = "Folder",
@@ -913,8 +925,8 @@ public:
         };
 
         form.open(
-            "Preserve Temporary Xanadoc",
-            "Designate a permanent directory and name for this temporary store",
+            "Name This Xanadoc",
+            "Choose where this untitled xanadoc lives and what it is called",
             std::move(fields),
             [this, storeIdx](const std::vector<Field> &answers) {
               preserveAnswers(storeIdx, answers);
@@ -937,9 +949,14 @@ public:
       try {
         namespace fs = std::filesystem;
         fs::create_directories(targetDir);
-        auto &st = session.store(storeIdx);
+        auto &st              = session.store(storeIdx);
+        const fs::path before = session.path(storeIdx);
         st.save(targetDir.string());
         session.setStorePath(storeIdx, targetDir.string(), false);
+        // The untitled copy has been superseded, not kept as a second one.
+        if (std::error_code same; !fs::equivalent(before, targetDir, same)) {
+          fs::remove_all(before, same);
+        }
         std::cout << "xudu: preserved temporary store to " << targetDir.string()
                   << "\n";
       } catch (const std::exception &err) {
@@ -979,22 +996,40 @@ public:
     });
   }
 
+  /// Make the most recently opened document the one being worked in.
+  void activateNewest() {
+    renderer->runWithState([this](RenderState &rState) {
+      if (!rState.docs.empty()) {
+        activateDocument(rState,
+                         static_cast<std::uint32_t>(rState.docs.size() - 1));
+      }
+    });
+  }
+
+  /**
+   * @brief Give document @p index the tab, the caret and the camera.
+   *
+   * The camera matters as much as the caret: documents open side by side, so
+   * a new one lands beside the view rather than in it, and typing into a
+   * document the reader cannot see looks like typing into nothing.
+   */
+  void activateDocument(RenderState &rState, const std::uint32_t index) {
+    if (index >= rState.docs.size() || !rState.docs[index]) {
+      return;
+    }
+    if (switcher) {
+      switcher->setActiveDocIndex(index);
+    }
+    if (auto *const caret = renderer->editCaret(); caret) {
+      caret->placeAt(index, 0);
+    }
+    frameTarget_ = rState.docs[index];
+  }
+
   void newDocument() {
     const auto storeIndex = session.createNewStore("");
     showAlongside(MicroversionId{}, 0.0F, storeIndex);
-    renderer->runWithState([this](RenderState &rState) {
-      if (!rState.docs.empty()) {
-        const auto newDocIndex =
-            static_cast<std::uint32_t>(rState.docs.size() - 1);
-        if (switcher) {
-          switcher->setActiveDocIndex(newDocIndex);
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(newDocIndex, 0);
-        }
-      }
-    });
+    activateNewest();
     std::cout << "xudu: created new sovereign document (store " << storeIndex
               << ")\n";
   }
@@ -1010,19 +1045,7 @@ public:
         session.store(0).transclude(MicroversionId{}, 0, payload.originVersion,
                                     payload.originCharStart, len);
     showAlongside(spawnedVer, 0.0F, 0);
-    renderer->runWithState([this](RenderState &rState) {
-      if (!rState.docs.empty()) {
-        const auto newDocIndex =
-            static_cast<std::uint32_t>(rState.docs.size() - 1);
-        if (switcher) {
-          switcher->setActiveDocIndex(newDocIndex);
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(newDocIndex, 0);
-        }
-      }
-    });
+    activateNewest();
     std::cout << "xudu: spawned transcluded document version "
               << spawnedVer.str() << " from origin version "
               << payload.originVersion.str() << " [" << payload.originCharStart
@@ -1062,19 +1085,7 @@ public:
                                       16);
       wireframeOverlay_->updateProgress(newDocIndex, 12);
     }
-    renderer->runWithState([this](RenderState &rState) {
-      if (!rState.docs.empty()) {
-        const auto newDocIndex =
-            static_cast<std::uint32_t>(rState.docs.size() - 1);
-        if (switcher) {
-          switcher->setActiveDocIndex(newDocIndex);
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(newDocIndex, 0);
-        }
-      }
-    });
+    activateNewest();
     std::cout << "xudu: summoned publication '" << entry.title
               << "' into 3D space (store " << storeIndex << ")\n";
   }
@@ -1314,19 +1325,7 @@ public:
       auto &sysStore  = session.store(sIdx);
       const auto head = sysStore.primaryCurrentVersion();
       showAlongside(head, 0.0F, sIdx);
-      renderer->runWithState([this](RenderState &rState) {
-        if (!rState.docs.empty()) {
-          const auto newDocIndex =
-              static_cast<std::uint32_t>(rState.docs.size() - 1);
-          if (switcher) {
-            switcher->setActiveDocIndex(newDocIndex);
-          }
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(newDocIndex, 0);
-          }
-        }
-      });
+      activateNewest();
       std::cout << "xudu: opened system document " << chosen << " (store "
                 << sIdx << ")\n";
       return;
@@ -1341,19 +1340,7 @@ public:
         auto &st        = session.store(sIdx);
         const auto head = st.primaryCurrentVersion();
         showAlongside(head, 0.0F, sIdx);
-        renderer->runWithState([this](RenderState &rState) {
-          if (!rState.docs.empty()) {
-            const auto newDocIndex =
-                static_cast<std::uint32_t>(rState.docs.size() - 1);
-            if (switcher) {
-              switcher->setActiveDocIndex(newDocIndex);
-            }
-            auto *const caret = renderer->editCaret();
-            if (caret) {
-              caret->placeAt(newDocIndex, 0);
-            }
-          }
-        });
+        activateNewest();
         std::cout << "xudu: opened store " << chosen << " (store " << sIdx
                   << ")\n";
       } catch (const std::exception &err) {
@@ -1365,19 +1352,7 @@ public:
         const auto [sIdx, imported] =
             session.importFileToTemporaryStore(chosen);
         showAlongside(imported, 0.0F, sIdx);
-        renderer->runWithState([this](RenderState &rState) {
-          if (!rState.docs.empty()) {
-            const auto newDocIndex =
-                static_cast<std::uint32_t>(rState.docs.size() - 1);
-            if (switcher) {
-              switcher->setActiveDocIndex(newDocIndex);
-            }
-            auto *const caret = renderer->editCaret();
-            if (caret) {
-              caret->placeAt(newDocIndex, 0);
-            }
-          }
-        });
+        activateNewest();
         std::cout << "xudu: imported file " << chosen << " to temporary store "
                   << sIdx << "\n";
       } catch (const std::exception &err) {
@@ -1393,15 +1368,7 @@ public:
   void selectDoc(const std::uint32_t index) {
     renderer->runWithState([this, index](RenderState &rState) {
       session.flushUncommitted();
-      if (index < rState.docs.size() && rState.docs[index]) {
-        if (switcher) {
-          switcher->setActiveDocIndex(index);
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(index, 0);
-        }
-      }
+      activateDocument(rState, index);
     });
   }
 
@@ -1566,6 +1533,9 @@ private:
   std::weak_ptr<Doc> primaryDocument_;
   float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
   bool readingFramed_{false};
+  /// The document activateDocument() last asked the camera to frame, until
+  /// it has a page to frame; weak so a document closed first is not kept.
+  std::weak_ptr<Doc> frameTarget_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -1954,8 +1924,10 @@ int main(const int argc, char **argv) {
   argparse::ArgumentParser parser("xudu", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
   parser.add_argument("store")
-      .help("directory the primary spools live in; created if it is not there")
-      .default_value(std::string{"xanadoc"});
+      .help("directory the primary spools live in; created if it is not "
+            "there. Defaults to \"default\" in the xanadocs folder, "
+            "$XDG_DATA_HOME/xudu/xanadocs")
+      .default_value((xudu::xanadocsDirectory() / "default").string());
   parser.add_argument("--version-id")
       .help("microversion to open, for example 2a4; the default is the most "
             "recent state in the store")
@@ -2541,6 +2513,9 @@ int main(const int argc, char **argv) {
     ImageOverlay images("Sans 11");
 
     auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
+    // First of the chrome, so it keeps the window's top edge and the ZigZag
+    // HUD stacks under it (FrameContext::chrome).
+    renderer->addFrameContributor(docSwitcher.get());
     gleditor::Form publishForm("Sans 11");
     Views views(*session, renderer, map, images, publishForm, state,
                 docSwitcher);
@@ -2617,16 +2592,8 @@ int main(const int argc, char **argv) {
       views.closeDocument(docIndex);
     });
     docSwitcher->setNewDocHandler([&views]() { views.newDocument(); });
-    docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
-      renderer->runWithState([&renderer, docIndex](RenderState &rState) {
-        if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(docIndex, 0);
-          }
-        }
-      });
-    });
+    docSwitcher->setSelectHandler(
+        [&views](const std::uint32_t docIndex) { views.selectDoc(docIndex); });
 
     auto radialMenu     = std::make_shared<gleditor::RadialMenu>("Sans 10");
     const auto &uiStore = session->systemStore(xudu::SystemDocKind::UI);
@@ -2886,7 +2853,6 @@ int main(const int argc, char **argv) {
         });
 
     renderer->addSpanDecorator(session.get());
-    renderer->addFrameContributor(docSwitcher.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
     renderer->addFrameContributor(&tenuousTetherOverlay);

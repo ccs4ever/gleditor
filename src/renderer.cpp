@@ -140,11 +140,15 @@ bool Renderer::hasPendingWork() const {
 }
 
 bool Renderer::docsLoading(const RenderState &state) const {
+  // No documents, or a document with no pages, is finished rather than
+  // loading: a new or emptied store is exactly that, and counting it as
+  // loading left every scripted step (and a queued quit) waiting forever.
+  // An open still in flight is already pending work (the render queue, then
+  // pendingDocLoads), and isFullyLoaded() waits for shaping to complete, so
+  // neither case can report settled before the document is there.
   return this->state->usesDocPages &&
-         (state.docs.empty() ||
-          std::ranges::any_of(state.docs, [](const auto &doc) {
-            return !doc->isFullyLoaded() || 0 == doc->numPages();
-          }));
+         std::ranges::any_of(
+             state.docs, [](const auto &doc) { return !doc->isFullyLoaded(); });
 }
 
 double Renderer::stepAnimations() {
@@ -416,10 +420,12 @@ bool Renderer::update(RenderState &state, const bool settled) {
                                .viewProjection = viewProjection,
                                .screenWidth    = screenWidth,
                                .screenHeight   = screenHeight,
-                               .timeline       = timeline};
+                               .timeline       = timeline,
+                               .settledChrome  = lastChrome};
     for (auto *const contributor : frameContributors) {
       contributor->drawFrame(ctx);
     }
+    lastChrome = ctx.chrome;
   }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so

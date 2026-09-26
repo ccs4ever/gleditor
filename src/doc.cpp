@@ -1401,6 +1401,27 @@ void Doc::makePages() {
     }
     tSize += consumed;
   }
+  if (text.empty()) {
+    // An empty document is one blank page, not none: a new xanadoc has to
+    // show where typing will go, and has a page for the caret and a pick to
+    // land on. Sized as a page of text would be.
+    const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
+                           pageGeometry.widthPx > 0.0F;
+    PageShaping blank;
+    blank.page         = pageGeometry;
+    blank.textWidthPx  = static_cast<int>(fixedPage ? pageGeometry.textWidthPx()
+                                                    : Doc::textWidthPx);
+    blank.textHeightPx = static_cast<int>(
+        fixedPage ? pageGeometry.textHeightPx() : Doc::textHeightPx);
+    const auto heightPx = pageBoxFor(blank).height;
+    std::scoped_lock lock(shapingMutex);
+    pendingShapings.emplace(
+        0U, PendingShaping{.shaping = std::move(blank), .textOffset = 0U});
+    pageEntries.push_back(gleditor::enfilade::LayoutEntry{
+        .byteLength = 0U,
+        .heightPx   = heightPx + pageGapPx,
+    });
+  }
   shapingComplete.store(true, std::memory_order_release);
 }
 

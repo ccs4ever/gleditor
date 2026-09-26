@@ -285,6 +285,9 @@ public:
 protected:
   std::vector<gleditor::SpanDecorator *> spanDecorators;
   std::vector<gleditor::FrameContributor *> frameContributors;
+  /// What the last frame's contributors claimed; see
+  /// FrameContext::settledChrome.
+  gleditor::ScreenInsets lastChrome;
   std::vector<gleditor::PickObserver *> pickObservers;
 };
 

@@ -61,6 +61,16 @@ namespace xudu {
 
 class Session;
 
+/**
+ * @brief Where the reader's xanadocs live unless they say otherwise:
+ *        `$XDG_DATA_HOME/xudu/xanadocs`.
+ *
+ * New and imported documents start here, under generated names, rather than
+ * in a temporary directory: a xanadoc is saved as it is typed, so one kept
+ * anywhere that is cleared on quit loses work nobody chose to discard.
+ */
+[[nodiscard]] std::filesystem::path xanadocsDirectory();
+
 struct RemoteCollaborator {
   std::string authorScrollKey;
   std::string name;
@@ -511,8 +521,8 @@ public:
   /**
    * @brief Create a new sovereign store bound to the author's UserPermascroll.
    *
-   * @param path File system directory to persist this store. If empty, a
-   * temporary directory is allocated.
+   * @param path File system directory to persist this store. If empty, an
+   * untitled directory under xanadocsDirectory(), kept once written to.
    * @return The store index.
    */
   std::size_t createNewStore(const std::string &path = "");
@@ -771,7 +781,12 @@ private:
   struct StoreEntry {
     std::unique_ptr<Store> store;
     std::string path;
+    /// Untitled: in xanadocsDirectory() under a generated name, and
+    /// removed at teardown if nothing was written to it.
     bool isTemporary{false};
+    /// What opCount() was when the store joined the session; see
+    /// isTemporary.
+    std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
 

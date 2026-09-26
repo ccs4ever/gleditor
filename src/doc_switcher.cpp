@@ -89,8 +89,11 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
   canvas->clear();
   currentTabs.clear();
 
-  // Background bar across the top of the viewport
-  const float barY = height - barHeight;
+  // Background bar across the top of the viewport, under any chrome already
+  // there.
+  const float top  = height - ctx.chrome.top;
+  const float barY = top - barHeight;
+  ctx.chrome.top += barHeight;
   canvas->addRect(0.0F, barY, width, barHeight, barBackground);
   canvas->addLine(0.0F, barY, width, barY, 1.0F, barBorder);
 
@@ -134,21 +137,20 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
 
     if (isActive) {
       // Top accent line for active tab
-      canvas->addLine(curX, height - 1.0F, curX + tabW, height - 1.0F, 2.0F,
+      canvas->addLine(curX, top - 1.0F, curX + tabW, top - 1.0F, 2.0F,
                       tabActiveBorder);
     }
 
     // Tab label text
     canvas->setTextWidthLimit(
         static_cast<int>(tabW - closeButtonW - (2.0F * tabPaddingX)));
-    canvas->addText(ctx.state, curX + tabPaddingX, height - 8.0F, title,
+    canvas->addText(ctx.state, curX + tabPaddingX, top - 8.0F, title,
                     isActive ? tabTextActive : tabTextInactive, tabBg);
 
     // Close button [×]: cluster tag has bit 0 = 1 (close)
     const float closeX = curX + tabW - closeButtonW;
     canvas->setTag(render::tagKindOverlay, (i << 1U) | 1U);
-    canvas->addText(ctx.state, closeX, height - 7.0F, "×", closeTextColour,
-                    tabBg);
+    canvas->addText(ctx.state, closeX, top - 7.0F, "×", closeTextColour, tabBg);
 
     curX += tabW + 2.0F;
   }
@@ -160,7 +162,7 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     const float tabY = barY + 2.0F;
     canvas->setTag(render::tagKindOverlay, kNewDocTag);
     canvas->addRect(curX, tabY, newButtonW, tabH, tabInactiveBg);
-    canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "+", tabTextInactive,
+    canvas->addText(ctx.state, curX + 9.0F, top - 7.0F, "+", tabTextInactive,
                     tabInactiveBg);
   }
 

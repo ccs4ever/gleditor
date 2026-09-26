@@ -1663,14 +1663,18 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const float topBarHeight =
       (3.0F * presentation_config_.hudVerticalPaddingPx) +
       structureMetrics.height + focusMetrics.height;
-  const float topBarBottom = height - topBarHeight;
+  // Under whatever chrome is already along the top (xuzz's tab bar), so the
+  // two bars stack rather than one hiding the other.
+  const float hudTop       = height - ctx.chrome.top;
+  const float topBarBottom = hudTop - topBarHeight;
+  ctx.chrome.top += topBarHeight;
 
   // Top Bar Background
   hudCanvas_->addRect(0.0F, topBarBottom, width, topBarHeight, 0x0D0D12DDU);
   hudCanvas_->addLine(0.0F, topBarBottom, width, topBarBottom, 1.0F,
                       0x333344FFU);
 
-  const float structureTop = height - presentation_config_.hudVerticalPaddingPx;
+  const float structureTop = hudTop - presentation_config_.hudVerticalPaddingPx;
   const float focusTop     = structureTop - structureMetrics.height -
                              presentation_config_.hudVerticalPaddingPx;
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
@@ -1689,33 +1693,30 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                   yVis.label.empty() ? current_view_.y_dimension : yVis.label,
                   zVis.label.empty() ? current_view_.z_dimension : zVis.label);
 
-  const auto dimsMetrics = hudCanvas_->measureText(dimsInfo);
-  hudCanvas_->addText(ctx.state,
-                      width - dimsMetrics.width -
-                          presentation_config_.hudHorizontalPaddingPx,
-                      structureTop, dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
-
-  // View Mode Status Indicator
+  // Right-aligned from the dimensions leftwards, each label only while it
+  // still clears the structure name: a narrow window drops the bundle, then
+  // the view mode, rather than drawing them over the name and off the edge.
   const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
                                     ? "[ View: 📄 Content (1/V) ]"
                                     : "[ View: 🌐 Topology (2/T) ]";
-  const auto modeMetrics      = hudCanvas_->measureText(modeLabel);
-  hudCanvas_->addText(ctx.state,
-                      width - dimsMetrics.width - modeMetrics.width -
-                          presentation_config_.hudHorizontalPaddingPx -
-                          presentation_config_.hudColumnGapPx,
-                      structureTop, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
-
-  // Dimension Bundle Indicator
   const std::string bundleLabel = std::format(
       "[ Bundle: {} (Ctrl+1..5) ]", dimensionBundleName(dimension_bundle_));
-  const auto bundleMetrics = hudCanvas_->measureText(bundleLabel);
-  hudCanvas_->addText(ctx.state,
-                      width - dimsMetrics.width - modeMetrics.width -
-                          bundleMetrics.width -
-                          presentation_config_.hudHorizontalPaddingPx -
-                          (2.0F * presentation_config_.hudColumnGapPx),
-                      structureTop, bundleLabel, 0x38BDF8FFU, 0x0D0D12DDU);
+  const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
+                          structureMetrics.width +
+                          presentation_config_.hudColumnGapPx;
+  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+  for (const auto &[label, colour] :
+       {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
+        std::pair{std::cref(modeLabel), 0xF59E0BFFU},
+        std::pair{std::cref(bundleLabel), 0x38BDF8FFU}}) {
+    const float labelWidth = hudCanvas_->measureText(label.get()).width;
+    if (rightEdge - labelWidth < leftLimit) {
+      break;
+    }
+    hudCanvas_->addText(ctx.state, rightEdge - labelWidth, structureTop,
+                        label.get(), colour, 0x0D0D12DDU);
+    rightEdge -= labelWidth + presentation_config_.hudColumnGapPx;
+  }
 
   // Bottom Command Key Hints
   const std::string hints =
@@ -1725,13 +1726,15 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const auto hintsMetrics = hudCanvas_->measureText(hints);
   const float bottomBarHeight =
       hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
-  hudCanvas_->addRect(0.0F, 0.0F, width, bottomBarHeight, 0x0D0D12DDU);
-  hudCanvas_->addLine(0.0F, bottomBarHeight, width, bottomBarHeight, 1.0F,
-                      0x222233FFU);
+  const float hudBottom = ctx.chrome.bottom;
+  hudCanvas_->addRect(0.0F, hudBottom, width, bottomBarHeight, 0x0D0D12DDU);
+  hudCanvas_->addLine(0.0F, hudBottom + bottomBarHeight, width,
+                      hudBottom + bottomBarHeight, 1.0F, 0x222233FFU);
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
-                      bottomBarHeight -
+                      hudBottom + bottomBarHeight -
                           presentation_config_.hudVerticalPaddingPx,
                       hints, 0x888899FFU, 0x0D0D12DDU);
+  ctx.chrome.bottom += bottomBarHeight;
 
   // Palette HUD Overlay
   if (paletteVisible_) {

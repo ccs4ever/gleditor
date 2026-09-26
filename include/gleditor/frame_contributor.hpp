@@ -30,6 +30,17 @@ class RenderDevice;
 
 namespace gleditor {
 
+/// Window-pixel bands along each edge that chrome drawn over the scene
+/// occupies: a tab bar, a status line.
+struct ScreenInsets {
+  float top{};
+  float bottom{};
+  float left{};
+  float right{};
+
+  friend bool operator==(const ScreenInsets &, const ScreenInsets &) = default;
+};
+
 /// What a contributor is given when the frame asks it to draw.
 struct FrameContext {
   RenderState &state;
@@ -50,6 +61,22 @@ struct FrameContext {
    * next frame rather than partway through this one.
    */
   ch::Timeline &timeline;
+  /**
+   * @brief Chrome claimed so far this frame, in registration order.
+   *
+   * A contributor anchored to a window edge draws inside what is already
+   * claimed there and adds its own band, so two bars stack rather than
+   * one covering the other.
+   */
+  ScreenInsets chrome{};
+  /**
+   * @brief Everything the previous frame's chrome claimed.
+   *
+   * For a contributor that places the scene rather than drawing over it --
+   * framing the camera, say -- and so must keep clear of chrome registered
+   * after it, which has not claimed its band yet this frame.
+   */
+  ScreenInsets settledChrome{};
 };
 
 /**
