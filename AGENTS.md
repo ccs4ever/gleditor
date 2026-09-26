@@ -32,6 +32,14 @@ transitions form branching walks in the private `system://activity` store; live 
 appends no operations to visited documents or slices. See the R8 activity-store extension in
 [`store-slice-convergence.md`](design/store-slice-convergence.md).
 
+## UX validation workflow
+
+To check that `xuzz` and `vquery` can be used for real work entirely through their UI — new xanadocs
+and slices, dragging text into pages and pouches, the home cell and back, closing and resuming — use
+[`xuzz-ux-validation`](.claude/skills/xuzz-ux-validation/SKILL.md) against the journeys in
+[`design/ux_workflow_real_work.md`](design/ux_workflow_real_work.md). A step reachable only by a
+flag, script or file is a finding, not a pass.
+
 ## Setup: submodules
 
 `thirdparty/argparse`, `Choreograph`, `merklecpp`, `SDL`, `zstd`, `nontype_functional`,
