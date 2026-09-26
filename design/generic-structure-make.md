@@ -29,6 +29,12 @@ Make-kind bit and bit 7 as its high bit, **only when the verb is Make**:
 | Reserved  |     3 |     1 |     1 |     `0x88` |
 
 The `ValueKind` bits retain their present meaning for Cell, including `OpHandle` and `ExternRef`.
+Assign the next free value, `ValueKind::Timestamp = 6`, to a typed timestamp Cell. Its 64-bit
+`value` is a signed count of nanoseconds since 1970-01-01T00:00:00Z, bit-cast into the unsigned
+field as `Int64` already is. It denotes a UTC instant; timezone, locale, and calendar formatting are
+presentation choices. Refuse values outside the signed 64-bit nanosecond range rather than clamping,
+and do not claim nanosecond measurement precision when the source clock has less.
+
 For Slice and Xanadoc births, `span` names primedia containing that structure's initial local name;
 require `ValueKind::None` and zero `value`. An empty span means an empty local name, not an absent
 structure. The name is a label, never the identity or a uniqueness key. Require the currently idle
@@ -96,6 +102,26 @@ absent `d.alias` link from a present link to empty text. A Xanadoc-only store al
 annotation dimension substrate before its first rename; initialize it once without changing that
 Xanadoc's concatext or treating the metadata Slice as the Xanadoc's identity.
 
+## Timestamp annotations
+
+Use the same OpHandle annotation shape for `d.created` on a Cell, Slice, or Xanadoc birth: the
+handle's `value` names the exact birth operation, and a `SetLink` on `d.created` points to a
+`ValueKind::Timestamp` Cell. That Cell carries both the signed epoch-nanosecond value bits and a
+persistent, addressable primedia span with a canonical UTC RFC 3339 rendering at nanosecond
+resolution. A reader uses the bits for ordering and comparison, and the span for ordinary display,
+quotation, and provenance. Reject a typed timestamp whose span does not render the same instant;
+never infer the typed value by parsing the span during normal reads.
+
+The current `annotateVersion()` writes a plain text Cell for `d.created` from a timestamp string.
+Update its writer to parse a complete, valid timestamp with a UTC offset, normalize it to the typed
+instant, and refuse invalid or out-of-range input. Add a typed timestamp API for callers that
+already have an instant, and keep absent timestamp distinct from epoch zero. The annotation is a
+claimed time supplied by its author, not proof of when the store appended the operation. A
+branch-local reader must find the `d.created` link on the handle targeting the selected birth;
+labels on handles targeting other operations remain ordinary operation annotations. Like a rename,
+the annotation's `SetLink` retains its OpHandle subject predecessor in `sourceOpIndex` and carries
+the annotated structure's edit-context predecessor in `sourceAt`.
+
 ## Context encoding and replay
 
 The current `sourceOpIndex` can hold the containment edge for a nested Make and the edit-context
@@ -154,6 +180,8 @@ equality, rank, or operation order never chooses that context. Focus changes app
 
 1. **Define the encoding and context API.** In `apps/common/xanadu/ops.hpp` and `ops.cpp`, rename
    the verb, add `StructureKind`, flag accessors, a Make-specific constructor, and names for dumps.
+   Add `ValueKind::Timestamp = 6`, a signed nanosecond accessor, and typed Cell construction that
+   writes matching value bits and a canonical UTC span. Make `d.created` annotations use that type.
    Add a typed context reference to `Op` and a `contextOf()` accessor for compact nodes. Audit every
    `StructureVerb::MakeCell` comparison, including Store, Manifold, external reference resolution,
    publication, and tools. Each site must say whether it means *any birth* or *a Cell birth*.
@@ -248,6 +276,10 @@ equality, rank, or operation order never chooses that context. Focus changes app
   a Xanadoc-only store's first rename, and save/load plus export/import round trips. Verify the
   annotation `SetLink` keeps both its handle-subject predecessor and the named structure's
   edit-context predecessor.
+- Annotate Cell, Slice, and Xanadoc births on `d.created` with typed timestamps. Verify pre-epoch,
+  epoch-zero, and fractional-second instants, canonical UTC spans, bitwise and publication round
+  trips, ordering across branches, and refusal of malformed or out-of-range input. Distinguish no
+  annotation from a present zero-valued timestamp; verify the SetLink's two predecessor edges.
 - Save/load and V5 export/import preserve both the context edge and transclusion source along with
   birth identities and kinds; old `ops.nodes` and binary export versions fail by version. Text
   export either round-trips with an explicit new version or refuses the new operations.
