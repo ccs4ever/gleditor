@@ -33,16 +33,19 @@ looks as if it should work is not a pass.
     XDG_CONFIG_HOME=$run/config XDG_DATA_HOME=$run/data
   ```
 
-- **The automation options are hands, not features.** `--click`, `--select`, `--type`, `--key`,
-  `--capture`, `--screenshot` and `--dump-a11y` stand in for a person. `--do NAME` stands in for
-  pressing NAME's key binding: before using it, confirm the binding exists in `system://keymap` (run
-  once with `SPDLOG_LEVEL=xudu.keymap=debug`, which logs each binding made and warns about any that
-  do not parse), and record the chord in the report. An action with no binding and no control is *No
-  affordance* however well `--do` drives it.
+- **The automation options are hands, not features.** They stand in for a person, and each goes
+  through the path the matching real input takes. `--click X,Y`, `--select START,END`,
+  `--type TEXT`, `--key NAME` (dialog keys), `--chord COMBO` (a key combination, through the key
+  bindings), `--mouse-down X,Y[,BUTTON]`, `--mouse-move X,Y`, `--mouse-up X,Y[,BUTTON]`,
+  `--drag X1,Y1:X2,Y2`, `--right-click X,Y`, `--capture FILE`, `--screenshot FILE` and
+  `--dump-a11y`. Prefer `--chord` with the default binding to `--do NAME`; use `--do` only for an
+  action whose binding is confirmed in `system://keymap` (run once with
+  `SPDLOG_LEVEL=xudu.keymap=debug`, which logs each binding made and warns about any that do not
+  parse), and record the chord. An action with no binding and no control is *No affordance* however
+  well `--do` drives it.
 
-- **Harness gaps are fixed first.** When a gesture a person can make has no automation — today a
-  chord through the keymap, a right-click, and a drag from one point to another are missing — that
-  is a *Harness gap*. Close it in the automation layer (`src/app.cpp`'s script options,
+- **Harness gaps are fixed first.** When a gesture a person can make has no automation, that is a
+  *Harness gap*. Close it in the automation layer (`src/app.cpp`'s script options,
   `src/renderer.cpp`'s script steps), routing synthetic input through the same event path a real
   event takes, with a test, before judging the journey. Never judge a journey through a side door
   the user does not have.

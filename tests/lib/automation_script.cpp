@@ -192,3 +192,45 @@ TEST(AutomationScript, typeCanBracketDecorateEmptyText) {
 }
 
 } // namespace
+
+TEST(AutomationScript, chordIsAKeyDownThroughTheKeymap) {
+  const auto script =
+      scriptOf({"--chord", "Alt+Shift+N", "--chord", "Alt+NoSuchKey"});
+  ASSERT_EQ(script.size(), 1U) << "an unparseable chord adds no step";
+  const auto expected = gleditor::parseKeyCombo("Alt+Shift+N");
+  ASSERT_TRUE(expected.has_value());
+  EXPECT_EQ(script[0].kind, Kind::Input);
+  EXPECT_EQ(script[0].input.kind, AppState::SyntheticInput::Kind::KeyDown);
+  EXPECT_EQ(script[0].input.scancode, expected->first);
+  EXPECT_EQ(script[0].input.mods, static_cast<std::uint32_t>(expected->second));
+}
+
+TEST(AutomationScript, dragIsAPressMovesAndARelease) {
+  using Input       = AppState::SyntheticInput::Kind;
+  const auto script = scriptOf({"--drag", "10,20:70,80"});
+  ASSERT_EQ(script.size(), 8U);
+  EXPECT_EQ(script.front().input.kind, Input::ButtonDown);
+  EXPECT_EQ(script.front().input.x, 10);
+  EXPECT_EQ(script.back().input.kind, Input::ButtonUp);
+  EXPECT_EQ(script.back().input.x, 70);
+  EXPECT_EQ(script.back().input.y, 80);
+  for (std::size_t i = 1; i + 1 < script.size(); ++i) {
+    EXPECT_EQ(script[i].input.kind, Input::Motion);
+    EXPECT_NE(0U, script[i].input.held & 1U) << "moves hold the left button";
+  }
+  EXPECT_EQ(script[6].input.x, 70) << "the last move reaches the drop point";
+}
+
+TEST(AutomationScript, pressesAreHeldUntilReleased) {
+  using Input = AppState::SyntheticInput::Kind;
+  const auto script =
+      scriptOf({"--mouse-down", "5,5,3", "--mouse-move", "9,9", "--mouse-up",
+                "9,9,3", "--mouse-move", "1,1", "--right-click", "2,2"});
+  ASSERT_EQ(script.size(), 6U);
+  EXPECT_EQ(script[0].input.button, 3);
+  EXPECT_EQ(script[1].input.held, 1U << 2U) << "right button held";
+  EXPECT_EQ(script[3].input.held, 0U) << "released";
+  EXPECT_EQ(script[4].input.kind, Input::ButtonDown);
+  EXPECT_EQ(script[4].input.button, 3);
+  EXPECT_EQ(script[5].input.kind, Input::ButtonUp);
+}

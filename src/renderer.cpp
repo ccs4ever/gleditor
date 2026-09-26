@@ -467,11 +467,39 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // scheduled a reflow, the script waits for the reflow to settle before
   // taking the next step.
   if (settled) {
-    if (awaitingSettle) {
+    const auto serviceClickOrDrag = [&]() {
+      if (this->state->clickPending.exchange(false)) {
+        const auto clickX   = this->state->clickX.load();
+        const auto clickY   = this->state->clickY.load();
+        awaitingClick       = std::pair{clickX, clickY};
+        awaitingClickButton = this->state->clickButton.load();
+        awaitingDrag        = false;
+        requestPick(state, clickX, clickY);
+        return true;
+      }
+      if (this->state->dragPending.exchange(false)) {
+        const auto dragX = this->state->dragX.load();
+        const auto dragY = this->state->dragY.load();
+        awaitingClick    = std::pair{dragX, dragY};
+        awaitingDrag     = true;
+        requestPick(state, dragX, dragY);
+        return true;
+      }
+      return false;
+    };
+    const bool inputHandled =
+        !awaitingInput ||
+        this->state->syntheticHandled.load() >= *awaitingInput;
+    if (awaitingSettle && awaitingInput && (!inputHandled || awaitingClick)) {
+      // Still with the event thread, or waiting on the pick it asked for.
+    } else if (awaitingSettle && awaitingInput && serviceClickOrDrag()) {
+      // The event asked where a press or drag landed; answered next frames.
+    } else if (awaitingSettle) {
       // The frame this step's work was scheduled on has been and gone, and
       // this one is settled, so the work is done and the script may go on.
       awaitingSettle = false;
       awaitingStep   = false;
+      awaitingInput.reset();
       nextStep++;
     } else if (!scriptFinished()) {
       advanceScript(state);
@@ -678,7 +706,9 @@ void Renderer::collectPickingResults(RenderState &state) {
       auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
       placeCaretFromPick(state, pickWithButton);
-      if (awaitingStep) {
+      // An Input step finishes through the settle check instead, once the
+      // frame after this answer is settled.
+      if (awaitingStep && !awaitingInput) {
         // The step that asked for this answer is done; the next one may go.
         awaitingStep = false;
         nextStep++;
@@ -739,6 +769,13 @@ void Renderer::advanceScript(RenderState &state) {
   switch (step.kind) {
   case Kind::Capture:
     pendingScriptCapture = step.text;
+    return;
+  case Kind::Input:
+    // Handled on the event thread, like the platform's own input; the step
+    // finishes once that has happened and whatever it asked of this thread
+    // -- a click's or a drag's pick -- has been answered.
+    awaitingInput = this->state->queueSynthetic(step.input);
+    finishStepWhenSettled();
     return;
   case Kind::Pick:
     // Answered on a later frame; collectPickingResults() reports it and moves

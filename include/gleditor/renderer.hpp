@@ -379,6 +379,8 @@ private:
   /// Whether the step being carried out is waiting for work it scheduled --
   /// the reflow an edit causes -- rather than for a picking answer.
   bool awaitingSettle{};
+  /// A script Input step's syntheticHandled target, until it is reached.
+  std::optional<std::uint64_t> awaitingInput;
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
   /// Wall time of each settled frame, of collecting its page draws, and of
