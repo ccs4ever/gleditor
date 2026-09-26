@@ -1,4 +1,4 @@
-# Surface: a Hypertime Map of Visible Regions
+# Surface: a Hypertime Coordinate Map
 
 **Status:** vision and replay contract, not an implemented format. This note explores assigning
 reserved `StructureKind = 3` to Surface after
@@ -90,11 +90,11 @@ Reserve `Structure` verbs 4–6 for a proposed Surface family; verb 7 remains un
 logical operations, with the field encoding below proposed rather than implemented. They are
 dispatched by verb, not inferred by parsing Cell contents.
 
-| Verb                | Replay effect                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------- |
-| `SurfacePlace = 4`  | Mint a placement whose identity is this op; install its source media, crop, transform, and layer. |
-| `SurfaceChange = 5` | Replace one placement's crop, transform, or layer, retaining its source and placement identity.   |
-| `SurfaceRemove = 6` | Remove one placement from the selected Surface view; earlier versions keep it.                    |
+| Verb                | Replay effect                                                                                   |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| `SurfacePlace = 4`  | Mint a placement whose identity is this op; install its source, range, transform, and layer.    |
+| `SurfaceChange = 5` | Replace one placement's crop, transform, or layer, retaining its source and placement identity. |
+| `SurfaceRemove = 6` | Remove one placement from the selected Surface view; earlier versions keep it.                  |
 
 Each op's context edge names the preceding edit to **S** on that branch, or `Make(S)` for the first.
 The edge can pass through a rename or other valid annotation event that targets S; replay ignores
@@ -118,7 +118,8 @@ Reintroducing the same source creates a new Place identity rather than mutating 
 change cannot retarget a placement to different source media: remove and place again, making the
 provenance change explicit.
 
-The first milestone admits decoded raster images with finite dimensions. A Place operand contains:
+The first milestone admits decoded raster images with finite dimensions and a built-in affine
+transform. A Place operand contains:
 
 - one addressable source media span and its declared decoded width, height, orientation, and media
   type;
@@ -126,14 +127,66 @@ The first milestone admits decoded raster images with finite dimensions. A Place
 - an invertible affine map from those coordinates to local Surface coordinates; and
 - an explicit layer number, with the Place birth's stable microversion name breaking ties.
 
-A Change operand replaces the source crop, affine map, and layer together. This is one named edit:
-replay never exposes a half-updated crop or transform. The source span and decoded geometry remain
-those of the Place. Coordinates and affine coefficients require an exact, bounded numeric encoding,
-not host-dependent floating-point serialization. A versioned operand schema should specify rational
-coefficients, half-open boundaries, pixel-center sampling, overflow limits, and rejection of
-singular maps before the wire format is chosen. General warps, masks, blend modes, and vector source
-geometry are later extensions; silently treating them as affine raster placements would change what
-old readers display.
+A first-milestone Change operand replaces the source crop, affine map, and layer together. This is
+one named edit: replay never exposes a half-updated crop or transform. The source span and decoded
+geometry remain those of the Place. Coordinates and affine coefficients require an exact, bounded
+numeric encoding, not host-dependent floating-point serialization. A versioned operand schema should
+specify rational coefficients, half-open boundaries, pixel-center sampling, overflow limits, and
+rejection of singular maps before the wire format is chosen. General warps, masks, blend modes, and
+vector source geometry are later extensions; silently treating them as affine raster placements
+would change what old readers display.
+
+## Vortex-defined transforms
+
+A later Place or Change operand may select a Vortex transform instead of a built-in affine map.
+Vortex programs are already representable as persistent opcode Cells: `VortexHost` can promote an
+entry opcode subgraph into a Store. A Surface operand must pin the **entry Cell birth and the exact
+program version** that supplies its complete opcode and dependency graph. A local symbol name or the
+latest version of a module is insufficient: editing the program later must not silently change an
+earlier Surface version. Export and adoption must translate program references by stable operation
+and version names, with all dependencies available or explicitly unresolved. The first
+implementation can require the program to be in the same store; cross-store calls need the
+publication boundary designed separately.
+
+The proposed function contract maps an output query to a source query:
+
+```text
+surface.map(destination coordinate, source-domain metadata, immutable parameters)
+    -> outside | one or more typed source coordinates with weights
+```
+
+The destination coordinate carries the Surface's fixed axis signature (`XY`, `XYZ`, or `XYT`). A
+result carries the source's declared axes and must lie within the Place's selected source range.
+Mapping from destination to source handles folds and many-to-one projections without demanding an
+inverse function. A transform could bend a volume through space, select a non-planar slice, or remap
+a video interval through time. A future Place source could itself be a pinned Surface or other
+spatial structure rather than raw media; replay would evaluate the returned coordinate in that
+source's own versioned coordinate frame. Recursive structure references need a cycle check and
+bounded evaluation depth. A Change may choose another pinned function snapshot or parameters while
+retaining the placement birth and source identity.
+
+For example, a pinned function could map each `(x, y, z)` in a destination volume to
+`(x, y, z + height(x, y))` in a source scan, where the height field is another pinned input. The
+result is a curved section through unchanged source voxels. A later branch can reference a revised
+function or height field, while the earlier branch still means the original mapping.
+
+General Vortex execution is too broad for authoritative replay: it can change arena Cells, and
+`VortexVM::run()` bounds cycles but does not alone establish a pure spatial function. Define a
+versioned `surface.map` profile that reads a frozen program snapshot, exposes no clock, randomness,
+network, mutable Store, or UI state, and allows only bounded scratch computation discarded after the
+call. Give it instruction, memory, recursion, and output-size budgets. Numeric operations used for
+authoritative coordinates need specified cross-platform behavior; device shader approximations may
+draw the result but cannot decide source provenance. Missing programs, contract violations, budget
+exhaustion, and cycles produce explicit unresolved placement results, never empty space or fallback
+to a different function.
+
+A built-in affine placement has conservative transformed bounds for a spatial index. An arbitrary
+Vortex function may have no cheap inverse or provable bounds. Without validated conservative
+destination bounds, replay must include that placement in each query rather than culling it and
+silently losing possible source material. Optional bounds are an optimization claim checked against
+the function's contract, not an authority to redefine its output. A future synthesis-capable profile
+would need provenance saying its samples derive from the pinned program and inputs; it could not
+masquerade as a quotation of bytes that do not exist.
 
 The present 64-byte `CompactOpNode` does not hold a source address, a crop, and a full affine map
 inline. The proposed compact node therefore points through its ordinary `span` to one immutable,
@@ -172,12 +225,19 @@ textures are replay caches, never authored Cells or operations. Incremental appl
 with a full ancestral rebuild, including after a fork or a Change that moves a placement across the
 indexed plane.
 
+For a Vortex placement, the same query calls its pinned `surface.map` function in the restricted
+profile and resolves each returned source coordinate. The replay fold stores the function reference
+and parameters; it does not execute the program while folding unrelated ops. Query caches include
+the Surface version, placement birth, program snapshot, source identity and any source-structure
+snapshot, parameters, and coordinate. A program edit or a branch cannot retroactively change an
+earlier cache entry.
+
 For a future `XYZ` or `XYT` birth, this fold is still selected by Surface identity and hypertime
 version, but its coverage index has the birth's declared axes. A query supplies a coordinate in
-those axes, inverse-maps through each placement, and returns typed source contributors. The fold
-must not answer a time query with a depth value, or fabricate a pixel result for an audio-only
-placement. A branch-local transform changes only the projection of source samples into that Surface;
-the source stream and its intrinsic coordinates remain fixed.
+those axes, applies each placement's affine or Vortex destination-to-source mapping, and returns
+typed source contributors. The fold must not answer a time query with a depth value, or fabricate a
+pixel result for an audio-only placement. A branch-local transform changes only the projection of
+source samples into that Surface; the source stream and its intrinsic coordinates remain fixed.
 
 This contract makes hypertime transforms inspectable: a reader can hold one source region fixed
 while comparing its transformed occurrences at two versions. Undo is selection of an earlier
@@ -217,6 +277,10 @@ The minimum evidence for promotion from vision to implementation plan is:
 - two interleaved Surfaces in one store, each rebuilding only its own placements;
 - forks changing the same placement differently, with replay and incremental results agreeing;
 - crop, translation, scale, and rotation retaining source-span and placement provenance;
+- a pinned Vortex transform that bends a volume or remaps media time, gives the same typed query
+  result after save/load and publication, and stays unchanged when the program later branches;
+- explicit unresolved results for absent programs, failed contracts, fuel exhaustion, and cycles,
+  plus correct queries when a function has no safe spatial bound;
 - an exploratory `XYZ` volume box and `XYT` video or audio interval that keep spatial depth and
   relative media time typed and distinct from UTC annotations;
 - deterministic ordering of overlapping placements before and after export/import renumbers ops;
