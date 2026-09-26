@@ -140,13 +140,37 @@ would change what old readers display.
 
 A later Place or Change operand may select a Vortex transform instead of a built-in affine map.
 Vortex programs are already representable as persistent opcode Cells: `VortexHost` can promote an
-entry opcode subgraph into a Store. A Surface operand must pin the **entry Cell birth and the exact
-program version** that supplies its complete opcode and dependency graph. A local symbol name or the
-latest version of a module is insufficient: editing the program later must not silently change an
-earlier Surface version. Export and adoption must translate program references by stable operation
-and version names, with all dependencies available or explicitly unresolved. The first
-implementation can require the program to be in the same store; cross-store calls need the
-publication boundary designed separately.
+entry opcode subgraph into a Store. For a user-authored routine, a Surface operand must pin the
+**entry Cell birth and exact program version** that supply its complete opcode and dependency graph.
+Editing the program later must not silently change an earlier Surface version. Export and adoption
+must translate persistent program references by stable operation and version names, with all
+dependencies available or explicitly unresolved. An initial user-program implementation can require
+the program to be in the same store; cross-store calls need the publication boundary designed
+separately.
+
+### Bundled `sys:surface` functions
+
+All clients could ship common Vortex routines in a `sys:surface` package. The current Vortex
+bootstrap already uses a `sys:` module path for `sys:array`; `sys:surface` would be a proposed
+module alongside it, exporting functions such as identity mapping, affine placement, axis-aligned
+volume section, and media-time windowing. The functions would be Vortex opcode graphs with the same
+`surface.map` call contract as user routines, so a client need not give each transform a new
+Structure verb or op-field interpretation.
+
+Bootstrap Cells live in a client's arena and have no portable `CellRef`. A Place referring to a
+bundled routine therefore records a *package release identity plus exported symbol* rather than that
+arena index or a floating path such as `sys:surface/volume_section`. The release identity must bind
+a canonical digest of the opcode graph, its transitive `sys:` dependencies, the call-contract
+version, and the numeric semantics needed for replay. The path is only an authoring lookup; the
+stored reference selects exact behavior. Clients must retain or obtain referenced older releases to
+replay old Surfaces. When a release is unavailable, the placement is unresolved; a newer client must
+not substitute its current `sys:surface` implementation.
+
+This gives authors a ready-made transform vocabulary while keeping the operation substrate small.
+The same operand schema can distinguish `BundledFunction{release, symbol}` from
+`PersistentFunction{store, version, entry}`. A Change can replace either reference at one named
+hypertime point. Merely installing a new client package creates no edit and changes no prior Surface
+result.
 
 The proposed function contract maps an output query to a source query:
 
@@ -279,6 +303,8 @@ The minimum evidence for promotion from vision to implementation plan is:
 - crop, translation, scale, and rotation retaining source-span and placement provenance;
 - a pinned Vortex transform that bends a volume or remaps media time, gives the same typed query
   result after save/load and publication, and stays unchanged when the program later branches;
+- a `sys:surface` function whose package release and symbol resolve identically on two clients;
+  updating one client's package must leave the old Surface unchanged or explicitly unresolved;
 - explicit unresolved results for absent programs, failed contracts, fuel exhaustion, and cycles,
   plus correct queries when a function has no safe spatial bound;
 - an exploratory `XYZ` volume box and `XYT` video or audio interval that keep spatial depth and
