@@ -478,6 +478,9 @@ protected:
 
   /// Whether document pages are still being loaded or laid out.
   [[nodiscard]] bool docsLoading(const RenderState &state) const;
+  /// Insert @p text at the caret, replacing any selection; returns where it
+  /// went. The caret must be in an open document.
+  std::uint32_t typeAtCaret(RenderState &state, const std::string &text);
 
   /// Build the glyph pipeline from the portable shader sources, and the
   /// overlay pipeline that shares them.
