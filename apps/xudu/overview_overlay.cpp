@@ -63,7 +63,7 @@ void OverviewOverlay::drawFrame(gleditor::FrameContext &ctx) {
   for (const auto &doc : ctx.state.docs) {
     if (doc) {
       ++stamp.documents;
-      stamp.pages += doc->builtPageCount();
+      stamp.pages += doc->numPages();
     }
   }
   if (builtFor != stamp) {
@@ -100,18 +100,36 @@ void OverviewOverlay::rebuild(gleditor::FrameContext &ctx, const Stamp &stamp) {
     if (!doc) {
       continue;
     }
+    // Every page the layout has, built or not: a page not yet built is placed
+    // where the stack puts it -- its gap below the one before, as tall as
+    // the first -- so the panel shows the arrangement rather than how far
+    // building has got, which varies with the machine.
+    std::optional<std::pair<glm::vec2, glm::vec2>> previous;
+    float firstHeight = 0.0F;
     for (std::size_t p = 0; p < doc->numPages(); ++p) {
-      const auto frame = doc->pageFrame(p);
-      if (!frame) {
+      std::pair<glm::vec2, glm::vec2> rect;
+      if (const auto frame = doc->pageFrame(p)) {
+        const glm::vec2 a(frame->localToWorld * glm::vec4(frame->leftPx,
+                                                          frame->bottomPx, 0.0F,
+                                                          1.0F));
+        const glm::vec2 b(frame->localToWorld *
+                          glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
+        rect = {glm::min(a, b), glm::max(a, b)};
+      } else if (previous) {
+        const float top =
+            previous->first.y - (Doc::pageGapPx * Doc::pixelsToWorld);
+        rect = {{previous->first.x, top - firstHeight},
+                {previous->second.x, top}};
+      } else {
         continue;
       }
-      const glm::vec2 a(frame->localToWorld *
-                        glm::vec4(frame->leftPx, frame->bottomPx, 0.0F, 1.0F));
-      const glm::vec2 b(frame->localToWorld *
-                        glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
-      pages.emplace_back(glm::min(a, b), glm::max(a, b));
-      grow(a);
-      grow(b);
+      if (0.0F == firstHeight) {
+        firstHeight = rect.second.y - rect.first.y;
+      }
+      previous = rect;
+      pages.push_back(rect);
+      grow(rect.first);
+      grow(rect.second);
     }
   }
   marks.clear();

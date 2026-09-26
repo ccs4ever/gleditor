@@ -24,6 +24,7 @@
 #ifndef XUDU_BEAMS_H
 #define XUDU_BEAMS_H
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -519,6 +520,8 @@ private:
       accessibleNodes;
   LinkContext *linkContext_{nullptr};
   float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  /// What the last settle diagnostic reported, so it is logged on change.
+  std::array<std::size_t, 4> lastSettleReport{};
   /// Bumped whenever the strands change, so the description is rebuilt then
   /// and not every frame.
   std::uint64_t described{1};
