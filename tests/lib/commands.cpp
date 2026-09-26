@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gleditor/app.hpp>
@@ -43,6 +44,48 @@ TEST(CommandTableTest, otherKeysAreLeftAlone) {
 
   EXPECT_FALSE(table.dispatch(keyB, Mod::None));
   EXPECT_EQ(ran, 0);
+}
+
+TEST(CommandTableTest, aScopedBindingWinsOnlyInItsScope) {
+  CommandTable table;
+  std::string scope;
+  table.setScopeResolver([&scope] { return scope; });
+  std::vector<std::string> ran;
+  table.bind(keyA, "caret", "", [&ran] { ran.emplace_back("caret"); });
+  table.bind(keyA, "cell", "", [&ran] { ran.emplace_back("cell"); });
+  ASSERT_TRUE(table.setScope("cell", "zigzag"));
+
+  EXPECT_TRUE(table.dispatch(keyA, Mod::None));
+  scope = "zigzag";
+  EXPECT_TRUE(table.dispatch(keyA, Mod::None));
+  scope = "elsewhere";
+  EXPECT_TRUE(table.dispatch(keyA, Mod::None));
+  EXPECT_THAT(ran, ::testing::ElementsAre("caret", "cell", "caret"));
+}
+
+TEST(CommandTableTest, aScopedBindingIsDeadOutsideItsScope) {
+  CommandTable table;
+  int ran = 0;
+  table.bind(keyA, "cell", "", [&ran] { ran++; });
+  ASSERT_TRUE(table.setScope("cell", "zigzag"));
+
+  EXPECT_FALSE(table.dispatch(keyA, Mod::None));
+  EXPECT_EQ(ran, 0);
+}
+
+TEST(CommandTableTest, conflictsAreOnlyWithinOneScope) {
+  CommandTable table;
+  table.bind(keyA, "first", "", [] {});
+  table.bind(keyA, "second", "", [] {});
+  table.bind(keyA, "scoped", "", [] {});
+  table.bind(keyB, "other", "", [] {});
+  table.registerAction("unbound", "", [] {});
+  table.registerAction("also unbound", "", [] {});
+  ASSERT_TRUE(table.setScope("scoped", "zigzag"));
+
+  EXPECT_THAT(table.conflicts(),
+              ::testing::ElementsAre(
+                  std::pair<std::string, std::string>{"first", "second"}));
 }
 
 TEST(CommandTableTest, modifiersMustMatchExactly) {
@@ -217,6 +260,20 @@ TEST(CommandTableTest, parseKeyComboVarious) {
 
   const auto c7 = parseKeyCombo("invalid-nonsense-key-xyz");
   EXPECT_FALSE(c7.has_value());
+}
+
+TEST(CommandTableTest, aColonIsTheShiftedSemicolonKey) {
+  using gleditor::parseKeyCombo;
+
+  const auto colon = parseKeyCombo(":");
+  ASSERT_TRUE(colon.has_value());
+  EXPECT_EQ(colon->first, SDL_SCANCODE_SEMICOLON);
+  EXPECT_EQ(colon->second, Mod::Shift);
+
+  const auto altColon = parseKeyCombo("Alt+:");
+  ASSERT_TRUE(altColon.has_value());
+  EXPECT_EQ(altColon->first, SDL_SCANCODE_SEMICOLON);
+  EXPECT_EQ(altColon->second, Mod::Alt | Mod::Shift);
 }
 
 TEST(MouseWheelTest, WheelHelpersExtractCoordinates) {
