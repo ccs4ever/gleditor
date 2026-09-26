@@ -1425,6 +1425,25 @@ public:
     });
   }
 
+  /// Transclude @p span at the caret -- the source's addresses, not a copy
+  /// -- and leave the caret after it.
+  void insertSpanAtCaret(const PrimediaSpan &span) {
+    withCaret(
+        [this, span](RenderState &rState, const Where &where, Caret *caret) {
+          if (where.doc >= rState.docs.size() || 0 == span.length) {
+            return;
+          }
+          const auto prod = session.insertSpan(where.doc, where.start, span);
+          if (const auto src =
+                  session.sourceFor(prod, session.storeIndexOf(where.doc))) {
+            rState.docs[where.doc]->load(*src);
+            syncMediaWidgets(rState);
+          }
+          caret->placeAt(where.doc,
+                         where.start + static_cast<std::uint32_t>(span.length));
+        });
+  }
+
   void insertPageBreakAtCaret() {
     withCaret([this](RenderState &rState, const Where &where, Caret *) {
       if (where.doc >= rState.docs.size()) {
@@ -2196,30 +2215,37 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   };
 
   app.commands().registerAction(
-      "pouch-drop-left", "drop selection onto clasp homestead bench (left)",
+      std::string(xanadu::settings::kKeymapPouchDropLeft),
+      "drop selection onto clasp homestead bench (left)",
       [dropSelectionToBench] { dropSelectionToBench(true); });
   app.commands().registerAction(
-      "pouch-drop-right", "drop selection onto clasp toward bench (right)",
+      std::string(xanadu::settings::kKeymapPouchDropRight),
+      "drop selection onto clasp toward bench (right)",
       [dropSelectionToBench] { dropSelectionToBench(false); });
   app.commands().registerAction(
-      "pouch-drop", "drop selection into active pouch zone",
+      std::string(xanadu::settings::kKeymapPouchDrop),
+      "drop selection into active pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("notes"); });
   app.commands().registerAction(
-      "pouch-drop-notes", "drop selection into notes pouch zone",
+      std::string(xanadu::settings::kKeymapPouchDropNotes),
+      "drop selection into notes pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("notes"); });
   app.commands().registerAction(
-      "pouch-drop-scratch", "drop selection into scratch pouch zone",
+      std::string(xanadu::settings::kKeymapPouchDropScratch),
+      "drop selection into scratch pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("scratch"); });
   app.commands().registerAction(
-      "pouch-drop-to-link-left", "drop selection into to-link-left pouch zone",
+      std::string(xanadu::settings::kKeymapPouchDropToLinkLeft),
+      "drop selection into to-link-left pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("to_link_left"); });
   app.commands().registerAction(
-      "pouch-drop-to-link-right",
+      std::string(xanadu::settings::kKeymapPouchDropToLinkRight),
       "drop selection into to-link-right pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("to_link_right"); });
 
   app.commands().registerAction(
-      "forge-clasp", "forge bilateral clasp link from items on bench",
+      std::string(xanadu::settings::kKeymapForgeClasp),
+      "forge bilateral clasp link from items on bench",
       [&pouchDrawer, &session, renderer] {
         renderer->runWithState([&pouchDrawer, &session,
                                 renderer](RenderState &) {
@@ -2920,6 +2946,9 @@ int main(const int argc, char **argv) {
 
     pouchDrawer.setSwingBackHandler(
         [&views](const PouchItem &item) { views.swingBackToSpan(item); });
+    pouchDrawer.setUseHandler([&views](const PouchItem &item) {
+      views.insertSpanAtCaret(item.span);
+    });
 
     KineticTetherEngine kineticTetherEngine;
     KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine, "Sans 10");

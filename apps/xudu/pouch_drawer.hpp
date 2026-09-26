@@ -42,6 +42,8 @@ public:
   static constexpr std::uint32_t kTagZoneClearBase   = 7100U;
   static constexpr std::uint32_t kTagItemBase        = 8000U;
   static constexpr std::uint32_t kTagItemDismissBase = 12000U;
+  /// A card's insert button: the item into the document at the caret.
+  static constexpr std::uint32_t kTagItemUseBase = 20000U;
 
   using SwingBackHandler = std::function<void(const PouchItem &)>;
 
@@ -70,6 +72,11 @@ public:
   void setDockSide(DockSide side) noexcept { side_ = side; }
   [[nodiscard]] DockSide dockSide() const noexcept { return side_; }
 
+  /// What a card's insert button does with its item: xudu transcludes it
+  /// at the caret, which is how a pouch item is used later.
+  void setUseHandler(SwingBackHandler handler) {
+    useHandler_ = std::move(handler);
+  }
   void setSwingBackHandler(SwingBackHandler handler) {
     swingBackHandler_ = std::move(handler);
   }
@@ -138,6 +145,7 @@ private:
   std::unique_ptr<gleditor::Canvas> canvas_;
 
   SwingBackHandler swingBackHandler_;
+  SwingBackHandler useHandler_;
   std::uint64_t a11yRevision_{1};
 
   float drawerX_{0.0F};

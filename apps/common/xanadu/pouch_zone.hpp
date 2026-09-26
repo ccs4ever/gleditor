@@ -49,6 +49,10 @@ struct PouchItem {
   std::uint32_t originCell{0};       ///< zigzag::CellRef if from Zigzag
   std::uint32_t originSliceIndex{0}; ///< Manifold or slice index
   std::string originRankCoord;       ///< e.g. "d.sequence: #4"
+
+  /// The cell holding this item in the backing store, whose content is the
+  /// span itself: what keeps it across sessions (see PouchManager).
+  std::uint32_t cell{0};
 };
 
 /**
@@ -194,9 +198,24 @@ public:
 
   /// Serialization of drop zone manifest into root microversion metadata.
   void saveManifest();
+  /// Zones, then the items that were in them when the store was last saved.
   void loadManifest();
 
 private:
+  void loadZones();
+  /**
+   * @brief Read back every item the store holds, into its zone.
+   *
+   * An item is a cell on the home cell's d.pouch rank whose content is the
+   * dropped span -- a transclusion, sharing the source's addresses -- with
+   * its zone along d.zone and where it came from along d.origin. Dismissing
+   * one takes it off the rank; the cell stays, as everything does.
+   */
+  void loadItems();
+  /// Mint @p item's cell and hang it on the rank; sets PouchItem::cell.
+  void persistItem(PouchItem &item, std::string_view zoneId);
+  /// @p name's dimension in the backing store, minted if it has none.
+  zigzag::DimRef dimension(std::string_view name);
   Store *systemStore_{nullptr};
   std::unique_ptr<Store> store_;
   MicroversionId currentVersion_;

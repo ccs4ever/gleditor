@@ -322,6 +322,20 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
       canvas_->addText(ctx.state, cardX + cardW - 13.0F, cardY + cardH - 6.0F,
                        "x", 0xFFFFFFFF, 0);
 
+      // Insert [+] button: the item into the document at the caret.
+      canvas_->setTag(render::tagKindOverlay,
+                      kTagItemUseBase +
+                          static_cast<std::uint32_t>(item.itemId));
+      canvas_->addRect(cardX + cardW - 32.0F, cardY + cardH - 16.0F, 12.0F,
+                       12.0F, 0x10B98188);
+      canvas_->addText(ctx.state, cardX + cardW - 29.0F, cardY + cardH - 6.0F,
+                       "+", 0xFFFFFFFF, 0);
+
+      // Back to the card body's own tag: the snippet is part of the card,
+      // and drawn under the dismiss tag a click on it deleted the item.
+      canvas_->setTag(render::tagKindOverlay,
+                      kTagItemBase + static_cast<std::uint32_t>(item.itemId));
+
       // Preview snippet text (bottom line)
       std::string snippet = item.previewText;
       if (snippet.size() > 26) {
@@ -377,7 +391,15 @@ bool PouchDrawer::picked(const render::PickingResult &pick,
   if (tag >= kTagZoneClearBase && tag < kTagZoneClearBase + 50U) {
     const auto zIdx = tag - kTagZoneClearBase;
     if (zIdx < pouchManager_.zones().size()) {
-      pouchManager_.zones()[zIdx]->clear();
+      // Each item dismissed as the [x] on its card would, so the store
+      // agrees and they do not come back next session.
+      std::vector<std::uint64_t> ids;
+      for (const auto &item : pouchManager_.zones()[zIdx]->items()) {
+        ids.push_back(item.itemId);
+      }
+      for (const auto id : ids) {
+        pouchManager_.dismissItem(id);
+      }
       return true;
     }
   }
@@ -389,7 +411,21 @@ bool PouchDrawer::picked(const render::PickingResult &pick,
     return true;
   }
 
-  // 5. Card Click -> Swing-Back Context Navigation
+  // 5. Insert the item at the caret
+  if (tag >= kTagItemUseBase && tag < kTagItemUseBase + 3000U) {
+    const auto itemId = static_cast<std::uint64_t>(tag - kTagItemUseBase);
+    for (const auto &zone : pouchManager_.zones()) {
+      for (const auto &item : zone->items()) {
+        if (item.itemId == itemId && useHandler_) {
+          useHandler_(item);
+          return true;
+        }
+      }
+    }
+    return true;
+  }
+
+  // 6. Card Click -> Swing-Back Context Navigation
   if (tag >= kTagItemBase && tag < kTagItemBase + 3000U) {
     const auto itemId = static_cast<std::uint64_t>(tag - kTagItemBase);
     for (const auto &zone : pouchManager_.zones()) {

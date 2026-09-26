@@ -12,8 +12,16 @@
 #include <gleditor/ranges.hpp>
 
 #include "common/xanadu/system_docs.hpp"
+#include "zigzag/manifold.hpp"
 
 namespace xanadu {
+
+namespace {
+// The rank items hang on from home, and what each carries.
+constexpr std::string_view kPouchRank = "d.pouch";
+constexpr std::string_view kZoneDim   = "d.zone";
+constexpr std::string_view kOriginDim = "d.origin";
+} // namespace
 
 DropZone::DropZone(DropZoneConfig config) : config_(std::move(config)) {}
 
@@ -184,22 +192,6 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
                                  const std::uint32_t charEnd) {
   DropZone *const zone = &zoneOrDefault(zoneId);
 
-  // Record transclusion into the system store: zero raw byte copying!
-  currentVersion_ = store().insertSpan(currentVersion_, 0, span);
-
-  // Annotate microversion with zone and preview
-  store().setVersionAnnotation(
-      currentVersion_,
-      VersionAnnotation{
-          .alias       = std::string(zone->id()),
-          .description = previewText,
-          .tag         = "pouch-drop",
-          .timestamp   = std::to_string(
-              std::chrono::duration_cast<std::chrono::seconds>(
-                  std::chrono::system_clock::now().time_since_epoch())
-                  .count()),
-      });
-
   PouchItem item{
       .itemId          = nextItemId_++,
       .span            = span,
@@ -214,6 +206,19 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
               .count()),
   };
 
+  persistItem(item, zone->id());
+  // The drop, labelled on the state it produced.
+  store().setVersionAnnotation(
+      currentVersion_,
+      VersionAnnotation{
+          .alias       = std::string(zone->id()),
+          .description = item.previewText,
+          .tag         = "pouch-drop",
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
+      });
   zone->addItem(item);
   return item;
 }
@@ -225,21 +230,6 @@ PouchItem PouchManager::dropCell(const std::string_view zoneId,
                                  const std::string_view rankCoord,
                                  const std::uint32_t sliceIndex) {
   DropZone *const zone = &zoneOrDefault(zoneId);
-
-  // Record transclusion into the system store
-  currentVersion_ = store().insertSpan(currentVersion_, 0, span);
-
-  store().setVersionAnnotation(
-      currentVersion_,
-      VersionAnnotation{
-          .alias       = std::string(zone->id()),
-          .description = previewText,
-          .tag         = "pouch-cell-drop",
-          .timestamp   = std::to_string(
-              std::chrono::duration_cast<std::chrono::seconds>(
-                  std::chrono::system_clock::now().time_since_epoch())
-                  .count()),
-      });
 
   PouchItem item{
       .itemId          = nextItemId_++,
@@ -259,6 +249,19 @@ PouchItem PouchManager::dropCell(const std::string_view zoneId,
       .originRankCoord  = std::string(rankCoord),
   };
 
+  persistItem(item, zone->id());
+  // The drop, labelled on the state it produced.
+  store().setVersionAnnotation(
+      currentVersion_,
+      VersionAnnotation{
+          .alias       = std::string(zone->id()),
+          .description = item.previewText,
+          .tag         = "pouch-cell-drop",
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
+      });
   zone->addItem(item);
   return item;
 }
@@ -271,11 +274,18 @@ bool PouchManager::dismissItem(const std::uint64_t itemId) {
           return item.itemId == itemId;
         });
     if (it != items.end()) {
-      const auto span = it->span;
+      const auto cell = static_cast<zigzag::CellRef>(it->cell);
       zone->removeItem(itemId);
-      // Non-destructive limbo: record erase in backing store
-      if (span.length > 0) {
-        currentVersion_ = store().erase(currentVersion_, 0, span.length);
+      // Off the rank, into limbo: the cell and its history stay.
+      if (zigzag::noCell != cell) {
+        const auto rank     = dimension(kPouchRank);
+        const auto manifold = store().rebuildManifold(currentVersion_);
+        const auto before = manifold.linked(cell, rank, zigzag::DimVector::NEG);
+        const auto after  = manifold.linked(cell, rank, zigzag::DimVector::POS);
+        if (zigzag::noCell != before) {
+          currentVersion_ = store().setLink(currentVersion_, before, rank,
+                                            zigzag::DimVector::POS, after);
+        }
       }
       return true;
     }
@@ -307,7 +317,131 @@ void PouchManager::saveManifest() {
       });
 }
 
+zigzag::DimRef PouchManager::dimension(const std::string_view name) {
+  if (const auto found = store()
+                             .rebuildManifold(currentVersion_)
+                             .dimensionNamed(name, store())) {
+    return *found;
+  }
+  const auto minted = store().makeDimension(currentVersion_, name);
+  currentVersion_   = minted.version;
+  return minted.dim;
+}
+
+void PouchManager::persistItem(PouchItem &item, const std::string_view zoneId) {
+  auto &st = store();
+  if (zigzag::noCell == st.homeCell()) {
+    currentVersion_ = st.sliceGenesis(currentVersion_);
+  }
+  const auto rank   = dimension(kPouchRank);
+  const auto zone   = dimension(kZoneDim);
+  const auto origin = dimension(kOriginDim);
+  const auto mint   = [&](const MicroversionId &next) {
+    currentVersion_ = next;
+    return st.cellRefOf(next);
+  };
+  const auto link = [&](const zigzag::CellRef from, const zigzag::DimRef dim,
+                        const zigzag::CellRef to) {
+    currentVersion_ =
+        st.setLink(currentVersion_, from, dim, zigzag::DimVector::POS, to);
+  };
+
+  auto tail           = st.homeCell();
+  const auto manifold = st.rebuildManifold(currentVersion_);
+  for (auto next = manifold.linked(tail, rank); zigzag::noCell != next;
+       next      = manifold.linked(tail, rank)) {
+    tail = next;
+  }
+  // The item's content is the span it quotes: no bytes are copied.
+  const auto cell = mint(st.makeCell(currentVersion_, item.span));
+  item.cell       = cell;
+  link(tail, rank, cell);
+  link(cell, zone, mint(st.makeCell(currentVersion_, zoneId)));
+
+  const auto number = [&](const std::uint64_t value) {
+    return mint(
+        st.makeScalarCell(currentVersion_, static_cast<std::int64_t>(value)));
+  };
+  const zigzag::CellRef fields[] = {
+      mint(st.makeCell(currentVersion_, item.originVersion.str())),
+      number(static_cast<std::uint64_t>(item.originKind)),
+      number(item.originDocIndex),
+      number(item.originCharStart),
+      number(item.originCharEnd),
+      number(item.originCell),
+      number(item.originSliceIndex),
+      mint(st.makeCell(currentVersion_, item.originRankCoord)),
+      number(item.timestampUtc),
+  };
+  auto last = cell;
+  for (const auto field : fields) {
+    link(last, origin, field);
+    last = field;
+  }
+}
+
+void PouchManager::loadItems() {
+  const auto &st = store();
+  if (zigzag::noCell == st.homeCell()) {
+    return;
+  }
+  const auto manifold = st.rebuildManifold(currentVersion_);
+  const auto rank     = manifold.dimensionNamed(kPouchRank, st);
+  const auto zoneDim  = manifold.dimensionNamed(kZoneDim, st);
+  const auto origin   = manifold.dimensionNamed(kOriginDim, st);
+  if (!rank) {
+    return;
+  }
+  // A preview long enough to recognise, as a drop's own is.
+  constexpr std::size_t kPreviewBytes = 40;
+  for (auto cell                    = manifold.linked(st.homeCell(), *rank);
+       zigzag::noCell != cell; cell = manifold.linked(cell, *rank)) {
+    PouchItem item;
+    item.itemId = nextItemId_++;
+    item.cell   = cell;
+    if (const auto content = manifold.contentOf(cell); !content.empty()) {
+      item.span = content.front();
+    }
+    item.previewText = manifold.textOf(cell, st).substr(0, kPreviewBytes);
+    std::vector<zigzag::CellRef> fields;
+    if (origin) {
+      for (auto at = manifold.linked(cell, *origin); zigzag::noCell != at;
+           at      = manifold.linked(at, *origin)) {
+        fields.push_back(at);
+      }
+    }
+    const auto text = [&](const std::size_t i) {
+      return i < fields.size() ? manifold.textOf(fields[i], st) : std::string{};
+    };
+    const auto number = [&](const std::size_t i) -> std::uint64_t {
+      return i < fields.size() ? static_cast<std::uint64_t>(
+                                     manifold.asInt64(fields[i]).value_or(0))
+                               : 0U;
+    };
+    item.originVersion    = MicroversionId::parse(text(0));
+    item.originKind       = static_cast<PouchOriginKind>(number(1));
+    item.originDocIndex   = static_cast<std::uint32_t>(number(2));
+    item.originCharStart  = static_cast<std::uint32_t>(number(3));
+    item.originCharEnd    = static_cast<std::uint32_t>(number(4));
+    item.originCell       = static_cast<std::uint32_t>(number(5));
+    item.originSliceIndex = static_cast<std::uint32_t>(number(6));
+    item.originRankCoord  = text(7);
+    item.timestampUtc     = number(8);
+    const auto zoneCell =
+        zoneDim ? manifold.linked(cell, *zoneDim) : zigzag::noCell;
+    const auto zoneId = zigzag::noCell == zoneCell
+                            ? std::string{}
+                            : manifold.textOf(zoneCell, st);
+    zoneOrDefault(zoneId).addItem(std::move(item));
+  }
+}
+
 void PouchManager::loadManifest() {
+  loadZones();
+  loadItems();
+}
+
+void PouchManager::loadZones() {
   if (store().opCount() > 0) {
     const auto pouchCfg = PouchConfig::fromStore(store());
     if (!pouchCfg.zones.empty()) {

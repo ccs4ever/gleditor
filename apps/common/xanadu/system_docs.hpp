@@ -490,9 +490,23 @@ inline constexpr std::string_view kKeymapSelectLineEnd =
 inline constexpr std::string_view kKeymapNewline = "std:edit/newline";
 inline constexpr std::string_view kKeymapDeleteForward =
     "std:edit/delete_forward";
-inline constexpr std::string_view kKeymapNewSlice = "std:xuzz/new_slice";
-inline constexpr std::string_view kKeymapEditCell = "std:zigzag/edit_cell";
-inline constexpr std::string_view kKeymapMarkCell = "std:zigzag/mark_cell";
+inline constexpr std::string_view kKeymapNewSlice  = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapPouchDrop = "std:xudu/pouch_drop";
+inline constexpr std::string_view kKeymapPouchDropToLinkLeft =
+    "std:xudu/pouch_drop_to_link_left";
+inline constexpr std::string_view kKeymapPouchDropToLinkRight =
+    "std:xudu/pouch_drop_to_link_right";
+inline constexpr std::string_view kKeymapPouchDropNotes =
+    "std:xudu/pouch_drop_notes";
+inline constexpr std::string_view kKeymapPouchDropScratch =
+    "std:xudu/pouch_drop_scratch";
+inline constexpr std::string_view kKeymapPouchDropLeft =
+    "std:xudu/pouch_drop_left";
+inline constexpr std::string_view kKeymapPouchDropRight =
+    "std:xudu/pouch_drop_right";
+inline constexpr std::string_view kKeymapForgeClasp = "std:xudu/forge_clasp";
+inline constexpr std::string_view kKeymapEditCell   = "std:zigzag/edit_cell";
+inline constexpr std::string_view kKeymapMarkCell   = "std:zigzag/mark_cell";
 inline constexpr std::string_view kKeymapLinkMarkedXPos =
     "std:zigzag/link_marked_x_pos";
 inline constexpr std::string_view kKeymapLinkMarkedXNeg =
