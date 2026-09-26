@@ -674,9 +674,19 @@ void LinkBeams::updatePriorityOffsets(RenderState &state,
   const auto considerStrand = [&](const auto &strand) {
     const bool fromNeeds = strand.from.isDocument() && !strand.fromAnchor;
     const bool toNeeds   = strand.to.isDocument() && !strand.toAnchor;
-    if (!fromNeeds && !toNeeds) {
-      // Both ends already resolved (or neither is a document end) -- nothing
-      // this strand could ask a document to prioritise.
+    // Alignment levels on both ends of each side's extent, so a strand still
+    // to be aligned also needs the pages its extents end on.
+    bool fromEndNeeds = false;
+    bool toEndNeeds   = false;
+    if constexpr (requires { strand.link; }) {
+      const bool pending = sworph && !strand.aligned &&
+                           strand.from.isDocument() && strand.to.isDocument();
+      fromEndNeeds       = pending && !strand.fromEndAnchor;
+      toEndNeeds         = pending && !strand.toEndAnchor;
+    }
+    if (!fromNeeds && !toNeeds && !fromEndNeeds && !toEndNeeds) {
+      // Every end it needs is resolved (or none is a document end) --
+      // nothing this strand could ask a document to prioritise.
       return;
     }
 
@@ -685,11 +695,22 @@ void LinkBeams::updatePriorityOffsets(RenderState &state,
     const auto toPos =
         approxWorldFor(strand.to, strand.toAnchor, strand.toCellAnchor);
 
+    // A link waiting to be brought alongside levels on all of its strands'
+    // anchors, so those pages are wanted whether or not the ribbon is on
+    // screen: aligning on whichever happened to be built first made the
+    // arrangement depend on how fast pages were built.
+    bool awaitingAlignment = false;
+    if constexpr (requires { strand.link; }) {
+      awaitingAlignment = sworph && !strand.aligned &&
+                          strand.from.isDocument() && strand.to.isDocument();
+    }
     if (fromPos && toPos) {
-      if (!ribbonMaybeOnScreen(viewProjection, *fromPos, *toPos,
-                               inflateWorld)) {
+      if (!awaitingAlignment && !ribbonMaybeOnScreen(viewProjection, *fromPos,
+                                                     *toPos, inflateWorld)) {
         return;
       }
+    } else if (awaitingAlignment) {
+      // Placed or not, the anchors are wanted; fall through to ask for them.
     } else if (!((strand.to.isCell() && !toPos && fromPos) ||
                  (strand.from.isCell() && !fromPos && toPos))) {
       // Neither a ribbon to test nor the cell-not-placed-yet fallback below
@@ -707,6 +728,12 @@ void LinkBeams::updatePriorityOffsets(RenderState &state,
     }
     if (toNeeds) {
       perDocOffsets[strand.to.doc].push_back(strand.to.start);
+    }
+    if (fromEndNeeds && strand.from.end > strand.from.start) {
+      perDocOffsets[strand.from.doc].push_back(strand.from.end - 1U);
+    }
+    if (toEndNeeds && strand.to.end > strand.to.start) {
+      perDocOffsets[strand.to.doc].push_back(strand.to.end - 1U);
     }
   };
 
@@ -1606,9 +1633,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         }
       }
 
+      // Every strand of this link between these two documents, anchored at
+      // both ends of both extents before any of them aligns -- see
+      // updatePriorityOffsets(). A sibling whose document has finished building
+      // and still has no anchor never will, and is not waited for.
+      const auto siblingStillLoading = [&] {
+        return std::ranges::any_of(strands, [&](const Strand &other) {
+          if (other.link != strand.link || !other.from.isDocument() ||
+              !other.to.isDocument()) {
+            return false;
+          }
+          const bool samePair = (other.from.doc == strand.from.doc &&
+                                 other.to.doc == strand.to.doc) ||
+                                (other.from.doc == strand.to.doc &&
+                                 other.to.doc == strand.from.doc);
+          const auto waiting  = [&](const auto &anchor, const LinkEnd &end) {
+            return !anchor && endpointStillLoading(end);
+          };
+          return samePair && (waiting(other.fromAnchor, other.from) ||
+                              waiting(other.toAnchor, other.to) ||
+                              waiting(other.fromEndAnchor, other.from) ||
+                              waiting(other.toEndAnchor, other.to));
+        });
+      };
       if (sworph && !strand.aligned) {
         if (strand.from.isDocument() && strand.to.isDocument()) {
-          if (moved) {
+          if (moved || siblingStillLoading()) {
             stillToAlign = true;
           } else {
             strand.aligned = true;
@@ -1958,6 +2008,23 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
 
     unsettled = stillToAlign || anyStrandStillLoading;
+    {
+      const auto aligned = static_cast<std::size_t>(
+          std::ranges::count_if(strands, &Strand::aligned));
+      const auto anchored = static_cast<std::size_t>(
+          std::ranges::count_if(strands, [](const Strand &st) {
+            return (st.from.isCell() || st.fromAnchor) &&
+                   (st.to.isCell() || st.toAnchor);
+          }));
+      const std::array<std::size_t, 4> now{strands.size(), anchored, aligned,
+                                           unsettled ? 1U : 0U};
+      if (now != lastSettleReport) {
+        lastSettleReport = now;
+        GLEDITOR_LOG_DEBUG(
+            "xudu.links", "beams: {} strands, {} anchored, {} aligned, {}",
+            now[0], now[1], now[2], unsettled ? "unsettled" : "settled");
+      }
+    }
 
     beams->commit();
     strandsRebuilt = false;
