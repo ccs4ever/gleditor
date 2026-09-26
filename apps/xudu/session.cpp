@@ -904,6 +904,54 @@ void Session::syncCurrentVersions(const std::size_t storeIndex) const {
   }
 }
 
+Store *Session::activity() {
+  if (activityStore || activityRefused) {
+    return activityStore.get();
+  }
+  const auto dir = xanadu::activityDirectory();
+  auto perma     = (stores.empty() || !stores[0].store)
+                       ? nullptr
+                       : stores[0].store->userPermascrollPtr();
+  auto opened    = std::make_unique<Store>(perma);
+  try {
+    if (std::filesystem::exists(dir)) {
+      opened->load(dir.string());
+    }
+    activityStore = std::move(opened);
+  } catch (const std::exception &err) {
+    activityRefused = true;
+    std::cerr << "xudu: not resuming or recording where you were: the "
+                 "activity store at "
+              << dir.string() << " cannot be read (" << err.what()
+              << "); it is left untouched\n";
+  }
+  return activityStore.get();
+}
+
+std::optional<xanadu::ReadingPlace> Session::lastPlace() {
+  auto *const store = activity();
+  if (nullptr == store) {
+    return std::nullopt;
+  }
+  try {
+    return xanadu::latestPlace(*store);
+  } catch (const std::exception &err) {
+    std::cerr << "xudu: cannot read where you were: " << err.what() << "\n";
+    return std::nullopt;
+  }
+}
+
+void Session::rememberPlace(const xanadu::ReadingPlace &place) {
+  auto *const store = activity();
+  if (nullptr == store) {
+    return;
+  }
+  static_cast<void>(xanadu::recordPlace(*store, place));
+  const auto dir = xanadu::activityDirectory();
+  std::filesystem::create_directories(dir);
+  store->save(dir.string());
+}
+
 void Session::saveAll() const {
   const_cast<Session *>(this)->flushUncommitted();
   for (std::size_t i = 0; i < stores.size(); ++i) {

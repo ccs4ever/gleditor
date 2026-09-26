@@ -247,6 +247,11 @@ public:
   [[nodiscard]] xanadu::vql::CompilationResult
   compileVQL(std::string_view vqlQuery) const;
 
+  /// The version of the store the slice shown was folded at; zero for none.
+  [[nodiscard]] xanadu::MicroversionId sliceHead() const {
+    return engine_ ? engine_->head() : xanadu::MicroversionId{};
+  }
+
   // -- Key hints ------------------------------------------------------------
   /**
    * @brief The hint line along the bottom, built by the host from the

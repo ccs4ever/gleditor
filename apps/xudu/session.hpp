@@ -41,6 +41,7 @@
 #include <gleditor/svg_cache.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "common/xanadu/reading_place.hpp"
 #include "core/anchor_lanes.hpp"
 #include "core/mutable_link.hpp"
 #include "core/provenance.hpp"
@@ -473,6 +474,21 @@ public:
   void save(std::size_t index = 0) const;
   void saveAll() const;
 
+  /**
+   * @brief Where the reader was when the last session ended, from the
+   *        activity store (system://activity), or nothing.
+   */
+  [[nodiscard]] std::optional<xanadu::ReadingPlace> lastPlace();
+
+  /**
+   * @brief Append @p place to the activity store and save it.
+   *
+   * An activity store that could not be read is left exactly as it was and
+   * nothing is recorded: it is the reader's history, and writing a fresh one
+   * over it would lose that. Said once, on stderr.
+   */
+  void rememberPlace(const xanadu::ReadingPlace &place);
+
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] std::vector<OpenView> &views() { return open; }
@@ -789,6 +805,13 @@ private:
     std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
+
+  /// system://activity, opened on first use; see activity().
+  std::unique_ptr<Store> activityStore;
+  bool activityRefused{false};
+  /// The activity store, loaded against this session's permascroll, or null
+  /// when it exists and cannot be read.
+  Store *activity();
 
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.

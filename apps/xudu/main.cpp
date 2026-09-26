@@ -10,6 +10,7 @@
  * logic, the commands and the command-line options.
  */
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <sstream>
 #include <string>
@@ -54,6 +56,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "common/xanadu/link_occurrences.hpp"
+#include "common/xanadu/reading_place.hpp"
 #include "xudu/batch_orchestrator.hpp"
 #include "xudu/beams.hpp"
 #include "xudu/collaborator_overlay.hpp"
@@ -1255,6 +1258,94 @@ public:
     return storeIndex;
   }
 
+  /**
+   * @brief Where the reader is: the open documents, the caret and selection
+   *        in the one being worked in, and the camera.
+   *
+   * Asked on the render thread as its loop ends (Renderer::setShutdownHook),
+   * the last moment the caret still exists; kept for the main thread to
+   * write once the loop has returned.
+   */
+  [[nodiscard]] xanadu::ReadingPlace currentPlace() const {
+    xanadu::ReadingPlace place;
+    const auto *const caret = renderer->editCaret();
+    for (std::size_t i = 0; i < session.views().size(); ++i) {
+      const auto &view = session.views()[i];
+      xanadu::DocumentPlace document{.storePath = session.path(view.storeIndex),
+                                     .version   = view.version.str()};
+      if (nullptr != caret && caret->active() && caret->documentIndex() == i) {
+        document.caret  = caret->byteOffset();
+        document.anchor = !caret->hasSelection() ? caret->byteOffset()
+                          : caret->byteOffset() == caret->selectionStart()
+                              ? caret->selectionEnd()
+                              : caret->selectionStart();
+        place.active    = i;
+      }
+      place.documents.push_back(std::move(document));
+    }
+    std::scoped_lock locker(state->view);
+    place.camera = std::array<double, 4>{state->view.pos.x, state->view.pos.y,
+                                         state->view.pos.z, state->view.fov};
+    return place;
+  }
+
+  /**
+   * @brief Put the caret, the selection and the camera back as @p place had
+   *        them, once the documents it names are open.
+   *
+   * @param opened For each of @p place's documents, the index it was opened
+   *        at, or nothing for one that could not be.
+   * @param lengths Each opened document's length, which a saved caret is held
+   *        inside: a store edited elsewhere may since have shrunk.
+   */
+  void restorePlace(const xanadu::ReadingPlace &place,
+                    std::vector<std::optional<std::uint32_t>> opened,
+                    std::vector<std::uint32_t> lengths) {
+    renderer->runWithState([this, place, opened = std::move(opened),
+                            lengths = std::move(lengths)](RenderState &rState) {
+      if (place.camera) {
+        // The saved view, not a fresh reading framing of the first page.
+        readingFramed_ = true;
+        frameTarget_.reset();
+        std::scoped_lock locker(state->view);
+        const auto &[x, y, z, fov] = *place.camera;
+        state->view.pos =
+            glm::vec3(static_cast<float>(x), static_cast<float>(y),
+                      static_cast<float>(z));
+        state->view.fov = static_cast<float>(fov);
+      }
+      if (!place.active || *place.active >= opened.size() ||
+          !opened[*place.active]) {
+        return;
+      }
+      const auto index = *opened[*place.active];
+      if (index >= rState.docs.size()) {
+        return;
+      }
+      const auto &saved = place.documents[*place.active];
+      const auto length = *place.active < lengths.size()
+                              ? lengths[*place.active]
+                              : std::uint32_t{0};
+      if (switcher) {
+        switcher->setActiveDocIndex(index);
+      }
+      if (auto *const caret = renderer->editCaret(); caret) {
+        caret->placeAt(index, std::min(saved.anchor, length));
+        if (saved.anchor != saved.caret) {
+          caret->anchorSelection();
+          caret->extendTo(std::min(saved.caret, length));
+        }
+      }
+    });
+  }
+
+  /// Take currentPlace() now, for finalPlace().
+  void keepFinalPlace() { finalPlace_ = currentPlace(); }
+  /// What keepFinalPlace() took, or the place now if it never ran.
+  [[nodiscard]] xanadu::ReadingPlace finalPlace() const {
+    return finalPlace_ ? *finalPlace_ : currentPlace();
+  }
+
   /// Place the ZigZag presentation beside @p doc's first page rather than
   /// the first document's -- the page of the store it is showing.
   void anchorPresentation(std::weak_ptr<Doc> doc) {
@@ -1767,6 +1858,8 @@ private:
   std::weak_ptr<Doc> presentationAnchor_;
   /// See placeCameraWhenReady().
   std::function<bool()> pendingCamera_;
+  /// See keepFinalPlace().
+  std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -3110,6 +3203,28 @@ int main(const int argc, char **argv) {
         });
     linkContext.setCellFocusQuery(
         [&zigzagPresentation] { return zigzagPresentation->focusCell(); });
+    // Which store's slice the presentation shows: the primary one until a new
+    // slice or a resumed session names another.
+    std::size_t zigzagStoreIndex = 0;
+    /// Show @p storeIndex's slice at @p version, beside the page of the
+    /// document open onto that store. On the render thread.
+    const auto bindZigzag = [&session, &zigzagPresentation, &linkContext,
+                             &bridgeCoordinator, &views,
+                             &zigzagStoreIndex](RenderState &rState,
+                                                const std::size_t storeIndex,
+                                                const MicroversionId &version) {
+      zigzagPresentation->bindXuduStore(session->store(storeIndex), version);
+      zigzagStoreIndex = storeIndex;
+      linkContext.setManifold(bridgeCoordinator.manifold());
+      bridgeCoordinator.synchronize();
+      const auto &open = session->views();
+      for (std::size_t i = 0; i < open.size() && i < rState.docs.size(); ++i) {
+        if (open[i].storeIndex == storeIndex) {
+          views.anchorPresentation(rState.docs[i]);
+          break;
+        }
+      }
+    };
     overview.setMarkSource(
         [chosenPlaces, &zigzagPresentation](const RenderState &rState,
                                             std::vector<glm::vec3> &out) {
@@ -3448,8 +3563,86 @@ int main(const int argc, char **argv) {
       });
       return true;
     };
-    if (asked.empty() && read.empty() && alongside.empty() &&
-        extraImports.empty()) {
+    // Launched with nothing named -- the way a person opens it -- xuzz comes
+    // back to where they were: the documents that were open, the caret and
+    // selection, the camera and the ZigZag focus.
+    std::optional<xanadu::ReadingPlace> resuming;
+    if (!parser.is_used("store") && asked.empty() && read.empty() &&
+        alongside.empty() && extraImports.empty() && background.empty()) {
+      resuming = session->lastPlace();
+    }
+    std::vector<std::optional<std::uint32_t>> resumedAt;
+    std::vector<std::uint32_t> resumedLengths;
+    if (resuming) {
+      namespace fs       = std::filesystem;
+      std::uint32_t next = 0;
+      for (const auto &document : resuming->documents) {
+        std::optional<std::size_t> storeIndex;
+        try {
+          if (document.storePath == session->path(0)) {
+            storeIndex = 0;
+          } else if (fs::exists(fs::path(document.storePath) / "ops.nodes")) {
+            storeIndex = session->loadAuxiliaryStore(document.storePath);
+          }
+        } catch (const std::exception &err) {
+          std::cerr << "xudu: cannot reopen " << document.storePath << ": "
+                    << err.what() << "\n";
+        }
+        if (!storeIndex) {
+          resumedAt.emplace_back();
+          resumedLengths.push_back(0);
+          continue;
+        }
+        const auto &store = session->store(*storeIndex);
+        auto version      = MicroversionId::parse(document.version);
+        if (!version.isZero() && !store.getOp(version).has_value()) {
+          version = store.primaryCurrentVersion();
+        }
+        views.showAlongside(version, 0.0F, *storeIndex);
+        resumedAt.emplace_back(next++);
+        resumedLengths.push_back(
+            static_cast<std::uint32_t>(store.textOf(version).size()));
+      }
+      if (0 == next) {
+        resuming.reset();
+      }
+    }
+    if (resuming) {
+      views.restorePlace(*resuming, resumedAt, resumedLengths);
+#ifdef XUZZ_BUILD
+      if (!resuming->zigzagStore.empty()) {
+        renderer->runWithState([&session, &bindZigzag, &zigzagPresentation,
+                                &keyboardPane,
+                                place = *resuming](RenderState &rState) {
+          for (std::size_t i = 0; i < session->storeCount(); ++i) {
+            if (session->path(i) != place.zigzagStore) {
+              continue;
+            }
+            const auto &store = session->store(i);
+            auto version      = MicroversionId::parse(place.zigzagVersion);
+            if (version.isZero() || !store.getOp(version).has_value()) {
+              version = store.primaryCurrentVersion();
+            } else if (version.isAncestorOf(store.latest())) {
+              // Saving appends bookkeeping after the slice's own last edit;
+              // resuming from before it would fork the next edit away.
+              version = store.latest();
+            }
+            bindZigzag(rState, i, version);
+            const auto focus = static_cast<zigzag::CellRef>(place.zigzagFocus);
+            if (zigzag::noCell != focus &&
+                zigzagPresentation->manifold().contains(focus)) {
+              zigzagPresentation->focusCell(focus);
+            }
+            if (place.zigzagHasKeyboard) {
+              keyboardPane.enterZigzag();
+            }
+            break;
+          }
+        });
+      }
+#endif
+    } else if (asked.empty() && read.empty() && alongside.empty() &&
+               extraImports.empty()) {
       const auto &primaryStore = session->store(0);
 #ifdef XUZZ_BUILD
       // Xuzz composes the current Xanadoc beside the current manifold. Its
@@ -3485,6 +3678,11 @@ int main(const int argc, char **argv) {
     }
     if (parser["--onion-skin"] == true) {
       views.setOnionSkin(true);
+    }
+    if (!resuming) {
+      // Somewhere for typing to land from the first keystroke; the audit
+      // found a relaunched session taking none until something was clicked.
+      views.selectDoc(0);
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
@@ -3595,23 +3793,17 @@ int main(const int argc, char **argv) {
     app.commands().registerAction(
         std::string(xanadu::settings::kKeymapNewSlice),
         "start a new ZigZag slice, in a new xanadoc of its own",
-        [&views, &session, &renderer, &keyboardPane, &linkContext,
-         &bridgeCoordinator, &state, zigzagPresentation] {
+        [&views, &session, &renderer, &keyboardPane, &bindZigzag, &state,
+         zigzagPresentation] {
           const auto storeIndex = views.newDocument();
-          renderer->runWithState([&views, &session, &keyboardPane, &linkContext,
-                                  &bridgeCoordinator, &state,
-                                  zigzagPresentation,
+          renderer->runWithState([&views, &session, &keyboardPane, &bindZigzag,
+                                  &state, zigzagPresentation,
                                   storeIndex](RenderState &rState) {
             auto &store = session->store(storeIndex);
             const auto version =
                 store.sliceGenesis(store.primaryCurrentVersion());
             session->save(storeIndex);
-            zigzagPresentation->bindXuduStore(store, version);
-            linkContext.setManifold(bridgeCoordinator.manifold());
-            bridgeCoordinator.synchronize();
-            if (!rState.docs.empty()) {
-              views.anchorPresentation(rState.docs.back());
-            }
+            bindZigzag(rState, storeIndex, version);
             keyboardPane.enterZigzag();
             // The home cell sits beside a page that is still being laid
             // out: wait for the presentation to be placed there, then one
@@ -3782,7 +3974,19 @@ int main(const int argc, char **argv) {
       }
     }
 
+    renderer->setShutdownHook(
+        [&views](RenderState &) { views.keepFinalPlace(); });
     const auto status = app.run();
+    {
+      auto place = views.finalPlace();
+#ifdef XUZZ_BUILD
+      place.zigzagStore       = session->path(zigzagStoreIndex);
+      place.zigzagVersion     = zigzagPresentation->sliceHead().str();
+      place.zigzagFocus       = zigzagPresentation->focusCell();
+      place.zigzagHasKeyboard = keyboardPane.inZigzag();
+#endif
+      session->rememberPlace(place);
+    }
     session->saveAll();
     if (parser["--export-osmic"] == true) {
       session->saveOsmicTextAll();
