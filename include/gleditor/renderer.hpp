@@ -205,6 +205,17 @@ public:
    * belongs to the render loop's own stack frame, so there is no way to hand
    * it over other than by going round the queue.
    */
+  /**
+   * @brief Run @p hook on the render thread once, as the render loop ends,
+   *        before the documents and the caret are released.
+   *
+   * For what a program wants to keep of the session -- where the reader was
+   * -- which is gone by the time the loop has returned.
+   */
+  void setShutdownHook(std::function<void(RenderState &)> hook) {
+    shutdownHook = std::move(hook);
+  }
+
   void runWithState(std::invocable<RenderState &> auto fun) {
     renderQueue.push(RenderItemRunState(std::move(fun)));
   }
@@ -288,6 +299,8 @@ protected:
   /// What the last frame's contributors claimed; see
   /// FrameContext::settledChrome.
   gleditor::ScreenInsets lastChrome;
+  /// See setShutdownHook().
+  std::function<void(RenderState &)> shutdownHook;
   std::vector<gleditor::PickObserver *> pickObservers;
 };
 
@@ -384,6 +397,9 @@ private:
   bool awaitingSettle{};
   /// A script Input step's syntheticHandled target, until it is reached.
   std::optional<std::uint64_t> awaitingInput;
+  /// Whether the step waiting on awaitingInput has already seen one settled
+  /// frame after its event was handled; see update().
+  bool inputSettledOnce{false};
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
   /// Wall time of each settled frame, of collecting its page draws, and of

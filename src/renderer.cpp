@@ -500,7 +500,15 @@ bool Renderer::update(RenderState &state, const bool settled) {
       // Still with the event thread, or waiting on the pick it asked for.
     } else if (awaitingSettle && awaitingInput && serviceClickOrDrag()) {
       // The event asked where a press or drag landed; answered next frames.
+    } else if (awaitingSettle && awaitingInput && !inputSettledOnce) {
+      // Handled, but perhaps after this frame was judged settled: what the
+      // handler queued for this thread runs at the start of the next frame,
+      // and only a settled frame after that shows it done. Without this a
+      // step could finish with its own work still queued -- and a run that
+      // quit then lost it, which is how a scripted Shift+Left went missing.
+      inputSettledOnce = true;
     } else if (awaitingSettle) {
+      inputSettledOnce = false;
       // The frame this step's work was scheduled on has been and gone, and
       // this one is settled, so the work is done and the script may go on.
       awaitingSettle = false;
@@ -1187,6 +1195,13 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
   }
 
+  // Work asked for before the loop ended is still carried out -- an edit a
+  // key queued just ahead of quitting is the reader's -- so that the
+  // shutdown hook below sees it.
+  while (auto item = renderQueue.pop()) {
+    dispatch(state, *item);
+  }
+
   // The background loaders capture the render state, which lives on this stack
   // frame, so none of them may outlive this function.
   for (auto &fut : pendingDocLoads) {
@@ -1195,6 +1210,12 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
   }
   pendingDocLoads.clear();
+
+  // Last look at the scene while all of it is still there -- documents,
+  // caret, camera -- before any of it is torn down below.
+  if (shutdownHook) {
+    shutdownHook(state);
+  }
 
   // Documents own device buffers; they must be released while the device is
   // still alive, and after any in-flight frame has finished reading them.

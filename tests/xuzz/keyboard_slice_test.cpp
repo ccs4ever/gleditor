@@ -92,4 +92,67 @@ TEST(KeyboardSliceTest, aSliceIsBuiltNamedAndLinkedFromTheKeyboard) {
       << dump.output;
 }
 
+// J5: quit and relaunch with nothing named, and carry on. The selection made
+// before quitting is what typing replaces afterwards, and the slice comes
+// back focused where it was with the keyboard still in it, so E renames that
+// cell and the edit continues its line of history rather than forking it.
+TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
+  ASSERT_TRUE(fs::exists(built("xuzz"))) << "xuzz did not link";
+  const auto root = fs::current_path() / "build" / "xuzz_resume";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto xuzz = [&](const std::string &script) {
+    return run("XDG_CONFIG_HOME=" + (root / "config").string() +
+               " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+               built("xuzz").string() + " --profile " + script);
+  };
+  const auto untitledStores = [&] {
+    std::vector<fs::path> found;
+    for (const auto &entry :
+         fs::directory_iterator(root / "data" / "xudu" / "xanadocs")) {
+      if (entry.path().filename().string().starts_with("untitled-")) {
+        found.push_back(entry.path());
+      }
+    }
+    return found;
+  };
+  const auto dumpOf = [&](const fs::path &store) {
+    fs::path permascroll;
+    for (const auto &entry :
+         fs::directory_iterator(root / "data" / "xudu" / "permascroll")) {
+      permascroll = entry.path();
+    }
+    return run(built("xudu-dump").string() + " --section=ops --permascroll=" +
+               permascroll.string() + " " + store.string())
+        .output;
+  };
+
+  const auto typed = xuzz("--chord Ctrl+N --type 'hello world' --chord Left"
+                          " --chord Left --chord Left --chord Shift+Left"
+                          " --chord Shift+Left");
+  ASSERT_EQ(typed.exitCode, 0) << typed.output;
+  const auto resumed = xuzz("--type Z");
+  ASSERT_EQ(resumed.exitCode, 0) << resumed.output;
+  ASSERT_EQ(untitledStores().size(), 1U);
+  const auto text = dumpOf(untitledStores().front());
+  EXPECT_THAT(text, ::testing::ContainsRegex("kind=delete [^\n]* at=6 len=2"))
+      << text;
+  EXPECT_THAT(text, ::testing::ContainsRegex(
+                        "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""))
+      << text;
+
+  fs::remove_all(root / "data" / "xudu" / "xanadocs");
+  const auto sliced = xuzz("--chord Ctrl+Alt+N --chord N");
+  ASSERT_EQ(sliced.exitCode, 0) << sliced.output;
+  const auto renamed = xuzz("--chord E --type renamed --chord Return");
+  ASSERT_EQ(renamed.exitCode, 0) << renamed.output;
+  ASSERT_EQ(untitledStores().size(), 1U);
+  const auto slice = dumpOf(untitledStores().front());
+  // On the store's own line: "produces=N" with no branch letter in N.
+  EXPECT_THAT(slice,
+              ::testing::ContainsRegex("produces=[0-9]+ [^\n]*\\[setValue\\] "
+                                       "text=\"renamed\""))
+      << slice;
+}
+
 } // namespace
