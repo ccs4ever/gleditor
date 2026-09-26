@@ -33,7 +33,12 @@ Assign the next free value, `ValueKind::Timestamp = 6`, to a typed timestamp Cel
 `value` is a signed count of nanoseconds since 1970-01-01T00:00:00Z, bit-cast into the unsigned
 field as `Int64` already is. It denotes a UTC instant; timezone, locale, and calendar formatting are
 presentation choices. Refuse values outside the signed 64-bit nanosecond range rather than clamping,
-and do not claim nanosecond measurement precision when the source clock has less.
+and do not claim nanosecond measurement precision when the source clock has less. Producers with
+microsecond or second resolution may round an instant to the nearest value their clock or input
+supports before converting to nanoseconds; use ties-to-even when conversion actually discards finer
+precision, including for pre-epoch instants. Multiply only after rounding and check the signed
+nanosecond range before storing it. A whole-second reading becomes a nanosecond count divisible by
+1,000,000,000; no fabricated subsecond precision is implied.
 
 For Slice and Xanadoc births, `span` names primedia containing that structure's initial local name;
 require `ValueKind::None` and zero `value`. An empty span means an empty local name, not an absent
@@ -278,8 +283,10 @@ equality, rank, or operation order never chooses that context. Focus changes app
   edit-context predecessor.
 - Annotate Cell, Slice, and Xanadoc births on `d.created` with typed timestamps. Verify pre-epoch,
   epoch-zero, and fractional-second instants, canonical UTC spans, bitwise and publication round
-  trips, ordering across branches, and refusal of malformed or out-of-range input. Distinguish no
-  annotation from a present zero-valued timestamp; verify the SetLink's two predecessor edges.
+  trips, ordering across branches, microsecond and second producers with nearest-value rounding,
+  ties-to-even at positive and negative half-unit boundaries, and refusal of malformed or
+  out-of-range input. Distinguish no annotation from a present zero-valued timestamp; verify the
+  SetLink's two predecessor edges.
 - Save/load and V5 export/import preserve both the context edge and transclusion source along with
   birth identities and kinds; old `ops.nodes` and binary export versions fail by version. Text
   export either round-trips with an explicit new version or refuses the new operations.
