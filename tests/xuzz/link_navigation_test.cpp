@@ -2,6 +2,8 @@
 
 #include <array>
 #include <functional>
+#include <map>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -493,4 +495,35 @@ TEST(LinkNavigationTest, ErrorsAndCommandsHaveNames) {
   EXPECT_EQ(xanadu::name(xanadu::NavigationCommand{nav::Dismiss{}}), "dismiss");
   EXPECT_EQ(xanadu::name(xanadu::NavigationCommand{nav::EnterAt{}}),
             "enter at");
+}
+
+TEST(LinkNavigationTest, EveryUiActionHasAnUnclaimedDefaultChord) {
+  using namespace xanadu::settings;
+  const std::vector<std::string_view> ours{
+      kKeymapLinkNext,           kKeymapLinkPrevious,
+      kKeymapLinkMemberNext,     kKeymapLinkMemberPrevious,
+      kKeymapLinkOccurrenceNext, kKeymapLinkOccurrencePrevious,
+      kKeymapLinkCross,          kKeymapLinkEnter,
+      kKeymapLinkOrigin,         kKeymapLinkDismiss,
+      kKeymapActivityBack,       kKeymapOverviewToggle};
+  std::map<std::string, std::vector<std::string>> byChord;
+  std::map<std::string, std::string> chordOf;
+  for (const auto &spec :
+       xanadu::defaultSettingSpecs(xanadu::SystemDocKind::Keymap)) {
+    for (const auto &schema : spec.schemas) {
+      for (const auto &value : schema.defaultValues) {
+        if (const auto *chord = std::get_if<std::string>(&value)) {
+          byChord[*chord].push_back(spec.name);
+          chordOf[spec.name] = *chord;
+        }
+      }
+    }
+  }
+  for (const auto action : ours) {
+    const auto found = chordOf.find(std::string{action});
+    ASSERT_NE(found, chordOf.end()) << action << " has no default binding";
+    EXPECT_FALSE(found->second.empty()) << action;
+    EXPECT_EQ(byChord[found->second].size(), 1U)
+        << found->second << " is claimed by more than " << action;
+  }
 }

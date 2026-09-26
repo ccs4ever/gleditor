@@ -54,7 +54,13 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "hypertime-map: Action shortcut to toggle visual hypertime tree "
            "display. Default is Ctrl+H.\n"
            "radial-menu: Action shortcut to open context-sensitive radial "
-           "menu. Default is Ctrl+M.\n";
+           "menu. Default is Ctrl+M.\n"
+           "Selected-link navigation, all on Alt+Shift: link next and "
+           "previous N and P; member next and previous J and K; place next "
+           "and previous L and H; cross X; enter Return; return to origin O; "
+           "dismiss D; activity back B, which steps back through visits "
+           "rather than document versions. overview-toggle: show or hide the "
+           "overview of every open page, Alt+Shift+V.\n";
   case SystemDocKind::Settings:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -930,6 +936,54 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to forge a xanalink",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+L"}}}}},
+        {.name    = std::string(settings::kKeymapLinkNext),
+         .notes   = "Select the next link on screen",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+N"}}}}},
+        {.name    = std::string(settings::kKeymapLinkPrevious),
+         .notes   = "Select the previous link on screen",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+P"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMemberNext),
+         .notes   = "Choose the next member on the active side",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+J"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMemberPrevious),
+         .notes   = "Choose the previous member on the active side",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+K"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOccurrenceNext),
+         .notes   = "Choose the next place the chosen member appears",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+L"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOccurrencePrevious),
+         .notes   = "Choose the previous place the chosen member appears",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+H"}}}}},
+        {.name    = std::string(settings::kKeymapLinkCross),
+         .notes   = "Make the other side of the selected link active",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+X"}}}}},
+        {.name    = std::string(settings::kKeymapLinkEnter),
+         .notes   = "Go to the chosen place of the selected link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Return"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOrigin),
+         .notes   = "Return to where the selected link was selected",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+O"}}}}},
+        {.name    = std::string(settings::kKeymapLinkDismiss),
+         .notes   = "Put the selected link away",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+D"}}}}},
+        {.name    = std::string(settings::kKeymapActivityBack),
+         .notes   = "Return to the previous visit, not the previous version",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+B"}}}}},
+        {.name    = std::string(settings::kKeymapOverviewToggle),
+         .notes   = "Show or hide the overview of every open page",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+V"}}}}},
         {.name    = std::string(settings::kKeymapCancelLink),
          .notes   = "Shortcut to cancel pending xanalink mark",
          .schemas = {{.expectedTypes = {"string"},

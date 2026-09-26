@@ -3393,6 +3393,14 @@ int main(const int argc, char **argv) {
             for (const auto &[act, comboStr] : kmCfg.bindings) {
               if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
                 app.commands().rebind(act, combo->first, combo->second);
+                GLEDITOR_LOG_DEBUG("xudu.keymap", "{} bound to {}", act,
+                                   comboStr);
+              } else {
+                // A binding that does not parse leaves its action unreachable
+                // from the keyboard; say so rather than dropping it.
+                GLEDITOR_LOG_WARN("xudu.keymap",
+                                  "{}: \"{}\" is not a key combination", act,
+                                  comboStr);
               }
             }
 #ifdef XUZZ_BUILD
@@ -3450,6 +3458,13 @@ int main(const int argc, char **argv) {
         for (const auto &[act, comboStr] : kmCfg.bindings) {
           if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
             app.commands().rebind(act, combo->first, combo->second);
+            GLEDITOR_LOG_DEBUG("xudu.keymap", "{} bound to {}", act, comboStr);
+          } else {
+            // A binding that does not parse leaves its action unreachable from
+            // the keyboard; say so rather than dropping it.
+            GLEDITOR_LOG_WARN("xudu.keymap",
+                              "{}: \"{}\" is not a key combination", act,
+                              comboStr);
           }
         }
       }
