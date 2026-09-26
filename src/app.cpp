@@ -293,8 +293,89 @@ readAutomationScript(const int argc, const char *const *const argv) {
     return script;
   }
 
-  const auto add = [&script](const std::string_view option,
-                             const std::string &value) {
+  // Buttons held by the script's own presses, so a move between a press and
+  // a release is a drag the way a person's is. SDL's mask convention: button
+  // b is bit b - 1.
+  std::uint32_t held = 0;
+  const auto input   = [&script](const AppState::SyntheticInput &event) {
+    script.push_back(Step{.kind = Step::Kind::Input, .input = event});
+  };
+  // X,Y with an optional ,BUTTON (1 left, 2 middle, 3 right; left if absent).
+  const auto point =
+      [](const std::string &value,
+         const std::string_view option) -> std::tuple<int, int, std::uint8_t> {
+    const auto comma = value.find(',', value.find(',') + 1);
+    const auto [x, y] =
+        parsePair(value.substr(0, comma), option, "X,Y[,BUTTON]");
+    const auto button =
+        std::string::npos == comma
+            ? 1
+            : std::clamp(std::stoi(value.substr(comma + 1)), 1, 5);
+    return {x, y, static_cast<std::uint8_t>(button)};
+  };
+  using Input = AppState::SyntheticInput;
+
+  const auto add = [&script, &held, &input,
+                    &point](const std::string_view option,
+                            const std::string &value) {
+    if ("--chord" == option) {
+      if (const auto combo = parseKeyCombo(value)) {
+        input(Input{.kind     = Input::Kind::KeyDown,
+                    .scancode = combo->first,
+                    .mods     = static_cast<std::uint32_t>(combo->second)});
+      } else {
+        std::cerr << "--chord: \"" << value << "\" is not a key combination\n";
+      }
+      return;
+    }
+    if ("--mouse-down" == option || "--mouse-up" == option) {
+      const auto [x, y, button] = point(value, option);
+      const std::uint32_t bit   = 1U << (button - 1U);
+      const bool down           = "--mouse-down" == option;
+      held                      = down ? (held | bit) : (held & ~bit);
+      input(
+          Input{.kind = down ? Input::Kind::ButtonDown : Input::Kind::ButtonUp,
+                .x    = x,
+                .y    = y,
+                .button = button});
+      return;
+    }
+    if ("--mouse-move" == option) {
+      const auto [x, y] = parsePair(value, option, "X,Y");
+      input(Input{.kind = Input::Kind::Motion, .x = x, .y = y, .held = held});
+      return;
+    }
+    if ("--right-click" == option) {
+      const auto [x, y] = parsePair(value, option, "X,Y");
+      input(
+          Input{.kind = Input::Kind::ButtonDown, .x = x, .y = y, .button = 3});
+      input(Input{.kind = Input::Kind::ButtonUp, .x = x, .y = y, .button = 3});
+      return;
+    }
+    if ("--drag" == option) {
+      // A press, a few moves along the way, and a release: the moves are what
+      // hover and drop-target feedback respond to, so one jump would test
+      // less than a hand does.
+      constexpr int kDragMoves = 6;
+      const auto colon         = value.find(':');
+      if (std::string::npos == colon) {
+        std::cerr << "--drag: expected X1,Y1:X2,Y2, got \"" << value << "\"\n";
+        return;
+      }
+      const auto [x1, y1] = parsePair(value.substr(0, colon), option, "X1,Y1");
+      const auto [x2, y2] = parsePair(value.substr(colon + 1), option, "X2,Y2");
+      input(Input{
+          .kind = Input::Kind::ButtonDown, .x = x1, .y = y1, .button = 1});
+      for (int m = 1; m <= kDragMoves; ++m) {
+        input(Input{.kind = Input::Kind::Motion,
+                    .x    = x1 + ((x2 - x1) * m / kDragMoves),
+                    .y    = y1 + ((y2 - y1) * m / kDragMoves),
+                    .held = held | 1U});
+      }
+      input(
+          Input{.kind = Input::Kind::ButtonUp, .x = x2, .y = y2, .button = 1});
+      return;
+    }
     if ("--pick" == option || "--click" == option) {
       const auto [x, y] = parsePair(value, option, "X,Y");
       Step step{.kind =
@@ -333,7 +414,9 @@ readAutomationScript(const int argc, const char *const *const argv) {
   };
 
   static constexpr std::array scripted = {
-      "--pick", "--click", "--capture", "--type", "--select", "--do", "--key"};
+      "--pick",     "--click", "--capture",    "--type",       "--select",
+      "--do",       "--key",   "--chord",      "--mouse-down", "--mouse-move",
+      "--mouse-up", "--drag",  "--right-click"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
@@ -779,6 +862,34 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "end, and any of them prefixed shift-. Carried out in order with "
              "the other automation options, and reported as a mistake when "
              "nothing is up to receive it.");
+  automation(parser.add_argument("--chord").append(),
+             "press a key combination, as the keymap writes it; repeatable",
+             "Press a key combination written as the keymap writes it, for "
+             "example Alt+Shift+N, through the same path a key from the "
+             "keyboard takes: a dialog that is up first, then the key "
+             "bindings. Carried out in order with the other automation "
+             "options.");
+  automation(parser.add_argument("--mouse-down").append(),
+             "press a mouse button at X,Y[,BUTTON]; repeatable",
+             "Press a mouse button at pixel X,Y (1 left, the default; 2 "
+             "middle; 3 right), handled as the platform's own press would be.");
+  automation(parser.add_argument("--mouse-move").append(),
+             "move the pointer to X,Y; repeatable",
+             "Move the pointer to pixel X,Y, holding whatever buttons earlier "
+             "--mouse-down steps pressed, so a move between a press and a "
+             "release is a drag.");
+  automation(parser.add_argument("--mouse-up").append(),
+             "release a mouse button at X,Y[,BUTTON]; repeatable",
+             "Release a mouse button at pixel X,Y, which is where a drag is "
+             "dropped.");
+  automation(parser.add_argument("--drag").append(),
+             "drag with the left button from X1,Y1 to X2,Y2; repeatable",
+             "Press the left button at X1,Y1, move to X2,Y2 in a few steps "
+             "and release there: a drag and drop, as a hand makes it.");
+  automation(parser.add_argument("--right-click").append(),
+             "click the right mouse button at X,Y; repeatable",
+             "Press and release the right mouse button at pixel X,Y, which is "
+             "what opens a context menu.");
   automation(parser.add_argument("--toast").append(),
              "show a notification, as [info:|warning:|error:]TEXT; repeatable",
              "Show a notification once the first frame is drawn, written as "
@@ -1120,6 +1231,69 @@ int Application::run() {
     }
   };
 
+  // What each input event does, shared by the platform's events and a
+  // script's (AppState::SyntheticInput), so that automation exercises the
+  // path a person's input takes rather than a side door.
+  const auto onKeyDown = [&](const int scancode, const Mod mods) {
+    // A modal has the keyboard while it is up, and gets first refusal on
+    // every key: a question on screen is not answered by editing the
+    // document behind it. A key it does not use falls through, so that
+    // quitting still works while one is open.
+    if (nullptr != state->modal && state->modal->grabbing()) {
+      const auto key = modalKey(scancode);
+      if (key && state->modal->keyPressed(*key, modalMods(mods))) {
+        return;
+      }
+    }
+    commandTable.dispatch(scancode, mods);
+  };
+  const auto onMotion = [&](const int x, const int y,
+                            const std::uint32_t held) {
+    // Kept in window coordinates, top-down, which is what
+    // RenderDevice::requestPickingTag takes. OpenGL's bottom-up framebuffer
+    // convention is the GL backend's business, not the application's.
+    state->mouseX = x;
+    state->mouseY = y;
+    if (state->mouseMotionHandler && state->mouseMotionHandler(x, y, held)) {
+      return;
+    }
+    // Motion with the left button held is a drag, which extends the
+    // selection rather than moving the caret on its own.
+    if (0 != (held & SDL_BUTTON_LMASK) &&
+        (nullptr == state->modal || !state->modal->grabbing())) {
+      state->dragX       = x;
+      state->dragY       = y;
+      state->dragPending = true;
+    }
+  };
+  const auto onButtonDown = [&](const int x, const int y,
+                                const std::uint8_t button) {
+    // Held while a modal is up, along with the drag above: the caret is not
+    // what is being moved when there is a question on screen.
+    if (nullptr != state->modal && state->modal->grabbing()) {
+      return;
+    }
+    if (state->mouseDownHandler && state->mouseDownHandler(x, y, button)) {
+      return;
+    }
+    // The render thread answers this: where a click lands in the text is a
+    // question only the picking attachment can answer, and that read is
+    // asynchronous.
+    state->clickX       = x;
+    state->clickY       = y;
+    state->clickButton  = button;
+    state->clickPending = true;
+  };
+  const auto onButtonUp = [&](const int x, const int y,
+                              const std::uint8_t button) {
+    if (nullptr != state->modal && state->modal->grabbing()) {
+      return;
+    }
+    if (state->mouseUpHandler) {
+      static_cast<void>(state->mouseUpHandler(x, y, button));
+    }
+  };
+
   while (state->alive) {
     sayWhatIsWaiting(true);
 
@@ -1158,6 +1332,33 @@ int Application::run() {
       }
     }
 
+    // Script input first, through the same handlers platform events use.
+    {
+      std::deque<AppState::SyntheticInput> queued;
+      {
+        const std::scoped_lock locker(state->syntheticGuard);
+        queued.swap(state->syntheticQueue);
+      }
+      for (const auto &input : queued) {
+        using Kind = AppState::SyntheticInput::Kind;
+        switch (input.kind) {
+        case Kind::KeyDown:
+          onKeyDown(input.scancode, static_cast<Mod>(input.mods));
+          break;
+        case Kind::Motion:
+          onMotion(input.x, input.y, input.held);
+          break;
+        case Kind::ButtonDown:
+          onButtonDown(input.x, input.y, input.button);
+          break;
+        case Kind::ButtonUp:
+          onButtonUp(input.x, input.y, input.button);
+          break;
+        }
+        state->syntheticHandled.fetch_add(1);
+      }
+    }
+
     SDL_Event evt;
     if (!SDL_WaitEventTimeout(&evt, eventWaitMs)) {
       continue;
@@ -1171,74 +1372,25 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_KEY_DOWN: {
-        const auto scancode = static_cast<int>(sdl::keyScancode(evt));
-        const auto mods     = modsFromSdl(sdl::keyModifiers(evt));
-        // A modal has the keyboard while it is up, and gets first refusal on
-        // every key: a question on screen is not answered by editing the
-        // document behind it. A key it does not use falls through, so that
-        // quitting still works while one is open.
-        if (nullptr != state->modal && state->modal->grabbing()) {
-          const auto key = modalKey(scancode);
-          if (key && state->modal->keyPressed(*key, modalMods(mods))) {
-            break;
-          }
-        }
-        commandTable.dispatch(scancode, mods);
+        onKeyDown(static_cast<int>(sdl::keyScancode(evt)),
+                  modsFromSdl(sdl::keyModifiers(evt)));
         break;
       }
       case SDL_EVENT_MOUSE_MOTION: {
-        // Kept in window coordinates, top-down, which is what
-        // RenderDevice::requestPickingTag takes. OpenGL's bottom-up framebuffer
-        // convention is the GL backend's business, not the application's.
-        state->mouseX = static_cast<int>(evt.motion.x);
-        state->mouseY = static_cast<int>(evt.motion.y);
-        if (state->mouseMotionHandler &&
-            state->mouseMotionHandler(
-                state->mouseX, state->mouseY,
-                static_cast<std::uint32_t>(evt.motion.state))) {
-          break;
-        }
-        // Motion with the left button held is a drag, which extends the
-        // selection rather than moving the caret on its own.
-        if (0 != (evt.motion.state & SDL_BUTTON_LMASK) &&
-            (nullptr == state->modal || !state->modal->grabbing())) {
-          state->dragX       = static_cast<int>(evt.motion.x);
-          state->dragY       = static_cast<int>(evt.motion.y);
-          state->dragPending = true;
-        }
+        onMotion(static_cast<int>(evt.motion.x), static_cast<int>(evt.motion.y),
+                 static_cast<std::uint32_t>(evt.motion.state));
         break;
       }
       case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-        // Held while a modal is up, along with the drag above: the caret is
-        // not what is being moved when there is a question on screen.
-        if (nullptr != state->modal && state->modal->grabbing()) {
-          break;
-        }
-        const int mx   = static_cast<int>(evt.button.x);
-        const int my   = static_cast<int>(evt.button.y);
-        const auto btn = static_cast<std::uint8_t>(evt.button.button);
-        if (state->mouseDownHandler && state->mouseDownHandler(mx, my, btn)) {
-          break;
-        }
-        // The render thread answers this: where a click lands in the text is a
-        // question only the picking attachment can answer, and that read is
-        // asynchronous.
-        state->clickX       = mx;
-        state->clickY       = my;
-        state->clickButton  = btn;
-        state->clickPending = true;
+        onButtonDown(static_cast<int>(evt.button.x),
+                     static_cast<int>(evt.button.y),
+                     static_cast<std::uint8_t>(evt.button.button));
         break;
       }
       case SDL_EVENT_MOUSE_BUTTON_UP: {
-        if (nullptr != state->modal && state->modal->grabbing()) {
-          break;
-        }
-        const int mx   = static_cast<int>(evt.button.x);
-        const int my   = static_cast<int>(evt.button.y);
-        const auto btn = static_cast<std::uint8_t>(evt.button.button);
-        if (state->mouseUpHandler && state->mouseUpHandler(mx, my, btn)) {
-          break;
-        }
+        onButtonUp(static_cast<int>(evt.button.x),
+                   static_cast<int>(evt.button.y),
+                   static_cast<std::uint8_t>(evt.button.button));
         break;
       }
       case SDL_EVENT_MOUSE_WHEEL: {
