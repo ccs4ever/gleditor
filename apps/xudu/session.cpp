@@ -2423,7 +2423,7 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
 }
 
 void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
-  if (!canvas) {
+  if (!canvas || !ctx.state.documentsVisible) {
     return;
   }
   for (const auto &p : placements) {

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <gleditor/render/types.hpp>
+#include <gleditor/render_state.hpp>
 
 #include <gleditor/cpp26_inplace_vector.hpp>
 
@@ -59,7 +60,8 @@ void TenuousTetherOverlay::deviceReady(
 }
 
 void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
-  if (!visible_ || tethers_.empty() || !beams_ || !beams_->ready()) {
+  if (!ctx.state.documentsVisible || !visible_ || tethers_.empty() || !beams_ ||
+      !beams_->ready()) {
     return;
   }
 

@@ -1368,7 +1368,7 @@ bool LinkBeams::picked(const render::PickingResult &pick,
 
 void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   session.tick();
-  if (nullptr == beams || !visible) {
+  if (nullptr == beams || !visible || !ctx.state.documentsVisible) {
     // Nothing will be drawn and so nothing will be moved. Saying so rather
     // than leaving the flag where it was matters: --no-beams would otherwise
     // leave the render loop waiting forever for a sworph that is never going

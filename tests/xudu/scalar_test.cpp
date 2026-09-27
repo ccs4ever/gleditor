@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include <common/xanadu/result_slice.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/scalar.hpp>
 #include <xudu/core/store.hpp>
@@ -343,6 +344,23 @@ TEST(ScalarTest, quotedNumericTextCarriesAValueAndKeepsItsAddress) {
   const auto after     = store.rebuildManifold(at);
   EXPECT_THAT(after.asInt64(quotation), testing::Optional(std::int64_t{12}));
   EXPECT_EQ(after.contentOf(quotation).front(), quoted);
+}
+
+TEST(ScalarTest, resultSliceKeepsRowsValuesAndSourceReferences) {
+  Store store;
+  const std::vector<xanadu::ResultRow> rows{
+      {.text = "12", .source = "/tmp/source#cell=42"},
+      {.text = "ready", .source = "/tmp/source#cell=58"},
+  };
+  const auto version = xanadu::writeResultSlice(store, rows);
+  EXPECT_EQ(xanadu::readResultSlice(store, version), rows);
+
+  const auto manifold = store.rebuildManifold(version);
+  const auto dim      = manifold.dimensionNamed("d.result", store);
+  ASSERT_TRUE(dim.has_value());
+  const auto first = manifold.linked(manifold.home(), *dim, DimVector::POS);
+  EXPECT_THAT(manifold.asInt64(first), testing::Optional(std::int64_t{12}));
+  EXPECT_EQ(store.primaryCurrentVersion(), version);
 }
 
 } // namespace
