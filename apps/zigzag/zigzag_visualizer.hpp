@@ -23,6 +23,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -369,6 +370,7 @@ public:
                     const std::string &role = "text");
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            DimVector dir = DimVector::POS);
+  bool insertConnectedTransclusion(std::span<const xanadu::PrimediaSpan> spans);
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            bool positive) {
     return insertConnectedCell(text, dimension,

@@ -93,6 +93,25 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
   EXPECT_EQ(engine.cellCount(), 0U);
 }
 
+TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
+  xudu::Store store;
+  UnifiedTransclusionEngine engine(store);
+  const auto source   = engine.addCell("quoted cell content");
+  const auto original = engine.manifold().contentOf(source);
+  ASSERT_EQ(original.size(), 1U);
+  const std::vector<xudu::PrimediaSpan> quoted(original.begin(),
+                                               original.end());
+
+  const auto target = engine.addCellFromSpans(quoted);
+  ASSERT_NE(source, target);
+  const auto copied = engine.manifold().contentOf(target);
+  ASSERT_EQ(copied.size(), quoted.size());
+  EXPECT_EQ(copied.front().scroll, quoted.front().scroll);
+  EXPECT_EQ(copied.front().start, quoted.front().start);
+  EXPECT_EQ(copied.front().length, quoted.front().length);
+  EXPECT_EQ(engine.manifold().textOf(target, store), "quoted cell content");
+}
+
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
   xudu::Store store;
   UnifiedTransclusionEngine engine(store);

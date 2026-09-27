@@ -126,6 +126,22 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   return store_.cellRefOf(head_);
 }
 
+CellRef UnifiedTransclusionEngine::addCellFromSpans(
+    const std::span<const xanadu::PrimediaSpan> spans) {
+  if (spans.empty()) return noCell;
+  ensureSliceBegun();
+  head_ = store_.makeCell(head_, spans.front());
+  syncIncremental();
+  const auto cell  = store_.cellRefOf(head_);
+  std::uint64_t at = spans.front().length;
+  for (const auto &span : spans.subspan(1)) {
+    head_ = store_.spliceCellSpan(head_, cell, at, 0, span, &manifold_);
+    syncIncremental();
+    at += span.length;
+  }
+  return cell;
+}
+
 void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
                                                const std::string_view text) {
   if (zigzag::noCell == cell) {
