@@ -737,6 +737,25 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
   return info;
 }
 
+std::string ZigzagVisualizer::cellBadge(const CellRef id,
+                                        const std::string_view role) const {
+  if (!engine_) return std::string(role);
+  switch (engine_->manifold().valueKindOf(id)) {
+  case xanadu::ValueKind::Int64:
+  case xanadu::ValueKind::Double:
+    return "number";
+  case xanadu::ValueKind::Bool:
+    return "boolean";
+  case xanadu::ValueKind::OpHandle:
+    return "handle / MicroversionId";
+  case xanadu::ValueKind::ExternRef:
+    return "extern / globalref";
+  case xanadu::ValueKind::None:
+    return std::string(role);
+  }
+  return std::string(role);
+}
+
 DimensionVisual
 ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
   const auto it = dimension_visuals_.find(dimension);
@@ -1072,7 +1091,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
         .id               = accursed_cell_focus_,
         .text             = focusInfo.text,
-        .type             = focusInfo.role,
+        .type             = cellBadge(focusRef, focusInfo.role),
         .mime_type        = focusInfo.mime_type,
         .media_path       = focusInfo.media_path,
         .is_image         = focusInfo.is_image,
@@ -1092,8 +1111,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .block_styles     = {},
     };
   } else {
-    visible_cells_[accursed_cell_focus_].text       = focusInfo.text;
-    visible_cells_[accursed_cell_focus_].type       = focusInfo.role;
+    visible_cells_[accursed_cell_focus_].text = focusInfo.text;
+    visible_cells_[accursed_cell_focus_].type =
+        cellBadge(focusRef, focusInfo.role);
     visible_cells_[accursed_cell_focus_].mime_type  = focusInfo.mime_type;
     visible_cells_[accursed_cell_focus_].media_path = focusInfo.media_path;
     visible_cells_[accursed_cell_focus_].is_image   = focusInfo.is_image;
@@ -1158,7 +1178,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       RenderStateCell newCell{
           .id               = childId,
           .text             = childInfo.text,
-          .type             = childInfo.role,
+          .type             = cellBadge(childId, childInfo.role),
           .mime_type        = childInfo.mime_type,
           .media_path       = childInfo.media_path,
           .is_image         = childInfo.is_image,
@@ -1179,12 +1199,12 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       };
       visible_cells_[childId] = newCell;
     } else {
-      visible_cells_[childId].text            = childInfo.text;
-      visible_cells_[childId].type            = childInfo.role;
-      visible_cells_[childId].mime_type       = childInfo.mime_type;
-      visible_cells_[childId].media_path      = childInfo.media_path;
-      visible_cells_[childId].is_image        = childInfo.is_image;
-      visible_cells_[childId].is_clone        = childInfo.is_clone;
+      visible_cells_[childId].text       = childInfo.text;
+      visible_cells_[childId].type       = cellBadge(childId, childInfo.role);
+      visible_cells_[childId].mime_type  = childInfo.mime_type;
+      visible_cells_[childId].media_path = childInfo.media_path;
+      visible_cells_[childId].is_image   = childInfo.is_image;
+      visible_cells_[childId].is_clone   = childInfo.is_clone;
       visible_cells_[childId].clone_master_id = childInfo.clone_master_id;
       visible_cells_[childId].is_quote        = childInfo.is_quote;
       visible_cells_[childId].quote_label     = childInfo.quote_label;
@@ -1784,9 +1804,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     if (!cur.mime_type.empty()) {
       mediaTag = std::format(" <{}>", cur.mime_type);
     }
-    focusLabel =
-        std::format("Focus: #{}{} \"{}\" {}", cur.id, mediaTag, cur.text,
-                    cur.role.empty() ? "" : "[" + cur.role + "]");
+    focusLabel = std::format(
+        "Focus: #{}{} \"{}\" {}", cur.id, mediaTag, cur.text,
+        cur.role.empty() ? "" : "[" + cellBadge(cur.id, cur.role) + "]");
     if (cur.is_clone) {
       focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
     }
@@ -2072,8 +2092,36 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       const bool isFocus  = (slot.birthOp == accursed_cell_focus_);
       std::string desc =
           std::format("Cell #{}: {}", slot.birthOp, cellInfo.text);
-      if (!cellInfo.role.empty()) {
-        desc += " [" + cellInfo.role + "]";
+      if (!cellInfo.role.empty() ||
+          engine_->manifold().valueKindOf(slot.birthOp) !=
+              xanadu::ValueKind::None) {
+        desc += " [" + cellBadge(slot.birthOp, cellInfo.role) + "]";
+      }
+      const auto kind = engine_->manifold().valueKindOf(slot.birthOp);
+      desc += std::format(" [value kind: {}]", xanadu::valueKindName(kind));
+      if (kind == xanadu::ValueKind::OpHandle) {
+        if (const auto target =
+                engine_->manifold().handleTarget(slot.birthOp)) {
+          desc += std::format(" [operation #{}]", *target);
+          if (const auto annotation =
+                  engine_->manifold().versionAnnotationForHandle(
+                      slot.birthOp, engine_->store());
+              annotation && !annotation->description.empty()) {
+            desc += " [note: " + annotation->description + "]";
+          }
+        }
+      } else if (kind == xanadu::ValueKind::ExternRef) {
+        if (const auto target = engine_->store().externTarget(slot.birthOp)) {
+          if (const auto *scroll =
+                  engine_->store().scrollRegistry().recordForId(
+                      target->scroll)) {
+            desc += " [foreign scroll: " + scroll->globalKey + "]";
+          }
+          desc += " [foreign operation: " + target->produces.str() + "]";
+        }
+        if (externInspector_) {
+          desc += externInspector_(slot.birthOp);
+        }
       }
       if (cellInfo.is_clone) {
         desc += std::format(" [Clone of #{}]", cellInfo.clone_master_id);

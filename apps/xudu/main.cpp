@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -57,6 +58,7 @@
 
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/xanadu/config.hpp"
+#include "common/xanadu/extern_ref.hpp"
 #include "common/xanadu/kinetic_tether.hpp"
 #include "common/xanadu/link_occurrences.hpp"
 #include "common/xanadu/microversion.hpp"
@@ -88,6 +90,7 @@
 #include "../zigzag/zigzag_visualizer.hpp"
 #include "xudu/bridge_coordinator.hpp"
 #endif
+#include "common/ui/hypertime_graph.hpp"
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
@@ -99,7 +102,7 @@ using xanadu::PouchOriginKind;
 using xudu::Author;
 using xudu::Config;
 using xudu::HoleReason;
-using xudu::HypertimeMap;
+using HypertimeMap = xanadu::ui::HypertimeGraph;
 using xudu::ImageOverlay;
 using xudu::KineticTetherEngine;
 using xudu::KineticTetherOverlay;
@@ -2962,7 +2965,12 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    HypertimeMap map("Sans 10", *session);
+    HypertimeMap map(
+        "Sans 10",
+        [&session](const std::size_t index) -> const xanadu::Store & {
+          return session->store(index);
+        },
+        [&session] { return session->generation(); });
     map.setVisible(parser["--map"] == true);
 
     PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
@@ -3047,8 +3055,29 @@ int main(const int argc, char **argv) {
           }
         });
 
-    state->wheelHandler = [&views](float /*wx*/, float wy,
-                                   std::uint16_t /*mods*/) -> bool {
+    state->wheelHandler = [&views, &map, &renderer, state](
+                              float wx, float wy, std::uint16_t mods) -> bool {
+      if (map.isVisible()) {
+        const auto mx = static_cast<float>(state->mouseX);
+        const auto my = static_cast<float>(state->mouseY);
+        float height;
+        float width;
+        {
+          const std::scoped_lock locker(state->view);
+          height = static_cast<float>(state->view.screenHeight);
+          width  = static_cast<float>(state->view.screenWidth);
+        }
+        const float panelHeight = std::min(height - 80.0F, 460.0F);
+        if (mx >= 16.0F && mx <= std::min(width - 16.0F, 656.0F) &&
+            my >= height - 50.0F - panelHeight && my <= height - 50.0F) {
+          renderer->runWithState(
+              [&map, wx, wy, mods, mx, pointerY = height - my](RenderState &) {
+                map.scroll(wx, wy, (mods & SDL_KMOD_CTRL) != 0,
+                           (mods & SDL_KMOD_SHIFT) != 0, mx, pointerY);
+              });
+          return true;
+        }
+      }
       if (!views.onionSkinMode()) {
         return false;
       }
@@ -3363,15 +3392,44 @@ int main(const int argc, char **argv) {
     // Which store's slice the presentation shows: the primary one until a new
     // slice or a resumed session names another.
     std::size_t zigzagStoreIndex = 0;
+    std::unordered_map<std::size_t, MicroversionId> sliceHeads;
+    zigzagPresentation->setExternInspector([&session, &zigzagStoreIndex](
+                                               const zigzag::CellRef cell) {
+      const auto &local = session->store(zigzagStoreIndex);
+      const auto target = local.externTarget(cell);
+      if (!target) return std::string{" [unreadable foreign target]"};
+      const auto *record = local.scrollRegistry().recordForId(target->scroll);
+      if (!record) return std::string{" [unregistered foreign scroll]"};
+      for (std::size_t i = 0; i < session->storeCount(); ++i) {
+        const auto &foreign = session->store(i);
+        if (foreign.documentId().str() != record->globalKey) continue;
+        const auto folded = foreign.rebuildManifold(foreign.latest());
+        const auto found =
+            xanadu::resolveLocalExternCell(local, cell, foreign, &folded);
+        if (!found.isResolved()) {
+          return std::string{" [foreign target absent]"};
+        }
+        return std::format(" [resolved in store {} cell #{}: {}]", i,
+                           found.cell, folded.textOf(found.cell, foreign));
+      }
+      return std::string{" [foreign slice not loaded]"};
+    });
     /// Show @p storeIndex's slice at @p version, beside the page of the
     /// document open onto that store. On the render thread.
     const auto bindZigzag = [&session, &zigzagPresentation, &linkContext,
-                             &bridgeCoordinator, &views,
-                             &zigzagStoreIndex](RenderState &rState,
-                                                const std::size_t storeIndex,
-                                                const MicroversionId &version) {
+                             &bridgeCoordinator, &views, &map,
+                             &zigzagStoreIndex,
+                             &sliceHeads](RenderState &rState,
+                                          const std::size_t storeIndex,
+                                          const MicroversionId &version) {
+      if (!zigzagPresentation->sliceHead().isZero()) {
+        sliceHeads[zigzagStoreIndex] = zigzagPresentation->sliceHead();
+      }
       zigzagPresentation->bindXuduStore(session->store(storeIndex), version);
-      zigzagStoreIndex = storeIndex;
+      zigzagStoreIndex       = storeIndex;
+      sliceHeads[storeIndex] = version;
+      map.setStoreIndex(storeIndex);
+      map.setCurrent(version);
       linkContext.setManifold(bridgeCoordinator.manifold(), storeIndex,
                               version);
       bridgeCoordinator.synchronize();
@@ -3383,6 +3441,21 @@ int main(const int argc, char **argv) {
         }
       }
     };
+    docSwitcher->setSelectHandler([&views, &renderer, &session, &bindZigzag,
+                                   &sliceHeads](const std::uint32_t docIndex) {
+      views.selectDoc(docIndex);
+      renderer->runWithState(
+          [&session, &bindZigzag, &sliceHeads, docIndex](RenderState &rState) {
+            if (docIndex >= session->views().size()) return;
+            const auto storeIndex = session->views()[docIndex].storeIndex;
+            const auto &store     = session->store(storeIndex);
+            if (store.homeCell() == zigzag::noCell) return;
+            const auto found = sliceHeads.find(storeIndex);
+            const auto version =
+                found != sliceHeads.end() ? found->second : store.latest();
+            bindZigzag(rState, storeIndex, version);
+          });
+    });
     overview.setMarkSource(
         [chosenPlaces, &zigzagPresentation](const RenderState &rState,
                                             std::vector<glm::vec3> &out) {
@@ -3452,47 +3525,103 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
 
-    map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
-    map.setScrubHandler(
-        [&views](const MicroversionId &id) { views.showOnly(id); });
-    map.setCompareHandler(
-        [&views, &session, &renderer](const std::vector<MicroversionId> &vers) {
-          const auto count = session->views().size();
-          for (std::size_t i = 0; i < count; i++) {
-            renderer->push(RenderItemCloseDoc());
-          }
-          renderer->runWithState(
-              [&session](RenderState &) { session->clearViews(); });
-          for (const auto &v : vers) {
-            views.showAlongside(v, 0.0F, 0);
-          }
-        });
-    map.setOnionSkinHandler(
-        [&views, &session, &renderer](const std::vector<MicroversionId> &vers) {
-          const auto count = session->views().size();
-          for (std::size_t i = 0; i < count; i++) {
-            renderer->push(RenderItemCloseDoc());
-          }
-          renderer->runWithState(
-              [&session](RenderState &) { session->clearViews(); });
-          for (const auto &v : vers) {
-            views.showAlongside(v, 0.0F, 0);
-          }
-          views.setOnionSkin(true);
-        });
-    map.setQuoteHandler([&session, &views](const MicroversionId &srcVer,
-                                           const std::uint32_t srcAt,
-                                           const std::uint32_t srcLen) {
-      if (session->views().empty()) {
-        return;
+    map.setGoer([&views, &map](const MicroversionId &id) {
+      views.showOnly(id, map.storeIndex());
+    });
+    map.setScrubHandler([&views, &map](const MicroversionId &id) {
+      views.showOnly(id, map.storeIndex());
+    });
+    map.setCompareHandler([&views, &session, &renderer,
+                           &map](const std::vector<MicroversionId> &vers) {
+      const auto count = session->views().size();
+      for (std::size_t i = 0; i < count; i++) {
+        renderer->push(RenderItemCloseDoc());
       }
-      auto &st           = session->store(0);
-      const auto headVer = session->views().front().version;
+      renderer->runWithState(
+          [&session](RenderState &) { session->clearViews(); });
+      for (const auto &v : vers) {
+        views.showAlongside(v, 0.0F, map.storeIndex());
+      }
+    });
+    map.setOnionSkinHandler([&views, &session, &renderer,
+                             &map](const std::vector<MicroversionId> &vers) {
+      const auto count = session->views().size();
+      for (std::size_t i = 0; i < count; i++) {
+        renderer->push(RenderItemCloseDoc());
+      }
+      renderer->runWithState(
+          [&session](RenderState &) { session->clearViews(); });
+      for (const auto &v : vers) {
+        views.showAlongside(v, 0.0F, map.storeIndex());
+      }
+      views.setOnionSkin(true);
+    });
+    map.setQuoteHandler([&session, &views, &map](const MicroversionId &srcVer,
+                                                 const std::uint32_t srcAt,
+                                                 const std::uint32_t srcLen) {
+      const auto chosen =
+          std::ranges::find_if(session->views(), [&map](const auto &view) {
+            return view.storeIndex == map.storeIndex();
+          });
+      if (chosen == session->views().end()) return;
+      auto &st           = session->store(map.storeIndex());
+      const auto headVer = chosen->version;
       const auto headLen =
           static_cast<std::uint32_t>(st.textOf(headVer).size());
       st.transclude(headVer, headLen, srcVer, srcAt, srcLen);
-      views.showOnly(headVer);
+      views.showOnly(headVer, map.storeIndex());
     });
+#ifdef XUZZ_BUILD
+    map.setAnnotateHandler([&map, &publishForm, &session, &renderer,
+                            &bindZigzag, &zigzagStoreIndex,
+                            zigzagPresentation](const MicroversionId &target) {
+      if (map.storeIndex() != zigzagStoreIndex || target.isZero()) return;
+      auto &store = session->store(zigzagStoreIndex);
+      if (!store.getOp(target)) return;
+      const auto focus = zigzagPresentation->focusCell();
+      const auto index = zigzagStoreIndex;
+      gleditor::Form::Field note;
+      note.label    = "Annotation";
+      note.hint     = "Note attached to the selected OSMIC operation";
+      note.required = true;
+      publishForm.open(
+          "Annotate operation " + target.str(),
+          "Place its handle after the focused cell on d.1", {note},
+          [&session, &renderer, &bindZigzag, &map, zigzagPresentation, target,
+           focus, index](const std::vector<gleditor::Form::Field> &answers) {
+            if (answers.empty() || answers.front().answer().empty()) return;
+            renderer->runWithState(
+                [&session, &bindZigzag, &map, zigzagPresentation, target, focus,
+                 index, note = answers.front().answer()](RenderState &rState) {
+                  auto &store = session->store(index);
+                  auto head =
+                      store.annotateVersion(zigzagPresentation->sliceHead(),
+                                            target, {.description = note});
+                  auto folded         = store.rebuildManifold(head);
+                  const auto targetOp = store.segmentedOps().indexOf(target);
+                  const auto handle   = folded.findOpHandle(targetOp);
+                  const auto dim      = folded.dimensionNamed("d.1", store);
+                  if (!handle || !dim) return;
+                  const auto anchor =
+                      folded.contains(focus) ? focus : folded.home();
+                  const auto next =
+                      folded.linked(anchor, *dim, zigzag::DimVector::POS);
+                  head =
+                      store.setLink(head, anchor, *dim, zigzag::DimVector::POS,
+                                    *handle, &folded);
+                  if (next != zigzag::noCell && next != *handle) {
+                    folded = store.rebuildManifold(head);
+                    head = store.setLink(head, *handle, *dim,
+                                         zigzag::DimVector::POS, next, &folded);
+                  }
+                  bindZigzag(rState, index, head);
+                  zigzagPresentation->focusCell(*handle);
+                  map.invalidate();
+                  session->save(index);
+                });
+          });
+    });
+#endif
     renderer->addFrameContributor(&publishForm);
     renderer->addFrameContributor(&pouchDrawer);
     renderer->addFrameContributor(&swarmTelescope);
@@ -4104,8 +4233,6 @@ int main(const int argc, char **argv) {
             }
             if (zigzagPresentation->insertConnectedTransclusion(
                     quotedCellSpans)) {
-              session->store(zigzagStoreIndex)
-                  .setCurrentVersions({zigzagPresentation->sliceHead()});
               session->save(zigzagStoreIndex);
               bridgeCoordinator.synchronize();
               linkContext.setManifold(bridgeCoordinator.manifold(),
@@ -4114,6 +4241,104 @@ int main(const int argc, char **argv) {
               std::cout << "xudu: transcluded into new cell "
                         << zigzagPresentation->focusCell() << "\n";
             }
+          });
+        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapInsertExternRef),
+        "choose a cell in another loaded slice and reference its birth",
+        [&renderer, &session, &publishForm, &bindZigzag, zigzagPresentation,
+         &zigzagStoreIndex] {
+          renderer->runWithState([&renderer, &session, &publishForm,
+                                  &bindZigzag, zigzagPresentation,
+                                  &zigzagStoreIndex](RenderState &) {
+            gleditor::Form::Field choice;
+            choice.label         = "Foreign cell";
+            choice.hint          = "Select a cell from another open slice";
+            choice.kind          = gleditor::Form::Kind::Choice;
+            choice.submitOnEnter = true;
+            for (std::size_t i = 0; i < session->storeCount(); ++i) {
+              if (i == zigzagStoreIndex) continue;
+              const auto &foreign = session->store(i);
+              if (foreign.isSystem() || foreign.homeCell() == zigzag::noCell)
+                continue;
+              const auto folded = foreign.rebuildManifold(foreign.latest());
+              for (const auto &cell : folded.cells()) {
+                if (cell.birthOp == folded.home() ||
+                    cell.birthOp == folded.dimsDimension())
+                  continue;
+                const auto label = folded.textOf(cell.birthOp, foreign);
+                choice.options.push_back(std::to_string(i) + ": cell #" +
+                                         std::to_string(cell.birthOp) + " " +
+                                         label.substr(0, 48));
+                choice.optionValues.push_back(std::to_string(i) + ":" +
+                                              std::to_string(cell.birthOp));
+              }
+            }
+            if (choice.options.empty()) {
+              std::cout << "xudu: load another slice before adding a "
+                           "foreign reference\n";
+              return;
+            }
+            const auto localIndex = zigzagStoreIndex;
+            const auto focus      = zigzagPresentation->focusCell();
+            publishForm.open(
+                "Reference a cell in another slice",
+                "The placeholder keeps that slice's identity and the "
+                "cell's original operation",
+                {std::move(choice)},
+                [&renderer, &session, &bindZigzag, zigzagPresentation,
+                 localIndex,
+                 focus](const std::vector<gleditor::Form::Field> &answers) {
+                  if (answers.empty()) return;
+                  const auto selected = answers.front().answer();
+                  const auto colon    = selected.find(':');
+                  if (colon == std::string::npos) return;
+                  const auto foreignIndex =
+                      std::stoull(selected.substr(0, colon));
+                  const auto foreignCell = static_cast<zigzag::CellRef>(
+                      std::stoul(selected.substr(colon + 1)));
+                  renderer->runWithState([&session, &bindZigzag,
+                                          zigzagPresentation, localIndex, focus,
+                                          foreignIndex,
+                                          foreignCell](RenderState &rState) {
+                    if (foreignIndex >= session->storeCount() ||
+                        foreignIndex == localIndex)
+                      return;
+                    const auto &foreign = session->store(foreignIndex);
+                    const auto birth = foreign.segmentedOps().idOf(foreignCell);
+                    if (birth.isZero()) return;
+                    auto &local = session->store(localIndex);
+                    auto head =
+                        local.registerScroll(zigzagPresentation->sliceHead(),
+                                             foreign.documentId().str());
+                    const auto scroll = local.scrollRegistry().scrollIdForKey(
+                        foreign.documentId().str());
+                    if (!scroll) return;
+                    const xanadu::ExternOpRef target{.scroll   = *scroll,
+                                                     .produces = birth};
+                    head                   = local.makeExternRef(head, target);
+                    const auto placeholder = local.placeholderForExtern(target);
+                    auto folded            = local.rebuildManifold(head);
+                    const auto dim = folded.dimensionNamed("d.1", local);
+                    if (!placeholder || !dim) return;
+                    const auto anchor =
+                        folded.contains(focus) ? focus : folded.home();
+                    const auto next =
+                        folded.linked(anchor, *dim, zigzag::DimVector::POS);
+                    head = local.setLink(head, anchor, *dim,
+                                         zigzag::DimVector::POS, *placeholder,
+                                         &folded);
+                    if (next != zigzag::noCell && next != *placeholder) {
+                      folded = local.rebuildManifold(head);
+                      head =
+                          local.setLink(head, *placeholder, *dim,
+                                        zigzag::DimVector::POS, next, &folded);
+                    }
+                    bindZigzag(rState, localIndex, head);
+                    zigzagPresentation->focusCell(*placeholder);
+                    session->save(localIndex);
+                  });
+                });
           });
         });
     app.commands().registerAction(

@@ -13,8 +13,8 @@
  * - Continuous horizontal time scrubber along the bottom.
  * - Floating comparative diff summary and quick [Quote into Head] transclusion.
  */
-#ifndef XUDU_HYPERTIME_GRAPH_HPP
-#define XUDU_HYPERTIME_GRAPH_HPP
+#ifndef XANADU_UI_HYPERTIME_GRAPH_HPP
+#define XANADU_UI_HYPERTIME_GRAPH_HPP
 
 #include <cstdint>
 #include <functional>
@@ -35,10 +35,7 @@
 
 struct RenderState;
 
-namespace xudu {
-using namespace ::xanadu;
-
-class Session;
+namespace xanadu::ui {
 
 /**
  * @class HypertimeGraph
@@ -54,9 +51,12 @@ public:
   static constexpr std::uint32_t kTagOpen3DButton    = 911U;
   static constexpr std::uint32_t kTagClearComp       = 912U;
   static constexpr std::uint32_t kTagOnionSkinButton = 913U;
+  static constexpr std::uint32_t kTagAnnotateButton  = 914U;
   static constexpr std::uint32_t kTagNodeBase        = 1000U;
 
-  HypertimeGraph(std::string aFontName, const Session &aSession);
+  HypertimeGraph(std::string aFontName,
+                 std::function<const Store &(std::size_t)> storeAt,
+                 std::function<std::uint64_t()> generation);
   ~HypertimeGraph() override;
 
   HypertimeGraph(const HypertimeGraph &)            = delete;
@@ -77,15 +77,46 @@ public:
   // -- a11y::Source -----------------------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return builtAt;
+    return revision_;
   }
 
   // -- Visibility & Navigation ------------------------------------------------
-  void setVisible(bool show) noexcept { visible_ = show; }
-  void toggle() noexcept { visible_ = !visible_; }
+  void setVisible(bool show) noexcept {
+    if (visible_ == show) return;
+    visible_ = show;
+    revision_++;
+  }
+  void toggle() noexcept {
+    visible_ = !visible_;
+    revision_++;
+  }
   [[nodiscard]] bool isVisible() const noexcept { return visible_; }
+  void scroll(float horizontal, float vertical, bool zoom, bool shift,
+              float pointerX, float pointerY);
 
-  void setCurrent(const MicroversionId &id) { current_ = id; }
+  void setCurrent(const MicroversionId &id) {
+    if (current_ == id) return;
+    current_ = id;
+    revision_++;
+  }
+  void invalidate() {
+    nodes_.clear();
+    revision_++;
+  }
+  void setStoreIndex(std::size_t index) {
+    if (storeIndex_ == index) return;
+    storeIndex_ = index;
+    nodes_.clear();
+    comparedVersions_.clear();
+    selectedOperation_.reset();
+    diffNeedsUpdate_ = true;
+    revision_++;
+  }
+  [[nodiscard]] std::size_t storeIndex() const noexcept { return storeIndex_; }
+  [[nodiscard]] const std::optional<MicroversionId> &
+  selectedOperation() const noexcept {
+    return selectedOperation_;
+  }
   [[nodiscard]] const MicroversionId &current() const noexcept {
     return current_;
   }
@@ -101,6 +132,9 @@ public:
                                           std::uint32_t at, std::uint32_t len)>
                            aQuoter) {
     quoteHandler_ = std::move(aQuoter);
+  }
+  void setAnnotateHandler(std::function<void(const MicroversionId &)> handler) {
+    annotateHandler_ = std::move(handler);
   }
   void setCompareHandler(
       std::function<void(const std::vector<MicroversionId> &)> aComparer) {
@@ -162,10 +196,13 @@ private:
                                         float panelTop, float panelBottom);
 
   std::string fontName_;
-  const Session &session_;
+  std::function<const Store &(std::size_t)> storeAt_;
+  std::function<std::uint64_t()> generation_;
   std::unique_ptr<gleditor::Canvas> canvas_;
+  std::size_t storeIndex_{0};
   bool visible_{false};
   MicroversionId current_;
+  std::optional<MicroversionId> selectedOperation_;
   std::vector<MicroversionId> comparedVersions_;
 
   std::vector<GraphNode> nodes_;
@@ -176,6 +213,11 @@ private:
   float panelY_{40.0F};
   float panelW_{580.0F};
   float panelH_{420.0F};
+  float panX_{0.0F};
+  float panY_{0.0F};
+  float zoom_{1.0F};
+  float laidOutWidth_{0.0F};
+  float laidOutHeight_{0.0F};
 
   float scrubberTrackX_{0.0F};
   float scrubberTrackY_{0.0F};
@@ -189,6 +231,7 @@ private:
   std::function<void(const MicroversionId &)> scrubHandler_;
   std::function<void(const MicroversionId &, std::uint32_t, std::uint32_t)>
       quoteHandler_;
+  std::function<void(const MicroversionId &)> annotateHandler_;
   std::function<void(const std::vector<MicroversionId> &)> compareHandler_;
   std::function<void(const std::vector<MicroversionId> &)> onionSkinHandler_;
 
@@ -196,9 +239,6 @@ private:
   std::uint64_t revision_{1};
 };
 
-/// Compatibility alias for the interactive hypertime visualizer.
-using HypertimeMap = HypertimeGraph;
+} // namespace xanadu::ui
 
-} // namespace xudu
-
-#endif // XUDU_HYPERTIME_GRAPH_HPP
+#endif // XANADU_UI_HYPERTIME_GRAPH_HPP

@@ -139,6 +139,13 @@ resolveExternCell(const Store &localStore, zigzag::CellRef placeholder,
                   const Store &foreignStore, const Scroll &sealedAs,
                   const zigzag::Manifold *foreignFold = nullptr);
 
+/// Resolve a placeholder whose registry key is the foreign store's persisted
+/// local DocumentId. The target remains the original MakeCell operation.
+[[nodiscard]] ExternResolution
+resolveLocalExternCell(const Store &localStore, zigzag::CellRef placeholder,
+                       const Store &foreignStore,
+                       const zigzag::Manifold *foreignFold = nullptr);
+
 } // namespace xanadu
 
 #endif // XUDU_EXTERN_REF_HPP

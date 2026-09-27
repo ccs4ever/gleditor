@@ -8,12 +8,14 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 #include "../lib/mocks/device.hpp"
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/compact_zzcell.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/font.hpp"
@@ -110,6 +112,40 @@ TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
   EXPECT_EQ(copied.front().start, quoted.front().start);
   EXPECT_EQ(copied.front().length, quoted.front().length);
   EXPECT_EQ(engine.manifold().textOf(target, store), "quoted cell content");
+}
+
+TEST(UnifiedTransclusionEngineTest,
+     OrdinarySliceEditReopensAtLatestWithoutDesignatingAnEdition) {
+  const auto dir =
+      std::filesystem::temp_directory_path() / "zigzag_slice_edit_resume";
+  std::filesystem::remove_all(dir);
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  CellRef first    = noCell;
+  CellRef second   = noCell;
+  xudu::MicroversionId edited;
+  {
+    xudu::Store store(perma);
+    UnifiedTransclusionEngine engine(store);
+    first  = engine.addCell("first");
+    second = engine.addCell("New Cell");
+    engine.linkCells(first, second, DimOrdinal::D1);
+    engine.updateCellText(second, "saved edit");
+    edited = engine.head();
+    ASSERT_EQ(store.primaryCurrentVersion(), edited);
+    store.save(dir.string());
+  }
+
+  xudu::Store reopened(perma);
+  reopened.load(dir.string());
+  const auto current = reopened.primaryCurrentVersion();
+  const auto folded  = reopened.rebuildManifold(current);
+  EXPECT_EQ(current, edited);
+  EXPECT_EQ(folded.textOf(second, reopened), "saved edit");
+  const auto dim = folded.dimensionNamed("d.1", reopened);
+  ASSERT_TRUE(dim.has_value());
+  EXPECT_EQ(folded.linked(first, *dim, DimVector::POS), second);
+  EXPECT_TRUE(folded.editions().empty());
+  std::filesystem::remove_all(dir);
 }
 
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {

@@ -53,7 +53,8 @@
 #include "common/xanadu/transcopyright_logic.hpp"
 #include "common/xanadu/uncommitted_op_log.hpp"
 #include "common/xanadu/reading_place.hpp"
-#include "hypertime_graph.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 class Caret;
 class Doc;
