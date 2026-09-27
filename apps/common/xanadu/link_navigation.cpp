@@ -19,6 +19,7 @@ VisitId InMemoryActivityLog::append(Visit visit) {
   // Numbered from one so that a default VisitId never names a real visit.
   visit.id = VisitId{.value = visits.size() + 1};
   visits.push_back(std::move(visit));
+  selected = visits.back().id;
   return visits.back().id;
 }
 
@@ -28,6 +29,18 @@ InMemoryActivityLog::find(const VisitId id) const {
     return gleditor::cpp26::nullopt;
   }
   return visits[id.value - 1];
+}
+
+std::vector<VisitId> InMemoryActivityLog::children(const VisitId parent) const {
+  std::vector<VisitId> found;
+  for (const auto &visit : visits) {
+    if (visit.parent == parent) found.push_back(visit.id);
+  }
+  return found;
+}
+
+void InMemoryActivityLog::select(const VisitId id) {
+  if (find(id)) selected = id;
 }
 
 namespace {
@@ -169,6 +182,8 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return enterAt(c);
         } else if constexpr (std::is_same_v<Command, nav::ActivityBack>) {
           return activityBack();
+        } else if constexpr (std::is_same_v<Command, nav::ActivityForward>) {
+          return activityForward(c.child);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
         } else {
@@ -379,6 +394,7 @@ NavigationResult LinkNavigator::enterAt(const nav::EnterAt &command) {
 
 NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   current = visit.id;
+  activity.select(visit.id);
   NavigationEffect effect{.focus = visit.target, .visit = visit.id};
   if (!visit.link) {
     // A visit made without a link keeps whatever link is pinned now: the
@@ -423,6 +439,17 @@ NavigationResult LinkNavigator::activityBack() {
   return restoreVisit(*parent);
 }
 
+NavigationResult LinkNavigator::activityForward(const VisitId child) {
+  if (!current) {
+    return std::unexpected(NavigationError::NoPreviousVisit);
+  }
+  const auto visit = activity.find(child);
+  if (!visit || visit->parent != current) {
+    return std::unexpected(NavigationError::NoPreviousVisit);
+  }
+  return restoreVisit(*visit);
+}
+
 NavigationResult LinkNavigator::returnToOrigin() {
   if (!selected) {
     return std::unexpected(NavigationError::NoLinkSelected);
@@ -435,6 +462,7 @@ NavigationResult LinkNavigator::returnToOrigin() {
     return std::unexpected(NavigationError::NoOrigin);
   }
   current = origin->id;
+  activity.select(origin->id);
   return NavigationEffect{.focus = origin->target, .visit = current};
 }
 
@@ -485,6 +513,7 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "enter",
                                                "enter at",
                                                "activity back",
+                                               "activity forward",
                                                "return to origin",
                                                "dismiss"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);

@@ -316,6 +316,36 @@ TEST(LinkNavigationTest, ActivityBackRestoresTheVisitAndItsPanel) {
   EXPECT_EQ(h.log.size(), 3U);
 }
 
+TEST(LinkNavigationTest, ActivityForwardChoosesEitherExistingBranch) {
+  Harness h;
+  const auto origin = arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{
+      .key = h.link(), .side = LinkSide::Right, .member = 0, .occurrence = 0}));
+  const auto first = h.run(nav::Enter{});
+  ASSERT_TRUE(first && first->visit);
+  ASSERT_TRUE(h.run(nav::ActivityBack{}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto second = h.run(nav::Enter{});
+  ASSERT_TRUE(second && second->visit);
+  ASSERT_TRUE(h.run(nav::ActivityBack{}));
+
+  const auto choices = h.log.children(origin);
+  ASSERT_EQ(choices.size(), 2U);
+  EXPECT_EQ(choices[0], first->visit);
+  EXPECT_EQ(choices[1], second->visit);
+  const auto toFirst = h.run(nav::ActivityForward{.child = choices.front()});
+  ASSERT_TRUE(toFirst);
+  EXPECT_EQ(toFirst->focus, first->focus);
+  ASSERT_TRUE(h.run(nav::ActivityBack{}));
+  const auto toSecond = h.run(nav::ActivityForward{.child = choices.back()});
+  ASSERT_TRUE(toSecond);
+  EXPECT_EQ(toSecond->focus, second->focus);
+  EXPECT_EQ(h.log.size(), 3U);
+}
+
 TEST(LinkNavigationTest, ActivityBackIntoAnotherLinkResolvesItAgain) {
   Harness h;
   arrive(h);

@@ -106,7 +106,9 @@ class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::ModalInput,
                          public xanadu::ZigzagPresentationSurface {
 public:
-  explicit ZigzagVisualizer(std::string aFontName);
+  explicit ZigzagVisualizer(
+      std::string aFontName,
+      std::shared_ptr<xanadu::UserPermascroll> userPermascroll = {});
   ~ZigzagVisualizer() override;
 
   ZigzagVisualizer(const ZigzagVisualizer &)            = delete;
@@ -546,6 +548,7 @@ private:
   std::string structure_name_;
   std::string current_slice_path_;
   std::unique_ptr<xanadu::Store> ownedStore_;
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll_;
   xanadu::Store *store_{nullptr};
   std::unique_ptr<UnifiedTransclusionEngine> engine_;
   CellID accursed_cell_focus_{0};

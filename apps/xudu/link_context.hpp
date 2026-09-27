@@ -27,6 +27,7 @@
 
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "xudu/session.hpp"
 
 namespace zigzag {
@@ -62,7 +63,10 @@ public:
     bool operator==(const ReadingStamp &) const = default;
   };
 
-  explicit LinkContext(Session &session) : session(session) {}
+  explicit LinkContext(Session &session)
+      : session(session),
+        activity(session.activityForNavigation(), xanadu::activityDirectory()) {
+  }
 
   void setFocusDocument(FocusDocument handler) {
     focusDocument = std::move(handler);
@@ -73,11 +77,14 @@ public:
     cellFocusQuery = std::move(query);
   }
 
-  /// The bridge's manifold, a replay of the primary store, or null outside
-  /// xuzz. Every cell in it is searched, so that an endpoint outside the
-  /// visible neighbourhood can still be entered.
-  void setManifold(const zigzag::Manifold *bridge) noexcept {
-    manifold = bridge;
+  /// The slice currently bound to the bridge, or null outside xuzz. Every
+  /// cell is searched so endpoints outside the visible neighbourhood can be
+  /// entered.
+  void setManifold(const zigzag::Manifold *bridge, std::size_t storeIndex,
+                   xanadu::MicroversionId version) noexcept {
+    manifold           = bridge;
+    manifoldStoreIndex = storeIndex;
+    manifoldVersion    = std::move(version);
   }
 
   /// The links on screen, in the stable order Next/Previous link walk.
@@ -104,6 +111,7 @@ public:
     return previewing;
   }
   [[nodiscard]] ReadingStamp readingStamp() const;
+  [[nodiscard]] std::vector<xanadu::Visit> forwardChoices() const;
 
   /**
    * @brief Where the reader is, for the panel.
@@ -139,7 +147,9 @@ private:
 
   Session &session;
   const zigzag::Manifold *manifold{};
-  xanadu::InMemoryActivityLog activity;
+  std::size_t manifoldStoreIndex{};
+  xanadu::MicroversionId manifoldVersion;
+  xanadu::StoreActivityLog activity;
   xanadu::LinkNavigator navigator{activity};
   FocusDocument focusDocument;
   FocusCell focusCell;

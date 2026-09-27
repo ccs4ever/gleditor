@@ -489,6 +489,9 @@ public:
    */
   void rememberPlace(const xanadu::ReadingPlace &place);
 
+  /// The reader-owned store shared by places and branching navigation visits.
+  Store *activityForNavigation() { return activity(); }
+
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] std::vector<OpenView> &views() { return open; }

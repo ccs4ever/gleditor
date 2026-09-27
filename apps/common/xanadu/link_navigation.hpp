@@ -83,8 +83,7 @@ struct Visit {
 /**
  * @brief Where completed visits are kept.
  *
- * The interface the system://activity store will implement; until then
- * InMemoryActivityLog holds a session's visits and forgets them at exit.
+ * Completed visits and the reader's selected branch in an activity record.
  */
 class ActivityLog {
 public:
@@ -99,7 +98,10 @@ public:
   virtual VisitId append(Visit visit) = 0;
 
   [[nodiscard]] virtual gleditor::cpp26::optional<const Visit &>
-  find(VisitId id) const = 0;
+  find(VisitId id) const                                                    = 0;
+  [[nodiscard]] virtual std::vector<VisitId> children(VisitId parent) const = 0;
+  [[nodiscard]] virtual std::optional<VisitId> current() const              = 0;
+  virtual void select(VisitId id)                                           = 0;
 };
 
 class InMemoryActivityLog final : public ActivityLog {
@@ -107,11 +109,17 @@ public:
   VisitId append(Visit visit) override;
   [[nodiscard]] gleditor::cpp26::optional<const Visit &>
   find(VisitId id) const override;
+  [[nodiscard]] std::vector<VisitId> children(VisitId parent) const override;
+  [[nodiscard]] std::optional<VisitId> current() const override {
+    return selected;
+  }
+  void select(VisitId id) override;
 
   [[nodiscard]] std::size_t size() const noexcept { return visits.size(); }
 
 private:
   std::vector<Visit> visits;
+  std::optional<VisitId> selected;
 };
 
 /**
@@ -184,6 +192,10 @@ struct EnterAt {
 struct ActivityBack {
   bool operator==(const ActivityBack &) const = default;
 };
+struct ActivityForward {
+  VisitId child;
+  bool operator==(const ActivityForward &) const = default;
+};
 struct ReturnToOrigin {
   bool operator==(const ReturnToOrigin &) const = default;
 };
@@ -197,7 +209,7 @@ using NavigationCommand =
     std::variant<nav::SelectLink, nav::StepLink, nav::SelectMember,
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
-                 nav::ReturnToOrigin, nav::Dismiss>;
+                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -276,7 +288,8 @@ using NavigationResult = std::expected<NavigationEffect, NavigationError>;
 
 class LinkNavigator {
 public:
-  explicit LinkNavigator(ActivityLog &activity) noexcept : activity(activity) {}
+  explicit LinkNavigator(ActivityLog &activity) noexcept
+      : activity(activity), current(activity.current()) {}
 
   NavigationResult dispatch(const NavigationCommand &command);
 
@@ -317,6 +330,7 @@ private:
   NavigationResult enter();
   NavigationResult enterAt(const nav::EnterAt &command);
   NavigationResult activityBack();
+  NavigationResult activityForward(VisitId child);
   NavigationResult returnToOrigin();
   NavigationResult dismiss();
 

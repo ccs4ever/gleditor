@@ -3311,7 +3311,8 @@ int main(const int argc, char **argv) {
       });
     };
     bridgeCoordinator.attach(*zigzagPresentation);
-    linkContext.setManifold(bridgeCoordinator.manifold());
+    linkContext.setManifold(bridgeCoordinator.manifold(), 0,
+                            session->store().primaryCurrentVersion());
     linkContext.setFocusCell(
         [&bridgeCoordinator, &keyboardPane,
          &showZigzagFocus](const zigzag::CellRef cell, xanadu::Extent) {
@@ -3333,7 +3334,8 @@ int main(const int argc, char **argv) {
                                                 const MicroversionId &version) {
       zigzagPresentation->bindXuduStore(session->store(storeIndex), version);
       zigzagStoreIndex = storeIndex;
-      linkContext.setManifold(bridgeCoordinator.manifold());
+      linkContext.setManifold(bridgeCoordinator.manifold(), storeIndex,
+                              version);
       bridgeCoordinator.synchronize();
       const auto &open = session->views();
       for (std::size_t i = 0; i < open.size() && i < rState.docs.size(); ++i) {
@@ -4041,10 +4043,11 @@ int main(const int argc, char **argv) {
         std::string(xanadu::settings::kKeymapTranscludeCellToCell),
         "transclude the same content into a new connected cell",
         [&renderer, &session, &bridgeCoordinator, zigzagPresentation,
-         &zigzagStoreIndex, &quotedCellSpans] {
+         &zigzagStoreIndex, &quotedCellSpans, &linkContext] {
           renderer->runWithState([&session, &bridgeCoordinator,
                                   zigzagPresentation, &zigzagStoreIndex,
-                                  &quotedCellSpans](RenderState &) {
+                                  &quotedCellSpans,
+                                  &linkContext](RenderState &) {
             if (quotedCellSpans.empty()) {
               std::cout << "xudu: transclude cell content to a document "
                            "first\n";
@@ -4056,9 +4059,54 @@ int main(const int argc, char **argv) {
                   .setCurrentVersions({zigzagPresentation->sliceHead()});
               session->save(zigzagStoreIndex);
               bridgeCoordinator.synchronize();
+              linkContext.setManifold(bridgeCoordinator.manifold(),
+                                      zigzagStoreIndex,
+                                      zigzagPresentation->sliceHead());
               std::cout << "xudu: transcluded into new cell "
                         << zigzagPresentation->focusCell() << "\n";
             }
+          });
+        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapActivityForward),
+        "choose one of the current visit's forward branches",
+        [&renderer, &linkContext, &publishForm] {
+          renderer->runWithState([&renderer, &linkContext,
+                                  &publishForm](RenderState &) {
+            const auto choices = linkContext.forwardChoices();
+            if (choices.empty()) {
+              std::cout << "xudu: no forward activity visit\n";
+              return;
+            }
+            if (choices.size() == 1) {
+              static_cast<void>(linkContext.execute(
+                  xanadu::nav::ActivityForward{.child = choices.front().id}));
+              return;
+            }
+            gleditor::Form::Field choice;
+            choice.label = "Forward visit";
+            choice.hint  = "choose one saved branch";
+            choice.kind  = gleditor::Form::Kind::Choice;
+            for (const auto &visit : choices) {
+              choice.options.push_back("Visit " +
+                                       std::to_string(visit.id.value) + ": " +
+                                       linkContext.describe(visit.target));
+              choice.optionValues.push_back(std::to_string(visit.id.value));
+            }
+            publishForm.open(
+                "Activity Forward", "Choose a saved destination",
+                {std::move(choice)},
+                [&renderer, &linkContext](
+                    const std::vector<gleditor::Form::Field> &answers) {
+                  if (answers.empty() || answers.front().answer().empty())
+                    return;
+                  const auto child = xanadu::VisitId{
+                      .value = std::stoull(answers.front().answer())};
+                  renderer->runWithState([&linkContext, child](RenderState &) {
+                    static_cast<void>(linkContext.execute(
+                        xanadu::nav::ActivityForward{.child = child}));
+                  });
+                });
           });
         });
     app.commands().setScopeResolver(
