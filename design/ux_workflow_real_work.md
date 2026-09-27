@@ -251,6 +251,34 @@ stages; a Prolog query that returns only the first solution; a VPL total that co
 missing rows; conversion requiring flags, external scripts or hand-edited files; a report that
 cannot be reopened or audited.
 
+### J14. Put every cell value kind on one rank
+
+1. In `xuzz`, start a slice and build a `d.1` rank with six example cells in this order: ordinary
+   text (`None`), integer `12` (`Int64`), floating value `3.5` (`Double`), `true` (`Bool`), an
+   operation handle (`OpHandle`) and a reference to another slice (`ExternRef`). Inspect each cell's
+   content and value kind before saving.
+1. Pop up the OSMIC map, select a specific operation that minted a cell in the first slice, and
+   annotate that operation with a short note. Place the resulting OpHandle cell on the rank. Read
+   the annotation through the handle and confirm that it names the selected operation, not the
+   current caret or an operation chosen by default.
+1. Load a second slice with a distinctive cell, select that cell, and create the ExternRef from the
+   first slice to its MakeCell operation. Place its persistent placeholder after the handle on
+   `d.1`. Follow or inspect the reference to confirm it resolves to the second slice's cell without
+   copying its content into the first slice.
+1. Save, close and reopen both slices. Walk the six cells in order and inspect their text, typed
+   values, handle target and foreign target again. Change the foreign cell's later state and confirm
+   that the reference still names its original MakeCell operation.
+
+Evidence: frames and accessibility descriptions of the whole rank, the OSMIC map with its chosen
+operation and annotation, and both loaded slices; `xudu-dump` of the stores; a typed value query or
+manifold inspection before and after reopening; the foreign target's stable microversion and the
+first slice's unchanged primedia when the second slice changes.
+
+Watch for: `12`, `3.5` or `true` remaining untyped text; a typed cell silently becoming plain text
+after editing; an OpHandle that points to a later annotation operation instead of the chosen one; an
+ExternRef that stores copied content or loses its scroll identity; a placeholder linked across
+stores as a raw local cell index; or a rank that cannot hold all six kinds together.
+
 ## Findings
 
 Each step ends in exactly one of:
