@@ -213,6 +213,9 @@ public:
   }
   void sworphCameraTo(const glm::vec3 &targetPos, ch::Timeline &timeline);
 
+  /// Hand camera ownership to an explicit navigation choice.
+  void releaseCamera() noexcept { cameraDriving = false; }
+
   void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
     tetherOverlay_ = overlay;
   }

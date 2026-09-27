@@ -408,6 +408,11 @@ public:
     pendingCamera_ = std::move(place);
   }
 
+  void cancelReadingFrame() {
+    frameTarget_.reset();
+    readingFramed_ = true;
+  }
+
   /// See settings::kReadableTextPx.
   void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
 
@@ -794,14 +799,36 @@ public:
       if (session.views().empty()) {
         return;
       }
-      const auto here = session.views().front().version;
+      auto which = switcher ? switcher->activeDocIndex() : 0U;
+      if (const auto *caret = renderer->editCaret();
+          caret && caret->active() &&
+          caret->documentIndex() < session.views().size()) {
+        which = caret->documentIndex();
+      }
+      if (which >= session.views().size()) return;
+      const auto here = session.views()[which].version;
       if (here.isZero()) {
         std::cout << "xudu: already at the null document\n";
         return;
       }
-      const auto there = here.parent();
+      const auto there  = here.parent();
+      const auto *caret = renderer->editCaret();
+      const auto offset =
+          caret && caret->active() && caret->documentIndex() == which
+              ? std::optional{caret->byteOffset()}
+              : std::nullopt;
+      const auto storeIndex = session.views()[which].storeIndex;
+      const auto length     = session.store(storeIndex).textOf(there).size();
       std::cout << "xudu: " << here.str() << " -> " << there.str() << "\n";
-      showOnly(there, session.views().front().storeIndex);
+      showOnly(there, storeIndex);
+      if (offset) {
+        renderer->runWithState(
+            [this, at = std::min<std::size_t>(*offset, length)](RenderState &) {
+              if (auto *next = renderer->editCaret()) {
+                next->placeAt(0, static_cast<std::uint32_t>(at));
+              }
+            });
+      }
     });
   }
 
@@ -810,8 +837,15 @@ public:
       if (session.views().empty()) {
         return;
       }
-      const auto sIdx     = session.views().front().storeIndex;
-      const auto here     = session.views().front().version;
+      auto which = switcher ? switcher->activeDocIndex() : 0U;
+      if (const auto *caret = renderer->editCaret();
+          caret && caret->active() &&
+          caret->documentIndex() < session.views().size()) {
+        which = caret->documentIndex();
+      }
+      if (which >= session.views().size()) return;
+      const auto sIdx     = session.views()[which].storeIndex;
+      const auto here     = session.views()[which].version;
       const auto children = session.store(sIdx).children(here);
       if (children.empty()) {
         std::cout << "xudu: " << here.str() << " has no successor\n";
@@ -822,7 +856,21 @@ public:
         std::cout << " (of " << children.size() << " futures)";
       }
       std::cout << "\n";
+      const auto *caret = renderer->editCaret();
+      const auto offset =
+          caret && caret->active() && caret->documentIndex() == which
+              ? std::optional{caret->byteOffset()}
+              : std::nullopt;
+      const auto length = session.store(sIdx).textOf(children.front()).size();
       showOnly(children.front(), sIdx);
+      if (offset) {
+        renderer->runWithState(
+            [this, at = std::min<std::size_t>(*offset, length)](RenderState &) {
+              if (auto *next = renderer->editCaret()) {
+                next->placeAt(0, static_cast<std::uint32_t>(at));
+              }
+            });
+      }
     });
   }
 
@@ -3525,23 +3573,138 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
 
-    map.setGoer([&views, &map](const MicroversionId &id) {
-      views.showOnly(id, map.storeIndex());
-    });
-    map.setScrubHandler([&views, &map](const MicroversionId &id) {
-      views.showOnly(id, map.storeIndex());
-    });
-    map.setCompareHandler([&views, &session, &renderer,
-                           &map](const std::vector<MicroversionId> &vers) {
-      const auto count = session->views().size();
+    const auto showMapVersion = [&views, &map, &renderer, &session
+#ifdef XUZZ_BUILD
+                                 ,
+                                 &bindZigzag
+#endif
+    ](const MicroversionId &id) {
+      const auto storeIndex = map.storeIndex();
+      const auto *caret     = renderer->editCaret();
+      const auto previous = caret && caret->active() ? caret->byteOffset() : 0U;
+      const auto length   = session->store(storeIndex).textOf(id).size();
+      views.showOnly(id, storeIndex);
+      renderer->runWithState([&renderer, at = std::min<std::size_t>(
+                                             previous, length)](RenderState &) {
+        if (auto *next = renderer->editCaret()) {
+          next->placeAt(0, static_cast<std::uint32_t>(at));
+        }
+      });
+#ifdef XUZZ_BUILD
+      renderer->runWithState(
+          [&bindZigzag, storeIndex, id](RenderState &rState) {
+            bindZigzag(rState, storeIndex, id);
+          });
+#endif
+    };
+    map.setGoer(showMapVersion);
+    map.setScrubHandler(showMapVersion);
+    map.setCompareHandler([&views, &session, &renderer, &map
+#ifdef XUZZ_BUILD
+                           ,
+                           &links, &bindZigzag, zigzagPresentation, &state,
+                           &keyboardPane
+#endif
+    ](const std::vector<MicroversionId> &vers) {
+      if (vers.empty()) return;
+      GLEDITOR_LOG_DEBUG("xudu.diff", "opening {} compared versions",
+                         vers.size());
+      const auto storeIndex = map.storeIndex();
+      const auto diff       = session->store(storeIndex).diffVersions(vers);
+      const auto count      = session->views().size();
       for (std::size_t i = 0; i < count; i++) {
         renderer->push(RenderItemCloseDoc());
       }
       renderer->runWithState(
           [&session](RenderState &) { session->clearViews(); });
       for (const auto &v : vers) {
-        views.showAlongside(v, 0.0F, map.storeIndex());
+        views.showAlongside(v, 0.0F, storeIndex);
       }
+      const auto viewIndex = vers.size() - 1;
+      const auto &baseline = diff.versions.front().text;
+      const auto &chosen   = diff.versions.back().text;
+      const auto mismatch  = std::ranges::mismatch(baseline, chosen);
+      auto changeAt        = static_cast<std::uint32_t>(
+          std::distance(chosen.begin(), mismatch.in2));
+      const auto &spans = diff.versions.back().spans;
+      const auto unique = std::ranges::find_if(spans, [](const auto &span) {
+        return span.kind == xanadu::DiffKind::Unique;
+      });
+      if (unique != spans.end()) changeAt = unique->offset;
+#ifdef XUZZ_BUILD
+      const auto baselineSlice =
+          session->store(storeIndex).rebuildManifold(vers.front());
+      const auto &changedCells = diff.versions.back().changedCells;
+      const auto freshCell     = std::ranges::find_if(
+          changedCells, [&baselineSlice](const zigzag::CellRef cell) {
+            return !baselineSlice.contains(cell);
+          });
+      const auto changedCell = changedCells.empty() ? zigzag::noCell
+                               : freshCell != changedCells.end()
+                                   ? *freshCell
+                                   : changedCells.front();
+      const bool focusSlice  = zigzagPresentation->presentationVisible() &&
+                               changedCell != zigzag::noCell;
+#endif
+      renderer->runWithState([&views, &renderer, viewIndex, changeAt
+#ifdef XUZZ_BUILD
+                              ,
+                              &bindZigzag, zigzagPresentation, &state,
+                              &keyboardPane, &links, focusSlice, changedCell,
+                              storeIndex, target = vers.back()
+#endif
+      ](RenderState &rState) {
+        if (viewIndex < rState.docs.size() && rState.docs[viewIndex]) {
+          if (auto *caret = renderer->editCaret()) {
+            caret->placeAt(static_cast<std::uint32_t>(viewIndex), changeAt);
+          }
+#ifdef XUZZ_BUILD
+          if (!focusSlice)
+#endif
+          {
+            const std::weak_ptr<Doc> document = rState.docs[viewIndex];
+            views.placeCameraWhenReady([&views, document, changeAt] {
+              const auto ready = document.lock();
+              if (!ready) return true;
+              if (!ready->anchorFor(changeAt)) return false;
+              views.keepInView(*ready, changeAt);
+              return true;
+            });
+          }
+        }
+#ifdef XUZZ_BUILD
+        if (focusSlice) {
+          keyboardPane.leaveZigzag(false);
+          bindZigzag(rState, storeIndex, target);
+          zigzagPresentation->focusCell(changedCell);
+          views.cancelReadingFrame();
+          views.placeCameraWhenReady([&views, &links, zigzagPresentation,
+                                      &state, changedCell,
+                                      placedFrames = 0]() mutable {
+            if (!views.presentationTransform() || ++placedFrames < 2) {
+              return false;
+            }
+            const auto anchor = zigzagPresentation->cellAnchor(changedCell);
+            if (!anchor) return false;
+            std::scoped_lock locker(state->view);
+            auto &camera = state->view;
+            links.releaseCamera();
+            camera.pos.x = anchor->position.x;
+            camera.pos.y = anchor->position.y;
+            if (const auto distance = xudu::readableCameraDistance(
+                    anchor->lineHeight, static_cast<float>(camera.screenHeight),
+                    camera.fov,
+                    zigzagPresentation->presentationConfig()
+                        .minReadableTextPx)) {
+              camera.pos.z = anchor->position.z + *distance;
+            }
+            views.cancelReadingFrame();
+            constexpr int kScaleSettlingFrames = 5;
+            return placedFrames >= kScaleSettlingFrames;
+          });
+        }
+#endif
+      });
     });
     map.setOnionSkinHandler([&views, &session, &renderer,
                              &map](const std::vector<MicroversionId> &vers) {

@@ -279,6 +279,32 @@ after editing; an OpHandle that points to a later annotation operation instead o
 ExternRef that stores copied content or loses its scroll identity; a placeholder linked across
 stores as a raw local cell index; or a rank that cannot hold all six kinds together.
 
+### J15. Compare three branches at their change sites
+
+1. In `xuzz`, use one store with a version before the lowest common ancestor of two later branches.
+   Make a distinct text edit and a distinct slice edit on each branch. Preserve all three version
+   names and the two branch histories. Xanadoc and cell operations may freely interleave on one
+   lineage; choosing another parent makes a branch, while the operation type does not.
+1. Open the hypertime map and select the earlier version and both branch tips through its controls.
+   Confirm the map identifies the three versions and their shared ancestry. Open the comparison.
+1. Inspect the three text versions together. Each version must identify its changed and shared
+   passages, and the cursor must move to a changed site in its document with the surrounding text
+   visible.
+1. Enable the slice view and compare again. The comparison must include changed cell values,
+   membership and links for each version. Focus a changed cell in its rank neighborhood without
+   writing to the store.
+1. Close and reopen the store, select the same three versions in the map, and verify the text and
+   slice changes and target positions agree with the first comparison.
+
+Evidence: the three selected microversion IDs and ancestry in map accessibility output; frames of
+each text and slice change site with its neighborhood; accessibility descriptions of changed cells;
+`xudu-dump` before and after reopening; and unchanged operation counts during comparison navigation.
+
+Watch for: comparison that silently omits slice structure when the slice is visible; a cursor left
+at the beginning of a document or on an unrelated cell; a version silently replaced by the current
+head; a comparison that writes navigation operations; or a difference report that loses which branch
+owns each change.
+
 ## Findings
 
 Each step ends in exactly one of:
