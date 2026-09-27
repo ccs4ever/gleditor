@@ -31,8 +31,10 @@
 #ifndef XUDU_SCALAR_HPP
 #define XUDU_SCALAR_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "ops.hpp"
 
@@ -75,6 +77,22 @@ struct ScalarValue {
 
   bool operator==(const ScalarValue &) const = default;
 };
+
+/// A typed reading of user-authored cell text. The cell keeps its original
+/// bytes as primedia; only its kind and value bits are inferred.
+struct InferredTextValue {
+  ValueKind kind{ValueKind::None};
+  std::uint64_t bits{0};
+
+  bool operator==(const InferredTextValue &) const = default;
+};
+
+/// Keep inference bounded when a small edit lands in a large prose cell.
+inline constexpr std::size_t maxInferredScalarTextBytes = 128;
+
+/// Recognise complete integer, floating-point and explicit boolean literals.
+/// Other text, including out-of-range integers, has no typed value.
+[[nodiscard]] InferredTextValue inferTextValue(std::string_view text) noexcept;
 
 /**
  * @brief @p value as a scalar cell's two halves.

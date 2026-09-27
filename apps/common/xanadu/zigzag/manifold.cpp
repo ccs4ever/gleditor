@@ -319,7 +319,10 @@ Manifold::applyStructure(const std::uint32_t opIndex,
       return refuse(FoldRefusal::UnknownSubject);
     }
     spliceContent(dense, node.at, node.length, node.span());
-    slots[dense].lastOp = opIndex;
+    auto &cell     = slots[dense];
+    cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+    cell.valueBits = node.value;
+    cell.lastOp    = opIndex;
     byRef.emplace(opIndex, dense);
     return {};
   }

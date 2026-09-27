@@ -1,10 +1,10 @@
-# Real Work in Xuzz and VQuery: UX Validation Contract
+# Real Work in Xuzz, VQuery, VPL and VProlog: UX Validation Contract
 
 ## Purpose
 
-A person should be able to open `xuzz` or `vquery` and do real work in them — write, gather,
-arrange, navigate, stop and come back — without reading source, passing command-line flags or
-editing files by hand. This document is the contract the
+A person should be able to open `xuzz`, `vquery`, `vpl` or `vprolog` and do real work in them —
+write, gather, arrange, calculate, reason, navigate, stop and come back — without reading source,
+passing command-line flags or editing files by hand. This document is the contract the
 [`xuzz-ux-validation`](../.claude/skills/xuzz-ux-validation/SKILL.md) workflow validates against. It
 describes journeys a user takes and what counts as done; it is not evidence that any of them works
 today. Every validation run reports what the current build actually does.
@@ -16,16 +16,18 @@ A journey passes only when every step is reachable through the program's own int
 - **Key bindings**: the defaults in `system://keymap`. An action that exists but has no default
   binding and no on-screen control is not reachable.
 - **Pointer**: click, drag, drop and scroll on what is drawn.
+- **REPL input**: expressions, facts, rules, queries and commands typed at a visible prompt.
 
-Launching the program counts: `xuzz` with no arguments, or with a store path as a file manager would
-pass it. Nothing else on the command line does. The automation options (`--click`, `--do`, and so
-on) are the validator's hands, standing in for a person's; they are not part of the product.
+Launching the program counts: no arguments, or a store path as a file manager would pass it. Nothing
+else on the command line does. A source file prepared outside the program is not a substitute for
+entering work in its interface. The automation options (`--click`, `--do`, and so on) are the
+validator's hands, standing in for a person's; they are not part of the product.
 
 ## Journeys
 
 Each journey lists its steps, the evidence a pass needs, and the failures to look for. "Evidence"
-means artefacts a reviewer can inspect without rerunning: captured frames, the accessibility dump,
-program output, and `xudu-dump` of the store afterwards.
+means artefacts a reviewer can inspect without rerunning: captured frames and accessibility dumps
+for graphical steps, a terminal transcript for REPL steps, and `xudu-dump` of saved stores.
 
 ### J1. Create a new xanadoc
 
@@ -106,6 +108,148 @@ Evidence: the REPL transcript; the result store's `xudu-dump`; a frame of it in 
 
 Watch for: errors that name internals instead of the query; results that cannot be saved; a saved
 result `xuzz` cannot open.
+
+### J7. Total an editorial budget with VPL
+
+1. In `xuzz`, make a slice for an issue budget with a rank of three numeric cells: writing 12,
+   artwork 8 and rights 5. Save it and note which dimension holds the amounts.
+1. Launch `vpl` and open that saved slice through its interactive interface. Inspect the dimension
+   and the three amounts before calculating anything.
+1. Use a VPL expression to total the amounts (25), then change artwork to 10 in the working view and
+   recalculate (27). Inspect the view with `:grid` to check which cells contributed. Correct an
+   expression after an error without losing the working view.
+
+Evidence: the slice frame and accessible cells; a REPL transcript showing the inspected amounts,
+both totals, the correction and the grid; the source store's operations before and after the
+calculation. The numbers in the result must come from the slice, not a second hand-typed copy.
+
+Watch for: store access available only through `--store`; arithmetic that silently works on a fresh,
+unrelated arena; numbers rendered as text with no usable scalar value; a grid that cannot identify
+the contributing cells; an error that destroys the working view.
+
+### J8. Keep and reuse a VPL result
+
+1. Continue J7 and save the revised budget as a new result slice through `vpl`'s interface, keeping
+   the original budget available for comparison.
+1. Open the result in `xuzz`. Find its amount cells and total, and compare them with the original.
+1. Quit and reopen `vpl` on the result. Recalculate the total from the saved cells, without
+   re-entering the numbers or using a source script.
+
+Evidence: the REPL transcript showing the save and reopened calculation; `xudu-dump` of both stores,
+including the result's Structure operations; a frame and accessible cells in `xuzz` showing the
+saved values. The original and result must remain distinguishable.
+
+Watch for: saving available only through `-o` or `--output-store`; an export that saves compiler
+cells but not the calculated view; a result that `xuzz` cannot open; loss of the original data or
+numeric type; a session that can calculate but cannot resume work.
+
+### J9. Decide whether an issue can ship with VProlog
+
+1. Launch `vprolog`. At its prompt, enter editing, rights clearance and approval facts for two
+   issues. Leave approval absent for one issue; the other has all three. Enter a rule that an issue
+   can ship only when all three are present. Use `listing.` to review the knowledge base.
+1. Ask whether the unapproved issue can ship and read the negative answer. Ask which issues can ship
+   and find only the approved one. Add the missing approval at the prompt and ask again; now both
+   issues must appear as separate solutions.
+1. Save the facts and rule through the interface, quit, reopen them in `vprolog`, and repeat the
+   decision. The rule and evidence must survive without preparing a `.pl` file by hand.
+
+Evidence: a complete REPL transcript with the facts, rule, listing, negative answer, added approval
+and later solution; a second transcript after relaunch; the saved knowledge base and, where it is
+represented as a store, its `xudu-dump`. The answer must change because the missing approval was
+added, not because the rule was weakened.
+
+Watch for: `assert(...)` accepting facts but losing them on exit; saving or consulting possible only
+through a file edited outside the program; a rule that returns an incomplete or duplicate solution;
+an error that leaks compiler or manifold internals instead of naming the failed query.
+
+### J10. Switch between xanadocs, slices and both
+
+1. Open `xuzz` with at least two xanadocs and a slice. Put the document caret mid-paragraph and
+   focus a cell in the slice.
+1. Choose **Xanadocs only** from the interface. Read and edit a xanadoc; the slice is absent from
+   the view but remains in the store.
+1. Choose **Slices only**. Move through cells and edit one; the xanadocs are absent from the view
+   but remain in the store.
+1. Choose **Both**. See the xanadoc and slice together, then switch among all three modes again.
+   Return to the same document caret and cell focus without reopening either item.
+
+Evidence: frames and accessibility dumps in each mode; the controls or bindings used to switch;
+`xudu-dump` before and after, showing that filtering changed visibility rather than document or
+slice content.
+
+Watch for: a mode available only at launch; hidden items still intercepting pointer or keyboard
+input; switching modes deleting, duplicating or silently closing content; the caret, cell focus or
+camera reset on every switch; **Both** rendering only one type.
+
+The eventual `xudu` and `zigzag` wrappers can select **Xanadocs only** and **Slices only** from this
+same view choice.
+
+### J11. Follow one link to two distant ZigZag cells
+
+1. In **Both** mode, open a xanadoc and an extensive slice. Put cell A and cell B in different
+   neighborhoods so neither is visible when the other is focused. Select a passage in the xanadoc
+   and create one link whose document passage is one endset member and whose other endset has both
+   cells' exact content spans. Inspect the link before navigating: it has one identity and two
+   separately selectable cell members.
+1. Choose cell A's member and enter it. Read the cell with its local neighborhood visible, then use
+   Activity Back or Return to origin to restore the xanadoc passage and its link context.
+1. Choose cell B's member of the same link and enter it even though B is outside the currently drawn
+   neighborhood. Return to the xanadoc again. From the origin, use Activity Forward to choose either
+   visit; both branches remain available. Save and reopen the session, then repeat the choice.
+
+Evidence: frames and accessibility dumps showing the one link identity, both complete endsets, each
+chosen cell and its neighborhood, the document origin and two activity branches; the stored link
+record and the separate activity-store visits; the same endpoint identity and exact passage after
+reopening. Compare the visited stores after link creation and after navigation: movement adds no
+operations there. The detailed interaction contract is
+[`ui_workflow_xuzz_navigation.md`](ui_workflow_xuzz_navigation.md).
+
+Watch for: two separate links created instead of one many-to-many link; a rendered beam choosing an
+arbitrary cell; cell B unreachable because it is outside the visible radius; a return that loses the
+document caret or selected link; the second visit replacing the first branch; movement mutating the
+visited store.
+
+### J12. Transclude cell content into a xanadoc and another cell
+
+1. Start in **Slices only** with a slice containing a cell whose content is a distinctive passage.
+   Create a xanadoc through the interface and switch to **Both**.
+1. Select the source cell's content and transclude it into the new xanadoc. Read the passage there
+   and follow its provenance back to the source cell.
+1. From the document or original cell, transclude that same content into a newly created cell in a
+   different part of the slice. Edit surrounding document text and neighboring cell content, save,
+   close and reopen all three locations.
+
+Evidence: frames and accessibility dumps for the source cell, document passage and new cell;
+`xudu-dump` showing their content spans address the same primedia and that edits around them have
+their own operations; provenance and all three readable occurrences after reopening.
+
+Watch for: retyping or copying bytes instead of transcluding; a document passage with no route back
+to the source; a new cell that receives plain text but loses source identity; creating a xanadoc
+forcing the slice to close; edits to surrounding content changing the quoted passage unexpectedly.
+
+### J13. Turn VQuery data into a VProlog decision and a VPL report
+
+1. In `xuzz`, make a store with three issue records. Two have editing, rights clearance and approval
+   recorded; the third lacks rights clearance. In `vquery`, inspect the source records and produce a
+   dataset of issue and gate facts that `vprolog` can open through its interface. Preserve which
+   source cell each fact came from.
+1. In `vprolog`, load that dataset through the REPL, enter a rule requiring all three gates, and ask
+   which issues can ship. See two distinct ready issues and one unready issue. Save the query result
+   in a form `vpl` can open through its interface, without retyping or hand-converting the rows.
+1. In `vpl`, aggregate the result into a report: ready 2, unready 1, total 3. Save the report, open
+   it in `xuzz`, and inspect the numbers and their route back through the Prolog result and VQuery
+   dataset to the original issue cells. Reopen the report and recompute the counts.
+
+Evidence: the VQuery, VProlog and VPL REPL transcripts; each saved intermediate and final result;
+`xudu-dump` for store-backed stages; an `xuzz` frame and accessibility dump of the report; source
+identities and the three expected counts after reopening. No stage may substitute a manually typed
+copy for the preceding stage's result.
+
+Watch for: a result that only the producing program understands; lost cell provenance between
+stages; a Prolog query that returns only the first solution; a VPL total that counts duplicate or
+missing rows; conversion requiring flags, external scripts or hand-edited files; a report that
+cannot be reopened or audited.
 
 ## Findings
 

@@ -1,26 +1,28 @@
 ---
 name: xuzz-ux-validation
 description: >-
-  Validate, from the user's seat, that xuzz and vquery can be used for real work entirely
-  through their UI: creating xanadocs and slices, selecting and dragging text into new pages and
-  pouches, moving between the home cell and documents, and closing and resuming a store. Use to
-  audit the user experience or to verify a UX fix; use the xudu, ZigZag or link-navigation skills
-  to design or build the features themselves.
+  Validate, from the user's seat, that xuzz, vquery, vpl and vprolog can be used for real work
+  through their interfaces: creating documents and slices, switching views, following links to
+  distant cells, transcluding content, querying stores, calculating over numeric cells, making
+  rule-based decisions, passing data between programs, and resuming work. Use to audit the user
+  experience or to verify a UX fix; use the xudu, ZigZag or link-navigation skills to design or
+  build those features.
 ---
 
-# Xuzz UX validation
+# Real work UX validation
 
-The contract is [`design/ux_workflow_real_work.md`](../../../design/ux_workflow_real_work.md): six
-journeys (J1–J6), what counts as reaching each step through the UI, and the evidence a pass needs.
-Read it first. This skill says how to run it. A validation reports what the build does; code that
-looks as if it should work is not a pass.
+The contract is [`design/ux_workflow_real_work.md`](../../../design/ux_workflow_real_work.md):
+thirteen journeys (J1–J13), what counts as reaching each step through the interface, and the
+evidence a pass needs. Read it first. This skill says how to run it. A validation reports what the
+build does; code that looks as if it should work is not a pass.
 
 ## Rules
 
-- **Through the UI only.** Every product step goes through a menu, an on-screen control, a
-  `system://keymap` default binding or the pointer. Launching the program with a store path is the
-  only command line a journey may use. A step reachable only by a flag, a script or a file is a *No
-  affordance* finding, not a pass.
+- **Through the interface only.** Graphical steps go through a menu, an on-screen control, a
+  `system://keymap` default binding or the pointer. Terminal steps use the program's visible REPL
+  prompt. Launching a program with a store path is the only command line a journey may use. A step
+  reachable only by a flag, a script or a source file prepared elsewhere is a *No affordance*
+  finding, not a pass.
 
 - **Headless always** (AGENTS.md). Use `make`'s environment or set it yourself, and give every run
   its **own** configuration and data directories: system xanadocs are read through the open
@@ -50,33 +52,47 @@ looks as if it should work is not a pass.
   event takes, with a test, before judging the journey. Never judge a journey through a side door
   the user does not have.
 
-- **Evidence or it did not happen.** Keep, per step: a captured frame, the relevant slice of the
-  accessibility dump, program output, and after closing,
-  `xudu-dump --section=ops --permascroll=<dir> <store>`. Inspect frames rather than trusting exit
-  codes; a program that draws nothing still exits 0.
+- **Use a terminal session for REPL journeys.** Drive `vquery`, `vpl` and `vprolog` by typing at
+  their prompts in a PTY and keep the full input and output transcript. Do not use `-e`, `--store`,
+  `--output-store`, a pipe or a prepared source file to complete a journey step. These can be used
+  separately to diagnose a finding, but their success is not a journey pass. Check that the answer
+  uses the user's data and that a later prompt can continue the work.
+
+- **Track every handoff.** For a journey crossing programs, retain the input and output artifacts,
+  their source cell identities and record counts at each stage. A manually copied value is not
+  evidence that the next program consumed the preceding program's result.
+
+- **Evidence or it did not happen.** Keep, per graphical step, a captured frame and relevant
+  accessibility dump; per terminal step, the REPL transcript including input, output and errors;
+  and, after closing a store, `xudu-dump --section=ops --permascroll=<dir> <store>`. Inspect frames
+  rather than trusting exit codes; a program that draws nothing still exits 0.
 
 - **Validate, then fix.** A validation run changes no product code. Fixes are separate changes, each
   followed by rerunning the journeys it touches.
 
 ## Agentic workflow
 
-For a full audit, assign independent roles when subagents are available (keep to five or fewer
-unless the user asks for more). Each works in its own run directory and edits no product code.
+For a full audit, assign independent roles when subagents are available. Run at most three subagents
+concurrently, using `gpt-6-luna` for each delegated role. Queue remaining journeys and reviews until
+a slot is free; the lead stays in the parent agent. Each subagent works in its own run directory and
+edits no product code.
 
 1. **Harness engineer (first, alone).** Inventory the automation (`xuzz --help-all`, the script step
-   kinds in `src/renderer.cpp`) against every gesture J1–J6 needs, close the gaps, and prove each
-   new step with a test and a captured frame. Hand the others the list of hands they now have.
+   kinds in `src/renderer.cpp`) against every gesture J1–J13 needs, close the gaps, and prove each
+   new graphical step with a test and a captured frame. Check that terminal sessions can capture
+   REPL input and output. Hand the others the list of hands they now have.
 1. **Journey runners (in parallel, one per journey or pair).** Before running, map each step to the
    affordance a user would find: a radial-menu entry, a command-bar command, a key binding, a
-   pointer gesture. A step with nothing to map to is already a finding. Then run the journey
-   headless, keeping evidence, and classify every step (Pass, Fail, No affordance, Missing, Harness
-   gap).
+   pointer gesture or a REPL command. A step with nothing to map to is already a finding. Then run
+   the journey headless, keeping evidence, and classify every step (Pass, Fail, No affordance,
+   Missing, Harness gap).
 1. **Persistence auditor.** Owns J5 and the save half of every journey: `xudu-dump` before closing
    and after reopening, the permascroll and system xanadocs, and whether caret, camera, slice focus,
-   pouch items and selected link come back.
-1. **Keyboard and accessibility reviewer.** Repeats each passing journey with the keyboard and the
-   accessibility tree alone: every step reachable without the pointer, every control named, focus
-   never lost. Reports steps that pass only by mouse.
+   pouch items, selected link, calculated views and asserted rules come back.
+1. **Keyboard and accessibility reviewer.** Repeats each passing graphical journey with the keyboard
+   and the accessibility tree alone: every step reachable without the pointer, every control named,
+   focus never lost. For REPL journeys, checks that commands, errors and solutions are readable in
+   the terminal. Reports steps that pass only by mouse.
 1. **Lead.** Merges the reports into one findings table, removes duplicates, ranks by how badly each
    blocks real work, and proposes fixes. A disagreement between roles is settled by rerunning the
    step and reading the evidence, not by argument.
@@ -87,8 +103,8 @@ For a single fix, run just the journeys it touches, directly, without subagents.
 
 One table for the run, then the findings:
 
-| Journey | Step | Affordance used (menu, key, pointer) | Outcome | Evidence |
-| ------- | ---- | ------------------------------------ | ------- | -------- |
+| Journey | Step | Affordance used (menu, key, pointer, prompt) | Outcome | Evidence |
+| ------- | ---- | -------------------------------------------- | ------- | -------- |
 
 For each finding that is not a Pass: what the user tried, what happened, the evidence path, and a
 proposed fix with where in the code it lands. Say plainly what was not validated and why: a harness
