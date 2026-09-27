@@ -79,7 +79,8 @@ std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
   return xanadu::DocumentSite{
       .store   = session.store(view.storeIndex).documentId(),
       .version = view.version,
-      .range   = {.start = caret->offset, .end = caret->offset}};
+      .range   = caret->selection.value_or(
+          xanadu::Extent{.start = caret->offset, .end = caret->offset})};
 }
 
 std::optional<xanadu::OccurrenceSite>

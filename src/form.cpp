@@ -472,7 +472,8 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       // without knowing that space is what opens one. A list with nothing in
       // it is not opened: an empty panel would say less than the hint already
       // showing, and the field is answered as empty either way.
-      if (Kind::Choice == here.kind && !here.options.empty()) {
+      if (Kind::Choice == here.kind && !here.options.empty() &&
+          !here.submitOnEnter) {
         expanded  = true;
         highlight = here.chosen;
         return true;

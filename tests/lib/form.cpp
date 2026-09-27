@@ -253,6 +253,24 @@ TEST_F(ChoiceFormTest, aChoiceAnswersWithWhatItMeansRatherThanWhatItShows) {
   EXPECT_TRUE(keys.options[0].contains("Ada"));
 }
 
+TEST(FormChoiceTest, SingleChoiceFieldCanSubmitSelectedBranchWithEnter) {
+  Form form{"Sans 11"};
+  Form::Field branch{"Forward visit", {}, {}, false, Kind::Choice};
+  branch.options       = {"Visit 2", "Visit 3"};
+  branch.optionValues  = {"2", "3"};
+  branch.submitOnEnter = true;
+  std::string chosen;
+  form.open("Activity Forward", "Choose a saved destination",
+            {std::move(branch)},
+            [&chosen](const std::vector<Form::Field> &answers) {
+              chosen = answers.front().answer();
+            });
+  form.keyPressed(Key::Right, KeyMods::None);
+  form.keyPressed(Key::Return, KeyMods::None);
+  EXPECT_EQ(chosen, "3");
+  EXPECT_FALSE(form.grabbing());
+}
+
 TEST_F(ChoiceFormTest, theListOpensMovesAndSettles) {
   openIt();
   form.keyPressed(Key::Tab, KeyMods::None);

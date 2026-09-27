@@ -3211,7 +3211,13 @@ int main(const int argc, char **argv) {
             return std::nullopt;
           }
           return xudu::LinkContext::CaretPosition{
-              .view = caret->documentIndex(), .offset = caret->byteOffset()};
+              .view   = caret->documentIndex(),
+              .offset = caret->byteOffset(),
+              .selection =
+                  caret->hasSelection()
+                      ? std::optional<xanadu::Extent>{{caret->selectionStart(),
+                                                       caret->selectionEnd()}}
+                      : std::nullopt};
         });
     links.setLinkContext(&linkContext);
     xudu::LinkPanelOverlay linkPanel(linkContext, *session);
@@ -4127,9 +4133,10 @@ int main(const int argc, char **argv) {
               return;
             }
             gleditor::Form::Field choice;
-            choice.label = "Forward visit";
-            choice.hint  = "choose one saved branch";
-            choice.kind  = gleditor::Form::Kind::Choice;
+            choice.label         = "Forward visit";
+            choice.hint          = "choose one saved branch";
+            choice.kind          = gleditor::Form::Kind::Choice;
+            choice.submitOnEnter = true;
             for (const auto &visit : choices) {
               choice.options.push_back("Visit " +
                                        std::to_string(visit.id.value) + ": " +

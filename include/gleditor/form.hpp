@@ -88,6 +88,8 @@ public:
     std::vector<std::string> optionValues;
     /// Choice: which one is picked.
     std::size_t chosen{};
+    /// A one-choice form can accept the selected item with Enter directly.
+    bool submitOnEnter{};
 
     /// Toggle: whether it is on.
     bool on{};

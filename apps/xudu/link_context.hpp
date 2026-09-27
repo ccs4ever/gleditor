@@ -48,6 +48,7 @@ public:
   struct CaretPosition {
     std::uint32_t view{};
     std::uint32_t offset{};
+    std::optional<xanadu::Extent> selection;
     bool operator==(const CaretPosition &) const = default;
   };
   using CaretQuery = std::function<std::optional<CaretPosition>()>;
