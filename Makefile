@@ -547,8 +547,13 @@ LIB_SRCS := $(filter-out src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,acces
 # .cpp extension every other source in this tree actually has.
 ZSTD_SEEKABLE_DIR := thirdparty/zstd/contrib/seekable_format
 ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
-                     $(ZSTD_SEEKABLE_DIR)/zstdseek_decompress.c
-# These two files' own #include "zstd.h"/"zstd_errors.h" resolve against
+                     $(ZSTD_SEEKABLE_DIR)/zstdseek_decompress.c \
+                     thirdparty/zstd/lib/common/xxhash.c
+# xxhash.c comes along because the seekable format's checksums call
+# XXH64_*, which the vendored xxhash.h renames to ZSTD_XXH64_* (its
+# XXH_NAMESPACE default) -- and the installed libzstd keeps those hidden, so
+# without this the link ends in undefined ZSTD_XXH64_reset/update/digest.
+# These three files' own #include "zstd.h"/"zstd_errors.h" resolve against
 # thirdparty/zstd/lib rather than the system libzstd this build otherwise
 # links (both are pinned to the same v1.5.7, so which one wins is not
 # supposed to matter -- see .gitmodules -- but pointing them at the vendored

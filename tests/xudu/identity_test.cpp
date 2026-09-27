@@ -9,6 +9,7 @@
 #include "common/xanadu/identity/identity_network_controller.hpp"
 #include "common/xanadu/identity/identity_serialization.hpp"
 #include "common/xanadu/identity/identity_validation.hpp"
+#include "common/xanadu/lt_compat.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
@@ -348,10 +349,8 @@ TEST(IdentityBEP10Test, ExtendedMessageEnvelopeEncoding) {
 TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
   libtorrent::entry h(libtorrent::entry::dictionary_t);
   IdentityNetworkController controller;
-  IdentityPeerPlugin plugin(
-      libtorrent::peer_connection_handle(
-          std::weak_ptr<libtorrent::aux::peer_connection>{}),
-      InfoHash{}, &controller);
+  IdentityPeerPlugin plugin(lt_compat::nullPeerConnection(), InfoHash{},
+                            &controller);
 
   plugin.add_handshake(h);
   ASSERT_THAT(h.type(), Eq(libtorrent::entry::dictionary_t));
@@ -375,9 +374,7 @@ namespace {
 std::shared_ptr<IdentityPeerPlugin>
 challengedPlugin(IdentityNetworkController &controller) {
   auto plugin = std::make_shared<IdentityPeerPlugin>(
-      libtorrent::peer_connection_handle(
-          std::weak_ptr<libtorrent::aux::peer_connection>{}),
-      InfoHash{}, &controller);
+      lt_compat::nullPeerConnection(), InfoHash{}, &controller);
 
   const std::string handshake =
       "d1:md20:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
