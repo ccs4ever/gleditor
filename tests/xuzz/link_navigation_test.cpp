@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <string>
@@ -344,6 +346,22 @@ TEST(LinkNavigationTest, ActivityForwardChoosesEitherExistingBranch) {
   ASSERT_TRUE(toSecond);
   EXPECT_EQ(toSecond->focus, second->focus);
   EXPECT_EQ(h.log.size(), 3U);
+}
+
+TEST(LinkNavigationTest, AuthoredManyToManyLinkSurvivesStoreReopen) {
+  auto fixture = xuzz_test::makeTwoByThree();
+  const auto directory =
+      std::filesystem::temp_directory_path() /
+      ("xuzz-link-reopen-" +
+       std::to_string(
+           std::chrono::steady_clock::now().time_since_epoch().count()));
+  fixture.store->save(directory.string());
+  xanadu::Store reopened(fixture.store->userPermascrollPtr());
+  reopened.load(directory.string());
+  ASSERT_TRUE(reopened.links().contains(fixture.link));
+  EXPECT_EQ(reopened.links().at(fixture.link).left.size(), 2U);
+  EXPECT_EQ(reopened.links().at(fixture.link).right.size(), 3U);
+  std::filesystem::remove_all(directory);
 }
 
 TEST(LinkNavigationTest, ActivityBackIntoAnotherLinkResolvesItAgain) {

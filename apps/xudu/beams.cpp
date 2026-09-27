@@ -255,15 +255,12 @@ void LinkBeams::rebuildStrands(RenderState &state) {
 
   ++described;
   if (linkContext_ != nullptr) {
-    std::vector<zigzag::CellRef> onScreen;
-    onScreen.reserve(strands.size());
-    for (const auto &strand : strands) {
-      onScreen.push_back(static_cast<zigzag::CellRef>(strand.link));
+    std::vector<zigzag::CellRef> candidates;
+    candidates.reserve(session.store().links().size());
+    for (const auto &entry : session.store().links()) {
+      candidates.push_back(entry.first);
     }
-    std::ranges::sort(onScreen);
-    const auto repeats = std::ranges::unique(onScreen);
-    onScreen.erase(repeats.begin(), repeats.end());
-    linkContext_->setCandidates(onScreen);
+    linkContext_->setCandidates(candidates);
   }
 }
 
