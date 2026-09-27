@@ -826,6 +826,42 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
     result.versions.push_back(std::move(sv));
   }
 
+  struct CellState {
+    std::string text;
+    std::uint8_t kind{};
+    std::uint64_t bits{};
+    std::vector<zigzag::DimLink> links;
+    bool operator==(const CellState &) const = default;
+  };
+  std::map<zigzag::CellRef, std::vector<std::optional<CellState>>> cells;
+  for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
+    const auto manifold = rebuildManifold(versions[vIdx]);
+    for (const auto &slot : manifold.cells()) {
+      auto &states = cells[slot.birthOp];
+      if (states.empty()) states.resize(versions.size());
+      const auto links = manifold.dimensionsOf(slot.birthOp);
+      states[vIdx]     = CellState{
+          .text  = manifold.textOf(slot.birthOp, *this),
+          .kind  = slot.valueKind,
+          .bits  = slot.valueBits,
+          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+    }
+  }
+  for (const auto &[ref, states] : cells) {
+    if (std::ranges::all_of(states, [&](const auto &state) {
+          return state == states.front();
+        })) {
+      continue;
+    }
+    for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
+      if (states[vIdx]) {
+        result.versions[vIdx].changedCells.push_back(ref);
+      } else {
+        result.versions[vIdx].absentChangedCells++;
+      }
+    }
+  }
+
   return result;
 }
 

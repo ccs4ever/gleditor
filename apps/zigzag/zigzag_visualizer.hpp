@@ -79,6 +79,7 @@ struct CellLayoutMetrics {
   float labelTop{};
   float badgeTop{};
   float labelLineHeight{};
+  float horizontalPadding{};
   std::string idText;
   std::string badgeText;
 };
@@ -578,6 +579,7 @@ private:
   std::chrono::steady_clock::time_point last_frame_time_;
 
   std::unique_ptr<gleditor::Canvas> worldCanvas_;
+  std::unique_ptr<gleditor::Canvas> ancillaryCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;

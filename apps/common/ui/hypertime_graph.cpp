@@ -37,6 +37,31 @@ constexpr std::array<std::uint32_t, 6> kLineageHues = {
     0x42A5F5FF, // Blue
 };
 
+std::string passagePreview(const SingleVersionDiff &version,
+                           const DiffKind kind,
+                           const std::size_t maxBytes = 18) {
+  const auto found =
+      std::ranges::find_if(version.spans, [kind](const auto &span) {
+        return span.kind == kind && span.length > 0;
+      });
+  if (found == version.spans.end() || found->offset >= version.text.size()) {
+    return "none";
+  }
+  auto text = version.text.substr(found->offset, found->length);
+  std::ranges::replace(text, '\n', ' ');
+  std::ranges::replace(text, '\r', ' ');
+  if (text.size() > maxBytes) {
+    auto end = maxBytes;
+    while (end > 0 &&
+           (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) {
+      --end;
+    }
+    text.resize(end);
+    text += "…";
+  }
+  return text;
+}
+
 } // namespace
 
 HypertimeGraph::HypertimeGraph(
@@ -484,6 +509,17 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->addText(ctx.state, panelX_ + 14.0F, topY - 40.0F,
                    "Wheel: pan | Shift+Wheel: sideways | Ctrl+Wheel: zoom",
                    0x94A3B8FF, 0);
+  if (selectedOperation_) {
+    const bool included =
+        std::ranges::find(comparedVersions_, *selectedOperation_) !=
+        comparedVersions_.end();
+    canvas_->setTag(render::tagKindOverlay, kTagCompareSelection);
+    canvas_->addRect(panelX_ + 14.0F, topY - 72.0F, 185.0F, 24.0F,
+                     included ? 0x9A3412FF : 0x0F766EFF);
+    canvas_->addText(ctx.state, panelX_ + 19.0F, topY - 55.0F,
+                     included ? "Remove from comparison" : "Add to comparison",
+                     0xFFFFFFFF, 0);
+  }
   if (selectedOperation_ && annotateHandler_) {
     canvas_->setTag(render::tagKindOverlay, kTagAnnotateButton);
     canvas_->addRect(panelX_ + panelW_ - 220.0F, topY - 72.0F, 206.0F, 24.0F,
@@ -629,9 +665,9 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
     }
 
     constexpr float diffW = 325.0F;
-    constexpr float diffH = 145.0F;
+    const float diffH     = comparedVersions_.size() == 3 ? 205.0F : 145.0F;
     const float diffX     = panelX_ + panelW_ - diffW - 14.0F;
-    const float diffY     = topY - diffH - 50.0F;
+    const float diffY     = panelY_ + 55.0F;
 
     canvas_->setTag(render::tagKindOverlay, 0);
     canvas_->addRect(diffX, diffY, diffW, diffH, 0x1E1E2EDD);
@@ -667,14 +703,48 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
     const std::string dStr =
         "Limbo (Crimson):   " + std::to_string(dChars) + " chars";
 
-    canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 34.0F, uStr,
-                     0xFFD700FF, 0);
-    canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 50.0F, sStr,
-                     0xF59E0BFF, 0);
-    canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 66.0F, qStr,
-                     0x10B981FF, 0);
-    canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 82.0F, dStr,
-                     0xEF4444FF, 0);
+    if (comparedVersions_.size() == 3) {
+      auto ancestor = comparedVersions_[1];
+      while (ancestor != comparedVersions_[2] &&
+             !ancestor.isAncestorOf(comparedVersions_[2]) &&
+             !ancestor.isZero()) {
+        ancestor = ancestor.parent();
+      }
+      const bool beforeAncestor = comparedVersions_[0] != ancestor &&
+                                  comparedVersions_[0].isAncestorOf(ancestor);
+      canvas_->addText(
+          ctx.state, diffX + 8.0F, diffY + diffH - 36.0F,
+          "Ancestor " + ancestor.str() +
+              (beforeAncestor ? " | base before" : " | check base"),
+          beforeAncestor ? 0x94A3B8FF : 0xEF4444FF, 0);
+      for (std::size_t i = 0; i < 3; ++i) {
+        const auto &version = diffResult_.versions[i];
+        const float rowY =
+            diffY + diffH - 54.0F - static_cast<float>(i) * 36.0F;
+        canvas_->addText(
+            ctx.state, diffX + 8.0F, rowY,
+            version.version.str() + ": " + std::to_string(version.uniqueChars) +
+                " unique chars, " +
+                std::to_string(version.changedCells.size()) + " changed cells",
+            0xE2E8F0FF, 0);
+        const auto universal = passagePreview(version, DiffKind::Universal, 10);
+        const auto shared    = passagePreview(version, DiffKind::Shared, 10);
+        const auto unique    = passagePreview(version, DiffKind::Unique, 10);
+        canvas_->addText(ctx.state, diffX + 8.0F, rowY - 16.0F,
+                         "all:\"" + universal + "\" some:\"" + shared +
+                             "\" only:\"" + unique + "\"",
+                         0x94A3B8FF, 0);
+      }
+    } else {
+      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 34.0F, uStr,
+                       0xFFD700FF, 0);
+      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 50.0F, sStr,
+                       0xF59E0BFF, 0);
+      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 66.0F, qStr,
+                       0x10B981FF, 0);
+      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 82.0F, dStr,
+                       0xEF4444FF, 0);
+    }
 
     // Buttons
     canvas_->setTag(render::tagKindOverlay, kTagQuoteButton);
@@ -740,6 +810,11 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
         quoteHandler_(srcVer, 0, static_cast<std::uint32_t>(text.size()));
       }
     }
+    return true;
+  }
+
+  if (tag == kTagCompareSelection) {
+    if (selectedOperation_) toggleComparison(*selectedOperation_);
     return true;
   }
 
@@ -823,6 +898,7 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
   if (selectedOperation_ && annotateHandler_) {
     mapNode.children.push_back(into.id(2001U));
   }
+  if (selectedOperation_) mapNode.children.push_back(into.id(2002U));
   if (comparedVersions_.size() >= 2) {
     mapNode.children.push_back(into.id(3000U));
   }
@@ -841,6 +917,9 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
     node.value = selectedOperation_ == n.id ? "selected operation"
                  : n.id == current_         ? "current view"
                                             : "";
+    if (std::ranges::find(comparedVersions_, n.id) != comparedVersions_.end()) {
+      node.value += node.value.empty() ? "in comparison" : ", in comparison";
+    }
   }
 
   auto &sliderNode = into.add(2000U, gleditor::a11y::Role::Group);
@@ -853,11 +932,31 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
                        " and place handle on d.1";
     annotate.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
   }
+  if (selectedOperation_) {
+    auto &compare = into.add(2002U, gleditor::a11y::Role::Button);
+    const bool included =
+        std::ranges::find(comparedVersions_, *selectedOperation_) !=
+        comparedVersions_.end();
+    compare.label   = std::string(included ? "Remove " : "Add ") +
+                      selectedOperation_->str() +
+                      (included ? " from comparison" : " to comparison");
+    compare.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
+  }
 
   if (comparedVersions_.size() >= 2) {
     auto &diffNode = into.add(3000U, gleditor::a11y::Role::Group);
     diffNode.label = "Comparative Diff (" +
                      std::to_string(comparedVersions_.size()) + " versions)";
+    for (const auto &version : diffResult_.versions) {
+      diffNode.label +=
+          " [" + version.version.str() + ": " +
+          std::to_string(version.uniqueChars) + " unique characters, " +
+          std::to_string(version.changedCells.size()) + " changed cells; " +
+          "universal passage '" + passagePreview(version, DiffKind::Universal) +
+          "'; shared passage '" + passagePreview(version, DiffKind::Shared) +
+          "'; unique passage '" + passagePreview(version, DiffKind::Unique) +
+          "']";
+    }
   }
 }
 

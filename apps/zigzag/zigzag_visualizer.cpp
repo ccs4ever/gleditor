@@ -26,6 +26,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
+#include <gleditor/text/font.hpp>
 
 namespace zigzag {
 
@@ -97,6 +98,13 @@ void ZigzagVisualizer::deviceReady(
     const render::PipelineDesc &documentPipeline) {
   worldCanvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
   worldCanvas_->createPipeline(documentPipeline, true);
+
+  const auto normalFont =
+      gleditor::text::FontManager::instance().getFont(fontName_);
+  const auto ancillaryFont = std::format("{} {:.1f}", normalFont->family(),
+                                         normalFont->pointSize() * 0.75);
+  ancillaryCanvas_ = std::make_unique<gleditor::Canvas>(&device, ancillaryFont);
+  ancillaryCanvas_->createPipeline(documentPipeline, true);
 
   hudCanvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
   hudCanvas_->createPipeline(documentPipeline, false);
@@ -715,9 +723,22 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
   case xanadu::ValueKind::Bool:
     return "boolean";
   case xanadu::ValueKind::OpHandle:
-    return "handle / MicroversionId";
+    if (const auto target = engine_->manifold().handleTarget(id)) {
+      return "handle / " + engine_->store().segmentedOps().idOf(*target).str();
+    }
+    return "handle / unresolved";
   case xanadu::ValueKind::ExternRef:
-    return "extern / globalref";
+    if (const auto target = engine_->store().externTarget(id)) {
+      const auto *scroll =
+          engine_->store().scrollRegistry().recordForId(target->scroll);
+      std::string key =
+          scroll ? scroll->globalKey : std::to_string(target->scroll);
+      // The full persistent key stays in accessibility; the card is a compact
+      // cue that must fit beside other cells in the neighborhood.
+      if (key.size() > 24) key = key.substr(0, 21) + "…";
+      return "extern / " + key + " @ " + target->produces.str();
+    }
+    return "extern / unresolved";
   case xanadu::ValueKind::None:
     return std::string(role);
   }
@@ -946,39 +967,44 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
     return metrics;
   }
 
-  const auto titleMetrics = worldCanvas_->measureText(metrics.idText);
+  const auto titleMetrics = ancillaryCanvas_->measureText(metrics.idText);
   worldCanvas_->setTextWidthLimit(static_cast<int>(widthLimit));
   const auto labelMetrics = worldCanvas_->measureText(cell.text);
   worldCanvas_->setTextWidthLimit(0);
-  const auto badgeMetrics = metrics.badgeText.empty()
-                                ? gleditor::TextMetrics{}
-                                : worldCanvas_->measureText(metrics.badgeText);
+  const auto badgeMetrics =
+      metrics.badgeText.empty()
+          ? gleditor::TextMetrics{}
+          : ancillaryCanvas_->measureText(metrics.badgeText);
+
+  // The value's own em is the minimum breathing room around its text.
+  const float valueEm = worldCanvas_->measureText("M").height;
+  const float horizontalPadding =
+      std::max(presentation_config_.cellHorizontalPaddingPx, valueEm);
+  const float verticalPadding =
+      std::max(presentation_config_.cellVerticalPaddingPx, valueEm);
+  metrics.horizontalPadding = horizontalPadding;
 
   metrics.labelWidthLimit = widthLimit;
   metrics.labelLineHeight = labelMetrics.height;
   metrics.width =
       std::max({titleMetrics.width, labelMetrics.width, badgeMetrics.width}) +
-      (2.0F * presentation_config_.cellHorizontalPaddingPx);
+      (2.0F * horizontalPadding);
 
   const bool hasBadge = !metrics.badgeText.empty();
   const float gaps =
       presentation_config_.cellBandGapPx * (hasBadge ? 2.0F : 1.0F);
-  metrics.height = (2.0F * presentation_config_.cellVerticalPaddingPx) +
-                   titleMetrics.height + labelMetrics.height +
-                   badgeMetrics.height + gaps;
+  metrics.height = (2.0F * verticalPadding) + titleMetrics.height +
+                   labelMetrics.height + badgeMetrics.height + gaps;
 
-  metrics.titleTop =
-      metrics.height - presentation_config_.cellVerticalPaddingPx;
-  const float titleBottom = metrics.titleTop - titleMetrics.height;
-  const float labelBottom =
-      hasBadge ? presentation_config_.cellVerticalPaddingPx +
-                     badgeMetrics.height + presentation_config_.cellBandGapPx
-               : presentation_config_.cellVerticalPaddingPx;
+  metrics.titleTop         = metrics.height - verticalPadding;
+  const float titleBottom  = metrics.titleTop - titleMetrics.height;
+  const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
+                                            presentation_config_.cellBandGapPx
+                                      : verticalPadding;
   const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
   metrics.labelTop =
       labelBottom + ((labelCeiling - labelBottom + labelMetrics.height) / 2.0F);
-  metrics.badgeTop =
-      presentation_config_.cellVerticalPaddingPx + badgeMetrics.height;
+  metrics.badgeTop = verticalPadding + badgeMetrics.height;
   return metrics;
 }
 
@@ -1562,8 +1588,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // --- 2. Draw 3D Cell Nodes & Text ---
   worldCanvas_->clear();
+  ancillaryCanvas_->clear();
   const auto pickScope = ctx.state.allocateOverlayPickScope();
   worldCanvas_->setIdentity(pickScope, 0);
+  ancillaryCanvas_->setIdentity(pickScope, 0);
   const auto &pickStore  = engine_->store();
   const auto pickVersion = engine_->head().str();
   if (pickTargetVersion_ != pickVersion) {
@@ -1606,6 +1634,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     ctx.state.bindOverlayPick(pickTag, target);
     worldCanvas_->setTag(render::tagKindOverlay,
                          static_cast<std::uint32_t>(id));
+    ancillaryCanvas_->setTag(render::tagKindOverlay,
+                             static_cast<std::uint32_t>(id));
 
     const bool isFocus     = (id == accursed_cell_focus_);
     const auto &layout     = cellLayout(id, cell, isFocus);
@@ -1671,14 +1701,14 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                           borderCol);
 
     // Title / ID
-    worldCanvas_->addText(
-        ctx.state, left + presentation_config_.cellHorizontalPaddingPx,
-        bottom + layout.titleTop, layout.idText, borderCol, bgCol);
+    ancillaryCanvas_->addText(ctx.state, left + layout.horizontalPadding,
+                              bottom + layout.titleTop, layout.idText,
+                              borderCol, bgCol);
     // Label Text
     worldCanvas_->setTextWidthLimit(static_cast<int>(layout.labelWidthLimit));
     const auto textMetrics = worldCanvas_->measureText(cell.text);
     const float textLeft =
-        left + std::max(presentation_config_.cellHorizontalPaddingPx,
+        left + std::max(layout.horizontalPadding,
                         (nodeWidth - textMetrics.width) / 2.0F);
     const float textTop = bottom + layout.labelTop;
     worldCanvas_->addText(ctx.state, textLeft, textTop, cell.text, textCol,
@@ -1687,15 +1717,18 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
     // Badges: type, mime, clone
     if (!layout.badgeText.empty()) {
-      worldCanvas_->addText(
-          ctx.state, left + presentation_config_.cellHorizontalPaddingPx,
-          bottom + layout.badgeTop, layout.badgeText, borderCol, bgCol);
+      ancillaryCanvas_->addText(ctx.state, left + layout.horizontalPadding,
+                                bottom + layout.badgeTop, layout.badgeText,
+                                borderCol, bgCol);
     }
   }
 
   worldCanvas_->commit();
   worldCanvas_->draw(ctx.state, ctx.viewProjection * presentation_transform_,
                      1.0F);
+  ancillaryCanvas_->commit();
+  ancillaryCanvas_->draw(ctx.state,
+                         ctx.viewProjection * presentation_transform_, 1.0F);
 
   // --- 3. Draw 2D Screen Overlay HUD ---
   hudCanvas_->clear();
@@ -2336,11 +2369,17 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
     if (vortex_host_->hasCustomAction(actionName)) {
       CellRef newFocus   = zigzag::noCell;
       const auto oldView = current_view_;
+      const auto beforeOps =
+          engine_ ? engine_->store().segmentedOps().size() : 0U;
       if (vortex_host_->dispatchAction(
               actionName, static_cast<CellRef>(accursed_cell_focus_),
               current_view_, newFocus)) {
         if (engine_) {
-          engine_->syncIncremental();
+          if (engine_->store().segmentedOps().size() > beforeOps) {
+            engine_->syncTo(engine_->store().latest());
+          } else {
+            engine_->syncIncremental();
+          }
         }
         GLEDITOR_LOG_DEBUG("zigzag.action",
                            "action {} focus {} -> {} (visible={})", actionName,
@@ -2547,7 +2586,7 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
         // Duplication is a user edit promoted from Vortex's arena into the
         // store. Replay it before validating the new focus against the view.
         if (engine_) {
-          engine_->syncIncremental();
+          engine_->syncTo(engine_->store().latest());
         }
         GLEDITOR_LOG_DEBUG("zigzag.edit",
                            "duplicate focus {} -> {} (visible={})",

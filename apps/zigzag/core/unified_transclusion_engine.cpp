@@ -57,9 +57,14 @@ void UnifiedTransclusionEngine::syncIncremental() {
   // rank at write time" is the same point from the other side: the rank is
   // minted where the transclusion is recorded, not invented where it is
   // displayed.
-  const auto &ops  = store_.segmentedOps();
-  const auto total = static_cast<std::uint32_t>(ops.size());
+  const auto &ops   = store_.segmentedOps();
+  const auto total  = static_cast<std::uint32_t>(ops.size());
+  const auto target = head_.isZero() && total > 0 ? ops.idOf(total) : head_;
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
+    // Spool order interleaves branches; only the named ancestry belongs in
+    // this replay product. The index still advances past skipped siblings.
+    const auto version = ops.idOf(idx);
+    if (version != target && !version.isAncestorOf(target)) continue;
     if (const auto *const node = ops.get(idx); nullptr != node) {
       // A refused operation is counted by the manifold (refusedOps()) and
       // leaves it unchanged; the render sync has nothing more to do about it.
@@ -79,10 +84,8 @@ void UnifiedTransclusionEngine::syncIncremental() {
     }
   }
   lastSyncedOpIndex_ = total;
-  if (total > 0) {
-    head_ = ops.idOf(total);
-  }
-  lastStoreOpCount_ = total;
+  head_              = target;
+  lastStoreOpCount_  = total;
 
   const auto currentFormatLinks = countFormatLinks();
   if (currentFormatLinks != lastFormatLinkCount_) {

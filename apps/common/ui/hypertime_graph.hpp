@@ -45,14 +45,15 @@ class HypertimeGraph : public gleditor::FrameContributor,
                        public gleditor::PickObserver,
                        public gleditor::a11y::Source {
 public:
-  static constexpr std::uint32_t kTagScrubberThumb   = 900U;
-  static constexpr std::uint32_t kTagScrubberTrack   = 901U;
-  static constexpr std::uint32_t kTagQuoteButton     = 910U;
-  static constexpr std::uint32_t kTagOpen3DButton    = 911U;
-  static constexpr std::uint32_t kTagClearComp       = 912U;
-  static constexpr std::uint32_t kTagOnionSkinButton = 913U;
-  static constexpr std::uint32_t kTagAnnotateButton  = 914U;
-  static constexpr std::uint32_t kTagNodeBase        = 1000U;
+  static constexpr std::uint32_t kTagScrubberThumb    = 900U;
+  static constexpr std::uint32_t kTagScrubberTrack    = 901U;
+  static constexpr std::uint32_t kTagQuoteButton      = 910U;
+  static constexpr std::uint32_t kTagOpen3DButton     = 911U;
+  static constexpr std::uint32_t kTagClearComp        = 912U;
+  static constexpr std::uint32_t kTagOnionSkinButton  = 913U;
+  static constexpr std::uint32_t kTagAnnotateButton   = 914U;
+  static constexpr std::uint32_t kTagCompareSelection = 915U;
+  static constexpr std::uint32_t kTagNodeBase         = 1000U;
 
   HypertimeGraph(std::string aFontName,
                  std::function<const Store &(std::size_t)> storeAt,

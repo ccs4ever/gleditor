@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -110,6 +111,25 @@ TEST(DiffTest, ThreeWayBranchingDiffWithSharedAndUniqueSpans) {
 
   // " high" is unique to vBranch2
   EXPECT_EQ(diff2.uniqueChars, 5U);
+}
+
+TEST(DiffTest, ThreeWayDiffIncludesVersionedSliceValuesAndMembership) {
+  Store st;
+  const auto before    = st.sliceGenesis(MicroversionId{});
+  const auto common    = st.makeCell(before, "common");
+  const auto cell      = st.cellRefOf(common);
+  const auto left      = st.spliceCell(common, cell, 0, 6, "left");
+  const auto right     = st.makeCell(common, "right only");
+  const auto rightCell = st.cellRefOf(right);
+
+  const auto result = st.diffVersions({before, left, right});
+  ASSERT_EQ(result.versions.size(), 3U);
+  EXPECT_TRUE(result.versions[0].changedCells.empty());
+  EXPECT_EQ(result.versions[0].absentChangedCells, 2U);
+  EXPECT_NE(std::ranges::find(result.versions[1].changedCells, cell),
+            result.versions[1].changedCells.end());
+  EXPECT_NE(std::ranges::find(result.versions[2].changedCells, rightCell),
+            result.versions[2].changedCells.end());
 }
 
 TEST(DiffTest, UnlimitedNWayDiffingTenVersions) {

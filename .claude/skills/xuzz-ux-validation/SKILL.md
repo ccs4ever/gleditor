@@ -12,9 +12,9 @@ description: >-
 # Real work UX validation
 
 The contract is [`design/ux_workflow_real_work.md`](../../../design/ux_workflow_real_work.md):
-fourteen journeys (J1–J14), what counts as reaching each step through the interface, and the
-evidence a pass needs. Read it first. This skill says how to run it. A validation reports what the
-build does; code that looks as if it should work is not a pass.
+fifteen journeys (J1–J15), what counts as reaching each step through the interface, and the evidence
+a pass needs. Read it first. This skill says how to run it. A validation reports what the build
+does; code that looks as if it should work is not a pass.
 
 ## Rules
 
@@ -78,7 +78,7 @@ a slot is free; the lead stays in the parent agent. Each subagent works in its o
 edits no product code.
 
 1. **Harness engineer (first, alone).** Inventory the automation (`xuzz --help-all`, the script step
-   kinds in `src/renderer.cpp`) against every gesture J1–J14 needs, close the gaps, and prove each
+   kinds in `src/renderer.cpp`) against every gesture J1–J15 needs, close the gaps, and prove each
    new graphical step with a test and a captured frame. Check that terminal sessions can capture
    REPL input and output. Hand the others the list of hands they now have.
 1. **Journey runners (in parallel, one per journey or pair).** Before running, map each step to the

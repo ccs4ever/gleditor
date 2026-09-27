@@ -95,6 +95,29 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
   EXPECT_EQ(engine.cellCount(), 0U);
 }
 
+TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
+  xudu::Store store;
+  const auto genesis   = store.sliceGenesis(xudu::MicroversionId{});
+  const auto common    = store.makeCell(genesis, "common");
+  const auto left      = store.makeCell(common, "left");
+  const auto leftCell  = store.cellRefOf(left);
+  const auto right     = store.makeCell(common, "right");
+  const auto rightCell = store.cellRefOf(right);
+
+  UnifiedTransclusionEngine engine(store, left);
+  const auto extra = engine.addCell("left next");
+  EXPECT_TRUE(engine.manifold().contains(leftCell));
+  EXPECT_TRUE(engine.manifold().contains(extra));
+  EXPECT_FALSE(engine.manifold().contains(rightCell));
+  EXPECT_EQ(engine.manifold().cellCount(),
+            store.rebuildManifold(engine.head()).cellCount());
+
+  engine.syncTo(right);
+  EXPECT_TRUE(engine.manifold().contains(rightCell));
+  EXPECT_FALSE(engine.manifold().contains(leftCell));
+  EXPECT_FALSE(engine.manifold().contains(extra));
+}
+
 TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
   xudu::Store store;
   UnifiedTransclusionEngine engine(store);
