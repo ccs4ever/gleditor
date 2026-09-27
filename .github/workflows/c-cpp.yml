@@ -20,8 +20,13 @@ jobs:
     - name: packages
       run: |
         sudo apt-get update -q
+        # clang-format is pinned to the major the tree is formatted to:
+        # unversioned `clang-format` follows the runner image and every major
+        # reflows continuation indents differently, so an image bump alone
+        # turns this job red. The Makefile prefers clang-format-19 and errors
+        # on anything older.
         sudo apt-get install -y -q --no-install-recommends \
-          clang-format shfmt shellcheck yamllint markdownlint
+          clang-format-19 shfmt shellcheck yamllint markdownlint
         # yamlfmt and mdformat aren't apt packages; go and pip are already on
         # this image. GOPATH/bin is where `go install` puts the binary, and
         # has to be on PATH for the make targets that call it by name.

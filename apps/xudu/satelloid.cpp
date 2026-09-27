@@ -173,10 +173,10 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
         const float theta2 = 2.0F * std::numbers::pi_v<float> *
                              static_cast<float>(i + 1) /
                              static_cast<float>(kRingSegments);
-        const float x1     = cx + r * std::cos(theta1);
-        const float y1     = cy + r * std::sin(theta1);
-        const float x2     = cx + r * std::cos(theta2);
-        const float y2     = cy + r * std::sin(theta2);
+        const float x1 = cx + r * std::cos(theta1);
+        const float y1 = cy + r * std::sin(theta1);
+        const float x2 = cx + r * std::cos(theta2);
+        const float y2 = cy + r * std::sin(theta2);
         canvas_->addLine(x1, y1, x2, y2, 2.0F, ringCol);
       }
     }

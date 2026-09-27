@@ -225,8 +225,8 @@ TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
   // The middle of it, written by somebody who only has the address.
   const auto quotingVersion = quoting(quotingStore, scroll, 150, 50);
 
-  const auto first = xanadu::publish(originalStore, originalVersion, author,
-                                     "original", "The Original", 1, 1700000000);
+  const auto first  = xanadu::publish(originalStore, originalVersion, author,
+                                      "original", "The Original", 1, 1700000000);
   const auto second = xanadu::publish(quotingStore, quotingVersion, quoter,
                                       "quoting", "A Quotation", 1, 1700000100);
 
