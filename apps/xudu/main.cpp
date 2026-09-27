@@ -1359,10 +1359,16 @@ public:
       return;
     }
     const auto len = payload.originCharEnd - payload.originCharStart;
-    const auto spawnedVer =
-        session.store(0).transclude(MicroversionId{}, 0, payload.originVersion,
-                                    payload.originCharStart, len);
-    showAlongside(spawnedVer, 0.0F, 0);
+    // In the store the text was carried from: its version names that store's
+    // history, and store 0's would quote whatever happened to be there.
+    const auto sIdx = PouchOriginKind::Document == payload.originKind &&
+                              payload.originDocIndex < session.views().size()
+                          ? session.storeIndexOf(payload.originDocIndex)
+                          : std::size_t{0};
+    const auto spawnedVer = session.store(sIdx).transclude(
+        MicroversionId{}, 0, payload.originVersion, payload.originCharStart,
+        len);
+    showAlongside(spawnedVer, 0.0F, sIdx);
     activateNewest();
     std::cout << "xudu: spawned transcluded document version "
               << spawnedVer.str() << " from origin version "
@@ -1428,20 +1434,29 @@ public:
   /// Transclude @p span at the caret -- the source's addresses, not a copy
   /// -- and leave the caret after it.
   void insertSpanAtCaret(const PrimediaSpan &span) {
-    withCaret(
-        [this, span](RenderState &rState, const Where &where, Caret *caret) {
-          if (where.doc >= rState.docs.size() || 0 == span.length) {
-            return;
-          }
-          const auto prod = session.insertSpan(where.doc, where.start, span);
-          if (const auto src =
-                  session.sourceFor(prod, session.storeIndexOf(where.doc))) {
-            rState.docs[where.doc]->load(*src);
-            syncMediaWidgets(rState);
-          }
-          caret->placeAt(where.doc,
-                         where.start + static_cast<std::uint32_t>(span.length));
-        });
+    withCaret([this, span](RenderState &rState, const Where &where, Caret *) {
+      insertSpanAt(rState, where.doc, where.start, span);
+    });
+  }
+
+  /// Transclude @p span into document @p doc at byte @p at, on the render
+  /// thread, and put the caret after it.
+  void insertSpanAt(RenderState &rState, const std::uint32_t doc,
+                    const std::uint32_t at, const PrimediaSpan &span) {
+    if (doc >= rState.docs.size() || 0 == span.length) {
+      return;
+    }
+    session.flushUncommitted(doc);
+    const auto prod = session.insertSpan(doc, at, span);
+    if (const auto src = session.sourceFor(prod, session.storeIndexOf(doc))) {
+      rState.docs[doc]->load(*src);
+      syncMediaWidgets(rState);
+    }
+    if (auto *const caret = renderer->editCaret(); caret) {
+      caret->placeAt(doc, at + static_cast<std::uint32_t>(span.length));
+    }
+    std::cout << "xudu: transcluded " << span.length << " bytes into doc "
+              << doc << " at " << at << "\n";
   }
 
   void insertPageBreakAtCaret() {
@@ -3380,117 +3395,96 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
 
-    state->mouseDownHandler = [&kineticTetherEngine, &session, renderer, state
-#ifdef XUZZ_BUILD
-                               ,
-                               zigzagPresentation
-#endif
-    ](const int mx, const int my, const std::uint8_t button) -> bool {
-      if (button != 1) {
+    // A press inside the selection picks it up -- the renderer asks once the
+    // press's pick says where it landed -- and the drop decides what becomes
+    // of it: a new page in empty space, a transclusion in a page, an item in
+    // a pouch. On the render thread, like the pick.
+    state->pressOnSelection = [&kineticTetherEngine, &session, renderer,
+                               state](const std::uint32_t docIdx,
+                                      const std::uint32_t /*offset*/,
+                                      const int mx, const int my) {
+      const auto *const caret = renderer->editCaret();
+      if (nullptr == caret || docIdx >= session->views().size()) {
         return false;
       }
-      const auto modState = SDL_GetModState();
-      const bool altHeld  = (0 != (modState & SDL_KMOD_ALT));
-      bool dragStarted    = false;
-
-      renderer->runWithState([&kineticTetherEngine, &session, renderer,
-                              &dragStarted, mx, my, state, altHeld
-#ifdef XUZZ_BUILD
-                              ,
-                              zigzagPresentation
-#endif
-      ](RenderState &rState) {
-        auto *const caret = rState.caret;
-        if (caret && caret->hasSelection()) {
-          const auto selStart = caret->selectionStart();
-          const auto selEnd   = caret->selectionEnd();
-          const auto docIdx   = caret->documentIndex();
-          if (docIdx < session->views().size() && selEnd > selStart) {
-            const auto &openView = session->views()[docIdx];
-            const auto &st       = session->store(openView.storeIndex);
-            const auto ver       = st.rebuild(openView.version);
-            const auto spans     = ver.spansFor(selStart, selEnd - selStart);
-            if (!spans.empty()) {
-              const auto text = st.textOf(openView.version);
-              std::string preview;
-              if (selStart < text.size()) {
-                preview =
-                    text.substr(selStart, std::min(selEnd - selStart, 40U));
-              }
-
-              const auto screenX = static_cast<float>(mx);
-              const auto screenY =
-                  static_cast<float>(state->view.screenHeight - my);
-
-              TetherPayload payload{
-                  .span            = spans.front(),
-                  .previewText     = std::move(preview),
-                  .originVersion   = openView.version,
-                  .originDocIndex  = docIdx,
-                  .originCharStart = selStart,
-                  .originCharEnd   = selEnd,
-                  .originScreenPos = glm::vec2(screenX, screenY),
-                  .originKind      = PouchOriginKind::Document,
-              };
-
-              if (altHeld) {
-                kineticTetherEngine.startDrag(std::move(payload), screenX,
-                                              screenY);
-                dragStarted = true;
-                return;
-              }
-            }
-          }
-        }
-
-#ifdef XUZZ_BUILD
-        if (altHeld && zigzagPresentation) {
-          const auto screenX = static_cast<float>(mx);
-          const auto screenY =
-              static_cast<float>(state->view.screenHeight - my);
-          std::optional<zigzag::CellRef> cellTarget;
-          if (renderer->lastPick && renderer->lastPick->semanticTarget &&
-              renderer->lastPick->semanticTarget->cellRef) {
-            cellTarget = static_cast<zigzag::CellRef>(
-                *renderer->lastPick->semanticTarget->cellRef);
-          } else {
-            cellTarget = zigzagPresentation->focusCell();
-          }
-
-          if (cellTarget && !zigzag::isEphemeral(*cellTarget)) {
-            const auto cellRef   = *cellTarget;
-            const auto &manifold = zigzagPresentation->manifold();
-            const auto spans     = manifold.contentOf(cellRef);
-            if (!spans.empty()) {
-              const auto &bridgeStore = session->store(0);
-              const auto preview      = manifold.textOf(cellRef, bridgeStore);
-              const std::string rankCoord = "d.1: #" + std::to_string(cellRef);
-              TetherPayload payload{
-                  .span            = spans.front(),
-                  .previewText     = preview,
-                  .originVersion   = bridgeStore.primaryCurrentVersion(),
-                  .originDocIndex  = 0,
-                  .originCharStart = 0,
-                  .originCharEnd =
-                      static_cast<std::uint32_t>(spans.front().length),
-                  .originScreenPos  = glm::vec2(screenX, screenY),
-                  .originKind       = PouchOriginKind::ZigzagCell,
-                  .originCell       = cellRef,
-                  .originSliceIndex = 0,
-                  .originRankCoord  = rankCoord,
-              };
-              kineticTetherEngine.startDrag(std::move(payload), screenX,
-                                            screenY);
-              dragStarted = true;
-              return;
-            }
-          }
-        }
-#endif
-      });
-
-      return dragStarted;
+      const auto selStart  = caret->selectionStart();
+      const auto selEnd    = caret->selectionEnd();
+      const auto &openView = session->views()[docIdx];
+      const auto &st       = session->store(openView.storeIndex);
+      const auto spans =
+          st.rebuild(openView.version).spansFor(selStart, selEnd - selStart);
+      if (spans.empty()) {
+        return false;
+      }
+      const auto text    = st.textOf(openView.version);
+      const auto screenX = static_cast<float>(mx);
+      const auto screenY = static_cast<float>(state->view.screenHeight - my);
+      kineticTetherEngine.startDrag(
+          TetherPayload{
+              .span = spans.front(),
+              .previewText =
+                  selStart < text.size()
+                      ? text.substr(selStart, std::min(selEnd - selStart, 40U))
+                      : std::string{},
+              .originVersion   = openView.version,
+              .originDocIndex  = docIdx,
+              .originCharStart = selStart,
+              .originCharEnd   = selEnd,
+              .originScreenPos = glm::vec2(screenX, screenY),
+              .originKind      = PouchOriginKind::Document,
+          },
+          screenX, screenY);
+      return true;
     };
+#ifdef XUZZ_BUILD
+    state->mouseDownHandler =
+        [&kineticTetherEngine, &session, renderer, state, zigzagPresentation](
+            const int mx, const int my, const std::uint8_t button) -> bool {
+      if (button != 1 || 0 == (SDL_GetModState() & SDL_KMOD_ALT)) {
+        return false;
+      }
+      // Alt+press on a cell carries its content, the way a press inside a
+      // selection carries text. Decided on the render thread, where the
+      // hovered cell is known; the press still goes on to be a click.
+      renderer->runWithState([&kineticTetherEngine, &session, renderer, mx, my,
+                              state, zigzagPresentation](RenderState &) {
+        const auto screenX = static_cast<float>(mx);
+        const auto screenY = static_cast<float>(state->view.screenHeight - my);
+        if (!renderer->lastPick || !renderer->lastPick->semanticTarget ||
+            !renderer->lastPick->semanticTarget->cellRef) {
+          return;
+        }
+        const auto cellRef = static_cast<zigzag::CellRef>(
+            *renderer->lastPick->semanticTarget->cellRef);
+        if (zigzag::isEphemeral(cellRef)) {
+          return;
+        }
+        const auto &manifold = zigzagPresentation->manifold();
+        const auto spans     = manifold.contentOf(cellRef);
+        if (spans.empty()) {
+          return;
+        }
+        const auto &bridgeStore = session->store(0);
+        kineticTetherEngine.startDrag(
+            TetherPayload{
+                .span            = spans.front(),
+                .previewText     = manifold.textOf(cellRef, bridgeStore),
+                .originVersion   = bridgeStore.primaryCurrentVersion(),
+                .originDocIndex  = 0,
+                .originCharStart = 0,
+                .originCharEnd =
+                    static_cast<std::uint32_t>(spans.front().length),
+                .originScreenPos  = glm::vec2(screenX, screenY),
+                .originKind       = PouchOriginKind::ZigzagCell,
+                .originCell       = cellRef,
+                .originSliceIndex = 0,
+                .originRankCoord  = "d.1: #" + std::to_string(cellRef),
+            },
+            screenX, screenY);
+      });
+      return false;
+    };
+#endif
 
     state->mouseMotionHandler = [&kineticTetherEngine, &pouchDrawer, state](
                                     const int mx, const int my,
@@ -3513,7 +3507,7 @@ int main(const int argc, char **argv) {
     };
 
     state->mouseUpHandler =
-        [&pouchDrawer, &kineticTetherEngine, &session, renderer,
+        [&pouchDrawer, &kineticTetherEngine, &session, &views, renderer,
          state](const int mx, const int my, const std::uint8_t button) -> bool {
       if (button != 1) { // 1 = SDL_BUTTON_LEFT
         return false;
@@ -3547,7 +3541,33 @@ int main(const int argc, char **argv) {
             return true;
           }
         }
-        kineticTetherEngine.endDrag(screenX, screenY);
+        // Onto a page, the carried text is transcluded where it lands; into
+        // empty space it becomes a page of its own. Which it is, is the
+        // pick's to say, on the render thread.
+        renderer->pickThen(
+            mx, my,
+            [&kineticTetherEngine, &views, screenX,
+             screenY](RenderState &rState, const render::PickingResult &pick) {
+              const auto payload = kineticTetherEngine.payload();
+              if ((render::tagKindGlyph == pick.tag.kind ||
+                   render::tagKindPage == pick.tag.kind) &&
+                  pick.tag.docIndex < rState.docs.size()) {
+                const auto doc = pick.tag.docIndex;
+                if (const auto at = rState.docs[doc]->offsetForPick(pick.tag)) {
+                  const bool ontoItself =
+                      PouchOriginKind::Document == payload.originKind &&
+                      doc == payload.originDocIndex &&
+                      *at >= payload.originCharStart &&
+                      *at <= payload.originCharEnd;
+                  kineticTetherEngine.cancelDrag();
+                  if (!ontoItself) {
+                    views.insertSpanAt(rState, doc, *at, payload.span);
+                  }
+                  return;
+                }
+              }
+              kineticTetherEngine.endDrag(screenX, screenY);
+            });
         return true;
       }
 

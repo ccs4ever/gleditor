@@ -212,6 +212,21 @@ public:
    * For what a program wants to keep of the session -- where the reader was
    * -- which is gone by the time the loop has returned.
    */
+  /// Called with a pick's answer on the render thread; see pickThen().
+  using PickAnswer =
+      std::function<void(RenderState &, const render::PickingResult &)>;
+
+  /**
+   * @brief Ask what is drawn at window pixel @p x, @p y and call @p then with
+   *        the answer on the render thread, a frame or two from now.
+   *
+   * For a decision that needs what is under a point at that moment -- where
+   * a drag was dropped -- which the hover pick answers only when idle and a
+   * frame late. Pending work until answered, so a frame waiting to settle
+   * waits for it too. Callable from any thread.
+   */
+  virtual void pickThen(int x, int y, PickAnswer then) = 0;
+
   void setShutdownHook(std::function<void(RenderState &)> hook) {
     shutdownHook = std::move(hook);
   }
@@ -301,6 +316,13 @@ protected:
   gleditor::ScreenInsets lastChrome;
   /// See setShutdownHook().
   std::function<void(RenderState &)> shutdownHook;
+  /// pickThen() requests still waiting on their answer.
+  struct PendingPickAnswer {
+    int x{};
+    int y{};
+    PickAnswer then;
+  };
+  std::vector<PendingPickAnswer> pickAnswers;
   std::vector<gleditor::PickObserver *> pickObservers;
 };
 
@@ -400,6 +422,9 @@ private:
   /// Whether the step waiting on awaitingInput has already seen one settled
   /// frame after its event was handled; see update().
   bool inputSettledOnce{false};
+  /// A press landed inside the selection and the program took it up as a
+  /// drag (AppState::pressOnSelection): drag picks leave the selection be.
+  bool draggingSelection{false};
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
   /// Wall time of each settled frame, of collecting its page draws, and of
@@ -429,6 +454,11 @@ private:
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
   void requestPick(RenderState &state, int x, int y);
+
+public:
+  void pickThen(int x, int y, PickAnswer then) override;
+
+private:
   /// Carry out the next automation step once the one before it has finished.
   void advanceScript(RenderState &state);
   /// Finish the step just carried out, or wait for the work it scheduled.

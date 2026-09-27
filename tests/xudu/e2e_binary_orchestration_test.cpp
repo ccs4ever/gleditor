@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <set>
 #include <string>
 #include <tuple>
@@ -873,6 +874,68 @@ TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
               ::testing::ContainsRegex("kind=delete [^\n]* at=6 len=2"));
   EXPECT_THAT(dump.output, ::testing::ContainsRegex(
                                "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""));
+}
+
+// Pressing inside a selection picks it up: dropped on a page it is
+// transcluded where it lands -- the source's addresses, not a copy -- and
+// dropped in empty space it becomes a page of its own. The audit found a
+// press there only started a new selection.
+TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+  const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_selection_drag";
+  const auto dragTo = [&](const std::string &drop) {
+    fs::remove_all(testRoot);
+    fs::create_directories(testRoot);
+    return executeProcess(
+        "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+        " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+        " --backend " + activeBackend() +
+        " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
+        " --chord Ctrl+Left --chord Ctrl+Shift+Right --drag 140,145:" +
+        drop);
+  };
+  const auto untitledOps = [&] {
+    for (const auto &entry :
+         fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+      if (entry.path().filename().string().starts_with("untitled-")) {
+        return executeProcess(dumpBin.string() +
+                              " --section=ops --permascroll=" +
+                              (testRoot / "permascroll").string() + " " +
+                              entry.path().string())
+            .output;
+      }
+    }
+    return std::string{};
+  };
+
+  // Onto the page, just past "gamma".
+  const auto onPage = dragTo("196,145");
+  ASSERT_EQ(onPage.exitCode, 0) << onPage.output;
+  EXPECT_THAT(onPage.output,
+              ::testing::HasSubstr("drag 140,145: doc 1 [6,11)"));
+  const auto ops = untitledOps();
+  // Spliced in at the end, and quoting the very bytes "beta " was typed as:
+  // six bytes into the first insert's span.
+  std::smatch typed;
+  std::smatch quoted;
+  ASSERT_TRUE(std::regex_search(
+      ops, typed, std::regex(R"(span=\[([0-9]+),[0-9]+\)[^\n]*"alpha beta)")))
+      << ops;
+  ASSERT_TRUE(std::regex_search(
+      ops, quoted,
+      std::regex(R"(at=16 [^\n]*span=\[([0-9]+),[0-9]+\)[^\n]*"beta ")")))
+      << ops;
+  EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
+
+  // Into the empty space right of the page.
+  const auto inSpace = dragTo("770,300");
+  ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
+  EXPECT_THAT(inSpace.output,
+              ::testing::HasSubstr("spawned transcluded document"));
 }
 
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {

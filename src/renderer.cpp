@@ -126,12 +126,19 @@ void Renderer::reapFinishedDocLoads() {
   pendingDocLoads.erase(done.begin(), done.end());
 }
 
+void Renderer::pickThen(const int x, const int y, PickAnswer then) {
+  runWithState([this, x, y, then = std::move(then)](RenderState &state) {
+    requestPick(state, x, y);
+    pickAnswers.push_back({.x = x, .y = y, .then = then});
+  });
+}
+
 bool Renderer::hasPendingWork() const {
   // An animation counts as pending work, which is what keeps a screenshot
   // honest: the frame a capture wants is the finished one, and a document
   // halfway through fading in is not it.
   return !renderQueue.empty() || !pendingDocLoads.empty() ||
-         !timeline.empty() ||
+         !pickAnswers.empty() || !timeline.empty() ||
          (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now())) ||
          std::ranges::any_of(frameContributors,
                              [](const gleditor::FrameContributor *const one) {
@@ -643,9 +650,11 @@ void Renderer::placeCaretFromPick(RenderState &state,
   // Whatever the program drew for itself gets first refusal, because a tag it
   // wrote is a tag only it can read. One that claims the click has dealt with
   // it, and the caret stays where it was: clicking on a program's own drawing
-  // is not clicking on the text behind it.
+  // is not clicking on the text behind it. Only a press is offered: a drag
+  // sweeping across a button is not a click on it, and one that was inserted
+  // a page break whenever a selection was dragged over "+ Split".
   for (auto *const observer : pickObservers) {
-    if (observer->picked(pick, state)) {
+    if (!awaitingDrag && observer->picked(pick, state)) {
       return;
     }
   }
@@ -679,10 +688,30 @@ void Renderer::placeCaretFromPick(RenderState &state,
     return;
   }
   if (awaitingDrag) {
+    if (draggingSelection) {
+      // The press picked the selection up: the drag carries it, and the
+      // selection it is carrying stays as it is.
+      return;
+    }
     // Dragging keeps the anchor where the press landed and moves the caret,
     // which is what grows the selection.
     caret->extendTo(*offset);
     std::cout << std::format("select {},{}: doc {} [{},{})\n", pick.x, pick.y,
+                             pick.tag.docIndex, caret->selectionStart(),
+                             caret->selectionEnd());
+    return;
+  }
+  // A left press inside the selection picks it up rather than starting a new
+  // one, when the program has somewhere to carry it.
+  draggingSelection = false;
+  if (1 == pick.button && caret->active() && caret->hasSelection() &&
+      caret->documentIndex() == pick.tag.docIndex &&
+      *offset >= caret->selectionStart() && *offset < caret->selectionEnd() &&
+      this->state->pressOnSelection &&
+      this->state->pressOnSelection(pick.tag.docIndex, *offset, pick.x,
+                                    pick.y)) {
+    draggingSelection = true;
+    std::cout << std::format("drag {},{}: doc {} [{},{})\n", pick.x, pick.y,
                              pick.tag.docIndex, caret->selectionStart(),
                              caret->selectionEnd());
     return;
@@ -714,6 +743,16 @@ void Renderer::collectPickingResults(RenderState &state) {
           scene.mapped().documents[resolvedPick.tag.docIndex];
     }
     lastPick = resolvedPick;
+    if (const auto asked = std::ranges::find_if(pickAnswers,
+                                                [&](const auto &one) {
+                                                  return one.x == pick->x &&
+                                                         one.y == pick->y;
+                                                });
+        asked != pickAnswers.end()) {
+      auto then = std::move(asked->then);
+      pickAnswers.erase(asked);
+      then(state, resolvedPick);
+    }
     if (awaitingClick && awaitingClick->first == pick->x &&
         awaitingClick->second == pick->y) {
       awaitingClick.reset();
