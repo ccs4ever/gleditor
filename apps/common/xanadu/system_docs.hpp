@@ -467,6 +467,10 @@ inline constexpr std::string_view kKeymapOverviewToggle =
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
+inline constexpr std::string_view kKeymapViewXanadocs =
+    "std:xuzz/view_xanadocs";
+inline constexpr std::string_view kKeymapViewSlices = "std:xuzz/view_slices";
+inline constexpr std::string_view kKeymapViewBoth   = "std:xuzz/view_both";
 // Caret movement and editing: the document pane's own keys.
 inline constexpr std::string_view kKeymapCaretLeft  = "std:edit/caret_left";
 inline constexpr std::string_view kKeymapCaretRight = "std:edit/caret_right";

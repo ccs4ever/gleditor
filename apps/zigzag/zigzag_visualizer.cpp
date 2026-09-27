@@ -109,6 +109,7 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
+  if (!presentation_visible_) return false;
   return std::ranges::any_of(visible_cells_, [](const auto &entry) {
     const auto &cell = entry.second;
     return std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
@@ -1317,6 +1318,12 @@ void ZigzagVisualizer::toggleViewMode() {
                                                   : ViewMode::CellContent);
 }
 
+void ZigzagVisualizer::setPresentationVisible(const bool visible) {
+  if (presentation_visible_ == visible) return;
+  presentation_visible_ = visible;
+  invalidateAccessibility();
+}
+
 void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
                                     const float opacityMultiplier) {
   const float deltaZ  = baseDepthZ - depth_tier_;
@@ -1368,8 +1375,8 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
                               RenderState & /*state*/) {
-  if (pick.tag.kind != render::tagKindOverlay || !engine_ ||
-      !pick.semanticTarget || !pick.semanticTarget->cellRef ||
+  if (!presentation_visible_ || pick.tag.kind != render::tagKindOverlay ||
+      !engine_ || !pick.semanticTarget || !pick.semanticTarget->cellRef ||
       pick.semanticTarget->documentId != engine_->store().documentId().str() ||
       pick.semanticTarget->microversion != engine_->head().str()) {
     return false;
@@ -1444,6 +1451,10 @@ void ZigzagVisualizer::applyReadableScale(const gleditor::FrameContext &ctx) {
 }
 
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  if (!presentation_visible_) {
+    last_frame_time_ = std::chrono::steady_clock::now();
+    return;
+  }
   if (presentationTransformResolver_) {
     const auto transform = presentationTransformResolver_();
     if (!transform) {
@@ -1994,6 +2005,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 }
 
 void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
+  if (!presentation_visible_) return;
   std::vector<std::uint64_t> rootChildren;
 
   auto &dimsNode = into.add(2, gleditor::a11y::Role::Group);
@@ -2080,6 +2092,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
 bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
                                      const gleditor::a11y::Action action,
                                      const std::string_view /*value*/) {
+  if (!presentation_visible_) return false;
   if (action == gleditor::a11y::Action::Click ||
       action == gleditor::a11y::Action::Focus) {
     const auto localId = gleditor::a11y::Ids::localOf(nodeId);
@@ -2099,11 +2112,13 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
 }
 
 bool ZigzagVisualizer::grabbing() const {
-  return commandBarVisible_ || paletteVisible_ || cellEditing_;
+  return presentation_visible_ &&
+         (commandBarVisible_ || paletteVisible_ || cellEditing_);
 }
 
 bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
                                   const gleditor::KeyMods /*mods*/) {
+  if (!presentation_visible_) return false;
   if (cellEditing_) {
     switch (key) {
     case gleditor::Key::Return:
@@ -2182,6 +2197,7 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
 }
 
 void ZigzagVisualizer::textTyped(const std::string &utf8) {
+  if (!presentation_visible_) return;
   if (cellEditing_) {
     if (cellEditWhole_) {
       cellEditWhole_ = false;
@@ -2196,6 +2212,7 @@ void ZigzagVisualizer::textTyped(const std::string &utf8) {
 }
 
 std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
+  if (!presentation_visible_) return std::nullopt;
   if (commandBarVisible_ || cellEditing_) {
     return gleditor::InputArea{
         .x      = 20,

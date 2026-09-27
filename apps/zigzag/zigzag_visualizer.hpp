@@ -193,6 +193,12 @@ public:
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
   void toggleViewMode();
 
+  /// Xuzz may hide the slice without unbinding its store or losing focus.
+  void setPresentationVisible(bool visible);
+  [[nodiscard]] bool presentationVisible() const noexcept {
+    return presentation_visible_;
+  }
+
   // -- Dimension Bundles ---------------------------------------------------
   using DimensionBundle = zigzag::DimensionBundle;
 
@@ -562,6 +568,7 @@ private:
 
   SceneVisual scene_;
   ViewMode view_mode_{ViewMode::CellContent};
+  bool presentation_visible_{true};
   glm::vec3 presentation_origin_{0.0F, 0.0F, 0.0F};
   glm::mat4 presentation_transform_{1.0F};
   PresentationTransformResolver presentationTransformResolver_;

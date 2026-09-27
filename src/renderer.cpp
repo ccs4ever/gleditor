@@ -396,14 +396,18 @@ bool Renderer::update(RenderState &state, const bool settled) {
   std::ranges::stable_sort(sortedDocs, [](const auto &a, const auto &b) {
     return a->currentPosition().z < b->currentPosition().z;
   });
-  for (const std::shared_ptr<Doc> &doc : sortedDocs) {
-    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : sortedDocs) {
+      doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+    }
   }
   // Closed documents still draw while they fade. They are gone from the open
   // list, so this is the only thing that still refers to them, and dropping
   // one the moment it is invisible is what ends that.
-  for (const std::shared_ptr<Doc> &doc : fadingDocs) {
-    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : fadingDocs) {
+      doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+    }
   }
   std::erase_if(fadingDocs, [](const std::shared_ptr<Doc> &doc) {
     return doc->hasFadedOut();
@@ -415,8 +419,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
   device->drawGlyphBatches(state.pageBatches);
   const auto recordEnd = std::chrono::steady_clock::now();
 
-  for (const std::shared_ptr<Doc> &doc : state.docs) {
-    doc->drawCaret(state, viewProjection, *caret);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : state.docs) {
+      doc->drawCaret(state, viewProjection, *caret);
+    }
   }
 
   // Whatever the program draws for itself: after the documents, so it can sit
@@ -657,6 +663,9 @@ void Renderer::placeCaretFromPick(RenderState &state,
     if (!awaitingDrag && observer->picked(pick, state)) {
       return;
     }
+  }
+  if (!state.documentsVisible) {
+    return;
   }
 
   if (pick.tag.empty()) {
@@ -959,6 +968,10 @@ void Renderer::updateHighlights(RenderState &state) {
   // frame anyway, and the table is a handful of entries -- one per page the
   // selection touches.
   highlights.clear();
+  if (!state.documentsVisible) {
+    device->setHighlights(highlights);
+    return;
+  }
 
   // The selection goes in first, and both reasons are properties of what
   // consumes this table. The fragment stage returns on the first span that
@@ -991,7 +1004,7 @@ void Renderer::updateHighlights(RenderState &state) {
 }
 
 void Renderer::applyTypedText(RenderState &state) {
-  if (!caret->active()) {
+  if (!state.documentsVisible || !caret->active()) {
     return;
   }
   std::string typed;

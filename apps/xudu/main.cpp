@@ -67,6 +67,7 @@
 #include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/resolver.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
@@ -389,7 +390,7 @@ public:
   }
 
   void drawFrame(gleditor::FrameContext &ctx) override {
-    frameForReading(ctx);
+    if (ctx.state.documentsVisible) frameForReading(ctx);
     if (pendingCamera_ && pendingCamera_()) {
       pendingCamera_ = {};
     }
@@ -2642,8 +2643,25 @@ int main(const int argc, char **argv) {
       userPermascroll = xudu::PermascrollRegistry::instance().defaultUser();
     }
 
-    session = std::make_unique<Session>(parser.get<std::string>("store"),
-                                        userPermascroll);
+    auto storePath = parser.get<std::string>("store");
+#ifdef XUZZ_BUILD
+    if (storePath == "-") {
+      std::filesystem::create_directories(xudu::xanadocsDirectory());
+      auto pattern =
+          (xudu::xanadocsDirectory() / "stream-import-XXXXXX").string();
+      if (::mkdtemp(pattern.data()) == nullptr) {
+        throw std::runtime_error("cannot create imported store directory");
+      }
+      try {
+        xanadu::readStoreStream(std::cin, pattern);
+      } catch (...) {
+        std::filesystem::remove_all(pattern);
+        throw;
+      }
+      storePath = pattern;
+    }
+#endif
+    session = std::make_unique<Session>(storePath, userPermascroll);
     state->onDecoratedInsert = [&session](Doc &doc, const std::uint32_t at,
                                           const std::uint32_t length,
                                           const gleditor::DecorationMask mask) {
@@ -3868,6 +3886,12 @@ int main(const int argc, char **argv) {
               [&overview](RenderState &) { overview.toggle(); });
         });
 #ifdef XUZZ_BUILD
+    enum class VisibilityMode : std::uint8_t {
+      Xanadocs,
+      Slices,
+      Both,
+    };
+    VisibilityMode visibilityMode = VisibilityMode::Both;
     zigzag::registerZigzagCommands(
         app.commands(), zigzagPresentation,
         {.activateFocus =
@@ -3927,6 +3951,39 @@ int main(const int argc, char **argv) {
             showZigzagFocus();
           }
         });
+    const auto setVisibilityMode = [&renderer, &keyboardPane, &state,
+                                    zigzagPresentation, &visibilityMode](
+                                       const VisibilityMode mode) {
+      renderer->runWithState([&keyboardPane, &state, zigzagPresentation,
+                              &visibilityMode, mode](RenderState &rState) {
+        if (visibilityMode == mode) return;
+        visibilityMode          = mode;
+        rState.documentsVisible = mode != VisibilityMode::Slices;
+        zigzagPresentation->setPresentationVisible(mode !=
+                                                   VisibilityMode::Xanadocs);
+        if (mode == VisibilityMode::Slices) {
+          keyboardPane.enterZigzag();
+          if (const auto centre = zigzagPresentation->focusCentre()) {
+            std::scoped_lock locker(state->view);
+            state->view.pos.x = centre->x;
+            state->view.pos.y = centre->y;
+          }
+        } else if (mode == VisibilityMode::Xanadocs) {
+          keyboardPane.leaveZigzag(true);
+        }
+      });
+    };
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapViewXanadocs),
+        "show only xanadocs",
+        [setVisibilityMode] { setVisibilityMode(VisibilityMode::Xanadocs); });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapViewSlices), "show only slices",
+        [setVisibilityMode] { setVisibilityMode(VisibilityMode::Slices); });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapViewBoth),
+        "show xanadocs and slices together",
+        [setVisibilityMode] { setVisibilityMode(VisibilityMode::Both); });
     app.commands().setScopeResolver(
         [&keyboardPane] { return keyboardPane.scope(); });
     state->documentTakesText = [&keyboardPane] {

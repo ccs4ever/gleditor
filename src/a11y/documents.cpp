@@ -107,6 +107,14 @@ void DocumentsSource::observe(const RenderState &state,
                               const Caret *const caret,
                               const glm::mat4 &viewProjection, const int width,
                               const int height) {
+  if (!state.documentsVisible) {
+    if (!docs.empty()) {
+      docs.clear();
+      ++revision;
+    }
+    everObserved = false;
+    return;
+  }
   // What the description would be made of, without making it. Bounds are in
   // here quantised to a few pixels: a document being moved really has changed
   // where it is and an assistive technology should be told, but rebuilding

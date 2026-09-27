@@ -40,6 +40,8 @@ struct RenderState {
   gleditor::GlyphCache glyphCache;        ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
+  /// A host presentation may keep documents open while showing another view.
+  bool documentsVisible{true};
   /// Stable meanings aligned with docs; raw GPU tags retain only their index.
   std::vector<std::shared_ptr<const render::PickSemanticTarget>> pickTargets;
   render::PickScene overlayPickScene;

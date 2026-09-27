@@ -17,9 +17,13 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
+#include "common/xanadu/result_slice.hpp"
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_stream.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -40,22 +44,59 @@ std::string extractStoreLabel(const std::string &path) {
   return name.empty() ? "store" : name;
 }
 
+std::vector<xanadu::ResultRow>
+resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
+           const std::vector<zigzag::CellRef> &results,
+           const std::string_view transientPath = {}) {
+  std::vector<xanadu::ResultRow> rows;
+  rows.reserve(results.size());
+  for (const auto cell : results) {
+    const auto value = coordinator.core().render(cell);
+    std::string rendered;
+    if (const auto *number = std::get_if<double>(&value)) {
+      rendered = xanadu::scalarValue(*number).text;
+    } else if (const auto *integer = std::get_if<std::int64_t>(&value)) {
+      rendered = xanadu::scalarValue(*integer).text;
+    } else if (const auto *truth = std::get_if<bool>(&value)) {
+      rendered = xanadu::scalarValue(*truth).text;
+    } else {
+      rendered = std::get<std::string>(value);
+    }
+    std::string source;
+    if (const auto foreign = coordinator.arena().resolveForeign(cell)) {
+      for (const auto &info : coordinator.stores()) {
+        if (info.store.get() == foreign->first) {
+          const auto identity = info.path == transientPath
+                                    ? "store:" + info.store->documentId().str()
+                                    : info.path;
+          source = identity + "#cell=" + std::to_string(foreign->second);
+          break;
+        }
+      }
+    }
+    rows.push_back({.text = std::move(rendered), .source = std::move(source)});
+  }
+  return rows;
+}
+
 void printHelpREPL() {
-  std::cout << "VQL Interactive REPL Commands:\n"
-            << "  <query>               Execute VQL query expression\n"
-            << "  :view [dims]          Toggle visible connection view or set "
-               "viewing dimensions\n"
-            << "  :dims [dims]          Inspect or set active viewing "
-               "dimensions (e.g. d.1,d.2,d.3)\n"
-            << "  :ascii                Toggle ASCII art output mode\n"
-            << "  :engine <dir|vortex>  Switch execution engine (direct or "
-               "vortex)\n"
-            << "  :store <label> <path> Load additional xanadoc/slice store\n"
-            << "  :stores               List currently loaded stores\n"
-            << "  :ast <query>          Print AST dump for query\n"
-            << "  :asm <query>          Print compiled bytecode for query\n"
-            << "  :help                 Show this help message\n"
-            << "  :quit / :exit         Exit REPL\n";
+  std::cout
+      << "VQL Interactive REPL Commands:\n"
+      << "  <query>               Execute VQL query expression\n"
+      << "  :view [dims]          Toggle visible connection view or set "
+         "viewing dimensions\n"
+      << "  :dims [dims]          Inspect or set active viewing "
+         "dimensions (e.g. d.1,d.2,d.3)\n"
+      << "  :ascii                Toggle ASCII art output mode\n"
+      << "  :engine <dir|vortex>  Switch execution engine (direct or "
+         "vortex)\n"
+      << "  :store <label> <path> Load additional xanadoc/slice store\n"
+      << "  :stores               List currently loaded stores\n"
+      << "  :save <path>          Save the last query rows as a result slice\n"
+      << "  :ast <query>          Print AST dump for query\n"
+      << "  :asm <query>          Print compiled bytecode for query\n"
+      << "  :help                 Show this help message\n"
+      << "  :quit / :exit         Exit REPL\n";
 }
 
 std::vector<std::string> parseDimensionNames(std::string_view input) {
@@ -124,7 +165,7 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
       if (i + 1 < argc) {
         options.emplace_back(argv[++i]);
       }
-    } else if (arg.starts_with("-")) {
+    } else if (arg.starts_with("-") && arg != "-") {
       options.push_back(arg);
     } else {
       positionals.push_back(arg);
@@ -259,6 +300,17 @@ int main(int argc, char *argv[]) {
   if (program.present<std::vector<std::string>>("stores")) {
     storePaths = program.get<std::vector<std::string>>("stores");
   }
+  std::unique_ptr<xanadu::TemporaryStreamStore> stdinStore;
+  for (auto &path : storePaths) {
+    if (path == "-") {
+      if (stdinStore) {
+        std::cerr << "Only one input store may use standard input.\n";
+        return 1;
+      }
+      stdinStore = std::make_unique<xanadu::TemporaryStreamStore>(std::cin);
+      path       = stdinStore->path().string();
+    }
+  }
 
   // Setup permascroll and MultiStoreCoordinator
   auto permaDir = program.get<std::string>("--permascroll");
@@ -280,7 +332,9 @@ int main(int argc, char *argv[]) {
   }
 
   auto permascroll =
-      std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+      permaConfig.storageDir.empty()
+          ? xanadu::PermascrollRegistry::instance().defaultUser()
+          : std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
   xanadu::vql::MultiStoreCoordinator coordinator;
 
   std::string primaryPath;
@@ -314,7 +368,9 @@ int main(int argc, char *argv[]) {
   }
 
   // Query Execution Helper
-  auto runQuery = [&](std::string_view qStr) -> bool {
+  std::vector<zigzag::CellRef> lastResults;
+  bool hasResults = false;
+  auto runQuery   = [&](std::string_view qStr) -> bool {
     // Parse AST
     xanadu::vql::QueryExpression ast;
     try {
@@ -382,6 +438,9 @@ int main(int argc, char *argv[]) {
       results = engine.execute(ast);
     }
 
+    lastResults = results;
+    hasResults  = true;
+
     // Format results
     if (format == "ascii") {
       std::cout << xanadu::vql::AsciiVisualizer::renderQueryResults(
@@ -425,6 +484,10 @@ int main(int argc, char *argv[]) {
 
   // If query is provided, execute batch and handle output persistence
   if (!queryText.empty()) {
+    const auto outPath      = program.get<std::string>("--output-store");
+    const bool streamOutput = outPath == "-";
+    auto *originalOutput    = std::cout.rdbuf();
+    if (streamOutput) std::cout.rdbuf(std::cerr.rdbuf());
     bool ok = runQuery(queryText);
     if (!ok) return 1;
 
@@ -439,18 +502,28 @@ int main(int argc, char *argv[]) {
     }
 
     // Handle output store
-    auto outPath = program.get<std::string>("--output-store");
     if (!outPath.empty()) {
-      std::filesystem::create_directories(outPath);
-      xanadu::Store outStore(permascroll);
-      if (std::filesystem::exists(outPath + "/ops.nodes")) {
-        outStore.load(outPath);
+      if (!streamOutput && std::filesystem::exists(outPath)) {
+        std::cerr << "Result path already exists: " << outPath << "\n";
+        return 1;
       }
-      zigzag::vortex::VortexVM vm(coordinator.core());
-      xanadu::vql::VQLCompiler compiler(coordinator.core(), vm);
-      compiler.exportToStore(outStore);
-      outStore.save(outPath);
-      std::cout << "Result store written to: " << outPath << "\n";
+      std::unique_ptr<xanadu::TemporaryStreamStore> streamStore;
+      if (streamOutput)
+        streamStore = std::make_unique<xanadu::TemporaryStreamStore>();
+      const auto destination =
+          streamOutput ? streamStore->path() : std::filesystem::path(outPath);
+      xanadu::Store outStore(permascroll);
+      xanadu::writeResultSlice(
+          outStore, resultRows(coordinator, lastResults,
+                               stdinStore ? stdinStore->path().string() : ""));
+      outStore.save(destination.string());
+      if (streamOutput) {
+        std::cout.flush();
+        std::cout.rdbuf(originalOutput);
+        xanadu::writeStoreStream(destination, std::cout);
+      } else {
+        std::cout << "Result store written to: " << outPath << "\n";
+      }
     }
 
     return 0;
@@ -529,6 +602,30 @@ int main(int argc, char *argv[]) {
                   << " [master: #" << s.homeCell << ", rep: #" << s.storeCell
                   << ", path: " << (s.path.empty() ? "(in-memory)" : s.path)
                   << "]\n";
+      }
+    } else if (line.starts_with(":save")) {
+      const auto pathStart = line.find_first_not_of(' ', 5);
+      if (pathStart == std::string::npos || line.substr(0, 5) != ":save") {
+        std::cout << "Usage: :save <new-store-path>\n";
+      } else if (!hasResults) {
+        std::cerr << "Run a query before saving results.\n";
+      } else {
+        const auto path = line.substr(pathStart);
+        try {
+          if (std::filesystem::exists(path)) {
+            throw std::invalid_argument("result path already exists: " + path);
+          }
+          const auto rows =
+              resultRows(coordinator, lastResults,
+                         stdinStore ? stdinStore->path().string() : "");
+          xanadu::Store output(permascroll);
+          xanadu::writeResultSlice(output, rows);
+          output.save(path);
+          std::cout << "Saved " << rows.size() << " result rows to " << path
+                    << "\n";
+        } catch (const std::exception &error) {
+          std::cerr << "Save error: " << error.what() << "\n";
+        }
       }
     } else if (line.starts_with(":store ")) {
       std::istringstream iss(line);
