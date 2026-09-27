@@ -346,6 +346,18 @@ readAutomationScript(const int argc, const char *const *const argv) {
       input(Input{.kind = Input::Kind::Motion, .x = x, .y = y, .held = held});
       return;
     }
+    if (option == "--wheel" || option == "--ctrl-wheel" ||
+        option == "--shift-wheel") {
+      const auto [wx, wy] = parsePair(value, option, "WX,WY");
+      input(Input{.kind = Input::Kind::Wheel,
+                  .mods = static_cast<std::uint32_t>(
+                      option == "--ctrl-wheel"    ? SDL_KMOD_CTRL
+                      : option == "--shift-wheel" ? SDL_KMOD_SHIFT
+                                                  : 0),
+                  .wheelX = static_cast<float>(wx),
+                  .wheelY = static_cast<float>(wy)});
+      return;
+    }
     if ("--right-click" == option) {
       const auto [x, y] = parsePair(value, option, "X,Y");
       input(
@@ -415,9 +427,10 @@ readAutomationScript(const int argc, const char *const *const argv) {
   };
 
   static constexpr std::array scripted = {
-      "--pick",     "--click", "--capture",    "--type",       "--select",
-      "--do",       "--key",   "--chord",      "--mouse-down", "--mouse-move",
-      "--mouse-up", "--drag",  "--right-click"};
+      "--pick",        "--click",      "--capture",    "--type",
+      "--select",      "--do",         "--key",        "--chord",
+      "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
+      "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
@@ -953,6 +966,16 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "click the right mouse button at X,Y; repeatable",
              "Press and release the right mouse button at pixel X,Y, which is "
              "what opens a context menu.");
+  automation(parser.add_argument("--wheel").append(),
+             "scroll by horizontal,vertical wheel ticks; repeatable",
+             "Send a mouse wheel event with WX,WY deltas through the same "
+             "handler as the platform event. Position it with --mouse-move.");
+  automation(parser.add_argument("--ctrl-wheel").append(),
+             "zoom with Ctrl and the mouse wheel; repeatable",
+             "Send a Ctrl+wheel event with WX,WY deltas at the pointer.");
+  automation(parser.add_argument("--shift-wheel").append(),
+             "scroll sideways with Shift and the mouse wheel; repeatable",
+             "Send a Shift+wheel event with WX,WY deltas at the pointer.");
   automation(parser.add_argument("--toast").append(),
              "show a notification, as [info:|warning:|error:]TEXT; repeatable",
              "Show a notification once the first frame is drawn, written as "
@@ -1356,6 +1379,32 @@ int Application::run() {
       static_cast<void>(state->mouseUpHandler(x, y, button));
     }
   };
+  const auto onWheel = [&](const float wx, const float wy,
+                           const std::uint16_t sdlMods) {
+    if (nullptr != state->modal && state->modal->grabbing()) return;
+    if (state->wheelHandler && state->wheelHandler(wx, wy, sdlMods)) return;
+
+    const std::scoped_lock locker(state->view);
+    const float perPixel          = worldPerPixel(state->view);
+    constexpr float pixelsPerTick = 180.0F;
+    if (0 != (sdlMods & SDL_KMOD_CTRL)) {
+      state->view.pos +=
+          wy * (pixelsPerTick * perPixel * 1.5F) * state->view.front;
+    } else if (0 != (sdlMods & SDL_KMOD_SHIFT)) {
+      const auto rightAxis =
+          glm::normalize(glm::cross(state->view.front, state->view.upward));
+      const float scrollX =
+          (wy != 0.0F ? -wy : wx) * (pixelsPerTick * perPixel);
+      state->view.pos += rightAxis * scrollX;
+    } else {
+      const auto vertAxis = glm::normalize(
+          glm::cross(state->view.front, glm::vec3(1.0F, 0.0F, 0.0F)));
+      const auto rightAxis =
+          glm::normalize(glm::cross(state->view.front, state->view.upward));
+      state->view.pos -= vertAxis * (wy * pixelsPerTick * perPixel);
+      state->view.pos += rightAxis * (wx * pixelsPerTick * perPixel);
+    }
+  };
 
   while (state->alive) {
     sayWhatIsWaiting(true);
@@ -1417,6 +1466,10 @@ int Application::run() {
         case Kind::ButtonUp:
           onButtonUp(input.x, input.y, input.button);
           break;
+        case Kind::Wheel:
+          onWheel(input.wheelX, input.wheelY,
+                  static_cast<std::uint16_t>(input.mods));
+          break;
         }
         state->syntheticHandled.fetch_add(1);
       }
@@ -1457,9 +1510,6 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_MOUSE_WHEEL: {
-        if (nullptr != state->modal && state->modal->grabbing()) {
-          break;
-        }
         const auto sdlMods = static_cast<std::uint16_t>(SDL_GetModState());
         float wx           = sdl::wheelX(evt);
         float wy           = sdl::wheelY(evt);
@@ -1468,39 +1518,7 @@ int Application::run() {
           wy = -wy;
         }
 
-        if (state->wheelHandler && state->wheelHandler(wx, wy, sdlMods)) {
-          break;
-        }
-
-        const std::scoped_lock locker(state->view);
-        const float perPixel = worldPerPixel(state->view);
-        // constexpr float pixelsPerTick = 48.0F;
-        constexpr float pixelsPerTick = 180.0F;
-
-        if (0 != (sdlMods & SDL_KMOD_CTRL)) {
-          // Ctrl: Zoom in / out
-          // Wheel up (wy > 0) zooms in (moves towards documents along front)
-          // Wheel down (wy < 0) zooms out
-          const float zoomDelta = wy * (pixelsPerTick * perPixel * 1.5F);
-          state->view.pos += zoomDelta * state->view.front;
-        } else if (0 != (sdlMods & SDL_KMOD_SHIFT)) {
-          // Shift: Scroll right / left
-          const auto rightAxis =
-              glm::normalize(glm::cross(state->view.front, state->view.upward));
-          const float scrollX =
-              (wy != 0.0F ? -wy : wx) * (pixelsPerTick * perPixel);
-          state->view.pos += rightAxis * scrollX;
-        } else {
-          // Unmodified: Scroll up / down
-          const auto vertAxis = glm::normalize(
-              glm::cross(state->view.front, glm::vec3(1.0F, 0.0F, 0.0F)));
-          const auto rightAxis =
-              glm::normalize(glm::cross(state->view.front, state->view.upward));
-          const float scrollY = wy * (pixelsPerTick * perPixel);
-          const float scrollX = wx * (pixelsPerTick * perPixel);
-          state->view.pos -= vertAxis * scrollY;
-          state->view.pos += rightAxis * scrollX;
-        }
+        onWheel(wx, wy, sdlMods);
         break;
       }
       case SDL_EVENT_FINGER_DOWN: {

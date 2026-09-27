@@ -423,6 +423,10 @@ public:
       override {
     cellActivationCallback_ = std::move(callback);
   }
+  void setExternInspector(std::function<std::string(CellRef)> inspector) {
+    externInspector_ = std::move(inspector);
+    invalidateAccessibility();
+  }
   [[nodiscard]] int cellRadius() const noexcept override {
     return scene_.neighborhood_radius;
   }
@@ -519,6 +523,7 @@ private:
   }
 
   [[nodiscard]] CellInfo inspectCell(CellRef id) const;
+  [[nodiscard]] std::string cellBadge(CellRef id, std::string_view role) const;
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
   [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
                                                     bool isFocus) const;
@@ -585,6 +590,7 @@ private:
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};
   xanadu::ZigzagPresentationSurface::CellActivationCallback
       cellActivationCallback_;
+  std::function<std::string(CellRef)> externInspector_;
 
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};

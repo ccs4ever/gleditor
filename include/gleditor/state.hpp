@@ -69,14 +69,22 @@ struct AppState {
    * Decoded rather than an SDL_Event, so that SDL 2 and 3 share one path.
    */
   struct SyntheticInput {
-    enum class Kind : std::uint8_t { KeyDown, Motion, ButtonDown, ButtonUp };
+    enum class Kind : std::uint8_t {
+      KeyDown,
+      Motion,
+      ButtonDown,
+      ButtonUp,
+      Wheel
+    };
     Kind kind{};
     int x{}; ///< Pointer events: window pixels, top-down.
     int y{};
     int scancode{};        ///< KeyDown.
-    std::uint32_t mods{};  ///< KeyDown: a gleditor::Mod value.
+    std::uint32_t mods{};  ///< KeyDown: gleditor::Mod; Wheel: SDL key mods.
     std::uint8_t button{}; ///< ButtonDown and ButtonUp: 1 left, 3 right.
     std::uint32_t held{};  ///< Motion: the buttons held, as SDL's mask.
+    float wheelX{};        ///< Wheel: horizontal delta.
+    float wheelY{};        ///< Wheel: vertical delta.
   };
 
   struct AutomationStep {

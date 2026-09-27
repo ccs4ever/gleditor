@@ -112,4 +112,33 @@ ExternResolution resolveExternCell(const Store &localStore,
   };
 }
 
+ExternResolution resolveLocalExternCell(const Store &localStore,
+                                        const zigzag::CellRef placeholder,
+                                        const Store &foreignStore,
+                                        const zigzag::Manifold *foreignFold) {
+  const auto target = localStore.externTarget(placeholder);
+  if (!target) {
+    return {.status = ExternResolutionStatus::Unintelligible};
+  }
+  const auto scroll = localStore.scrollRegistry().findRecord(target->scroll);
+  if (!scroll || scroll->globalKey != foreignStore.documentId().str()) {
+    return {.status = ExternResolutionStatus::Absent};
+  }
+  const auto index = foreignStore.segmentedOps().indexOf(target->produces);
+  if (index == 0) {
+    return {.status = ExternResolutionStatus::Absent};
+  }
+  const auto *op = foreignStore.getCompactOp(index);
+  if (!op || op->kind != OpKind::Structure ||
+      structureVerbOf(op->flags) != StructureVerb::MakeCell) {
+    return {.status = ExternResolutionStatus::Unintelligible};
+  }
+  if (foreignFold && !foreignFold->contains(index)) {
+    return {.status = ExternResolutionStatus::Absent};
+  }
+  return {.status  = ExternResolutionStatus::Resolved,
+          .cell    = index,
+          .opIndex = index};
+}
+
 } // namespace xanadu

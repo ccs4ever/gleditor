@@ -992,6 +992,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Transclude that content into a new connected cell",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+T"}}}}},
+        {.name    = std::string(settings::kKeymapInsertExternRef),
+         .notes   = "Choose a cell in another loaded slice and reference it",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+R"}}}}},
         {.name    = std::string(settings::kKeymapFocusToggle),
          .notes   = "Shortcut to move the keyboard between the document and "
                     "ZigZag",

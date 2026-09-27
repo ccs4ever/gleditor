@@ -9,6 +9,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <numbers>
@@ -23,9 +24,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/sdl_compat.hpp>
 
-#include "session.hpp"
-
-namespace xudu {
+namespace xanadu::ui {
 
 namespace {
 
@@ -40,10 +39,34 @@ constexpr std::array<std::uint32_t, 6> kLineageHues = {
 
 } // namespace
 
-HypertimeGraph::HypertimeGraph(std::string aFontName, const Session &aSession)
-    : fontName_(std::move(aFontName)), session_(aSession) {}
+HypertimeGraph::HypertimeGraph(
+    std::string aFontName, std::function<const Store &(std::size_t)> storeAt,
+    std::function<std::uint64_t()> generation)
+    : fontName_(std::move(aFontName)), storeAt_(std::move(storeAt)),
+      generation_(std::move(generation)) {}
 
 HypertimeGraph::~HypertimeGraph() = default;
+
+void HypertimeGraph::scroll(const float horizontal, const float vertical,
+                            const bool zoom, const bool shift,
+                            const float pointerX, const float pointerY) {
+  if (!visible_) return;
+  if (zoom) {
+    const float next =
+        std::clamp(zoom_ * std::pow(1.12F, vertical), 0.4F, 3.0F);
+    const float factor  = next / zoom_;
+    const float originX = panelX_ + 36.0F;
+    const float originY = panelY_ + panelH_ - 100.0F;
+    panX_ = pointerX - originX - (pointerX - originX - panX_) * factor;
+    panY_ = pointerY - originY - (pointerY - originY - panY_) * factor;
+    zoom_ = next;
+  } else {
+    panX_ += (-horizontal + (shift ? vertical : 0.0F)) * 48.0F;
+    panY_ -= (shift ? 0.0F : vertical) * 48.0F;
+  }
+  builtAt = std::numeric_limits<std::uint64_t>::max();
+  revision_++;
+}
 
 void HypertimeGraph::deviceReady(render::RenderDevice &device,
                                  const render::PipelineDesc &documentPipeline) {
@@ -261,15 +284,19 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
 
 void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
                             const float screenH) {
-  if (builtAt == session_.generation() && !nodes_.empty()) {
+  if (builtAt == generation_() && !nodes_.empty() && laidOutWidth_ == screenW &&
+      laidOutHeight_ == screenH) {
     return;
   }
   nodes_.clear();
   edges_.clear();
   chronologicalOrder_.clear();
-  builtAt = session_.generation();
+  builtAt        = generation_();
+  laidOutWidth_  = screenW;
+  laidOutHeight_ = screenH;
+  revision_++;
 
-  const auto &st = session_.store(0);
+  const auto &st = storeAt_(storeIndex_);
   const auto all = st.allVersions();
 
   // 1. Explicit Genesis root node (opLetter 'G', depth 0, lane 0)
@@ -382,10 +409,26 @@ void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
           ? std::clamp(graphAreaH / static_cast<float>(maxLanes), 32.0F, 55.0F)
           : 45.0F;
 
+  const float graphLeft   = panelX_ + 16.0F;
+  const float graphRight  = panelX_ + panelW_ - 16.0F;
+  const float graphBottom = panelY_ + 58.0F;
+  const float graphTop    = topY - 80.0F;
+  const float originX     = panelX_ + 36.0F;
+  const float originY     = topY - 100.0F;
+  panX_ =
+      std::clamp(panX_,
+                 std::min(0.0F, graphRight - 15.0F - originX -
+                                    static_cast<float>(maxDepth) * dx * zoom_),
+                 std::max(0.0F, graphLeft + 15.0F - originX));
+  panY_ = std::clamp(
+      panY_, std::min(0.0F, graphTop - 15.0F - originY),
+      std::max(0.0F, graphBottom + 15.0F - originY +
+                         static_cast<float>(maxLanes - 1) * dy * zoom_));
+
   for (auto &node : nodes_) {
-    node.x      = panelX_ + 36.0F + static_cast<float>(node.depth) * dx;
-    node.y      = (topY - 85.0F) - static_cast<float>(node.lane) * dy;
-    node.radius = 13.0F;
+    node.x      = originX + static_cast<float>(node.depth) * dx * zoom_ + panX_;
+    node.y      = originY - static_cast<float>(node.lane) * dy * zoom_ + panY_;
+    node.radius = 13.0F * zoom_;
   }
 
   for (auto &edge : edges_) {
@@ -439,14 +482,32 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->addText(ctx.state, panelX_ + 14.0F, topY - 24.0F,
                    "HYPERTIME BRANCHING DAG & N-WAY DIFF", 0x38BDF8FF, 0);
   canvas_->addText(ctx.state, panelX_ + 14.0F, topY - 40.0F,
-                   "Click: jump | Shift+Click: compare | Scrub bar below",
+                   "Wheel: pan | Shift+Wheel: sideways | Ctrl+Wheel: zoom",
                    0x94A3B8FF, 0);
+  if (selectedOperation_ && annotateHandler_) {
+    canvas_->setTag(render::tagKindOverlay, kTagAnnotateButton);
+    canvas_->addRect(panelX_ + panelW_ - 220.0F, topY - 72.0F, 206.0F, 24.0F,
+                     0x2563EBFF);
+    canvas_->addText(ctx.state, panelX_ + panelW_ - 215.0F, topY - 55.0F,
+                     "Annotate and place handle", 0xFFFFFFFF, 0);
+  }
 
   // 2. Directed branch edges
+  const float graphLeft   = panelX_ + 8.0F;
+  const float graphRight  = panelX_ + panelW_ - 8.0F;
+  const float graphBottom = panelY_ + 52.0F;
+  const float graphTop    = topY - 76.0F;
+  const auto insideGraph  = [&](const GraphNode &node) {
+    return node.x - node.radius >= graphLeft &&
+           node.x + node.radius <= graphRight &&
+           node.y - node.radius >= graphBottom &&
+           node.y + node.radius <= graphTop;
+  };
   for (const auto &edge : edges_) {
     if (edge.fromIdx < nodes_.size() && edge.toIdx < nodes_.size()) {
-      const auto &n1     = nodes_[edge.fromIdx];
-      const auto &n2     = nodes_[edge.toIdx];
+      const auto &n1 = nodes_[edge.fromIdx];
+      const auto &n2 = nodes_[edge.toIdx];
+      if (!insideGraph(n1) || !insideGraph(n2)) continue;
       const auto edgeCol = kLineageHues[edge.lane % kLineageHues.size()];
       drawPolyline(*canvas_, n1.x, n1.y, n2.x, n2.y, 2.5F, edgeCol);
     }
@@ -454,7 +515,8 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
 
   // 3. Circular nodes
   for (std::size_t i = 0; i < nodes_.size(); ++i) {
-    const auto &n    = nodes_[i];
+    const auto &n = nodes_[i];
+    if (!insideGraph(n)) continue;
     const bool isCur = (n.id == current_);
     const bool isComp =
         std::ranges::find(comparedVersions_, n.id) != comparedVersions_.end();
@@ -497,7 +559,9 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
                      n.y + m.height * 0.5F - 2.0F, letterStr, letterCol, 0);
 
     // Unobstructed alias badge
-    if (!n.alias.empty()) {
+    if (!n.alias.empty() && n.aliasX >= graphLeft &&
+        n.aliasX + n.aliasW <= graphRight && n.aliasY >= graphBottom &&
+        n.aliasY + n.aliasH <= graphTop) {
       canvas_->setTag(render::tagKindOverlay,
                       kTagNodeBase + static_cast<std::uint32_t>(i));
       canvas_->addRect(n.aliasX, n.aliasY, n.aliasW, n.aliasH, 0x0F172AEE);
@@ -560,7 +624,7 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
   // 5. Unlimited N-way comparative diff panel
   if (comparedVersions_.size() >= 2) {
     if (diffNeedsUpdate_) {
-      diffResult_      = session_.store(0).diffVersions(comparedVersions_);
+      diffResult_      = storeAt_(storeIndex_).diffVersions(comparedVersions_);
       diffNeedsUpdate_ = false;
     }
 
@@ -670,7 +734,7 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
           (comparedVersions_.size() > 1 && comparedVersions_[0] == current_)
               ? comparedVersions_[1]
               : comparedVersions_[0];
-      const auto &st  = session_.store(0);
+      const auto &st  = storeAt_(storeIndex_);
       const auto text = st.textOf(srcVer);
       if (!text.empty()) {
         quoteHandler_(srcVer, 0, static_cast<std::uint32_t>(text.size()));
@@ -698,6 +762,13 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
     return true;
   }
 
+  if (tag == kTagAnnotateButton) {
+    if (selectedOperation_ && annotateHandler_) {
+      annotateHandler_(*selectedOperation_);
+    }
+    return true;
+  }
+
   if (tag >= kTagNodeBase) {
     const std::size_t nodeIdx = tag - kTagNodeBase;
     if (nodeIdx < nodes_.size()) {
@@ -707,7 +778,9 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
       if (shiftOrCtrl) {
         toggleComparison(targetId);
       } else {
+        if (!targetId.isZero()) selectedOperation_ = targetId;
         current_ = targetId;
+        revision_++;
         if (goer_) {
           goer_(targetId);
         }
@@ -743,6 +816,17 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
   constexpr std::uint64_t mapId = 1;
   auto &mapNode                 = into.add(mapId, gleditor::a11y::Role::List);
   mapNode.label                 = "Hypertime Branching DAG";
+  for (std::size_t i = 0; i < nodes_.size(); ++i) {
+    mapNode.children.push_back(into.id(1000U + i));
+  }
+  mapNode.children.push_back(into.id(2000U));
+  if (selectedOperation_ && annotateHandler_) {
+    mapNode.children.push_back(into.id(2001U));
+  }
+  if (comparedVersions_.size() >= 2) {
+    mapNode.children.push_back(into.id(3000U));
+  }
+  into.contribute(into.id(mapId));
 
   for (std::size_t i = 0; i < nodes_.size(); ++i) {
     const auto &n     = nodes_[i];
@@ -754,12 +838,21 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
       label += " (" + n.alias + ")";
     }
     node.label = label;
-    node.value = (n.id == current_) ? "selected" : "";
+    node.value = selectedOperation_ == n.id ? "selected operation"
+                 : n.id == current_         ? "current view"
+                                            : "";
   }
 
   auto &sliderNode = into.add(2000U, gleditor::a11y::Role::Group);
   sliderNode.label = "Time Scrubber";
   sliderNode.value = current_.str();
+
+  if (selectedOperation_ && annotateHandler_) {
+    auto &annotate   = into.add(2001U, gleditor::a11y::Role::Button);
+    annotate.label   = "Annotate operation " + selectedOperation_->str() +
+                       " and place handle on d.1";
+    annotate.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
+  }
 
   if (comparedVersions_.size() >= 2) {
     auto &diffNode = into.add(3000U, gleditor::a11y::Role::Group);
@@ -768,4 +861,4 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
   }
 }
 
-} // namespace xudu
+} // namespace xanadu::ui

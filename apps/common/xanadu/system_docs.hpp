@@ -466,6 +466,8 @@ inline constexpr std::string_view kKeymapTranscludeCellToDoc =
     "std:xuzz/transclude_cell_to_doc";
 inline constexpr std::string_view kKeymapTranscludeCellToCell =
     "std:xuzz/transclude_cell_to_cell";
+inline constexpr std::string_view kKeymapInsertExternRef =
+    "std:xuzz/insert_extern_ref";
 inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
 inline constexpr std::string_view kKeymapViewXanadocs =
     "std:xuzz/view_xanadocs";
