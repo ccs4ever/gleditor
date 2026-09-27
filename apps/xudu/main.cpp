@@ -938,6 +938,10 @@ public:
       const auto sIdx    = session.storeIndexOf(where.doc);
       auto spans         = session.store(sIdx).rebuild(version).spansFor(
           where.start, where.end - where.start);
+      if (spans.empty()) {
+        std::cout << "xudu: selected passage has no addressable content\n";
+        return;
+      }
 
       if (!pending) {
         pending = Pending{.doc   = where.doc,
@@ -963,6 +967,41 @@ public:
       pending.reset();
     });
   }
+
+#ifdef XUZZ_BUILD
+  void addCellToPendingLink(const std::span<const xudu::PrimediaSpan> content) {
+    if (!pending) {
+      std::cout << "xudu: select a document passage with Ctrl+L first\n";
+      return;
+    }
+    if (content.empty()) {
+      std::cout << "xudu: focused cell has no content to link\n";
+      return;
+    }
+    pending->right.insert(pending->right.end(), content.begin(), content.end());
+    ++pending->rightCells;
+    std::cout << "xudu: added cell " << pending->rightCells
+              << " to the pending link; choose another or finish the link\n";
+  }
+
+  void finishCellLink() {
+    if (!pending || pending->right.empty()) {
+      std::cout << "xudu: select a passage and add at least one cell first\n";
+      return;
+    }
+    xudu::Link link;
+    link.type  = xudu::LinkType::Comment;
+    link.owner = "you";
+    link.left  = std::move(pending->spans);
+    link.right = std::move(pending->right);
+    // The bridge reads links from the primary store while its manifold can
+    // show another slice store. All these spans address the same permascroll.
+    const auto after = session.addLink(0, std::move(link));
+    std::cout << "xudu: linked document passage to " << pending->rightCells
+              << " cell(s) at " << after.str() << "\n";
+    pending.reset();
+  }
+#endif
 
   void cancelLink() {
     renderer->runWithState([this](RenderState &) {
@@ -1441,6 +1480,19 @@ public:
     });
   }
 
+#ifdef XUZZ_BUILD
+  void transcludeSpansAtCaret(std::vector<PrimediaSpan> spans) {
+    withCaret([this, spans = std::move(spans)](RenderState &rState,
+                                               const Where &where, Caret *) {
+      auto at = where.start;
+      for (const auto &span : spans) {
+        insertSpanAt(rState, where.doc, at, span);
+        at += static_cast<std::uint32_t>(span.length);
+      }
+    });
+  }
+#endif
+
   /// Transclude @p span into document @p doc at byte @p at, on the render
   /// thread, and put the caret after it.
   void insertSpanAt(RenderState &rState, const std::uint32_t doc,
@@ -1875,6 +1927,10 @@ private:
     std::uint32_t start{};
     std::uint32_t end{};
     std::vector<xudu::PrimediaSpan> spans;
+#ifdef XUZZ_BUILD
+    std::vector<xudu::PrimediaSpan> right;
+    std::size_t rightCells{};
+#endif
   };
 
   Session &session;
@@ -3984,6 +4040,70 @@ int main(const int argc, char **argv) {
         std::string(xanadu::settings::kKeymapViewBoth),
         "show xanadocs and slices together",
         [setVisibilityMode] { setVisibilityMode(VisibilityMode::Both); });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapLinkAddCell),
+        "add the focused cell to the pending document link",
+        [&renderer, &views, &bridgeCoordinator, zigzagPresentation] {
+          renderer->runWithState(
+              [&views, &bridgeCoordinator, zigzagPresentation](RenderState &) {
+                const auto *manifold = bridgeCoordinator.manifold();
+                const auto cell      = zigzagPresentation->focusCell();
+                if (manifold == nullptr || cell == zigzag::noCell) return;
+                views.addCellToPendingLink(manifold->contentOf(cell));
+              });
+        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapLinkFinish),
+        "finish the pending document-to-cell link", [&renderer, &views] {
+          renderer->runWithState(
+              [&views](RenderState &) { views.finishCellLink(); });
+        });
+    std::vector<xudu::PrimediaSpan> quotedCellSpans;
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapTranscludeCellToDoc),
+        "transclude the focused cell content at the document caret",
+        [&renderer, &views, &bridgeCoordinator, zigzagPresentation,
+         &quotedCellSpans] {
+          renderer->runWithState([&views, &bridgeCoordinator,
+                                  zigzagPresentation,
+                                  &quotedCellSpans](RenderState &) {
+            const auto *manifold = bridgeCoordinator.manifold();
+            const auto cell      = zigzagPresentation->focusCell();
+            if (manifold == nullptr || cell == zigzag::noCell) return;
+            const auto content = manifold->contentOf(cell);
+            if (content.empty()) {
+              std::cout << "xudu: focused cell has no content to "
+                           "transclude\n";
+              return;
+            }
+            quotedCellSpans.assign(content.begin(), content.end());
+            views.transcludeSpansAtCaret(quotedCellSpans);
+          });
+        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapTranscludeCellToCell),
+        "transclude the same content into a new connected cell",
+        [&renderer, &session, &bridgeCoordinator, zigzagPresentation,
+         &zigzagStoreIndex, &quotedCellSpans] {
+          renderer->runWithState([&session, &bridgeCoordinator,
+                                  zigzagPresentation, &zigzagStoreIndex,
+                                  &quotedCellSpans](RenderState &) {
+            if (quotedCellSpans.empty()) {
+              std::cout << "xudu: transclude cell content to a document "
+                           "first\n";
+              return;
+            }
+            if (zigzagPresentation->insertConnectedTransclusion(
+                    quotedCellSpans)) {
+              session->store(zigzagStoreIndex)
+                  .setCurrentVersions({zigzagPresentation->sliceHead()});
+              session->save(zigzagStoreIndex);
+              bridgeCoordinator.synchronize();
+              std::cout << "xudu: transcluded into new cell "
+                        << zigzagPresentation->focusCell() << "\n";
+            }
+          });
+        });
     app.commands().setScopeResolver(
         [&keyboardPane] { return keyboardPane.scope(); });
     state->documentTakesText = [&keyboardPane] {

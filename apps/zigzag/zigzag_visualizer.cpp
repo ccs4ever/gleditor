@@ -399,6 +399,31 @@ bool ZigzagVisualizer::insertConnectedCell(const std::string &text,
   return true;
 }
 
+bool ZigzagVisualizer::insertConnectedTransclusion(
+    const std::span<const xanadu::PrimediaSpan> spans) {
+  if (!engine_ || spans.empty()) return false;
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  if (isEphemeral(focus)) return false;
+  const auto newId = engine_->addCellFromSpans(spans);
+  if (newId == noCell) return false;
+  const auto roleDim = engine_->dimensionFor("d.role");
+  const auto role    = engine_->addCell("text");
+  engine_->linkCells(newId, role, roleDim, DimVector::POS);
+  if (focus != noCell) {
+    const auto dim = engine_->dimensionFor(current_view_.x_dimension);
+    const auto oldNeighbor =
+        engine_->manifold().linked(focus, dim, DimVector::POS);
+    engine_->linkCells(focus, newId, dim, DimVector::POS);
+    if (oldNeighbor != noCell) {
+      engine_->linkCells(newId, oldNeighbor, dim, DimVector::POS);
+    }
+  }
+  accursed_cell_focus_ = newId;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
 bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
                                       const CellID targetId,
                                       const DimVector dir) {

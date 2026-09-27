@@ -11,6 +11,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -146,6 +147,7 @@ public:
   /// names it. Adding a cell is recording one now: there is nowhere for a cell
   /// with no operation behind it to live.
   CellRef addCell(std::string_view text);
+  CellRef addCellFromSpans(std::span<const xanadu::PrimediaSpan> spans);
 
   /// Restate @p cell's content as @p text, recording a SetValue operation.
   void updateCellText(CellRef cell, std::string_view text);
