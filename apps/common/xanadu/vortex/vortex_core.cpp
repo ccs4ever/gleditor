@@ -1,12 +1,12 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 
 #include <bit>
-#include <cctype>
 #include <iostream>
 #include <ranges>
 #include <utility>
 
 #include "common/xanadu/scalar.hpp"
+#include "common/xanadu/truthiness.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace zigzag::vortex {
@@ -303,19 +303,7 @@ bool VortexCore::evaluateTruthiness(const CellValue &val) {
   if (std::holds_alternative<std::int64_t>(val)) {
     return std::get<std::int64_t>(val) != 0;
   }
-  const auto &s     = std::get<std::string>(val);
-  std::string lower = s;
-  for (char &c : lower) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  if (lower == "1" || lower == "true" || lower == "yes" || lower == "on") {
-    return true;
-  }
-  if (lower.empty() || lower == "0" || lower == "false" || lower == "no" ||
-      lower == "off") {
-    return false;
-  }
-  return true;
+  return xanadu::evaluateStringTruthiness(std::get<std::string>(val));
 }
 
 std::function<CellRef()> VortexCore::cloneGenerator(CellRef source) {

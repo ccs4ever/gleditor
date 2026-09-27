@@ -52,6 +52,15 @@ TEST(VortexCoreTest, SystemGenesisMintsAllDimensionsOffHome) {
             d.dims);
 }
 
+TEST(VortexCoreTest, TruthinessKeepsItsExplicitWordsAndProseFallback) {
+  EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"YeS"}}));
+  EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"ON"}}));
+  EXPECT_FALSE(VortexCore::evaluateTruthiness(CellValue{std::string{"Off"}}));
+  EXPECT_FALSE(VortexCore::evaluateTruthiness(CellValue{std::string{}}));
+  EXPECT_TRUE(
+      VortexCore::evaluateTruthiness(CellValue{std::string{"a report title"}}));
+}
+
 TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
   TestHarness h;
   CellRef a        = h.arena.makeCell("nodeA");

@@ -277,4 +277,75 @@ TEST(ScalarTest, aScalarCellIsAnOrdinaryCellInEveryOtherWay) {
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
 }
 
+TEST(ScalarTest, userTextEditsRefreshTheTypedValueWithoutChangingTheText) {
+  Store store;
+  auto at         = store.sliceGenesis(MicroversionId{});
+  at              = store.makeCell(at, "0012");
+  const auto cell = store.cellRefOf(at);
+
+  auto folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "0012");
+  EXPECT_THAT(folded.asInt64(cell), testing::Optional(std::int64_t{12}));
+
+  at     = store.setCellText(at, cell, "1.25");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "1.25");
+  EXPECT_THAT(folded.asDouble(cell), testing::Optional(1.25));
+
+  at     = store.setCellText(at, cell, "YeS");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "YeS");
+  EXPECT_THAT(folded.asBool(cell), testing::Optional(true));
+
+  at     = store.setCellText(at, cell, "off");
+  folded = store.rebuildManifold(at);
+  EXPECT_THAT(folded.asBool(cell), testing::Optional(false));
+
+  at     = store.setCellText(at, cell, "a report title");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.valueKindOf(cell), ValueKind::None);
+  EXPECT_EQ(folded.textOf(cell, store), "a report title");
+
+  at     = store.setCellText(at, cell, "9223372036854775808");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.valueKindOf(cell), ValueKind::None);
+}
+
+TEST(ScalarTest, cellSplicesRefreshAndClearTheTypedValue) {
+  Store store;
+  auto at         = store.sliceGenesis(MicroversionId{});
+  at              = store.makeCell(at, "12");
+  const auto cell = store.cellRefOf(at);
+
+  at          = store.spliceCell(at, cell, 1, 1, "3");
+  auto folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "13");
+  EXPECT_THAT(folded.asInt64(cell), testing::Optional(std::int64_t{13}));
+
+  at     = store.spliceCell(at, cell, 2, 0, ".5");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "13.5");
+  EXPECT_THAT(folded.asDouble(cell), testing::Optional(13.5));
+
+  at     = store.spliceCell(at, cell, 0, 0, "about ");
+  folded = store.rebuildManifold(at);
+  EXPECT_EQ(folded.textOf(cell, store), "about 13.5");
+  EXPECT_EQ(folded.valueKindOf(cell), ValueKind::None);
+}
+
+TEST(ScalarTest, quotedNumericTextCarriesAValueAndKeepsItsAddress) {
+  Store store;
+  auto at             = store.sliceGenesis(MicroversionId{});
+  at                  = store.makeCell(at, "12");
+  const auto original = store.cellRefOf(at);
+  const auto before   = store.rebuildManifold(at);
+  const auto quoted   = before.contentOf(original).front();
+
+  at                   = store.makeCell(at, quoted);
+  const auto quotation = store.cellRefOf(at);
+  const auto after     = store.rebuildManifold(at);
+  EXPECT_THAT(after.asInt64(quotation), testing::Optional(std::int64_t{12}));
+  EXPECT_EQ(after.contentOf(quotation).front(), quoted);
+}
+
 } // namespace

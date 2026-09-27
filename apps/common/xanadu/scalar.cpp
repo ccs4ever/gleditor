@@ -1,11 +1,15 @@
 #include "scalar.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cstddef>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+
+#include "truthiness.hpp"
 
 namespace xanadu {
 
@@ -21,7 +25,57 @@ constexpr std::uint64_t quietBit = 0x0008000000000000ULL;
 /// that could only ever be dead.
 constexpr std::size_t renderingRoom = 32;
 
+bool integerSyntax(const std::string_view text) noexcept {
+  if (text.empty()) return false;
+  const std::size_t first = text.front() == '-' ? 1 : 0;
+  if (first == text.size()) return false;
+  return std::all_of(text.begin() + static_cast<std::ptrdiff_t>(first),
+                     text.end(),
+                     [](const char ch) { return ch >= '0' && ch <= '9'; });
+}
+
 } // namespace
+
+InferredTextValue inferTextValue(const std::string_view text) noexcept {
+  if (text.empty() || text.size() > maxInferredScalarTextBytes) return {};
+
+  // from_chars does not accept a leading plus, though it is a normal way to
+  // enter a signed number. Keep that sign in the text while parsing the value.
+  auto numeric = text;
+  if (numeric.front() == '+') numeric.remove_prefix(1);
+  if (numeric.empty()) return {};
+
+  if (integerSyntax(numeric)) {
+    std::int64_t value{};
+    const auto done =
+        std::from_chars(numeric.data(), numeric.data() + numeric.size(), value);
+    if (done.ec == std::errc{} && done.ptr == numeric.data() + numeric.size()) {
+      return {.kind = ValueKind::Int64,
+              .bits = std::bit_cast<std::uint64_t>(value)};
+    }
+    // An out-of-range integer must not silently lose precision as a double.
+    return {};
+  }
+
+  // Numeric 1 and 0 remain integers; the same explicit truthiness literals
+  // provide the words that can become boolean cells.
+  if (const auto truth = truthLiteral(text)) {
+    return {.kind = ValueKind::Bool, .bits = *truth ? 1ULL : 0ULL};
+  }
+
+  const bool floatSyntax =
+      numeric.find_first_of(".eE") != std::string_view::npos ||
+      asciiEqualsIgnoreCase(numeric, "nan") ||
+      asciiEqualsIgnoreCase(numeric, "inf") ||
+      asciiEqualsIgnoreCase(numeric, "infinity") ||
+      asciiEqualsIgnoreCase(numeric, "-nan") ||
+      asciiEqualsIgnoreCase(numeric, "-inf") ||
+      asciiEqualsIgnoreCase(numeric, "-infinity");
+  if (!floatSyntax) return {};
+  double value{};
+  if (!parseDouble(numeric, value) || isSignallingNaN(value)) return {};
+  return {.kind = ValueKind::Double, .bits = canonicalDoubleBits(value)};
+}
 
 bool isSignallingNaN(const double value) noexcept {
   const auto bits = std::bit_cast<std::uint64_t>(value);
