@@ -260,6 +260,15 @@ struct AppState {
    * letter bound to a command there is not also typed into the text.
    */
   std::function<bool()> documentTakesText;
+  /**
+   * @brief Asked on the render thread when a left press lands inside the
+   *        selection, at byte @p offset of document @p docIndex and window
+   *        pixel @p x, @p y: whether the program picks the selection up to
+   *        drag it. False, or unset, starts a new selection there instead.
+   */
+  std::function<bool(std::uint32_t docIndex, std::uint32_t offset, int x,
+                     int y)>
+      pressOnSelection;
 
   /**
    * @brief Interceptor for mouse motion events on the event thread.

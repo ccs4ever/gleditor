@@ -50,10 +50,12 @@ void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas,
   canvas.setTag(render::tagKindOverlay, 0);
   canvas.addRect(p0.x - 3.0F, p0.y - 3.0F, 6.0F, 6.0F, col);
 
-  // Subdivided quadratic Bezier
+  // Subdivided quadratic Bezier, stopping short of the pointer: whatever is
+  // drawn under the pointer answers the pick that decides where a drop
+  // lands, and the tether is never what it was dropped on.
   constexpr int kSegments = 16;
   glm::vec2 prevPt        = p0;
-  for (int i = 1; i <= kSegments; ++i) {
+  for (int i = 1; i < kSegments; ++i) {
     const float t = static_cast<float>(i) / static_cast<float>(kSegments);
     const glm::vec2 pt =
         gleditor::spatial::evaluateQuadraticBezier(p0, mid, p1, t);
@@ -61,8 +63,14 @@ void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas,
     prevPt = pt;
   }
 
-  // Cursor tether end pip
-  canvas.addRect(p1.x - 3.0F, p1.y - 3.0F, 6.0F, 6.0F, col);
+  // Cursor end: a hollow ring, for the same reason -- the pixel under the
+  // pointer stays whatever the drag is over.
+  constexpr float kRing = 6.0F;
+  constexpr float kBar  = 2.0F;
+  canvas.addRect(p1.x - kRing, p1.y + kRing - kBar, 2.0F * kRing, kBar, col);
+  canvas.addRect(p1.x - kRing, p1.y - kRing, 2.0F * kRing, kBar, col);
+  canvas.addRect(p1.x - kRing, p1.y - kRing, kBar, 2.0F * kRing, col);
+  canvas.addRect(p1.x + kRing - kBar, p1.y - kRing, kBar, 2.0F * kRing, col);
 }
 
 void KineticTetherOverlay::drawBlueprintQuad(gleditor::Canvas &canvas,
