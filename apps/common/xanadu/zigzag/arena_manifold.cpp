@@ -349,8 +349,8 @@ CellRef ArenaManifold::proxyFor(const std::uint32_t space,
     return it->second;
   }
 
-  const auto bits     = (static_cast<std::uint64_t>(space) << 32) |
-                        static_cast<std::uint64_t>(foreignIndex);
+  const auto bits = (static_cast<std::uint64_t>(space) << 32) |
+                    static_cast<std::uint64_t>(foreignIndex);
   const CellRef proxy = mintSlot(xanadu::ValueKind::ExternRef, bits, {});
 
   const auto dimStoreRefs = ensureDimension("d.store-refs");

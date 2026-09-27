@@ -134,9 +134,9 @@ TEST(VersionModelTest, randomEditsAgreeWithAString) {
     case 0:
     case 1: { // insert, sometimes at the end and sometimes within
       const auto text = "t" + std::to_string(step) + " ";
-      const auto at = 0 == length
-                          ? 0U
-                          : static_cast<std::uint32_t>(random() % (length + 1));
+      const auto at   = 0 == length
+                            ? 0U
+                            : static_cast<std::uint32_t>(random() % (length + 1));
       version.insert(at, spool.put(text));
       model.insert(at, text);
       break;

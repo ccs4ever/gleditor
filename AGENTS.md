@@ -167,8 +167,10 @@ hand with its own `.permascroll` beside it.
 
 - `.clang-format` (LLVM-based, `IndentWidth: 2`, `ColumnLimit: 80`, aligned consecutive assignments)
   governs C++ **and `.glsl`**. `.editorconfig` mirrors every formatter's settings for editors; it is
-  a hint, not a gate. Run `make format` before committing, or `clang-format -i --style=file <file>`
-  for one file.
+  a hint, not a gate. Run `make format` before committing, or
+  `clang-format-19 -i --style=file <file>` for one file. **clang-format 19**: `.clang-format` needs
+  18+ to parse at all (`AlignFunctionPointers`) and majors disagree on continuation indents, so
+  `make format`/`format-check` prefer `clang-format-19` and refuse anything older by name.
 
 - CI (`.github/workflows/c-cpp.yml`, job `format`) runs `make format-check` and `make lint` on a
   checkout with no build dependencies installed — see "Makefile gotchas" for how.

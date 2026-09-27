@@ -1994,10 +1994,10 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
           currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
       if (placeholder && *placeholder != zigzag::noCell) {
         const auto dimOriginCell = ensureDim("d.origin-cell");
-        curHead = setLink(curHead, itemCell, dimOriginCell,
-                          zigzag::DimVector::POS, *placeholder, currentFold);
-        folded  = rebuildManifold(curHead);
-        currentFold = &folded.value();
+        curHead                  = setLink(curHead, itemCell, dimOriginCell,
+                                           zigzag::DimVector::POS, *placeholder, currentFold);
+        folded                   = rebuildManifold(curHead);
+        currentFold              = &folded.value();
       }
     }
   }

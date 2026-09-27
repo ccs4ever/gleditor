@@ -217,8 +217,8 @@ AdoptedDimension adoptPublishedDimension(Store &store,
     const auto aliasRef = store.cellRefOf(aliasOp);
     curHead             = aliasOp;
     fold                = store.rebuildManifold(curHead);
-    curHead = store.setLink(curHead, placeholder, dimAlias,
-                            zigzag::DimVector::POS, aliasRef, &fold);
+    curHead             = store.setLink(curHead, placeholder, dimAlias,
+                                        zigzag::DimVector::POS, aliasRef, &fold);
     zigzag::DimensionRegistry::instance().registerDim(store, localAlias,
                                                       placeholder);
   }

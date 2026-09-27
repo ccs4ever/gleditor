@@ -1142,7 +1142,8 @@ SH_FORMAT_FILES  = $(shell $(GIT_LS) '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
 MD_FORMAT_FILES  = $(shell $(GIT_LS) '*.md' | grep -v '^thirdparty/')
 
-CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
+CLANG_FORMAT_MAJOR := 19
+CLANG_FORMAT := $(shell command -v clang-format-$(CLANG_FORMAT_MAJOR) 2>/dev/null || command -v clang-format 2>/dev/null)
 SHFMT        := $(shell command -v shfmt 2>/dev/null)
 YAMLFMT      := $(shell command -v yamlfmt 2>/dev/null)
 MDFORMAT     := $(shell command -v mdformat 2>/dev/null)
@@ -1153,6 +1154,29 @@ RUN_CLANG_TIDY := $(shell command -v run-clang-tidy 2>/dev/null)
 CLANG_TIDY     := $(shell command -v clang-tidy 2>/dev/null)
 SCAN_BUILD     := $(shell command -v scan-build 2>/dev/null)
 CPPCHECK       := $(shell command -v cppcheck 2>/dev/null)
+
+# .clang-format names keys that only exist from clang-format 18 on
+# (AlignFunctionPointers), and an older binary does not ignore them: it
+# refuses the whole file with "unknown key" and exits non-zero on every
+# source. A loop that counted failures therefore read as "every file is
+# unformatted" from 17 and as "nothing is unformatted" from anything that
+# swallowed the error -- neither of which is a formatting result at all.
+# 18 and 19 then disagree with each other on brace-init and aligned-
+# assignment continuations, so the tree can only be formatted to one major.
+# Refuse an older one by name rather than let it write a diff CI rejects;
+# only the formatting goals care, so a build on a machine with an ancient
+# clang-format is unaffected.
+FORMAT_GOALS := format format-check check
+ifneq (,$(filter $(FORMAT_GOALS),$(MAKECMDGOALS)))
+ifdef CLANG_FORMAT
+CLANG_FORMAT_FOUND_MAJOR := $(shell $(CLANG_FORMAT) --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p')
+ifneq (,$(CLANG_FORMAT_FOUND_MAJOR))
+ifeq (1,$(shell test $(CLANG_FORMAT_FOUND_MAJOR) -lt $(CLANG_FORMAT_MAJOR) && echo 1))
+$(error clang-format $(CLANG_FORMAT_FOUND_MAJOR) ($(CLANG_FORMAT)) is older than the $(CLANG_FORMAT_MAJOR) this tree is formatted to; install clang-format-$(CLANG_FORMAT_MAJOR) (apt) or pip install 'clang-format==$(CLANG_FORMAT_MAJOR).*')
+endif
+endif
+endif
+endif
 
 # mdformat is useless to this tree without its plugins, and worse than useless
 # quietly: plain mdformat has no concept of GFM tables (it reflows them into
