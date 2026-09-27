@@ -25,6 +25,7 @@
 
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "zigzag_commands.hpp"
 #include "zigzag_visualizer.hpp"
@@ -54,11 +55,12 @@ struct LoadedDocument {
   std::string description;
 };
 
-LoadedDocument loadDocument(const std::string &slicePath,
-                            const std::string &xuduPath) {
+LoadedDocument
+loadDocument(const std::string &slicePath, const std::string &xuduPath,
+             const std::shared_ptr<xanadu::UserPermascroll> &scroll) {
   if (!xuduPath.empty() && fs::exists(xuduPath)) {
     try {
-      xanadu::Store store;
+      xanadu::Store store(scroll);
       store.load(xuduPath);
       auto versions = store.allVersions();
       if (versions.empty()) {
@@ -77,7 +79,7 @@ LoadedDocument loadDocument(const std::string &slicePath,
 
   if (!slicePath.empty() && fs::exists(slicePath)) {
     try {
-      xanadu::Store store;
+      xanadu::Store store(scroll);
       store.load(slicePath);
       auto versions = store.allVersions();
       if (versions.empty()) {
@@ -98,11 +100,12 @@ LoadedDocument loadDocument(const std::string &slicePath,
   return {.doc = std::nullopt, .sourcePath = {}, .description = {}};
 }
 
-std::unique_ptr<xanadu::Store> loadOrCreateKeymapStore() {
+std::unique_ptr<xanadu::Store> loadOrCreateKeymapStore(
+    const std::shared_ptr<xanadu::UserPermascroll> &scroll) {
   const auto dir = xanadu::systemDocDirectory(xanadu::SystemDocKind::Keymap);
   std::filesystem::create_directories(dir);
 
-  auto sysStore = std::make_unique<xanadu::Store>();
+  auto sysStore = std::make_unique<xanadu::Store>(scroll);
   sysStore->setSystem(true);
 
   bool opened = false;
@@ -218,6 +221,9 @@ int main(const int argc, char **argv) {
   parser.add_argument("--xudu")
       .default_value(std::string{})
       .help("load a Xudu store path or document");
+  parser.add_argument("--permascroll")
+      .default_value(std::string{})
+      .help("use or create this user permascroll directory");
   parser.add_argument("slice").help("Store to load").remaining();
 
   if (detailed) {
@@ -240,6 +246,7 @@ int main(const int argc, char **argv) {
   render::Backend backend = render::Backend::OpenGL;
   RendererRef renderer;
   std::string slicePath;
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll;
 
   try {
     parser.parse_args(argc, argv);
@@ -261,9 +268,14 @@ int main(const int argc, char **argv) {
     }
 
     const auto xuduPath = parser.get<std::string>("--xudu");
+    xanadu::UserPermascroll::Config scrollConfig;
+    const auto permascrollPath = parser.get<std::string>("--permascroll");
+    if (!permascrollPath.empty()) scrollConfig.storageDir = permascrollPath;
+    userPermascroll =
+        std::make_shared<xanadu::UserPermascroll>(std::move(scrollConfig));
 
     if (rasterMode) {
-      auto loaded = loadDocument(slicePath, xuduPath);
+      auto loaded = loadDocument(slicePath, xuduPath, userPermascroll);
       zigzag::ZzStructureDocument doc =
           loaded.doc ? std::move(*loaded.doc) : zigzag::ZzStructureDocument{};
       const auto res = zigzag::rasterizeZzStructure(doc);
@@ -279,11 +291,11 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    auto viz =
-        std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
+    auto viz = std::make_shared<zigzag::ZigzagVisualizer>(
+        state->defaultFontName, userPermascroll);
 
     const auto xuduPath = parser.get<std::string>("--xudu");
-    auto loaded         = loadDocument(slicePath, xuduPath);
+    auto loaded         = loadDocument(slicePath, xuduPath, userPermascroll);
     if (loaded.doc) {
       viz->adoptDocument(std::move(*loaded.doc), loaded.sourcePath);
       if (!loaded.description.empty()) {
@@ -337,7 +349,7 @@ int main(const int argc, char **argv) {
     state->documentTakesText = [] { return false; };
     bindCommands(app, state, viz, quotationOverlay);
 
-    auto keymapStore = loadOrCreateKeymapStore();
+    auto keymapStore = loadOrCreateKeymapStore(userPermascroll);
     if (keymapStore && keymapStore->opCount() > 0) {
       const auto kmCfg = xanadu::KeymapConfig::fromStore(*keymapStore);
       for (const auto &[act, comboStr] : kmCfg.bindings) {

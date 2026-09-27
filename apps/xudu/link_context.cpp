@@ -62,8 +62,8 @@ LinkContext::resolve(const xanadu::LinkKey &key) const {
   std::vector<xanadu::CellView> cells;
   if (nullptr != manifold) {
     everyCell = manifold->cellsWithinRadius(zigzag::noCell, -1);
-    cells.push_back({.store    = primary.documentId(),
-                     .version  = primary.primaryCurrentVersion(),
+    cells.push_back({.store    = session.store(manifoldStoreIndex).documentId(),
+                     .version  = manifoldVersion,
                      .manifold = *manifold,
                      .cells    = everyCell});
   }
@@ -91,9 +91,9 @@ LinkContext::cellSite(const zigzag::CellRef cell) const {
   for (const auto &span : manifold->contentOf(cell)) {
     length += static_cast<std::uint32_t>(span.length);
   }
-  const auto &primary = session.store();
-  return xanadu::CellSite{.store   = primary.documentId(),
-                          .version = primary.primaryCurrentVersion(),
+  const auto &slice = session.store(manifoldStoreIndex);
+  return xanadu::CellSite{.store   = slice.documentId(),
+                          .version = manifoldVersion,
                           .cell    = cell,
                           .range   = {.start = 0, .end = length}};
 }
@@ -102,6 +102,18 @@ LinkContext::ReadingStamp LinkContext::readingStamp() const {
   return {.caret = caretQuery ? caretQuery() : std::nullopt,
           .cell  = cellFocusQuery ? cellFocusQuery() : zigzag::noCell,
           .visit = navigator.currentVisit()};
+}
+
+std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
+  std::vector<xanadu::Visit> choices;
+  const auto current = navigator.currentVisit();
+  if (!current) return choices;
+  for (const auto child : activity.children(*current)) {
+    if (const auto visit = activity.find(child)) {
+      choices.push_back(*visit);
+    }
+  }
+  return choices;
 }
 
 xanadu::ReadingPosition LinkContext::reading() const {
@@ -242,6 +254,14 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
           GLEDITOR_LOG_DEBUG("xudu.links", "entered {} is not open",
                              at.version.str());
         } else {
+          if (!manifold ||
+              at.store != session.store(manifoldStoreIndex).documentId() ||
+              !manifold->contains(at.cell)) {
+            GLEDITOR_LOG_DEBUG("xudu.links",
+                               "saved cell {} is outside the bound slice",
+                               at.cell);
+            return;
+          }
           if (focusCell) {
             focusCell(at.cell, at.range);
           } else {

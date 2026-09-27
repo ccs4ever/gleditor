@@ -55,8 +55,11 @@ using gleditor::color::packRgba;
 
 } // namespace
 
-ZigzagVisualizer::ZigzagVisualizer(std::string aFontName)
+ZigzagVisualizer::ZigzagVisualizer(
+    std::string aFontName,
+    std::shared_ptr<xanadu::UserPermascroll> userPermascroll)
     : fontName_(std::move(aFontName)),
+      userPermascroll_(std::move(userPermascroll)),
       last_frame_time_(std::chrono::steady_clock::now()) {
   presentation_transform_ =
       glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
@@ -211,7 +214,9 @@ void ZigzagVisualizer::adoptDocument(
     };
   }
 
-  ownedStore_       = std::make_unique<xanadu::Store>();
+  ownedStore_       = userPermascroll_
+                          ? std::make_unique<xanadu::Store>(userPermascroll_)
+                          : std::make_unique<xanadu::Store>();
   store_            = ownedStore_.get();
   const auto sliced = sliceToStore(doc, *store_);
   sourceOrigins_.clear();
