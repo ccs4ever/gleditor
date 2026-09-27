@@ -317,4 +317,6 @@ The minimum evidence for promotion from vision to implementation plan is:
 
 The last check is decisive. If a Slice projection provides the same authored operations, stable
 identity, branch behavior, and coordinate queries at acceptable cost, Surface should remain a
-projection and the final Make-kind slot should remain free.
+projection and the final Make-kind slot should remain free. The
+[Slice-only counterdesign](surface-as-slice.md) gives that alternative a concrete Cell graph,
+single-link scene commit, and prototype gate.
