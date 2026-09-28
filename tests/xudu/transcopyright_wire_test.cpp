@@ -13,6 +13,7 @@
 
 #include "common/xanadu/identity/identity_network_controller.hpp"
 #include "common/xanadu/identity/payment_verifier.hpp"
+#include "common/xanadu/lt_compat.hpp"
 #include "common/xanadu/transcopyright_crypto.hpp"
 
 namespace xanadu::identity {
@@ -44,8 +45,7 @@ struct Pair {
   bool deliver{true};
 
   Pair() {
-    const auto dead = libtorrent::peer_connection_handle(
-        std::weak_ptr<libtorrent::aux::peer_connection>{});
+    const auto dead = lt_compat::nullPeerConnection();
     author = std::make_shared<IdentityPeerPlugin>(dead, InfoHash{}, &authorCtl);
     reader = std::make_shared<IdentityPeerPlugin>(dead, InfoHash{}, &readerCtl);
     // Both ends learn the other's extension ids, as they would from a real

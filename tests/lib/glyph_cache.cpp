@@ -310,17 +310,23 @@ TEST_F(GlyphCacheTest, boldHasMoreInkThanPlain) {
          "of the glyph's own box, not just occupy a different cache slot";
 }
 
-TEST_F(GlyphCacheTest, italicChangesTheGlyphsFootprint) {
+TEST_F(GlyphCacheTest, italicChangesTheGlyphsRasterisation) {
+  // The pixels, not the box: whether the slant comes from a real italic file
+  // or from FT_GlyphSlot_Oblique is the installed font's business, and a
+  // sheared 'A' can keep the very same bounding box and the very same mean
+  // ink while every row inside it has moved. What must hold on any font is
+  // that the glyph was rasterised differently, not merely filed under
+  // another cache key.
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  const auto plain  = cache->put("A", face).value();
-  const auto italic = cache->put("A", face, {Decoration::Italic}).value();
+  ASSERT_TRUE(cache->put("A", face).has_value());
+  const auto plain = lastUpload;
+  ASSERT_TRUE(cache->put("A", face, {Decoration::Italic}).has_value());
+  const auto italic = lastUpload;
 
-  EXPECT_NE(std::to_underlying(italic.dims.width),
-            std::to_underlying(plain.dims.width))
-      << "FT_GlyphSlot_Oblique shears the outline, which widens an upright "
-         "glyph's bounding box";
+  ASSERT_FALSE(plain.empty());
+  EXPECT_NE(plain, italic);
 }
 
 TEST_F(GlyphCacheTest, underlineAddsInkBelowTheGlyph) {
