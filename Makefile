@@ -352,6 +352,7 @@ A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/linux/$(A11Y_ARCH)/shared
 endif
 ifneq ($(wildcard $(ACCESSKIT_DIR)/include/accesskit.h),)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(ACCESSKIT_DIR)/include/accesskit.h
 A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
 A11Y_LIBS   := -L$(A11Y_LIBDIR) -laccesskit
 ifndef WINDOWS
@@ -363,12 +364,27 @@ endif
 endif
 else ifeq ($(shell pkg-config --exists accesskit && echo 1),1)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(wildcard $(shell pkg-config --variable=includedir accesskit)/accesskit.h)
 A11Y_CFLAGS := $(shell pkg-config $(STATIC) --cflags accesskit)
 A11Y_LIBS   := $(shell pkg-config $(STATIC) --libs accesskit)
 else ifneq ($(wildcard /usr/include/accesskit.h /usr/local/include/accesskit.h),)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(firstword $(wildcard /usr/include/accesskit.h /usr/local/include/accesskit.h))
 A11Y_CFLAGS :=
 A11Y_LIBS   := -laccesskit
+endif
+
+# accesskit-c 0.23 renamed the tree description -- `accesskit_tree` and its
+# four entry points -- to `accesskit_tree_info`, to stop it being read as the
+# tree of nodes it is not. Both spellings have to be buildable: no
+# distribution packages accesskit-c at all, so whoever has it has whichever
+# release they happened to unpack. The header itself carries no version, and a
+# renamed function cannot be detected from the preprocessor, so the name is
+# looked for in the header the compiler is about to read.
+ifneq ($(A11Y_HEADER),)
+ifneq ($(shell grep -c accesskit_tree_info_new $(A11Y_HEADER) 2>/dev/null),0)
+A11Y_CFLAGS += -DGLEDITOR_ACCESSKIT_TREE_INFO=1
+endif
 endif
 
 ifndef GLEDITOR_HAVE_A11Y

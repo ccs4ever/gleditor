@@ -42,6 +42,7 @@
  */
 #include <gleditor/a11y/platform.hpp> // IWYU pragma: associated
 
+#include <cstddef>
 #include <deque>
 #include <mutex>
 #include <utility>
@@ -51,6 +52,57 @@
 namespace gleditor::a11y {
 
 namespace {
+
+/// The description of the tree as a whole -- its root, and who built it.
+/// accesskit-c 0.23 renamed it and its four entry points from
+/// `accesskit_tree` to `accesskit_tree_info`, so that it is not read as the
+/// tree of nodes it is not. Nothing packages accesskit-c, so whoever has it
+/// has whichever release they unpacked, and both spellings are built here;
+/// the Makefile looks for the newer name in the header and defines
+/// GLEDITOR_ACCESSKIT_TREE_INFO.
+#ifdef GLEDITOR_ACCESSKIT_TREE_INFO
+using AccessKitTree = accesskit_tree_info;
+
+AccessKitTree *newTree(const accesskit_node_id root) {
+  return accesskit_tree_info_new(root);
+}
+
+void setToolkitName(AccessKitTree *const tree, const char *const name,
+                    const std::size_t length) {
+  accesskit_tree_info_set_toolkit_name_with_length(tree, name, length);
+}
+
+void setToolkitVersion(AccessKitTree *const tree, const char *const version,
+                       const std::size_t length) {
+  accesskit_tree_info_set_toolkit_version_with_length(tree, version, length);
+}
+
+void attachTree(accesskit_tree_update *const update,
+                AccessKitTree *const tree) {
+  accesskit_tree_update_set_tree_info(update, tree);
+}
+#else
+using AccessKitTree = accesskit_tree;
+
+AccessKitTree *newTree(const accesskit_node_id root) {
+  return accesskit_tree_new(root);
+}
+
+void setToolkitName(AccessKitTree *const tree, const char *const name,
+                    const std::size_t length) {
+  accesskit_tree_set_toolkit_name_with_length(tree, name, length);
+}
+
+void setToolkitVersion(AccessKitTree *const tree, const char *const version,
+                       const std::size_t length) {
+  accesskit_tree_set_toolkit_version_with_length(tree, version, length);
+}
+
+void attachTree(accesskit_tree_update *const update,
+                AccessKitTree *const tree) {
+  accesskit_tree_update_set_tree(update, tree);
+}
+#endif
 
 /// AccessKit's role for one of ours. A switch rather than a cast, so that
 /// reordering either enumeration is a compile error and not a user interface
@@ -385,12 +437,10 @@ private:
 
     auto *const update = accesskit_tree_update_with_capacity_and_focus(
         self->kept.nodes.size(), self->kept.focus);
-    auto *const tree = accesskit_tree_new(self->kept.root());
-    accesskit_tree_set_toolkit_name_with_length(tree, self->toolkit.data(),
-                                                self->toolkit.size());
-    accesskit_tree_set_toolkit_version_with_length(tree, self->version.data(),
-                                                   self->version.size());
-    accesskit_tree_update_set_tree(update, tree);
+    auto *const tree = newTree(self->kept.root());
+    setToolkitName(tree, self->toolkit.data(), self->toolkit.size());
+    setToolkitVersion(tree, self->version.data(), self->version.size());
+    attachTree(update, tree);
     for (const auto &node : self->kept.nodes) {
       accesskit_tree_update_push_node(update, node.id, nodeOf(node));
     }
