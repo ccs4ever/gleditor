@@ -892,6 +892,35 @@ CellRef ArenaManifold::linked(const CellRef from, const DimRef dim,
   return noCell;
 }
 
+CellRef ArenaManifold::linkedMinting(const CellRef from, const DimRef dim,
+                                     const DimVector dir) {
+  if (const auto found = linked(from, dim, dir); noCell != found) {
+    return found;
+  }
+  // Only a proxy delegates to a foreign space, and only there can a
+  // neighbour exist that linked() could not name.
+  const auto dense = denseOf(from);
+  if (noDense == dense || isQuoteOccurrence(from) || !isProxy(from) ||
+      proxyShadowedEdges_.contains(
+          ShadowEdgeKey{.dense = dense, .dim = dim, .dir = dir})) {
+    return noCell;
+  }
+  const auto foreign = foreignOf(from);
+  if (!foreign) {
+    return noCell;
+  }
+  const auto space = spaceAt(foreign->space);
+  if (!space || !space->manifold) {
+    return noCell;
+  }
+  const auto foreignDim = dimIn(foreign->space, dim);
+  if (noCell == foreignDim) {
+    return noCell;
+  }
+  const auto answer = space->manifold->linked(foreign->index, foreignDim, dir);
+  return noCell == answer ? noCell : proxyFor(foreign->space, answer);
+}
+
 std::span<const DimLink>
 ArenaManifold::dimensionsOf(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);

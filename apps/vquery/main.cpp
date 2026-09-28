@@ -332,10 +332,19 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  const auto permaSource = permaConfig.storageDir;
   auto permascroll =
-      permaConfig.storageDir.empty()
-          ? xanadu::PermascrollRegistry::instance().defaultUser()
-          : std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+      std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+  // A store holds no text of its own; read against a permascroll that is
+  // not the one it was written against, every answer comes back blank. Say
+  // so rather than print nothing.
+  if (!storePaths.empty() && 0 == permascroll->size()) {
+    std::cerr << "Warning: the permascroll"
+              << (permaSource.empty() ? std::string{}
+                                      : " at " + permaSource.string())
+              << " holds no text, so results will have none; pass "
+                 "--permascroll with the one the store was written against\n";
+  }
   xanadu::vql::MultiStoreCoordinator coordinator;
 
   std::string primaryPath;
@@ -346,11 +355,13 @@ int main(int argc, char *argv[]) {
       std::string label       = extractStoreLabel(path);
       std::string role        = (i == 0) ? "primary" : "library";
 
-      if (std::filesystem::exists(path)) {
-        coordinator.loadAndAddStore(label, role, path, permascroll);
-      } else {
-        std::cerr << "Warning: store path does not exist: " << path << "\n";
+      if (!std::filesystem::exists(path)) {
+        // Querying a store that is not there would answer from nothing and
+        // look like an empty result.
+        std::cerr << "Error: store path does not exist: " << path << "\n";
+        return 1;
       }
+      coordinator.loadAndAddStore(label, role, path, permascroll);
     }
   }
 

@@ -172,7 +172,18 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   varBindings_.clear();
   lastResultCells_.clear();
 
-  CellRef resultCell = compileQuery(query);
+  CellRef resultCell = noCell;
+  try {
+    resultCell = compileQuery(query);
+  } catch (const std::invalid_argument &unsupported) {
+    return CompilationResult{
+        .success          = false,
+        .entryOpcode      = noCell,
+        .errorMessage     = unsupported.what(),
+        .generatedOpcodes = {},
+        .disassembly      = "",
+    };
+  }
   if (lastResultCells_.empty() && resultCell != noCell) {
     lastResultCells_.push_back(resultCell);
   }
