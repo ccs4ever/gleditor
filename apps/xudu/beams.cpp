@@ -1242,6 +1242,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
       bridgeConfig_.satelloid.alignmentEnabled) {
     CellSatelloid sat;
     sat.cellRef    = cellRef;
+    sat.linkId     = strand.link;
     sat.originPos  = cellAnch->position;
     sat.currentPos = solvedPos;
     sat.targetPos = glm::vec3(docPos.x + docHalfW + bridgeConfig_.satelloid.gap,
