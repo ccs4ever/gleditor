@@ -3393,6 +3393,7 @@ int main(const int argc, char **argv) {
     links.setTetherOverlay(&tenuousTetherOverlay);
     SatelloidOverlay satelloidOverlay(renderer);
     links.setSatelloidOverlay(&satelloidOverlay);
+    satelloidOverlay.setLinkContext(&linkContext);
 #ifdef XUZZ_BUILD
     auto zigzagPresentation =
         std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
@@ -3485,6 +3486,54 @@ int main(const int argc, char **argv) {
     // slice or a resumed session names another.
     std::size_t zigzagStoreIndex = 0;
     std::unordered_map<std::size_t, MicroversionId> sliceHeads;
+    satelloidOverlay.setSiteFilter(
+        [&session, &zigzagStoreIndex](const xanadu::CellSite &site) {
+          return site.store == session->store(zigzagStoreIndex).documentId();
+        });
+    satelloidOverlay.setAnchorResolver(
+        [zigzagPresentation](const zigzag::CellRef cell) {
+          if (const auto anchor = zigzagPresentation->cellAnchor(cell)) {
+            return std::optional{anchor->position};
+          }
+          return zigzagPresentation->focusCentre();
+        });
+    satelloidOverlay.setNeighborhoodResolver([zigzagPresentation](
+                                                 const zigzag::CellRef root) {
+      std::vector<xudu::SatelloidNeighbor> out;
+      const auto &manifold = zigzagPresentation->manifold();
+      const auto *store    = zigzagPresentation->store();
+      if (!store || !manifold.contains(root)) return out;
+      out.push_back({root, manifold.textOf(root, *store), {}, 0});
+      const auto &view = zigzagPresentation->currentView();
+      const std::array<std::string, 3> names{view.x_dimension, view.y_dimension,
+                                             view.z_dimension};
+      const std::array<glm::vec2, 3> axes{glm::vec2{1.0F, 0.0F},
+                                          glm::vec2{-0.5F, 0.866F},
+                                          glm::vec2{-0.5F, -0.866F}};
+      const auto radius = std::max(1, zigzagPresentation->cellRadius());
+      for (std::size_t axis = 0; axis < names.size(); ++axis) {
+        const auto dim = manifold.dimensionNamed(names[axis], *store);
+        if (!dim) continue;
+        for (const auto direction :
+             {zigzag::DimVector::NEG, zigzag::DimVector::POS}) {
+          auto cell        = root;
+          const float sign = direction == zigzag::DimVector::POS ? 1.0F : -1.0F;
+          for (int depth = 1; depth <= radius; ++depth) {
+            cell = manifold.linked(cell, *dim, direction);
+            if (cell == zigzag::noCell || cell == root) break;
+            out.push_back({cell, manifold.textOf(cell, *store),
+                           axes[axis] * sign * static_cast<float>(depth),
+                           static_cast<std::uint32_t>(depth)});
+          }
+        }
+      }
+      return out;
+    });
+    satelloidOverlay.setNeighborhoodRevision(
+        [zigzagPresentation] { return zigzagPresentation->bridgeRevision(); });
+    satelloidOverlay.setAxisNameResolver([zigzagPresentation] {
+      return zigzagPresentation->currentView().x_dimension;
+    });
     zigzagPresentation->setExternInspector([&session, &zigzagStoreIndex](
                                                const zigzag::CellRef cell) {
       const auto &local = session->store(zigzagStoreIndex);
