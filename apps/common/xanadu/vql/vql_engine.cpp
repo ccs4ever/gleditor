@@ -88,6 +88,24 @@ VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
       coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {}
 
+namespace {
+/// A value as the text a comparison or a search reads.
+std::string textOfValue(const zigzag::vortex::CellValue &value) {
+  return std::visit(
+      [](const auto &held) -> std::string {
+        using T = std::remove_cvref_t<decltype(held)>;
+        if constexpr (std::same_as<T, std::string>) {
+          return held;
+        } else if constexpr (std::same_as<T, bool>) {
+          return held ? "true" : "false";
+        } else {
+          return std::format("{}", held);
+        }
+      },
+      value);
+}
+} // namespace
+
 zigzag::DimRef VQLEngine::resolveDimension(std::string_view name) {
   return coordinator_.resolveDimension(name);
 }
