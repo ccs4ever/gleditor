@@ -305,6 +305,43 @@ at the beginning of a document or on an unrelated cell; a version silently repla
 head; a comparison that writes navigation operations; or a difference report that loses which branch
 owns each change.
 
+### J16. Navigate a crowded, branching Xanadu link without losing its identity
+
+1. Through Xuzz's ordinary controls, write two passages in a xanadoc, quote one passage into a
+   second document position, and create three cells on a long `d.1` rank that contain linkable
+   content. Author one link with two separate left members and three right members, including a
+   distant cell. Author a second link overlapping one passage. Inspect the stored member spans and
+   confirm the two links have different identities; no structure script counts as authoring.
+1. At the overlap, inspect candidate links with the pointer and accessibility tree. Select one
+   identity without moving the caret. Cycle its left members and right members independently, choose
+   each repeated occurrence, cross in both directions, and verify that every preview keeps both full
+   endsets and the origin marker. Dismiss and reselect the other link without inheriting the first
+   link's member cursors.
+1. Enter a chosen document occurrence, return, then enter the distant cell's exact content span.
+   Move along its rank and switch projection while keeping the source document as a companion and
+   the selected link available. Reverse direction and enter the explicitly chosen document
+   occurrence; neither direction may infer an authored pair from a rendered beam.
+1. Return to the origin visit and make two different endpoint visits. Use Activity Back and choose
+   each Activity Forward child. Open Walks, preview both branches, reference one visit and annotate
+   the other; preview and annotation must add no visit. Close and reopen Xuzz, then restore both
+   branches with their link ID, side, member, occurrence, caret/rank focus, and note intact.
+1. Request an unavailable endpoint, inspect its pending or unavailable status, then cancel. Confirm
+   that the chosen link and member remain selected and that no target or completed visit was
+   invented. Compare visited stores' operation counts before and after navigation; only the private
+   activity store may grow when a semantic visit completes.
+
+Evidence: frame and accessibility output at the overlap, both endset cursor positions, each exact
+document and cell occurrence, the distant rank neighborhood, Walks' two futures, the reopened
+reference and annotation, and the cancelled pending target; `xudu-dump` of visited and activity
+stores before and after navigation. Record the control used for every step. A direct store API call,
+prepared structure script, or automation-only action is diagnostic evidence, not a journey pass.
+
+Watch for: a covering selection that fills a gap between discontinuous members; duplicate
+occurrences collapsed into one; a beam choosing a member by its visual strand; a second link
+silently replacing the selected one; a distant cell unreachable because it is outside the current
+radius; a Forward choice erasing its sibling; a preview writing a visit; or an unavailable target
+silently resolving to another occurrence.
+
 ## Findings
 
 Each step ends in exactly one of:

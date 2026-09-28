@@ -103,6 +103,9 @@ public:
    */
   xanadu::NavigationResult execute(const xanadu::NavigationCommand &command);
 
+  /// Rehydrate the selected link after reopened views can resolve its ends.
+  void restoreCurrentSelection();
+
   [[nodiscard]] gleditor::cpp26::optional<const xanadu::SelectedLink &>
   selection() const noexcept {
     return navigator.selection();

@@ -4045,10 +4045,6 @@ int main(const int argc, char **argv) {
             auto version      = MicroversionId::parse(place.zigzagVersion);
             if (version.isZero() || !store.getOp(version).has_value()) {
               version = store.primaryCurrentVersion();
-            } else if (version.isAncestorOf(store.latest())) {
-              // Saving appends bookkeeping after the slice's own last edit;
-              // resuming from before it would fork the next edit away.
-              version = store.latest();
             }
             bindZigzag(rState, i, version);
             const auto focus = static_cast<zigzag::CellRef>(place.zigzagFocus);
@@ -4064,6 +4060,9 @@ int main(const int argc, char **argv) {
         });
       }
 #endif
+      renderer->runWithState([&linkContext](RenderState &) {
+        linkContext.restoreCurrentSelection();
+      });
     } else if (asked.empty() && read.empty() && alongside.empty() &&
                extraImports.empty()) {
       const auto &primaryStore = session->store(0);

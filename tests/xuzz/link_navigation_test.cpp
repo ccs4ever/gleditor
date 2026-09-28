@@ -318,6 +318,38 @@ TEST(LinkNavigationTest, ActivityBackRestoresTheVisitAndItsPanel) {
   EXPECT_EQ(h.log.size(), 3U);
 }
 
+TEST(LinkNavigationTest, RestartRestoresSelectedLinkWithoutAnotherVisit) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto entered = h.run(nav::Enter{});
+  ASSERT_TRUE(entered && entered->visit);
+  const auto before = h.log.size();
+
+  xanadu::LinkNavigator reopened{h.log};
+  const auto restored = reopened.restoreCurrentSelection();
+  ASSERT_TRUE(restored && restored->resolve);
+  EXPECT_FALSE(restored->focus);
+  EXPECT_FALSE(restored->visit);
+  ASSERT_TRUE(reopened.supply(restored->resolve->generation,
+                              h.resolve(restored->resolve->key)));
+  const auto selected = reopened.selection();
+  ASSERT_TRUE(selected);
+  EXPECT_EQ(selected->key, h.link());
+  EXPECT_EQ(selected->active, LinkSide::Right);
+  EXPECT_EQ(selected->right,
+            (SideCursor{.member = kThree, .occurrence = kThreeInWholeCell}));
+  EXPECT_EQ(h.log.size(), before);
+
+  const auto back = reopened.dispatch(nav::ActivityBack{});
+  ASSERT_TRUE(back);
+  EXPECT_EQ(selected->key, h.link());
+  EXPECT_EQ(h.log.size(), before);
+}
+
 TEST(LinkNavigationTest, ActivityForwardChoosesEitherExistingBranch) {
   Harness h;
   const auto origin = arrive(h);

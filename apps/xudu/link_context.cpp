@@ -200,6 +200,10 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
   }
 }
 
+void LinkContext::restoreCurrentSelection() {
+  if (auto effect = navigator.restoreCurrentSelection()) apply(*effect);
+}
+
 std::optional<xanadu::OccurrenceSite> LinkContext::originSite() const {
   const auto selected = navigator.selection();
   if (!selected || !selected->origin) {
