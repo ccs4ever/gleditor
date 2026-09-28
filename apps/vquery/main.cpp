@@ -31,6 +31,7 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/parser.hpp"
+#include "common/xanadu/vql/result_store.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
@@ -367,8 +368,35 @@ int main(int argc, char *argv[]) {
                      (std::istreambuf_iterator<char>()));
   }
 
-  // Query Execution Helper
+  // The last query run and what it found: what -o and :save write.
+  std::string lastQuery;
   std::vector<zigzag::CellRef> lastResults;
+  const auto saveResults = [&](const std::string &path) -> bool {
+    namespace fs = std::filesystem;
+    if (fs::exists(fs::path(path) / "ops.nodes")) {
+      std::cerr << "Error: " << path
+                << " already holds a store; results are written to a new one\n";
+      return false;
+    }
+    try {
+      fs::create_directories(path);
+      xanadu::Store out(permascroll);
+      const auto stats = xanadu::vql::writeResultStore(coordinator, lastQuery,
+                                                       lastResults, out);
+      out.save(path);
+      std::cout << "Saved " << stats.cells << " result"
+                << (1 == stats.cells ? "" : "s") << " to " << path << " ("
+                << stats.quoted << " quoted, " << stats.copied
+                << " written out)\n";
+      return true;
+    } catch (const std::exception &err) {
+      std::cerr << "Error: cannot save results to " << path << ": "
+                << err.what() << "\n";
+      return false;
+    }
+  };
+
+  // Query Execution Helper
   bool hasResults = false;
   auto runQuery   = [&](std::string_view qStr) -> bool {
     // Parse AST
@@ -440,6 +468,7 @@ int main(int argc, char *argv[]) {
 
     lastResults = results;
     hasResults  = true;
+    lastQuery   = std::string(qStr);
 
     // Format results
     if (format == "ascii") {
@@ -491,13 +520,35 @@ int main(int argc, char *argv[]) {
     bool ok = runQuery(queryText);
     if (!ok) return 1;
 
-    // Handle in-place mutation
+    // In place: what the query minted -- cells that exist only in the arena
+    // -- is promoted into the primary store with everything reachable from
+    // it. A query that only read has nothing to write, and says so rather
+    // than claim a save that changed nothing.
     if (program.get<bool>("--in-place") && !primaryPath.empty()) {
       const auto primStore = coordinator.primaryStore();
-      if (primStore && primStore->store) {
-        primStore->store->save(primaryPath);
-        std::cout << "Saved in-place changes to primary store: " << primaryPath
-                  << "\n";
+      if (!primStore || !primStore->store) {
+        std::cerr << "Error: no primary store to write into\n";
+        return 1;
+      }
+      auto &store         = *primStore->store;
+      const auto &arena   = coordinator.arena();
+      std::size_t written = 0;
+      for (const auto result : lastResults) {
+        if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
+            arena.resolveForeign(result)) {
+          continue;
+        }
+        if (const auto promoted =
+                zigzag::promote(store, store.latest(), arena, result)) {
+          written += promoted->cells.size();
+        }
+      }
+      if (0 == written) {
+        std::cout << "Nothing to write in place: the query minted no cells\n";
+      } else {
+        store.save(primaryPath);
+        std::cout << "Wrote " << written << " cell" << (1 == written ? "" : "s")
+                  << " into " << primaryPath << "\n";
       }
     }
 
@@ -636,6 +687,16 @@ int main(int argc, char *argv[]) {
         std::cout << "Loaded store '" << label << "' from " << path << "\n";
       } else {
         std::cout << "Usage: :store <label> <path>\n";
+      }
+    } else if (line.starts_with(":save")) {
+      std::string path = line.size() > 5 ? line.substr(5) : std::string{};
+      path.erase(0, path.find_first_not_of(' '));
+      if (path.empty()) {
+        std::cout << "Usage: :save <path>\n";
+      } else if (lastQuery.empty()) {
+        std::cout << "Run a query first; :save writes its results\n";
+      } else {
+        static_cast<void>(saveResults(path));
       }
     } else if (line.starts_with(":ast ")) {
       std::string q = line.substr(5);
