@@ -14,6 +14,7 @@
 #include <gleditor/logging.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/spatial.hpp>
 
 namespace xudu {
 
@@ -169,9 +170,22 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   const auto screenH = static_cast<float>(ctx.screenHeight);
   const auto panelW  = inner + (2.0F * config.paddingPx);
   const auto panelH  = tall + allRows + (2.0F * config.paddingPx);
-  const auto left    = screenW - config.marginPx - panelW;
-  const auto top     = screenH - config.topPx;
-  const auto x0      = left + config.paddingPx;
+  auto left          = screenW - config.marginPx - panelW;
+  auto top           = screenH - config.topPx;
+  if (panelAnchors) {
+    const auto &a      = *panelAnchors;
+    const auto centreX = 0.5F * (a[0].x + a[1].x);
+    const auto highest = std::max(a[0].y, a[1].y);
+    const auto minLeft = ctx.chrome.left + config.marginPx;
+    const auto maxLeft = screenW - ctx.chrome.right - config.marginPx - panelW;
+    const auto minTop  = ctx.chrome.bottom + config.marginPx + panelH;
+    const auto maxTop  = screenH - std::max(ctx.chrome.top, config.topPx);
+    if (maxLeft >= minLeft && maxTop >= minTop) {
+      left = std::clamp(centreX - panelW * 0.5F, minLeft, maxLeft);
+      top  = std::clamp(highest + config.marginPx + panelH, minTop, maxTop);
+    }
+  }
+  const auto x0 = left + config.paddingPx;
 
   // The whole panel answers picks, so a click on it never falls through to
   // the page behind; the buttons are tagged after it, one each.
@@ -236,12 +250,39 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
   // Documents may be closed with nothing asking decorate(), so the cell
   // marks are kept current from here too.
   rebuildHighlights();
+  panelAnchors.reset();
+  if (context.selection() && anchorResolver) {
+    if (const auto world = anchorResolver(ctx.state)) {
+      const bool moved =
+          framedAnchors &&
+          (glm::distance((*framedAnchors)[0], (*world)[0]) > 0.5F ||
+           glm::distance((*framedAnchors)[1], (*world)[1]) > 0.5F);
+      if (framingHandler && (framedSelection != context.revision() || moved)) {
+        framingHandler(*world, ctx.timeline);
+        framedSelection = context.revision();
+        framedAnchors   = *world;
+      }
+      const auto width   = static_cast<float>(ctx.screenWidth);
+      const auto height  = static_cast<float>(ctx.screenHeight);
+      const auto inFront = [&](const glm::vec3 &point) {
+        return (ctx.viewProjection * glm::vec4(point, 1.0F)).w > 0.0001F;
+      };
+      if (inFront((*world)[0]) && inFront((*world)[1])) {
+        panelAnchors =
+            std::array{gleditor::spatial::projectToScreen(
+                           ctx.viewProjection, (*world)[0], width, height),
+                       gleditor::spatial::projectToScreen(
+                           ctx.viewProjection, (*world)[1], width, height)};
+      }
+    }
+  }
   const Stamp stamp{.selection = context.revision(),
                     .views     = session.generation(),
                     .config    = configRevision,
                     .width     = ctx.screenWidth,
                     .height    = ctx.screenHeight,
-                    .reading   = context.readingStamp()};
+                    .reading   = context.readingStamp(),
+                    .anchors   = panelAnchors};
   if (panelBuiltFor != stamp) {
     panelBuiltFor = stamp;
     rebuildPanel(ctx);

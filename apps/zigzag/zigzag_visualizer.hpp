@@ -418,6 +418,9 @@ public:
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(CellRef cell) const override;
+  /// Show a chosen link occurrence outside the focused neighborhood without
+  /// changing the reader's cell focus or recording a visit.
+  void setPreviewCell(std::optional<CellRef> cell);
 
   // -- Embedded presentation surface ---------------------------------------
   [[nodiscard]] const Manifold &manifold() const noexcept override {
@@ -575,6 +578,7 @@ private:
   xanadu::Store *store_{nullptr};
   std::unique_ptr<UnifiedTransclusionEngine> engine_;
   CellID accursed_cell_focus_{0};
+  std::optional<CellRef> preview_cell_;
   ViewAxisBinding current_view_;
 
   SceneVisual scene_;

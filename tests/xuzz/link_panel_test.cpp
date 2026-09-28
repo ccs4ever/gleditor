@@ -84,7 +84,7 @@ TEST(LinkPanelTest, APendingLinkSaysSo) {
   EXPECT_EQ(lines[0].text, "link " + std::to_string(p.f.link) + " · resolving");
 }
 
-TEST(LinkPanelTest, UnsetCursorsAreDashedAndMuted) {
+TEST(LinkPanelTest, UnsetCursorsExplainTheChoiceAndAreMuted) {
   Panel p;
   p.run(nav::SelectLink{.key = p.key()});
 
@@ -93,11 +93,11 @@ TEST(LinkPanelTest, UnsetCursorsAreDashedAndMuted) {
   ASSERT_EQ(lines.size(), 4U);
   EXPECT_EQ(lines[0].text,
             "comment · link " + std::to_string(p.f.link) + " · twobythree");
-  EXPECT_EQ(lines[1], (PanelLine{.text   = "Left —/2",
+  EXPECT_EQ(lines[1], (PanelLine{.text   = "Left: choose member (2)",
                                  .tone   = PanelLine::Tone::Muted,
                                  .active = true}));
-  EXPECT_EQ(lines[2],
-            (PanelLine{.text = "Right —/3", .tone = PanelLine::Tone::Muted}));
+  EXPECT_EQ(lines[2], (PanelLine{.text = "Right: choose member (3)",
+                                 .tone = PanelLine::Tone::Muted}));
   EXPECT_EQ(lines[3], (PanelLine{.text = "origin: none",
                                  .tone = PanelLine::Tone::Muted}));
 }
@@ -129,7 +129,7 @@ TEST(LinkPanelTest, AMemberWithSeveralOccurrencesWaitsForAChoice) {
   p.run(
       nav::SelectMember{.key = p.key(), .side = LinkSide::Right, .member = 2});
 
-  EXPECT_EQ(p.lines()[2].text, "Right 3/3 · occurrence —/5");
+  EXPECT_EQ(p.lines()[2].text, "Right 3/3 · choose occurrence (5)");
 }
 
 TEST(LinkPanelTest, AMemberOutOfViewSaysSo) {

@@ -576,7 +576,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
-  if (settled && scriptFinished() && this->state->dumpAccessibility) {
+  if (settled && !hasPendingWork() && scriptFinished() &&
+      this->state->dumpAccessibility) {
     // Once, on the first settled frame, and after the rebuild above so that
     // what is printed is what would be sent rather than the frame before it.
     this->state->dumpAccessibility = false;
@@ -1218,7 +1219,8 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // Every step carried out and answered: the script is what this run was
     // for, so quitting before it finished would report on a document the
     // command line did not ask for.
-    if (settled && this->state->profiling && scriptFinished()) {
+    if (settled && !hasPendingWork() && this->state->profiling &&
+        scriptFinished()) {
       if (this->state->recordFrames > 0 &&
           this->state->recordedFrames < this->state->recordFrames) {
         continue;

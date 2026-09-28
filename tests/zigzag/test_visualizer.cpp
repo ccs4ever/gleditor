@@ -565,6 +565,28 @@ TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
   EXPECT_FALSE(viz.cellAnchor(static_cast<CellRef>(999999U)).has_value());
 }
 
+TEST(ZigzagVisualizerTest, LinkPreviewShowsDistantCellWithoutChangingFocus) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto focus   = viz.focusCell();
+  const auto distant = static_cast<CellRef>(viz.createCell("distant", "text"));
+  ASSERT_NE(distant, focus);
+  const auto operations = viz.store()->opCount();
+
+  viz.setPreviewCell(distant);
+
+  EXPECT_EQ(viz.focusCell(), focus);
+  EXPECT_EQ(viz.store()->opCount(), operations);
+  ASSERT_TRUE(viz.visibleCells().contains(static_cast<CellID>(distant)));
+  EXPECT_GT(viz.visibleCells().at(static_cast<CellID>(distant)).target_alpha,
+            0.0F);
+
+  viz.setPreviewCell(std::nullopt);
+  EXPECT_EQ(viz.focusCell(), focus);
+  EXPECT_EQ(viz.store()->opCount(), operations);
+  EXPECT_FLOAT_EQ(
+      viz.visibleCells().at(static_cast<CellID>(distant)).target_alpha, 0.0F);
+}
+
 TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
   ZigzagVisualizer viz("Sans 12");
   const auto root = viz.focusCellId();
