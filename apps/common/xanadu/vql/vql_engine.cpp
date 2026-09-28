@@ -216,6 +216,11 @@ VQLEngine::evaluatePath(const PathExpression &path,
                         const std::vector<zigzag::CellRef> &contextCells) {
   std::vector<zigzag::CellRef> current =
       resolveAnchor(path.anchor, contextCells);
+  std::erase_if(current, [&](const zigzag::CellRef cell) {
+    return !std::ranges::all_of(
+        path.anchorPredicates,
+        [&](const BooleanExpr &pred) { return evaluatePredicate(pred, cell); });
+  });
 
   for (const auto &step : path.steps) {
     current = evaluateStep(step, current);

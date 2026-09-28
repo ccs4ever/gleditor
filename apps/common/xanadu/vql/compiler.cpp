@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "common/xanadu/vql/lexer.hpp"
@@ -347,6 +348,13 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
 CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
                                            CellRef ctxCell) {
+  if (!path.anchorPredicates.empty()) {
+    // Refused rather than compiled without them, which would answer every
+    // anchor cell whatever the predicate said.
+    throw std::invalid_argument(
+        "predicates on an anchor are not compiled to Vortex yet; run the "
+        "query with --engine direct");
+  }
   CellRef start = compileAnchor(path.anchor);
   if (start == noCell) {
     start = ctxCell != noCell ? ctxCell : core_.home();
