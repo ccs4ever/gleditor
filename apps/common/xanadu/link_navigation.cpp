@@ -424,6 +424,18 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   return effect;
 }
 
+NavigationResult LinkNavigator::restoreCurrentSelection() {
+  if (!current) return NavigationEffect{};
+  const auto visit = activity.find(*current);
+  if (!visit || !visit->link) return NavigationEffect{};
+  auto effect = restoreVisit(*visit);
+  if (effect) {
+    effect->focus.reset();
+    effect->visit.reset();
+  }
+  return effect;
+}
+
 NavigationResult LinkNavigator::activityBack() {
   if (!current) {
     return std::unexpected(NavigationError::NoPreviousVisit);

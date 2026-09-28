@@ -293,6 +293,10 @@ public:
 
   NavigationResult dispatch(const NavigationCommand &command);
 
+  /// Rebuild the saved link context after the host has reopened its views.
+  /// The returned resolution request changes no reading place or visit.
+  NavigationResult restoreCurrentSelection();
+
   /**
    * @brief Deliver the occurrences a ResolveRequest asked for.
    *
