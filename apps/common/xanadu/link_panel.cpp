@@ -11,10 +11,7 @@ namespace xanadu {
 
 namespace {
 
-// An unset cursor is shown as a dash rather than left blank or defaulted, so
-// a reader can tell "nothing chosen" from "the first one".
-constexpr std::string_view kUnset = "—";
-constexpr std::string_view kSep   = " · ";
+constexpr std::string_view kSep = " · ";
 
 PanelLine sideLine(const SelectedLink &selected,
                    const LinkOccurrences &resolved, const LinkSide side,
@@ -23,15 +20,15 @@ PanelLine sideLine(const SelectedLink &selected,
   const auto &cursor  = selected.cursor(side);
   const bool active   = side == selected.active;
 
-  std::string text = std::format(
-      "{} {}/{}", LinkSide::Left == side ? "Left" : "Right",
-      cursor.member ? std::to_string(*cursor.member + 1) : std::string{kUnset},
-      members.size());
+  const auto label = LinkSide::Left == side ? "Left" : "Right";
   if (!cursor.member) {
-    return {.text   = std::move(text),
+    return {.text =
+                std::format("{}: choose member ({})", label, members.size()),
             .tone   = PanelLine::Tone::Muted,
             .active = active};
   }
+  std::string text =
+      std::format("{} {}/{}", label, *cursor.member + 1, members.size());
 
   const auto &member = members[*cursor.member];
   if (!member.inView()) {
@@ -40,10 +37,13 @@ PanelLine sideLine(const SelectedLink &selected,
             .tone   = PanelLine::Tone::Muted,
             .active = active};
   }
-  text += std::format("{}occurrence {}/{}", kSep,
-                      cursor.occurrence ? std::to_string(*cursor.occurrence + 1)
-                                        : std::string{kUnset},
-                      member.occurrences.size());
+  if (!cursor.occurrence) {
+    text += std::format("{}choose occurrence ({})", kSep,
+                        member.occurrences.size());
+  } else {
+    text += std::format("{}occurrence {}/{}", kSep, *cursor.occurrence + 1,
+                        member.occurrences.size());
+  }
   if (cursor.occurrence) {
     const auto &occurrence = member.occurrences[*cursor.occurrence];
     text += std::format("{}{}", kSep, name(occurrence.site));

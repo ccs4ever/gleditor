@@ -13,6 +13,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -53,6 +54,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
+#include <gleditor/spatial.hpp>
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
@@ -3266,6 +3268,80 @@ int main(const int argc, char **argv) {
         });
     links.setLinkContext(&linkContext);
     xudu::LinkPanelOverlay linkPanel(linkContext, *session);
+    const auto selectedPair = [&linkContext](const RenderState &rState,
+                                             const auto &cellPoint)
+        -> std::optional<xudu::LinkPanelOverlay::AnchorPair> {
+      const auto selected = linkContext.selection();
+      if (!selected || !selected->occurrences) return std::nullopt;
+      xudu::LinkPanelOverlay::AnchorPair points;
+      for (const auto side :
+           {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
+        const auto &cursor = selected->cursor(side);
+        if (!cursor.member || !cursor.occurrence) return std::nullopt;
+        const auto &members = selected->occurrences->members(side);
+        if (*cursor.member >= members.size() ||
+            *cursor.occurrence >= members[*cursor.member].occurrences.size()) {
+          return std::nullopt;
+        }
+        const auto &site =
+            members[*cursor.member].occurrences[*cursor.occurrence].site;
+        const auto point = std::visit(
+            [&]<typename Site>(const Site &at) -> std::optional<glm::vec3> {
+              if constexpr (std::is_same_v<Site, xanadu::CellSite>) {
+                return cellPoint(at);
+              } else {
+                const auto view = linkContext.viewIndexOf(at);
+                if (!view || *view >= rState.docs.size() || !rState.docs[*view])
+                  return std::nullopt;
+                const auto &doc  = *rState.docs[*view];
+                const auto start = doc.anchorFor(at.range.start);
+                if (!start) return std::nullopt;
+                const auto first = doc.worldPoint(*start);
+                if (!first) return std::nullopt;
+                if (at.range.end > at.range.start + 1) {
+                  if (const auto last = doc.anchorFor(at.range.end - 1)) {
+                    if (const auto end = doc.worldPoint(*last)) {
+                      return 0.5F * (*first + *end);
+                    }
+                  }
+                }
+                return first;
+              }
+            },
+            site);
+        if (!point) return std::nullopt;
+        points[side == xanadu::LinkSide::Left ? 0 : 1] = *point;
+      }
+      return points;
+    };
+    linkPanel.setAnchorResolver([selectedPair](const RenderState &rState) {
+      return selectedPair(
+          rState, [](const xanadu::CellSite &) -> std::optional<glm::vec3> {
+            return std::nullopt;
+          });
+    });
+    linkPanel.setFramingHandler(
+        [&links, &state](const xudu::LinkPanelOverlay::AnchorPair &points,
+                         ch::Timeline &timeline) {
+          const auto midpoint = 0.5F * (points[0] + points[1]);
+          glm::vec3 target;
+          {
+            std::scoped_lock locker(state->view);
+            const auto &view   = state->view;
+            const float aspect = view.screenHeight > 0
+                                     ? static_cast<float>(view.screenWidth) /
+                                           static_cast<float>(view.screenHeight)
+                                     : 4.0F / 3.0F;
+            const float fit    = gleditor::spatial::framingDistance(
+                std::max(std::abs(points[0].x - points[1].x) + 20.0F, 10.0F),
+                std::max(std::abs(points[0].y - points[1].y) + 20.0F, 10.0F),
+                view.fov, aspect, 1.5F);
+            target = glm::vec3{
+                midpoint.x, midpoint.y,
+                std::clamp(std::max(view.pos.z, fit), 50.0F, 9500.0F)};
+          }
+          links.sworphCameraTo(target, timeline);
+        });
     xudu::OverviewOverlay overview(state);
     // The selected link's chosen places, marked on the overview so a reader
     // at reading zoom can see where the other end of what they chose lies.
@@ -3488,6 +3564,40 @@ int main(const int argc, char **argv) {
                               const std::uint32_t border) {
           zigzagPresentation->setCellHighlights(std::move(highlights), border);
         });
+    linkPanel.setAnchorResolver([selectedPair, &linkContext,
+                                 &zigzagPresentation, &session,
+                                 &zigzagStoreIndex](const RenderState &rState) {
+      std::optional<zigzag::CellRef> preview;
+      const auto selected = linkContext.selection();
+      if (selected && selected->occurrences) {
+        for (const auto side :
+             {selected->active, xanadu::opposite(selected->active)}) {
+          const auto &cursor = selected->cursor(side);
+          if (!cursor.member || !cursor.occurrence) continue;
+          const auto &members = selected->occurrences->members(side);
+          if (*cursor.member >= members.size() ||
+              *cursor.occurrence >= members[*cursor.member].occurrences.size())
+            continue;
+          const auto &site =
+              members[*cursor.member].occurrences[*cursor.occurrence].site;
+          const auto *cell = std::get_if<xanadu::CellSite>(&site);
+          if (cell &&
+              cell->store == session->store(zigzagStoreIndex).documentId()) {
+            preview = cell->cell;
+            break;
+          }
+        }
+      }
+      zigzagPresentation->setPreviewCell(preview);
+      return selectedPair(
+          rState, [&](const xanadu::CellSite &at) -> std::optional<glm::vec3> {
+            if (at.store != session->store(zigzagStoreIndex).documentId()) {
+              return std::nullopt;
+            }
+            const auto anchor = zigzagPresentation->cellAnchor(at.cell);
+            return anchor ? std::optional{anchor->position} : std::nullopt;
+          });
+    });
     bridgeCoordinator.applyConfig(initialLayout.bridge);
 #endif
     links.setOpener([&views](const MicroversionId &version) {

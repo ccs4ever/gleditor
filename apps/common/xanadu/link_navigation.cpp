@@ -152,6 +152,15 @@ void settleHint(SelectedLink &link) {
                                          : std::nullopt};
 }
 
+void selectSingletonMembers(SelectedLink &link) {
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    const auto &members = membersOf(link, side);
+    if (members.size() == 1 && !link.cursor(side).member) {
+      link.cursor(side) = chooseMember(members.front(), 0);
+    }
+  }
+}
+
 } // namespace
 
 gleditor::cpp26::optional<const SelectedLink &>
@@ -241,6 +250,7 @@ NavigationResult LinkNavigator::supply(
   keepInRange(*selected, LinkSide::Left);
   keepInRange(*selected, LinkSide::Right);
   settleHint(*selected);
+  selectSingletonMembers(*selected);
   return NavigationEffect{.preview = previewOf(*selected, selected->active)};
 }
 

@@ -134,6 +134,19 @@ TEST(LinkNavigationTest, SelectingPinsTheWholeLinkWithoutMoving) {
   EXPECT_EQ(h.log.size(), 1U);
 }
 
+TEST(LinkNavigationTest, SingletonMembersAreReadyWithoutEntering) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectLink{.key = h.overlapping()}));
+  const auto &chosen = h.selected();
+  ASSERT_TRUE(chosen.occurrences);
+  ASSERT_EQ(chosen.occurrences->left.size(), 1U);
+  ASSERT_EQ(chosen.occurrences->right.size(), 1U);
+  EXPECT_EQ(chosen.left.member, 0U);
+  EXPECT_EQ(chosen.right.member, 0U);
+  EXPECT_EQ(h.log.size(), 1U);
+}
+
 TEST(LinkNavigationTest, SideCursorsMoveIndependently) {
   Harness h;
   ASSERT_TRUE(h.run(nav::SelectLink{.key = h.link()}));

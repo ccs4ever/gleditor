@@ -263,6 +263,7 @@ void ZigzagVisualizer::adoptDocument(
     }
   }
 
+  preview_cell_.reset();
   visible_cells_.clear();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
@@ -294,6 +295,7 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   if (accursed_cell_focus_ == 0 && engine_->manifold().cellCount() > 0) {
     accursed_cell_focus_ = engine_->manifold().cells().front().birthOp;
   }
+  preview_cell_.reset();
   visible_cells_.clear();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
@@ -1229,6 +1231,22 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           ySpace);
   mapAxis(current_view_.z_dimension, glm::vec3{0.0F, 0.0F, 1.0F}, zVisual,
           zSpace);
+  if (preview_cell_ && *preview_cell_ != focusRef &&
+      engine_->findCell(*preview_cell_) &&
+      (!visible_cells_.contains(static_cast<CellID>(*preview_cell_)) ||
+       visible_cells_.at(static_cast<CellID>(*preview_cell_)).target_alpha <=
+           0.0F)) {
+    mapNeighbor(focusRef, *preview_cell_, glm::vec3{xSpace * 2.0F, 0.0F, 0.0F},
+                xVisual.color);
+  }
+}
+
+void ZigzagVisualizer::setPreviewCell(std::optional<CellRef> cell) {
+  if (cell && (!engine_ || !engine_->findCell(*cell))) cell.reset();
+  if (cell == preview_cell_) return;
+  preview_cell_ = cell;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
 }
 
 void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
