@@ -150,7 +150,7 @@ PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler li
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
-GL_CFLAGS := -Ithirdparty/opengl-registry
+GL_CFLAGS := -isystem thirdparty/opengl-registry
 endif
 
 # Vulkan backend is enabled by default if available through pkg-config,
@@ -453,7 +453,21 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include -isystem thirdparty/beman_optional/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+# INFO: -Werror added to combat a rising tide of compiler warnings that Claude/Devin/Gemini/Codex
+# were letting through
+# INFO: switched -Ithirdparty/** to -isystem thirdparty/** to kill all warnings coming from
+# thirdparty vendored code
+# INFO: added -Wno-missing-field-initializers to counteract the flag that -Wextra enables
+# that causes a known warning cycle (redundant-initializer <=> missing-field-initializers
+# in designated initializers) which is known safe, but the compiler doesn't know this as of (2026-09)
+# INFO: added -Wno-deprecated-declarations for std::inplace_vector, which (as of 2026-09) uses
+# a deprecated template
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps \
+-isystem thirdparty/Choreograph/src -isystem thirdparty/argparse/include \
+-isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include \
+-isystem thirdparty/beman_optional/include -Werror -Wall -Wextra \
+-Wno-missing-field-initializers -Wno-deprecated-declarations \
+$(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
 override CXXFLAGS += -isystem thirdparty/beman_inplace_vector/include
 ifeq ($(GLEDITOR_CPP26_FORCE_FALLBACK),1)
 override CXXFLAGS += -DGLEDITOR_CPP26_FORCE_FALLBACK=1
@@ -491,7 +505,7 @@ ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_ZSTD=1
 # zstd_seekable.h lives only in the vendored submodule (see .gitmodules),
 # not anywhere pkg-config's own --cflags for libzstd would find.
-override CXXFLAGS += -Ithirdparty/zstd/contrib/seekable_format
+override CXXFLAGS += -isystem thirdparty/zstd/contrib/seekable_format
 endif
 ifeq ($(HAVE_DECODE_INDEX_FLAC),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_FLAC=1
@@ -548,7 +562,9 @@ GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang
 # library must not need either of them in order to build, and neither program
 # may need the other; that is the whole of what the boundary is for.
 VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
-LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp'))
+# split out Choreograph from LIB_SRCS into its own build to prevent its warnings from being picked up
+LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find src/ -name '*.cpp'))
+CHOREOGRAPH_SRCS := $(shell find thirdparty/Choreograph/src/ -name '*.cpp')
 ifdef GLEDITOR_ENABLE_VULKAN
 LIB_SRCS += $(VK_SRCS)
 endif
@@ -577,7 +593,7 @@ ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
 # about pkg-config's own -I ordering). lib/common holds the private
 # xxhash.h/mem.h headers these two files need that installed zstd.h never
 # exposes.
-ZSTD_SEEKABLE_CFLAGS := -Ithirdparty/zstd/lib -Ithirdparty/zstd/lib/common \
+ZSTD_SEEKABLE_CFLAGS := -isystem thirdparty/zstd/lib -isystem thirdparty/zstd/lib/common \
                        -I$(ZSTD_SEEKABLE_DIR)
 LIB_SRCS_C :=
 ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
@@ -604,7 +620,8 @@ XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
 objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
-LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
+CHOREOGRAPH_OBJS := $(call obj,$(CHOREOGRAPH_SRCS))
+LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C)) $(call obj,$(CHOREOGRAPH_OBJS))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
@@ -736,6 +753,8 @@ endif
 $(ALL_OBJ_DIRS): private .UNSANDBOXED = 1
 $(ALL_OBJ_DIRS):
 	[ -d "$@" ] || $(MKDIR) -p "$@"
+
+$(CHOREOGRAPH_OBJS): CXXFLAGS := $(filter-out -Werror, $(CXXFLAGS))
 
 $(ALL_OBJS): | $(ALL_OBJ_DIRS)
 $(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
