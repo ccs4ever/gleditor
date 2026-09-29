@@ -258,7 +258,7 @@ public:
    */
   [[nodiscard]] virtual std::vector<ContentPiece> pieces() const {
     return {
-        ContentPiece{.bytes = text(), .mimeType = {}, .pageBreakAfter = false}};
+        ContentPiece{.bytes = text(), .mimeType = {}, .pageBreakAfter = false, .duplicateOfPieceIndex = std::nullopt}};
   }
 };
 

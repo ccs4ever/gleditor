@@ -1331,7 +1331,7 @@ int Application::run() {
         return;
       }
     }
-    commandTable.dispatch(scancode, mods);
+    std::ignore = commandTable.dispatch(scancode, mods);
   };
   const auto onMotion = [&](const int x, const int y,
                             const std::uint32_t held) {

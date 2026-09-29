@@ -806,11 +806,11 @@ inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
 /**
  * @brief The scope @p action's binding is live in; empty for anywhere.
  *
- * ZigZag's bare-key set (std:nav/*, std:ui/*, std:zigzag/*) steps, edits and
+ * ZigZag's bare-key set (std:nav/\*, std:ui/\*, std:zigzag/\*) steps, edits and
  * cycles cells with the arrows, letters and Space a document needs for text,
  * so in xuzz it only reaches the keyboard while ZigZag has it. Its
  * Alt-prefixed zigzag_* twins are how a reader in a document reaches ZigZag,
- * and are live anywhere. std:edit/* is caret movement, a document's.
+ * and are live anywhere. std:edit/\* is caret movement, a document's.
  */
 [[nodiscard]] std::string_view keymapScope(std::string_view action);
 

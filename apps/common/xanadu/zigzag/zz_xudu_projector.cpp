@@ -137,7 +137,6 @@ ZzStructureDocument projectXuduToZigzag(
 
       // Split text into paragraphs
       std::size_t start   = 0;
-      std::size_t paraIdx = 0;
       while (start < doc.text.size()) {
         std::size_t end = doc.text.find("\n\n", start);
         if (end == std::string::npos) {
@@ -174,23 +173,6 @@ ZzStructureDocument projectXuduToZigzag(
               break;
             }
           }
-          // No fallback to doc.spans[paraIdx]. That paired the *nth paragraph*
-          // with the *nth piece*, and a paragraph index and a piece index have
-          // no relationship whatever: a piece is a run of one primedia address,
-          // split and coalesced by editing, so one paragraph can span three
-          // pieces and one piece can hold five paragraphs.
-          //
-          // The address is not inert either. It is what clone detection
-          // compares, so two paragraphs handed the same borrowed span were
-          // declared clones: the second lost its text and gained a d.clone link
-          // to a paragraph it has nothing to do with. A wrong address is a
-          // claim, and Version::occurrencesOf() would report the quotation it
-          // asserts.
-          //
-          // So a paragraph the pieces do not cover gets no address and reads as
-          // empty, which is the answer Resolver gives for content it cannot
-          // verify: nothing, rather than something plausible.
-          ++paraIdx;
 
           const bool isUnchangedClone =
               (span.length > 0 && spanTrackers.contains(span));

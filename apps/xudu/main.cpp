@@ -674,7 +674,7 @@ public:
         (view.pos.z - point.z) * std::tan(glm::radians(view.fov) * 0.5F);
     const float halfW = halfH * static_cast<float>(view.screenWidth) /
                         static_cast<float>(view.screenHeight);
-    const auto follow = [kComfort](float &camera, const float at,
+    const auto follow = [](float &camera, const float at,
                                    const float half) {
       const float reach = half * kComfort;
       if (at > camera + reach) {
@@ -2795,7 +2795,7 @@ int main(const int argc, char **argv) {
     if (parser["--swarm"] == true || !collabRoom.empty()) {
       if (!session->swarmEnabled()) {
         session->useSwarm(parser["--private-dht"] == true);
-        quiet || std::cout << "xudu: swarm listening on port "
+        if (quiet) std::cout << "xudu: swarm listening on port "
                            << session->swarmPort() << "\n";
       }
     }
@@ -2815,7 +2815,7 @@ int main(const int argc, char **argv) {
       const std::string myScrollKey =
           "btpk:" + session->identity().publicKey.hex() + ":main";
       session->setLocalCollaboratorInfo(collabName, myFp, myScrollKey);
-      quiet || std::cout << "xudu: joined collaborative room '" << collabRoom
+      if (quiet) std::cout << "xudu: joined collaborative room '" << collabRoom
                          << "' (target: " << roomTarget.hex() << ") as "
                          << collabName << "\n";
     }
@@ -2831,7 +2831,7 @@ int main(const int argc, char **argv) {
         session->addDhtNode(
             spec.substr(0, colon),
             static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
-        quiet || std::cout << "xudu: joining the DHT through " << spec << "\n";
+        if (quiet) std::cout << "xudu: joining the DHT through " << spec << "\n";
       }
     }
 
@@ -2851,11 +2851,11 @@ int main(const int argc, char **argv) {
         available.push_back(hash);
         if (const auto meta = session->content().metainfo(hash);
             meta.has_value()) {
-          quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
+          if (quiet) std::cout << "xudu: " << file << " is " << meta->magnet()
                              << " (" << meta->files().size() << " file(s), "
                              << meta->totalLength() << " bytes)\n";
         } else {
-          quiet || std::cout << "xudu: " << file << " is " << hash.hex()
+          if (quiet) std::cout << "xudu: " << file << " is " << hash.hex()
                              << " (awaiting metadata)\n";
         }
       }
@@ -2873,7 +2873,7 @@ int main(const int argc, char **argv) {
         session->connectPeer(
             available.back(), spec.substr(0, colon),
             static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
-        quiet || std::cout << "xudu: asking " << spec << " for "
+        if (quiet) std::cout << "xudu: asking " << spec << " for "
                            << available.back().hex() << "\n";
       }
     }
@@ -2916,7 +2916,7 @@ int main(const int argc, char **argv) {
           session->viewOpened(produced, 0);
         }
         opening = produced;
-        quiet || std::cout << "xudu: " << produced.str() << " quotes "
+        if (quiet) std::cout << "xudu: " << produced.str() << " quotes "
                            << available.back().hex() << " file " << fileIndex
                            << " [" << offset << "," << offset + length << ")\n";
       }
@@ -2957,7 +2957,7 @@ int main(const int argc, char **argv) {
         xudu::saveConfig(config);
         recorded = config.author;
       }
-      quiet || std::cout << "xudu: publishing as " << recorded.name << " <"
+      if (quiet) std::cout << "xudu: publishing as " << recorded.name << " <"
                          << recorded.email << ">"
                          << (recorded.gpgKey.empty()
                                  ? std::string{}
@@ -3001,11 +3001,11 @@ int main(const int argc, char **argv) {
                                                            .extra  = {},
                                                            .passphrase = {}},
                                    0);
-      quiet || std::cout << "xudu: published " << opening.str() << " as "
+      if (quiet) std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }
 
-    quiet || std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
+    if (quiet) std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
                        << session->store(0).opCount() << " operations in "
                        << session->path(0) << ", opening " << opening.str()
                        << "\n";
@@ -4722,7 +4722,7 @@ int main(const int argc, char **argv) {
       app.commands().setScope(command.name,
                               std::string(xanadu::keymapScope(command.name)));
     }
-    quiet || std::cout << "commands:\n" << app.commands().helpText();
+    if (quiet) std::cout << "commands:\n" << app.commands().helpText();
 
 #ifdef XUZZ_BUILD
     // Handed to the render thread, which draws the strings.

@@ -98,7 +98,7 @@ DimRef ArenaManifold::ensureDimension(const std::string_view name) {
       }
       tail = nxt;
     }
-    link(tail, dimDims, DimVector::POS, dim);
+    link(tail, dimDims, DimVector::POS, dim).value();
   }
   return dim;
 }
@@ -129,7 +129,7 @@ void ArenaManifold::projectProvenance(const xanadu::Store &store) {
   provenanceCells_.insert(dimAuthorship);
   authorshipRoot_ = makeCell(intern("AUTHORSHIP.tsv"));
   provenanceCells_.insert(authorshipRoot_);
-  link(home, dimAuthorship, DimVector::POS, authorshipRoot_);
+  link(home, dimAuthorship, DimVector::POS, authorshipRoot_).value();
 
   const DimRef dimSource = ensureDimension("d.source");
   provenanceCells_.insert(dimSource);
@@ -165,7 +165,7 @@ void ArenaManifold::projectProvenance(const xanadu::Store &store) {
     }
   }
   if (noCell != bootstrapCell) {
-    link(authorshipRoot_, dimSource, DimVector::POS, bootstrapCell);
+    link(authorshipRoot_, dimSource, DimVector::POS, bootstrapCell).value();
   }
 
   auto appendRank = [this](std::string_view dimName, std::string_view value) {
@@ -181,7 +181,7 @@ void ArenaManifold::projectProvenance(const xanadu::Store &store) {
       }
       tail = nxt;
     }
-    link(tail, dim, DimVector::POS, cell);
+    link(tail, dim, DimVector::POS, cell).value();
     return cell;
   };
 

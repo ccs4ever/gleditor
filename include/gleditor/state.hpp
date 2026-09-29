@@ -122,7 +122,7 @@ struct AppState {
   std::mutex syntheticGuard;
   std::deque<SyntheticInput> syntheticQueue;
   std::uint64_t syntheticQueued{};
-  std::atomic<std::uint64_t> syntheticHandled{};
+  std::atomic<std::uint64_t> syntheticHandled;
 
   /// Queue @p input for the event loop; answers the syntheticHandled value
   /// at which it has been handled.
