@@ -133,11 +133,13 @@ TEST(ScalarTest, aSignallingNaNIsRefusedRatherThanQuieted) {
       xanadu::isSignallingNaN(std::numeric_limits<double>::infinity()));
   EXPECT_FALSE(xanadu::isSignallingNaN(1.0));
 
-  EXPECT_THROW(xanadu::scalarValue(signalling), std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(xanadu::scalarValue(signalling)),
+               std::invalid_argument);
 
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
-  EXPECT_THROW(store.makeScalarCell(at, signalling), std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(store.makeScalarCell(at, signalling)),
+               std::invalid_argument);
   // And nothing was recorded, so the document is the one it was.
   EXPECT_EQ(store.opCount(), 3U);
 }

@@ -137,8 +137,8 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   Store foreignStore(perma);
   auto atF = foreignStore.sliceGenesis(MicroversionId{});
   atF      = foreignStore.makeCell(atF, "Alice Chapter 3 Draft 1");
-  const auto foreignCell = foreignStore.cellRefOf(atF);
-  const auto verA        = atF;
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  const auto verA                         = atF;
 
   // Advance foreign store past that state
   atF =
@@ -382,19 +382,19 @@ TEST(AnthologyTest, invalidAncestryThrows) {
   const GlobalDocumentState pinnedState{.scroll  = foreignKey,
                                         .version = MicroversionId::parse("2")};
 
-  EXPECT_THROW(
-      store.appendAnthologyEntry(at, store.homeCell(), memberRef, pinnedState),
-      std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(store.appendAnthologyEntry(
+                   at, store.homeCell(), memberRef, pinnedState)),
+               std::invalid_argument);
 }
 
 TEST(AnthologyTest, arenaResolutionAttachesForeignProxyWithoutCopying) {
   const auto perma = std::make_shared<UserPermascroll>();
 
   Store foreignStore(perma);
-  auto atF               = foreignStore.sliceGenesis(MicroversionId{});
-  atF                    = foreignStore.makeCell(atF, "Foreign Cell Content");
-  const auto foreignCell = foreignStore.cellRefOf(atF);
-  const auto foreignBirthVersion = atF;
+  auto atF = foreignStore.sliceGenesis(MicroversionId{});
+  atF      = foreignStore.makeCell(atF, "Foreign Cell Content");
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  const auto foreignBirthVersion          = atF;
 
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'f'));

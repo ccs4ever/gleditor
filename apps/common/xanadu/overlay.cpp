@@ -194,7 +194,7 @@ OverlayReleaseResult sealOverlayRelease(Store &store,
 
 RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
                            const zigzag::CellRef releaseCell,
-                           const Store &targetStore,
+                           const Store & /*targetStore*/,
                            const GlobalDocumentState &newTargetState,
                            const std::string_view newReleaseLabel) {
   auto curHead = parent.isZero() ? overlayStore.latest() : parent;
@@ -211,8 +211,10 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
     return *d;
   };
 
-  const auto dimTargets = ensureDim(kDimOverlayTargets);
-  const auto dimClaims  = ensureDim(kDimOverlayClaims);
+  // Minted here even though a rebase links nothing on it, so the store has
+  // both overlay dimensions whichever operation came first.
+  static_cast<void>(ensureDim(kDimOverlayTargets));
+  const auto dimClaims = ensureDim(kDimOverlayClaims);
 
   // Mint new release cell to preserve hypertime history of old release
   const auto newRelOp = overlayStore.makeCell(

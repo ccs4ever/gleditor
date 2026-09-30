@@ -393,7 +393,8 @@ TEST_F(GlyphCacheTest, superscriptAndSubscriptRaiseNoDecorationSpecificCode) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  EXPECT_NO_THROW(std::ignore = cache->put("A", face, {Decoration::Superscript}));
+  EXPECT_NO_THROW(std::ignore =
+                      cache->put("A", face, {Decoration::Superscript}));
   EXPECT_NO_THROW(std::ignore = cache->put("A", face, {Decoration::Subscript}));
 }
 

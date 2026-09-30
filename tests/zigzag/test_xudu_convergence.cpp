@@ -303,7 +303,7 @@ TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
   segLocked.holeRecord = hole2;
   extScroll.segments.push_back(segLocked);
 
-  const auto scrollId = store.addScroll(extScroll);
+  static_cast<void>(store.addScroll(extScroll));
 
   const auto v2 = store.transcludeExternal(v1, 14, extScroll, 0, 30);
   const auto v3 = store.transcludeExternal(v2, 14 + 30, extScroll, 30, 40);

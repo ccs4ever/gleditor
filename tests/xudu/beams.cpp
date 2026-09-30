@@ -660,11 +660,11 @@ TEST(LinkLayout, symmetricMultiPageFramingZoomScaling) {
 }
 
 TEST(LinkLayout, asymmetricMultiPageCentroidAlignmentAndFraming) {
-  const float pageH      = 40.0F; // world units
-  const float pageGapH   = 2.0F;
-  const float aspect     = 16.0F / 9.0F;
-  const float fovDeg     = 15.0F;
-  const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
+  const float pageH                   = 40.0F; // world units
+  const float pageGapH                = 2.0F;
+  [[maybe_unused]] const float aspect = 16.0F / 9.0F;
+  const float fovDeg                  = 15.0F;
+  const float tanHalfFov              = std::tan(glm::radians(fovDeg) * 0.5F);
 
   // Case 1: 3-page Doc A vs 8-page Doc B
   {
@@ -1185,25 +1185,26 @@ TEST(MarginLanes, aPageWithNoMarginHasNoLaneToDrawIn) {
 
 TEST(FramingTest, ReadableDistanceDrawsTextAtTheAskedHeight) {
   // A 16 px line of page text is 16/18 of a world unit.
-  const float line    = 16.0F / 18.0F;
-  const auto distance = xudu::readableCameraDistance(line, 600.0F, 5.0F, 16.0F);
+  const float line = 16.0F / 18.0F;
+  const auto distance =
+      xanadu::readableCameraDistance(line, 600.0F, 5.0F, 16.0F);
   ASSERT_TRUE(distance.has_value());
   // Back through the projection: the line's height on screen.
   const float onScreen =
       line * 600.0F / (2.0F * *distance * std::tan(glm::radians(2.5F)));
   EXPECT_NEAR(onScreen, 16.0F, 1e-3F);
   // Half the height needs twice the distance.
-  EXPECT_NEAR(*xudu::readableCameraDistance(line, 600.0F, 5.0F, 8.0F),
+  EXPECT_NEAR(*xanadu::readableCameraDistance(line, 600.0F, 5.0F, 8.0F),
               2.0F * *distance, 1e-2F);
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 0.0F, 5.0F, 16.0F));
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 600.0F, 5.0F, 0.0F));
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 600.0F, 180.0F, 16.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 0.0F, 5.0F, 16.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 600.0F, 5.0F, 0.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 600.0F, 180.0F, 16.0F));
 }
 
 TEST(FramingTest, OverviewFitKeepsAspectAndRoundTrips) {
   // A scene twice as wide as tall into a square panel: width decides.
-  const auto fit = xudu::OverviewFit::fit({0.0F, 0.0F}, {100.0F, 50.0F},
-                                          {10.0F, 20.0F}, {200.0F, 200.0F});
+  const auto fit = xanadu::OverviewFit::fit({0.0F, 0.0F}, {100.0F, 50.0F},
+                                            {10.0F, 20.0F}, {200.0F, 200.0F});
   EXPECT_FLOAT_EQ(fit.scale, 2.0F);
   const auto corner = fit.toPanel({0.0F, 0.0F});
   EXPECT_FLOAT_EQ(corner.x, 10.0F);
@@ -1214,7 +1215,7 @@ TEST(FramingTest, OverviewFitKeepsAspectAndRoundTrips) {
   EXPECT_FLOAT_EQ(back.y, 12.0F);
 
   // One point: centred, and no division by zero.
-  const auto point = xudu::OverviewFit::fit({5.0F, 5.0F}, {5.0F, 5.0F},
-                                            {0.0F, 0.0F}, {100.0F, 100.0F});
+  const auto point = xanadu::OverviewFit::fit({5.0F, 5.0F}, {5.0F, 5.0F},
+                                              {0.0F, 0.0F}, {100.0F, 100.0F});
   EXPECT_FLOAT_EQ(point.toPanel({5.0F, 5.0F}).x, 50.0F);
 }

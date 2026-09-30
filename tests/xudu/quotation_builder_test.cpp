@@ -225,7 +225,7 @@ TEST(QuotationBuilderTest, PreviewNavigation) {
 
 TEST(QuotationBuilderTest, CommitQuotationAppliesToLocalStore) {
   TestStore alice("btpk:aaaa:alice");
-  const auto dimA = alice.makeDim("d.items");
+  [[maybe_unused]] const auto dimA = alice.makeDim("d.items");
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "target_cell");

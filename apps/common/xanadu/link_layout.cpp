@@ -506,8 +506,8 @@ std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
     // link type it does not know how to colour.
     rgb = 0xCFCFCF00U;
     break;
-  case LinkType::Dimension: [[unlikely]]
-    rgb = 0xAA00FF00U;
+  case LinkType::Dimension:
+    [[unlikely]] rgb = 0xAA00FF00U;
     break;
   }
 

@@ -48,12 +48,12 @@
 #include "common/xanadu/mutable_link.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/reading_place.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/transcopyright_logic.hpp"
 #include "common/xanadu/uncommitted_op_log.hpp"
-#include "common/xanadu/reading_place.hpp"
-#include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
 class Caret;

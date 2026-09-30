@@ -619,7 +619,7 @@ bool IdentityPeerPlugin::sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery) {
   return sendExtendedRaw(remoteTranscopyrightId_, frame);
 }
 
-void IdentityPeerPlugin::isolateAndDisconnect(std::string_view/* reason*/) {
+void IdentityPeerPlugin::isolateAndDisconnect(std::string_view /* reason*/) {
   isIsolated_ = true;
   // Same weak reference as in sendExtendedRaw: nothing below may touch the
   // connection once it has gone, and disconnect() does not check either.

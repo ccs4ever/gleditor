@@ -674,8 +674,7 @@ public:
         (view.pos.z - point.z) * std::tan(glm::radians(view.fov) * 0.5F);
     const float halfW = halfH * static_cast<float>(view.screenWidth) /
                         static_cast<float>(view.screenHeight);
-    const auto follow = [](float &camera, const float at,
-                                   const float half) {
+    const auto follow = [](float &camera, const float at, const float half) {
       const float reach = half * kComfort;
       if (at > camera + reach) {
         camera = at - reach;
@@ -2795,8 +2794,9 @@ int main(const int argc, char **argv) {
     if (parser["--swarm"] == true || !collabRoom.empty()) {
       if (!session->swarmEnabled()) {
         session->useSwarm(parser["--private-dht"] == true);
-        if (quiet) std::cout << "xudu: swarm listening on port "
-                           << session->swarmPort() << "\n";
+        if (quiet)
+          std::cout << "xudu: swarm listening on port " << session->swarmPort()
+                    << "\n";
       }
     }
 
@@ -2815,9 +2815,10 @@ int main(const int argc, char **argv) {
       const std::string myScrollKey =
           "btpk:" + session->identity().publicKey.hex() + ":main";
       session->setLocalCollaboratorInfo(collabName, myFp, myScrollKey);
-      if (quiet) std::cout << "xudu: joined collaborative room '" << collabRoom
-                         << "' (target: " << roomTarget.hex() << ") as "
-                         << collabName << "\n";
+      if (quiet)
+        std::cout << "xudu: joined collaborative room '" << collabRoom
+                  << "' (target: " << roomTarget.hex() << ") as " << collabName
+                  << "\n";
     }
 
     if (parser.present<std::vector<std::string>>("--dht-node")) {
@@ -2831,7 +2832,8 @@ int main(const int argc, char **argv) {
         session->addDhtNode(
             spec.substr(0, colon),
             static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
-        if (quiet) std::cout << "xudu: joining the DHT through " << spec << "\n";
+        if (quiet)
+          std::cout << "xudu: joining the DHT through " << spec << "\n";
       }
     }
 
@@ -2851,12 +2853,14 @@ int main(const int argc, char **argv) {
         available.push_back(hash);
         if (const auto meta = session->content().metainfo(hash);
             meta.has_value()) {
-          if (quiet) std::cout << "xudu: " << file << " is " << meta->magnet()
-                             << " (" << meta->files().size() << " file(s), "
-                             << meta->totalLength() << " bytes)\n";
+          if (quiet)
+            std::cout << "xudu: " << file << " is " << meta->magnet() << " ("
+                      << meta->files().size() << " file(s), "
+                      << meta->totalLength() << " bytes)\n";
         } else {
-          if (quiet) std::cout << "xudu: " << file << " is " << hash.hex()
-                             << " (awaiting metadata)\n";
+          if (quiet)
+            std::cout << "xudu: " << file << " is " << hash.hex()
+                      << " (awaiting metadata)\n";
         }
       }
     }
@@ -2873,8 +2877,9 @@ int main(const int argc, char **argv) {
         session->connectPeer(
             available.back(), spec.substr(0, colon),
             static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
-        if (quiet) std::cout << "xudu: asking " << spec << " for "
-                           << available.back().hex() << "\n";
+        if (quiet)
+          std::cout << "xudu: asking " << spec << " for "
+                    << available.back().hex() << "\n";
       }
     }
 
@@ -2916,9 +2921,10 @@ int main(const int argc, char **argv) {
           session->viewOpened(produced, 0);
         }
         opening = produced;
-        if (quiet) std::cout << "xudu: " << produced.str() << " quotes "
-                           << available.back().hex() << " file " << fileIndex
-                           << " [" << offset << "," << offset + length << ")\n";
+        if (quiet)
+          std::cout << "xudu: " << produced.str() << " quotes "
+                    << available.back().hex() << " file " << fileIndex << " ["
+                    << offset << "," << offset + length << ")\n";
       }
       session->save(0);
     }
@@ -2957,14 +2963,15 @@ int main(const int argc, char **argv) {
         xudu::saveConfig(config);
         recorded = config.author;
       }
-      if (quiet) std::cout << "xudu: publishing as " << recorded.name << " <"
-                         << recorded.email << ">"
-                         << (recorded.gpgKey.empty()
-                                 ? std::string{}
-                                 : ", signed by " + recorded.gpgKey)
-                         << (here ? " from " + session->path(0)
-                                  : " (kept in " + xudu::configPath() + ")")
-                         << "\n";
+      if (quiet)
+        std::cout << "xudu: publishing as " << recorded.name << " <"
+                  << recorded.email << ">"
+                  << (recorded.gpgKey.empty()
+                          ? std::string{}
+                          : ", signed by " + recorded.gpgKey)
+                  << (here ? " from " + session->path(0)
+                           : " (kept in " + xudu::configPath() + ")")
+                  << "\n";
     }
 
     if (parser.present<std::vector<std::string>>("--read")) {
@@ -3001,14 +3008,15 @@ int main(const int argc, char **argv) {
                                                            .extra  = {},
                                                            .passphrase = {}},
                                    0);
-      if (quiet) std::cout << "xudu: published " << opening.str() << " as "
-                         << manifest << "\n";
+      if (quiet)
+        std::cout << "xudu: published " << opening.str() << " as " << manifest
+                  << "\n";
     }
 
-    if (quiet) std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
-                       << session->store(0).opCount() << " operations in "
-                       << session->path(0) << ", opening " << opening.str()
-                       << "\n";
+    if (quiet)
+      std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
+                << session->store(0).opCount() << " operations in "
+                << session->path(0) << ", opening " << opening.str() << "\n";
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << parser;
     return 1;
@@ -3803,7 +3811,7 @@ int main(const int argc, char **argv) {
                                    ? *freshCell
                                    : changedCells.front();
       const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                               changedCell != zigzag::noCell;
+                              changedCell != zigzag::noCell;
 #endif
       renderer->runWithState([&views, &renderer, viewIndex, changeAt
 #ifdef XUZZ_BUILD
@@ -3933,8 +3941,8 @@ int main(const int argc, char **argv) {
                                     *handle, &folded);
                   if (next != zigzag::noCell && next != *handle) {
                     folded = store.rebuildManifold(head);
-                    head = store.setLink(head, *handle, *dim,
-                                         zigzag::DimVector::POS, next, &folded);
+                    head   = store.setLink(head, *handle, *dim,
+                                           zigzag::DimVector::POS, next, &folded);
                   }
                   bindZigzag(rState, index, head);
                   zigzagPresentation->focusCell(*handle);
@@ -4392,6 +4400,7 @@ int main(const int argc, char **argv) {
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, linkContext, *session,
                  radialMenu, renderer, pouchDrawer, swarmTelescope,
+                 quotationOverlay,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     app.commands().registerAction(
         std::string(xanadu::settings::kKeymapOverviewToggle),

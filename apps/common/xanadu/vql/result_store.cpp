@@ -79,8 +79,8 @@ writeResultStore(const MultiStoreCoordinator &coordinator,
         "a result store is written fresh, and this one already has operations");
   }
   ResultStoreStats stats;
-  auto at             = out.sliceGenesis(MicroversionId{});
-  const auto home     = out.homeCell();
+  auto at         = out.sliceGenesis(MicroversionId{});
+  const auto home = out.homeCell();
   // The default ZigZag view shows d.1 across and d.2 down: the results on
   // d.1, as a sequence is, and the query on d.2, so a result store opens in
   // xuzz with its answer on screen.

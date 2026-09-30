@@ -797,9 +797,9 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
-                          " timeout 120 " + xuduBin.string() + " --backend " +
-                          activeBackend() + " --profile " + script);
+                               " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                               " timeout 120 " + xuduBin.string() + " --backend " +
+                               activeBackend() + " --profile " + script);
   };
   const auto untitled = [&] {
     std::vector<fs::path> found;
@@ -1870,10 +1870,10 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
            "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
   }
   const auto storePath = testRoot / "store";
-  const auto res = executeProcess(xuduBin.string() +
-                                  permascrollFlag(testRoot / "permascroll") +
-                                  " --headless --structure-script " +
-                                  script.string() + " " + storePath.string());
+  const auto res       = executeProcess(xuduBin.string() +
+                                        permascrollFlag(testRoot / "permascroll") +
+                                        " --headless --structure-script " +
+                                        script.string() + " " + storePath.string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   Store store(permascrollAt(testRoot / "permascroll"));

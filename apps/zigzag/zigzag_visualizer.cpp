@@ -1072,7 +1072,7 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
   metrics.titleTop         = metrics.height - verticalPadding;
   const float titleBottom  = metrics.titleTop - titleMetrics.height;
   const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
-                                            presentation_config_.cellBandGapPx
+                                           presentation_config_.cellBandGapPx
                                       : verticalPadding;
   const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
   metrics.labelTop =
@@ -1912,7 +1912,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
-  float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
+  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
   for (const auto &[label, colour] :
        {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
         std::pair{std::cref(modeLabel), 0xF59E0BFFU},

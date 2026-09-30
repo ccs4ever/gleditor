@@ -100,11 +100,11 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
       std::pair<std::string, std::pair<std::vector<std::string>, std::string>>,
       std::string>
       seen;
-  for (const auto &spec : xudu::defaultSettingSpecs(SystemDocKind::Keymap)) {
+  for (const auto &spec : xanadu::defaultSettingSpecs(SystemDocKind::Keymap)) {
     ASSERT_FALSE(spec.schemas.empty()) << spec.name;
     const auto &chord =
         std::get<std::string>(spec.schemas.front().defaultValues.front());
-    const auto key = std::pair{std::string(xudu::keymapScope(spec.name)),
+    const auto key = std::pair{std::string(xanadu::keymapScope(spec.name)),
                                normalisedChord(chord)};
     const auto [where, fresh] = seen.emplace(key, spec.name);
     EXPECT_TRUE(fresh) << chord << " is bound to both " << where->second
@@ -113,13 +113,13 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
 }
 
 TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
-  EXPECT_EQ(xudu::keymapScope("std:nav/step_x_pos"), "zigzag");
-  EXPECT_EQ(xudu::keymapScope("std:zigzag/insert_cell_x_pos"), "zigzag");
-  EXPECT_EQ(xudu::keymapScope("std:ui/confirm_action"), "zigzag");
-  EXPECT_EQ(xudu::keymapScope("std:nav/zigzag_step_x_pos"), "");
-  EXPECT_EQ(xudu::keymapScope("std:edit/caret_left"), "document");
-  EXPECT_EQ(xudu::keymapScope("std:xudu/save"), "");
-  EXPECT_EQ(xudu::keymapScope("std:xuzz/link_next"), "");
+  EXPECT_EQ(xanadu::keymapScope("std:nav/step_x_pos"), "zigzag");
+  EXPECT_EQ(xanadu::keymapScope("std:zigzag/insert_cell_x_pos"), "zigzag");
+  EXPECT_EQ(xanadu::keymapScope("std:ui/confirm_action"), "zigzag");
+  EXPECT_EQ(xanadu::keymapScope("std:nav/zigzag_step_x_pos"), "");
+  EXPECT_EQ(xanadu::keymapScope("std:edit/caret_left"), "document");
+  EXPECT_EQ(xanadu::keymapScope("std:xudu/save"), "");
+  EXPECT_EQ(xanadu::keymapScope("std:xuzz/link_next"), "");
 }
 
 TEST(SystemDocsTest, MetadataAndUriRoundTrips) {

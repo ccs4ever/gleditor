@@ -678,8 +678,8 @@ void LinkBeams::updatePriorityOffsets(RenderState &state,
     if constexpr (requires { strand.link; }) {
       const bool pending = sworph && !strand.aligned &&
                            strand.from.isDocument() && strand.to.isDocument();
-      fromEndNeeds       = pending && !strand.fromEndAnchor;
-      toEndNeeds         = pending && !strand.toEndAnchor;
+      fromEndNeeds = pending && !strand.fromEndAnchor;
+      toEndNeeds   = pending && !strand.toEndAnchor;
     }
     if (!fromNeeds && !toNeeds && !fromEndNeeds && !toEndNeeds) {
       // Every end it needs is resolved (or none is a document end) --
@@ -1645,7 +1645,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
                                  other.to.doc == strand.to.doc) ||
                                 (other.from.doc == strand.to.doc &&
                                  other.to.doc == strand.from.doc);
-          const auto waiting  = [&](const auto &anchor, const LinkEnd &end) {
+          const auto waiting = [&](const auto &anchor, const LinkEnd &end) {
             return !anchor && endpointStillLoading(end);
           };
           return samePair && (waiting(other.fromAnchor, other.from) ||
@@ -2158,7 +2158,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                 .label = "occurrence " + std::to_string(i + 1) + " of " +
                          std::to_string(member.occurrences.size()) + ", " +
                          linkContext_->describe(occurrence.site),
-                .value = chosen && cursor.occurrence == i ? "chosen" : "",
+                .value       = chosen && cursor.occurrence == i ? "chosen" : "",
                 .description = xanadu::Coverage::Partial == occurrence.coverage
                                    ? "part of the member"
                                    : "",

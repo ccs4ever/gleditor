@@ -35,9 +35,9 @@ struct ResultStoreStats {
  *
  * The results hang off the home cell in order along d.1 and the query along
  * d.2: the two dimensions ZigZag's default view shows, so the answer is on
- * screen when the store is opened. A result's content is quoted -- its addresses,
- * not a copy -- wherever it is in the shared permascroll, so the answer
- * transcludes what it found; only content with no address to share is
+ * screen when the store is opened. A result's content is quoted -- its
+ * addresses, not a copy -- wherever it is in the shared permascroll, so the
+ * answer transcludes what it found; only content with no address to share is
  * written as text. Nothing else is copied: the answer is what was asked for,
  * not the workspace it was found in.
  *

@@ -136,7 +136,7 @@ ZzStructureDocument projectXuduToZigzag(
       }
 
       // Split text into paragraphs
-      std::size_t start   = 0;
+      std::size_t start = 0;
       while (start < doc.text.size()) {
         std::size_t end = doc.text.find("\n\n", start);
         if (end == std::string::npos) {

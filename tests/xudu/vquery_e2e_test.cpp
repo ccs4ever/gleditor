@@ -156,16 +156,24 @@ TEST_F(VQueryE2ETest, InPlaceStoreMutation) {
   fs::path copyStore = testDir / "inplace_store";
   fs::copy(sampleSrc, copyStore, fs::copy_options::recursive);
 
+  const auto opsBefore = [&] {
+    xanadu::Store before(std::make_shared<xanadu::UserPermascroll>());
+    before.load(copyStore.string());
+    return before.opCount();
+  }();
+
+  // The create mints a cell, which in place writes into the store itself;
+  // a query that only read would say there was nothing to write.
   auto res = runVQuery(copyStore.string() +
                        " -e \"##/d.mutated%'CellData'\" --in-place");
   EXPECT_EQ(res.exitCode, 0) << res.output;
-  EXPECT_NE(res.output.find("Saved in-place changes to primary store:"),
-            std::string::npos);
+  EXPECT_NE(res.output.find("Wrote "), std::string::npos) << res.output;
 
-  // Load and verify store is valid
+  // Load and verify store is valid, and holds what was written
   auto perma = std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store store(perma);
   EXPECT_NO_THROW(store.load(copyStore.string()));
+  EXPECT_GT(store.opCount(), opsBefore);
 }
 
 TEST_F(VQueryE2ETest, QueryFileExecution) {

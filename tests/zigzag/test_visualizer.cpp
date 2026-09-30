@@ -812,8 +812,8 @@ TEST(ZigzagVisualizerTest, CommandOmnibarQuickPathNavigation) {
 
 TEST(ZigzagVisualizerTest, CommandOmnibarScriptExecution) {
   ZigzagVisualizer viz("Sans 12");
-  const auto initialFocus   = viz.focusCellId();
-  const auto initialOpCount = viz.operationCount();
+  [[maybe_unused]] const auto initialFocus   = viz.focusCellId();
+  [[maybe_unused]] const auto initialOpCount = viz.operationCount();
 
   viz.setCommandBarVisible(true);
   viz.setCommandBarText("weave { /d.step%ScriptNode }");

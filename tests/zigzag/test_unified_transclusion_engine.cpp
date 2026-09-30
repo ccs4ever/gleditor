@@ -96,8 +96,8 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
 }
 
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
-  xudu::Store store;
-  const auto genesis   = store.sliceGenesis(xudu::MicroversionId{});
+  xanadu::Store store;
+  const auto genesis   = store.sliceGenesis(xanadu::MicroversionId{});
   const auto common    = store.makeCell(genesis, "common");
   const auto left      = store.makeCell(common, "left");
   const auto leftCell  = store.cellRefOf(left);
@@ -119,13 +119,13 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
 }
 
 TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
   const auto source   = engine.addCell("quoted cell content");
   const auto original = engine.manifold().contentOf(source);
   ASSERT_EQ(original.size(), 1U);
-  const std::vector<xudu::PrimediaSpan> quoted(original.begin(),
-                                               original.end());
+  const std::vector<xanadu::PrimediaSpan> quoted(original.begin(),
+                                                 original.end());
 
   const auto target = engine.addCellFromSpans(quoted);
   ASSERT_NE(source, target);
@@ -142,12 +142,12 @@ TEST(UnifiedTransclusionEngineTest,
   const auto dir =
       std::filesystem::temp_directory_path() / "zigzag_slice_edit_resume";
   std::filesystem::remove_all(dir);
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   CellRef first    = noCell;
   CellRef second   = noCell;
-  xudu::MicroversionId edited;
+  xanadu::MicroversionId edited;
   {
-    xudu::Store store(perma);
+    xanadu::Store store(perma);
     UnifiedTransclusionEngine engine(store);
     first  = engine.addCell("first");
     second = engine.addCell("New Cell");
@@ -158,7 +158,7 @@ TEST(UnifiedTransclusionEngineTest,
     store.save(dir.string());
   }
 
-  xudu::Store reopened(perma);
+  xanadu::Store reopened(perma);
   reopened.load(dir.string());
   const auto current = reopened.primaryCurrentVersion();
   const auto folded  = reopened.rebuildManifold(current);

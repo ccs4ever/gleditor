@@ -171,7 +171,7 @@ void SatelloidOverlay::synchronizeSelection() {
         }
         found->selected = side == selected->active && cursor.member == member &&
                           cursor.occurrence == occurrence;
-        found->active   = true;
+        found->active      = true;
         found->targetAlpha = 1.0F;
         if (anchorResolver_) {
           if (const auto anchor = anchorResolver_(cell->cell)) {
@@ -207,8 +207,8 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
       if (s.active && s.neighborhoodRevision != revision) {
         s.neighborhood         = neighborhoodResolver_(s.cellRef);
         s.neighborhoodRevision = revision;
-        s.text = s.neighborhood.empty() ? std::string{}
-                                        : s.neighborhood.front().text;
+        s.text                 = s.neighborhood.empty() ? std::string{}
+                                                        : s.neighborhood.front().text;
         if (axisNameResolver_) s.dimName = axisNameResolver_();
       }
     }
@@ -444,11 +444,11 @@ bool SatelloidOverlay::picked(const render::PickingResult &pick,
     if (selected && selected->key.id == card.occurrence->link) {
       const auto side = card.occurrence->side == 0 ? xanadu::LinkSide::Left
                                                    : xanadu::LinkSide::Right;
-      linkContext_->execute(
+      static_cast<void>(linkContext_->execute(
           xanadu::nav::EnterAt{.key        = selected->key,
                                .side       = side,
                                .member     = card.occurrence->member,
-                               .occurrence = card.occurrence->occurrence});
+                               .occurrence = card.occurrence->occurrence}));
       return true;
     }
   }
