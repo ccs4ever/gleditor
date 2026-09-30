@@ -99,10 +99,10 @@ struct Slice {
 TEST(ManifoldTest, genesisMintsHomeAndTheDimsDimension) {
   Slice slice;
 
-  // Index 1 and index 2, which is what the design describes for a store that
-  // was a slice from its first operation.
-  EXPECT_EQ(slice.store.homeCell(), 1U);
-  EXPECT_EQ(slice.store.dimsDimension(), 2U);
+  // Index 2 and index 3, which is what the design describes for a store that
+  // was a slice from its first operation (Make(Slice) at op 1).
+  EXPECT_EQ(slice.store.homeCell(), 2U);
+  EXPECT_EQ(slice.store.dimsDimension(), 3U);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.cellCount(), 2U);
@@ -309,9 +309,12 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   // Walked with no index at all: each operation names the previous one on the
   // same cell, and the chain ends at the MakeCell whose index is the cell.
   std::vector<std::uint32_t> chain;
-  for (auto step = slot->lastOp; step != 0;
-       step      = slice.store.getCompactOp(step)->sourceOpIndex) {
+  for (auto step = slot->lastOp; step != 0;) {
     chain.push_back(step);
+    if (step == cell) {
+      break;
+    }
+    step = slice.store.getCompactOp(step)->sourceOpIndex;
   }
   EXPECT_THAT(chain, testing::ElementsAre(secondLink, firstLink, cell));
 
@@ -771,8 +774,8 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   Store reopened(permascroll);
   reopened.load(dir.string());
-  EXPECT_EQ(reopened.homeCell(), 1U);
-  EXPECT_EQ(reopened.dimsDimension(), 2U);
+  EXPECT_EQ(reopened.homeCell(), 2U);
+  EXPECT_EQ(reopened.dimsDimension(), 3U);
 
   const auto manifold =
       reopened.rebuildManifold(reopened.primaryCurrentVersion());

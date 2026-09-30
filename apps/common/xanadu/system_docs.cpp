@@ -1501,6 +1501,7 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
   const std::string p2 = defaultSystemDocNotes(kind);
 
   MicroversionId cur{};
+  cur = store.makeXanadoc(cur, systemDocName(kind));
   cur = store.insert(cur, 0, p1);
 
   const auto p1Size = static_cast<std::uint32_t>(p1.size());

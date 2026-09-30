@@ -325,4 +325,195 @@ TEST(StructureMakeTest, ManifoldTypeAwareFold) {
   EXPECT_FALSE(manifold.equivalentTo(manifold3));
 }
 
+TEST(StructureMakeTest, SliceGenesisSequence) {
+  Store store;
+  const auto head = store.sliceGenesis(MicroversionId{}, "test_slice");
+  EXPECT_EQ(store.opCount(), 4U);
+  EXPECT_EQ(store.sliceBirth(), 1U);
+  EXPECT_EQ(store.homeCell(), 2U);
+  EXPECT_EQ(store.dimsDimension(), 3U);
+
+  // Op 1: Make(Slice)
+  const auto *op1 = store.getCompactOp(1);
+  ASSERT_NE(op1, nullptr);
+  EXPECT_EQ(op1->kind, OpKind::Structure);
+  EXPECT_EQ(structureVerbOf(op1->flags), StructureVerb::Make);
+  EXPECT_EQ(structureKindOf(op1->flags), StructureKind::Slice);
+  EXPECT_EQ(contextOf(*op1), 0U);
+  EXPECT_EQ(store.read(op1->span()), "test_slice");
+
+  // Op 2: Make(Cell: home) with context pointing to Slice (1)
+  const auto *op2 = store.getCompactOp(2);
+  ASSERT_NE(op2, nullptr);
+  EXPECT_EQ(op2->kind, OpKind::Structure);
+  EXPECT_EQ(structureVerbOf(op2->flags), StructureVerb::Make);
+  EXPECT_EQ(structureKindOf(op2->flags), StructureKind::Cell);
+  EXPECT_EQ(contextOf(*op2), 1U);
+  EXPECT_EQ(store.read(op2->span()), "home");
+
+  // Op 3: Make(Cell: d.dims) with context pointing to Slice (1)
+  const auto *op3 = store.getCompactOp(3);
+  ASSERT_NE(op3, nullptr);
+  EXPECT_EQ(op3->kind, OpKind::Structure);
+  EXPECT_EQ(structureVerbOf(op3->flags), StructureVerb::Make);
+  EXPECT_EQ(structureKindOf(op3->flags), StructureKind::Cell);
+  EXPECT_EQ(contextOf(*op3), 1U);
+  EXPECT_EQ(store.read(op3->span()), "d.dims");
+
+  // Op 4: SetLink home -> d.dims with context pointing to Slice (1)
+  const auto *op4 = store.getCompactOp(4);
+  ASSERT_NE(op4, nullptr);
+  EXPECT_EQ(op4->kind, OpKind::Structure);
+  EXPECT_EQ(structureVerbOf(op4->flags), StructureVerb::SetLink);
+  EXPECT_EQ(contextOf(*op4), 1U);
+
+  // Manifold inspection
+  const auto manifold = store.rebuildManifold(head);
+  EXPECT_EQ(manifold.cellCount(), 2U);
+  EXPECT_TRUE(manifold.isStructureBirth(1));
+  EXPECT_EQ(manifold.structureKind(1), StructureKind::Slice);
+  EXPECT_TRUE(manifold.isCell(2));
+  EXPECT_EQ(manifold.containerOf(2), 1U);
+  EXPECT_TRUE(manifold.isCell(3));
+  EXPECT_EQ(manifold.containerOf(3), 1U);
+}
+
+TEST(StructureMakeTest, XanadocEditContextChains) {
+  Store store;
+  const auto doc = store.makeXanadoc(MicroversionId{}, "doc1");
+  EXPECT_EQ(doc.str(), "1");
+  const auto *docNode = store.getCompactOp(1);
+  ASSERT_NE(docNode, nullptr);
+  EXPECT_EQ(docNode->kind, OpKind::Structure);
+  EXPECT_EQ(structureKindOf(docNode->flags), StructureKind::Xanadoc);
+  EXPECT_EQ(contextOf(*docNode), 0U);
+
+  // Consecutive operations on doc
+  const auto v1 = store.insert(doc, 0, "hello");
+  const auto v2 = store.insert(v1, 5, " world");
+  const auto v3 = store.erase(v2, 5, 6);
+  const auto v4 = store.insertBreak(v3, 5);
+  const auto v5 = store.rearrange(v4, 0, 5, 5);
+
+  // Verify context chain
+  const auto *n1 = store.getCompactOp(store.segmentedOps().indexOf(v1));
+  ASSERT_NE(n1, nullptr);
+  EXPECT_EQ(contextOf(*n1), 1U); // points to doc
+
+  const auto *n2 = store.getCompactOp(store.segmentedOps().indexOf(v2));
+  ASSERT_NE(n2, nullptr);
+  EXPECT_EQ(contextOf(*n2), store.segmentedOps().indexOf(v1)); // points to v1
+
+  const auto *n3 = store.getCompactOp(store.segmentedOps().indexOf(v3));
+  ASSERT_NE(n3, nullptr);
+  EXPECT_EQ(contextOf(*n3), store.segmentedOps().indexOf(v2)); // points to v2
+
+  const auto *n4 = store.getCompactOp(store.segmentedOps().indexOf(v4));
+  ASSERT_NE(n4, nullptr);
+  EXPECT_EQ(contextOf(*n4), store.segmentedOps().indexOf(v3)); // points to v3
+
+  const auto *n5 = store.getCompactOp(store.segmentedOps().indexOf(v5));
+  ASSERT_NE(n5, nullptr);
+  EXPECT_EQ(contextOf(*n5), store.segmentedOps().indexOf(v4)); // points to v4
+}
+
+TEST(StructureMakeTest, InterleavedXanadocsAndBranchLocalContext) {
+  Store store;
+  const auto docA = store.makeXanadoc(MicroversionId{}, "docA"); // op 1
+  const auto docB = store.makeXanadoc(docA, "docB");             // op 2
+
+  const auto vA1 = store.insert(docB, 0, "A1", docA); // op 3
+  const auto vB1 = store.insert(vA1, 0, "B1", docB);  // op 4
+  const auto vA2 = store.insert(vB1, 2, "A2", docA);  // op 5
+  const auto vB2 = store.insert(vA2, 2, "B2", docB);  // op 6
+
+  // Verify each points to its own structure's previous edit:
+  const auto *nA1 = store.getCompactOp(store.segmentedOps().indexOf(vA1));
+  EXPECT_EQ(contextOf(*nA1), 1U); // docA birth
+
+  const auto *nB1 = store.getCompactOp(store.segmentedOps().indexOf(vB1));
+  EXPECT_EQ(contextOf(*nB1), 2U); // docB birth
+
+  const auto *nA2 = store.getCompactOp(store.segmentedOps().indexOf(vA2));
+  EXPECT_EQ(contextOf(*nA2), 3U); // vA1
+
+  const auto *nB2 = store.getCompactOp(store.segmentedOps().indexOf(vB2));
+  EXPECT_EQ(contextOf(*nB2), 4U); // vB1
+
+  // Branching from vA1:
+  const auto vA_fork = store.insert(vA1, 2, "A_fork", docA);
+  const auto *nA_fork =
+      store.getCompactOp(store.segmentedOps().indexOf(vA_fork));
+  EXPECT_EQ(contextOf(*nA_fork), 3U); // vA1
+}
+
+TEST(StructureMakeTest, StructureRenameAndResolution) {
+  Store store;
+  const auto doc = store.makeXanadoc(MicroversionId{}, "original_name");
+  EXPECT_EQ(store.resolveStructureName(doc, 1), "original_name");
+
+  const auto v1 = store.insert(doc, 0, "text");
+
+  // Rename structure
+  const auto vRenamed = store.renameStructure(v1, 1, "renamed_doc");
+  EXPECT_EQ(store.resolveStructureName(vRenamed, 1), "renamed_doc");
+
+  // Branch before rename still sees original name
+  EXPECT_EQ(store.resolveStructureName(v1, 1), "original_name");
+
+  // Rename to empty string
+  const auto vEmpty = store.renameStructure(vRenamed, 1, "");
+  EXPECT_EQ(store.resolveStructureName(vEmpty, 1), "");
+
+  // Verify the rename SetLink carries the named structure's prior edit in
+  // sourceAt
+  const auto *setLinkNode =
+      store.getCompactOp(store.segmentedOps().indexOf(vRenamed));
+  ASSERT_NE(setLinkNode, nullptr);
+  EXPECT_EQ(setLinkNode->kind, OpKind::Structure);
+  EXPECT_EQ(structureVerbOf(setLinkNode->flags), StructureVerb::SetLink);
+  EXPECT_EQ(contextOf(*setLinkNode), store.segmentedOps().indexOf(v1));
+}
+
+TEST(StructureMakeTest, TimestampAnnotationAndResolution) {
+  Store store;
+  const auto doc = store.makeXanadoc(MicroversionId{}, "timed_doc");
+
+  // Before annotation: nullopt
+  EXPECT_EQ(store.resolveStructureCreated(doc, 1), std::nullopt);
+
+  // Annotate with instant
+  const auto instant = TimestampInstant{.epochNanos = 1712345678900000000LL};
+  const auto vAnn    = store.annotateTimestamp(doc, 1, instant);
+
+  const auto resolved = store.resolveStructureCreated(vAnn, 1);
+  ASSERT_TRUE(resolved.has_value());
+  EXPECT_EQ(resolved->epochNanos, instant.epochNanos);
+
+  // Annotate with ISO 8601 string
+  const auto vIso = store.annotateTimestamp(vAnn, 1, "2026-09-30T12:00:00Z");
+  const auto resolvedIso = store.resolveStructureCreated(vIso, 1);
+  ASSERT_TRUE(resolvedIso.has_value());
+  EXPECT_EQ(formatUtcTimestampIso8601(*resolvedIso),
+            "2026-09-30T12:00:00.000000000Z");
+
+  // Sibling branch before annotation still sees no timestamp
+  EXPECT_EQ(store.resolveStructureCreated(doc, 1), std::nullopt);
+}
+
+TEST(StructureMakeTest, ContextValidationRejections) {
+  Store store;
+  const auto docA = store.makeXanadoc(MicroversionId{}, "docA");
+  const auto vA1  = store.insert(docA, 0, "hello");
+
+  // Fork a sibling branch
+  const auto docB = store.makeXanadoc(MicroversionId{}, "docB");
+
+  // 1. Context in the future
+  EXPECT_THROW(store.insert(docA, 0, "fail", vA1), std::invalid_argument);
+
+  // 2. Context on sibling branch (unreachable from parent)
+  EXPECT_THROW(store.insert(vA1, 0, "fail", docB), std::invalid_argument);
+}
+
 } // namespace

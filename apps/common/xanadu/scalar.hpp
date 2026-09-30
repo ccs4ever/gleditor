@@ -96,13 +96,25 @@ struct TimestampInstant {
 
 /// A timestamp scalar ready to become a cell.
 [[nodiscard]] ScalarValue scalarTimestamp(std::int64_t epochNanos);
+[[nodiscard]] inline ScalarValue scalarTimestamp(TimestampInstant instant) {
+  return scalarTimestamp(instant.epochNanos);
+}
 
 /// Canonical UTC RFC 3339 string at nanosecond resolution.
 [[nodiscard]] std::string formatUtcTimestampIso8601(std::int64_t epochNanos);
+[[nodiscard]] inline std::string
+formatUtcTimestampIso8601(TimestampInstant instant) {
+  return formatUtcTimestampIso8601(instant.epochNanos);
+}
 
 /// Parse an RFC 3339 / ISO 8601 UTC timestamp to signed epoch nanoseconds.
 [[nodiscard]] bool parseUtcTimestampIso8601(std::string_view text,
                                             std::int64_t &outNanos) noexcept;
+[[nodiscard]] inline bool
+parseUtcTimestampIso8601(std::string_view text,
+                         TimestampInstant &outInstant) noexcept {
+  return parseUtcTimestampIso8601(text, outInstant.epochNanos);
+}
 
 /// Round @p nanos to the nearest multiple of @p unitNanos using ties-to-even.
 [[nodiscard]] std::int64_t

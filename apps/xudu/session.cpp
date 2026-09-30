@@ -739,12 +739,9 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
-  // Piece by piece rather than one whole-file insert(), the same way and for
-  // the same reason as the very first --import (see main.cpp): a plain file
-  // is one plain-text piece and this changes nothing for it, but a PDF's
-  // embedded figures only reach the store as classifiable primedia spans
-  // through insertMedia(), which pieces() is what makes reachable here.
-  MicroversionId imported;
+  const auto docName      = std::filesystem::path(filePath).stem().string();
+  MicroversionId imported = newStore->makeXanadoc(
+      MicroversionId{}, docName.empty() ? "document" : docName);
   std::uint32_t at = 0;
   // Indexed by piece position, parallel to source.pieces(): the span each
   // piece landed at, so a later piece naming an earlier one via
@@ -837,6 +834,7 @@ std::size_t Session::createNewStore(const std::string &aPath) {
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
+  newStore->makeXanadoc(MicroversionId{}, "document");
   newStore->save(targetDir);
   return addStore(std::move(newStore), targetDir, isTemporary);
 }
