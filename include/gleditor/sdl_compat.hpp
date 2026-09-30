@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #if GLEDITOR_SDL_MAJOR == 3
@@ -372,8 +373,7 @@ inline WindowPlacement windowPlacement(SDL_Window *window) {
   int right  = 0;
   // Fails on a platform with no server-side decorations, leaving the four at
   // zero, which is the right answer there anyway.
-  static_cast<void>(
-      SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right));
+  std::ignore = SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right);
   return WindowPlacement{.outerLeft   = posX - left,
                          .outerTop    = posY - top,
                          .outerRight  = posX + width + right,

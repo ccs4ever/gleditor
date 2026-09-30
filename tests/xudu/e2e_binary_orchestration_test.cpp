@@ -278,7 +278,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  static_cast<void>(std::system(py.c_str()));
+  std::ignore = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {

@@ -11,6 +11,7 @@
 #include <format>
 #include <iostream>
 #include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1353,9 +1354,9 @@ bool LinkBeams::picked(const render::PickingResult &pick,
     // A beam body says which link, not which member: one strand of a 2x3 link
     // is one of six the renderer happened to draw, so selecting pins the whole
     // link and leaves the member to the reader.
-    static_cast<void>(linkContext_->execute(xanadu::commandForPick(
+    std::ignore = linkContext_->execute(xanadu::commandForPick(
         linkContext_->keyOf(static_cast<zigzag::CellRef>(strand.link)),
-        std::nullopt)));
+        std::nullopt));
   }
   // Selecting a link is a request to see both ends of it, which is the one
   // case where the far document is moved whether or not the sworph is on.
@@ -1448,7 +1449,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
     if (linkContext_ != nullptr) {
       for (const auto &command : asked) {
-        static_cast<void>(linkContext_->execute(command));
+        std::ignore = linkContext_->execute(command);
       }
     }
   }

@@ -5,6 +5,7 @@
 #include "link_panel_overlay.hpp"
 
 #include <algorithm>
+#include <tuple>
 #include <type_traits>
 #include <variant>
 
@@ -199,11 +200,11 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                             ? config.mutedColour
                             : config.textColour;
     if (lines[i].active) {
-      static_cast<void>(canvas->addText(ctx.state, x0, y, marker, colour,
-                                        config.backgroundColour));
+      std::ignore = canvas->addText(ctx.state, x0, y, marker, colour,
+                                    config.backgroundColour);
     }
-    static_cast<void>(canvas->addText(ctx.state, x0 + gutter, y, lines[i].text,
-                                      colour, config.backgroundColour));
+    std::ignore = canvas->addText(ctx.state, x0 + gutter, y, lines[i].text,
+                                  colour, config.backgroundColour);
     y -= lineSizes[i].height + gap;
   }
 
@@ -218,9 +219,9 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     canvas->setTag(render::tagKindOverlay,
                    kTagPanelBase + 1U + static_cast<std::uint32_t>(i));
     canvas->addRect(bLeft, bTop - height, width, height, config.buttonColour);
-    static_cast<void>(canvas->addText(ctx.state, bLeft + gap, bTop - gap,
-                                      buttons[i].label, colour,
-                                      config.buttonColour));
+    std::ignore =
+        canvas->addText(ctx.state, bLeft + gap, bTop - gap, buttons[i].label,
+                        colour, config.buttonColour);
   }
   canvas->setTag(render::tagKindOverlay, 0);
   canvas->commit();

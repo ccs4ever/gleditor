@@ -16,20 +16,20 @@
 
 namespace {
 
+using gleditor::enfilade::DisplacementMonoid;
+using gleditor::enfilade::EnfiladeAction;
+using gleditor::enfilade::WidthMonoid;
 using xanadu::Extent;
 using xanadu::MicroversionId;
 using xanadu::PrimediaSpan;
 using xanadu::Store;
 using xanadu::TransclusionPair;
 using xanadu::Version;
-using xanadu::enfilade::DisplacementMonoid;
-using xanadu::enfilade::EnfiladeAction;
 using xanadu::enfilade::ScrollSpanfilade;
 using xanadu::enfilade::SpanDsp;
 using xanadu::enfilade::SpanEntry;
 using xanadu::enfilade::Spanfilade;
 using xanadu::enfilade::SpanWid;
-using xanadu::enfilade::WidthMonoid;
 using zigzag::Manifold;
 
 // 1. Concept Verification

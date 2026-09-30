@@ -8,6 +8,7 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <tuple>
 #include <unistd.h>
 
 #include "common/xanadu/reading_place.hpp"
@@ -78,7 +79,7 @@ TEST_F(ReadingPlaceTest, anEmptyStoreHasNoPlace) {
 
 TEST_F(ReadingPlaceTest, thePlaceRecordedIsThePlaceReadBack) {
   xanadu::Store store(perma);
-  static_cast<void>(xanadu::recordPlace(store, twoDocuments()));
+  std::ignore = xanadu::recordPlace(store, twoDocuments());
   EXPECT_EQ(xanadu::latestPlace(store), twoDocuments());
 }
 
@@ -94,11 +95,11 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
   first.zigzagVersion.clear();
   first.zigzagFocus       = 0;
   first.zigzagHasKeyboard = false;
-  static_cast<void>(xanadu::recordPlace(store, first));
+  std::ignore             = xanadu::recordPlace(store, first);
   EXPECT_EQ(xanadu::latestPlace(store), first);
   const auto opsAfterFirst = store.opCount();
 
-  static_cast<void>(xanadu::recordPlace(store, twoDocuments()));
+  std::ignore = xanadu::recordPlace(store, twoDocuments());
   EXPECT_GT(store.opCount(), opsAfterFirst);
   store.save((root / "activity").string());
 

@@ -16,6 +16,7 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -707,7 +708,7 @@ int main(int argc, char *argv[]) {
       } else if (lastQuery.empty()) {
         std::cout << "Run a query first; :save writes its results\n";
       } else {
-        static_cast<void>(saveResults(path));
+        std::ignore = saveResults(path);
       }
     } else if (line.starts_with(":ast ")) {
       std::string q = line.substr(5);

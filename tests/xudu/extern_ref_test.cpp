@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -240,7 +241,7 @@ TEST(ExternRefTest, anExternRefSurvivesTheForeignStoreGainingABranch) {
 
   // Branch 1: add some ops
   const auto b1_1 = foreignStore.insert(baseVersion, 0, "branch 1 text");
-  static_cast<void>(foreignStore.insert(b1_1, 0, "more branch 1 text"));
+  std::ignore     = foreignStore.insert(b1_1, 0, "more branch 1 text");
 
   // Branch 2: make the cell on branch 2
   const auto b2_1 = foreignStore.makeCell(baseVersion, "Foreign Cell Content");

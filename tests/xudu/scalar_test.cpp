@@ -17,6 +17,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/microversion.hpp"
@@ -133,12 +134,12 @@ TEST(ScalarTest, aSignallingNaNIsRefusedRatherThanQuieted) {
       xanadu::isSignallingNaN(std::numeric_limits<double>::infinity()));
   EXPECT_FALSE(xanadu::isSignallingNaN(1.0));
 
-  EXPECT_THROW(static_cast<void>(xanadu::scalarValue(signalling)),
+  EXPECT_THROW(std::ignore = xanadu::scalarValue(signalling),
                std::invalid_argument);
 
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
-  EXPECT_THROW(static_cast<void>(store.makeScalarCell(at, signalling)),
+  EXPECT_THROW(std::ignore = store.makeScalarCell(at, signalling),
                std::invalid_argument);
   // And nothing was recorded, so the document is the one it was.
   EXPECT_EQ(store.opCount(), 3U);

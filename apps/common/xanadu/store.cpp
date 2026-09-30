@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -287,7 +288,7 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
       opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
         // A cold fold keeps going past a refusal: the manifold counts it in
         // refusedOps(), which is where a caller checking honesty looks.
-        static_cast<void>(folded.applyStructure(idx, node));
+        std::ignore = folded.applyStructure(idx, node);
       });
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
@@ -307,7 +308,7 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
       // As above: refusals are counted, not fatal to the fold.
-      static_cast<void>(folded.applyStructure(opsSpool.indexOf(step), *node));
+      std::ignore = folded.applyStructure(opsSpool.indexOf(step), *node);
     }
   }
   folded.compact();

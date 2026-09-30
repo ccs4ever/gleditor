@@ -1312,8 +1312,8 @@ int Application::run() {
       } else if (render::DiagnosticSeverity::Warning == dialog.severity) {
         kind = sdl::MessageKind::Warning;
       }
-      static_cast<void>(sdl::showMessageBox(window.window, kind, dialog.title,
-                                            dialog.message, {"OK"}));
+      std::ignore = sdl::showMessageBox(window.window, kind, dialog.title,
+                                        dialog.message, {"OK"});
     }
   };
 
@@ -1376,7 +1376,7 @@ int Application::run() {
       return;
     }
     if (state->mouseUpHandler) {
-      static_cast<void>(state->mouseUpHandler(x, y, button));
+      std::ignore = state->mouseUpHandler(x, y, button);
     }
   };
   const auto onWheel = [&](const float wx, const float wy,
@@ -1415,7 +1415,7 @@ int Application::run() {
     // requires; publishing costs a comparison when nothing has changed.
     if (const auto &publisher = state->accessibility; publisher) {
       publisher->publish();
-      static_cast<void>(publisher->pumpActions());
+      std::ignore = publisher->pumpActions();
     }
 
     // Text entry follows whatever has the keyboard. A modal is typed into even

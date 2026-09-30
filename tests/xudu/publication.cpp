@@ -21,6 +21,7 @@
 
 #include <map>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/store.hpp"
@@ -161,8 +162,8 @@ TEST(PublicationTest, refusesToPublishContentThisMachineHasNotPublished) {
   xanadu::Store store;
   const auto version = store.insert(MicroversionId{}, 0, "written just now");
   const auto keys    = xanadu::createMutableKeys();
-  EXPECT_THROW(static_cast<void>(xanadu::publish(store, version, keys, "essay",
-                                                 "An Essay", 1, 1700000000)),
+  EXPECT_THROW(std::ignore = xanadu::publish(store, version, keys, "essay",
+                                             "An Essay", 1, 1700000000),
                std::runtime_error);
 }
 
@@ -175,8 +176,8 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
   const auto keys    = xanadu::createMutableKeys();
 
   // Before sealing there is nothing a reader could resolve.
-  EXPECT_THROW(static_cast<void>(xanadu::publish(store, version, keys, "essay",
-                                                 "An Essay", 1, 1700000000)),
+  EXPECT_THROW(std::ignore = xanadu::publish(store, version, keys, "essay",
+                                             "An Essay", 1, 1700000000),
                std::runtime_error);
 
   // Sealing insists on a signed record of who is doing it; whether gpg made

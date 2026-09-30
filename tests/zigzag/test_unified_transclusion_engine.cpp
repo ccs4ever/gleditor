@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <tuple>
 
 #include "../lib/mocks/device.hpp"
 #include "common/xanadu/format.hpp"
@@ -90,7 +91,7 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
   // into a document mints nothing: a xanadoc's pieces become cells when
   // something says they are cells, which is sliceToStore() or the verbs below.
   const auto v1 = store.insert(xanadu::MicroversionId{}, 0, "Everything is");
-  static_cast<void>(store.insert(v1, 13, " deeply intertwingled."));
+  std::ignore   = store.insert(v1, 13, " deeply intertwingled.");
   engine.syncIncremental();
   EXPECT_EQ(engine.cellCount(), 0U);
 }
@@ -496,16 +497,14 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   const auto req   = UnifiedTransclusionEngine::RenderSliceRequest{
         .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
 
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto afterFirst = rig.engine.shapingCacheStats();
 
   // A second cell whose text differs only in its last character.
   const auto second = rig.engine.addCell("Alpha content y");
   const auto req2   = UnifiedTransclusionEngine::RenderSliceRequest{
         .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache);
   const auto afterSecond = rig.engine.shapingCacheStats();
 
   EXPECT_GT(afterSecond.misses, afterFirst.misses)
@@ -521,8 +520,7 @@ TEST(ShapingCacheTest, StaysWithinItsCapacity) {
       static_cast<int>(UnifiedTransclusionEngine::kShapingCacheCapacity) + 40;
   const auto req = rig.buildChain(cells);
 
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto stats = rig.engine.shapingCacheStats();
 
   EXPECT_LE(stats.entries, UnifiedTransclusionEngine::kShapingCacheCapacity);
@@ -533,8 +531,7 @@ TEST(ShapingCacheTest, ClearingDropsEverything) {
   StagingRig rig;
   ASSERT_NE(rig.font, nullptr);
   const auto req = rig.buildChain(4);
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore    = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   ASSERT_GT(rig.engine.shapingCacheStats().entries, 0U);
 
   rig.engine.clearShapingCache();
@@ -562,7 +559,7 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
     return std::chrono::duration<double, std::milli>(t1 - t0).count();
   };
 
-  static_cast<void>(timeOne(false)); // warm the glyph atlas
+  std::ignore = timeOne(false); // warm the glyph atlas
 
   double cold        = 0.0;
   double warm        = 0.0;
@@ -662,8 +659,7 @@ TEST(UnifiedTransclusionEngineTest,
   const auto plain1 = rig.engine.addCell("Plain cell 1");
   const auto plain2 = rig.engine.addCell("Plain cell 2");
   rig.engine.linkCells(plain1, plain2, DimOrdinal::D1);
-  static_cast<void>(
-      rig.store.insert(rig.engine.head(), 0, "Unrelated text in doc"));
+  std::ignore = rig.store.insert(rig.engine.head(), 0, "Unrelated text in doc");
 
   rig.engine.syncIncremental();
 

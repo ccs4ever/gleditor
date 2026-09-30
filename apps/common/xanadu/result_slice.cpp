@@ -23,18 +23,18 @@ MicroversionId writeResultSlice(Store &store,
   for (const auto &row : rows) {
     version         = store.makeCell(version, row.text);
     const auto cell = store.cellRefOf(version);
-    static_cast<void>(manifold.advance(store, version));
+    manifold.advanceOrRefold(store, version);
     version = store.setLink(version, previous, result.dim,
                             zigzag::DimVector::POS, cell, &manifold);
-    static_cast<void>(manifold.advance(store, version));
+    manifold.advanceOrRefold(store, version);
     previous = cell;
     if (!row.source.empty()) {
       version               = store.makeCell(version, row.source);
       const auto sourceCell = store.cellRefOf(version);
-      static_cast<void>(manifold.advance(store, version));
+      manifold.advanceOrRefold(store, version);
       version = store.setLink(version, cell, source.dim, zigzag::DimVector::POS,
                               sourceCell, &manifold);
-      static_cast<void>(manifold.advance(store, version));
+      manifold.advanceOrRefold(store, version);
     }
   }
   store.setCurrentVersions({version});

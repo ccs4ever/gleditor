@@ -8,6 +8,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/bencode.hpp"
@@ -82,7 +83,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
     std::istringstream in3(data);
     std::uint64_t val = 0;
     try {
-      static_cast<void>(readVarint(in3, val));
+      std::ignore = readVarint(in3, val);
     } catch (const std::exception &) {
       // Graceful error expected
     }
@@ -91,7 +92,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
     std::istringstream in4(data);
     MicroversionId id;
     try {
-      static_cast<void>(readMicroversionId(in4, id));
+      std::ignore = readMicroversionId(in4, id);
     } catch (const std::exception &) {
       // Graceful error expected
     }
@@ -105,22 +106,22 @@ TEST(FuzzTest, bencodeAndManifestParsersNeverCrashOnRandomBytes) {
 
     // 1. Raw Bencode decode
     try {
-      static_cast<void>(xanadu::bencode::decode(str));
+      std::ignore = xanadu::bencode::decode(str);
     } catch (const std::exception &) {
       // Graceful error
     }
 
     // 2. decodePublication
-    static_cast<void>(decodePublication(str));
+    std::ignore = decodePublication(str);
 
     // 3. decodeLinkPackage
-    static_cast<void>(decodeLinkPackage(str));
+    std::ignore = decodeLinkPackage(str);
 
     // 4. decodeBlessing
-    static_cast<void>(decodeBlessing(str));
+    std::ignore = decodeBlessing(str);
 
     // 5. decodeMutablePointer
-    static_cast<void>(decodeMutablePointer(str));
+    std::ignore = decodeMutablePointer(str);
   }
 }
 
@@ -131,28 +132,28 @@ TEST(FuzzTest, mutableLinkAndHexParsersNeverCrashOnRandomStrings) {
 
     // 1. MutableLink::parse
     try {
-      static_cast<void>(MutableLink::parse(str));
+      std::ignore = MutableLink::parse(str);
     } catch (const std::exception &) {
       // Graceful exception expected
     }
 
     // 2. PublicKey::fromHex
     try {
-      static_cast<void>(PublicKey::fromHex(str));
+      std::ignore = PublicKey::fromHex(str);
     } catch (const std::exception &) {
       // Graceful exception expected
     }
 
     // 3. SecretKey::fromHex
     try {
-      static_cast<void>(SecretKey::fromHex(str));
+      std::ignore = SecretKey::fromHex(str);
     } catch (const std::exception &) {
       // Graceful exception expected
     }
 
     // 4. Signature::fromHex
     try {
-      static_cast<void>(Signature::fromHex(str));
+      std::ignore = Signature::fromHex(str);
     } catch (const std::exception &) {
       // Graceful exception expected
     }
@@ -166,7 +167,7 @@ TEST(FuzzTest, microversionParserNeverCrashesOnRandomStrings) {
 
     // 1. MicroversionId::parse
     try {
-      static_cast<void>(MicroversionId::parse(str));
+      std::ignore = MicroversionId::parse(str);
     } catch (const std::exception &) {
       // Graceful exception expected
     }

@@ -16,6 +16,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -946,7 +947,7 @@ void Session::rememberPlace(const xanadu::ReadingPlace &place) {
   if (nullptr == store) {
     return;
   }
-  static_cast<void>(xanadu::recordPlace(*store, place));
+  std::ignore    = xanadu::recordPlace(*store, place);
   const auto dir = xanadu::activityDirectory();
   std::filesystem::create_directories(dir);
   store->save(dir.string());

@@ -20,6 +20,7 @@
 #include <iterator>
 #include <string>
 #include <thread>
+#include <tuple>
 
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/torrent.hpp"
@@ -127,7 +128,7 @@ int main(const int argc, char **argv) {
       std::this_thread::sleep_for(std::chrono::milliseconds{100});
       // Keeps the session's alert queue drained; an undrained queue eventually
       // stops libtorrent posting the ones that matter.
-      static_cast<void>(peer.metainfo(hash));
+      std::ignore = peer.metainfo(hash);
 
       if (publish && std::chrono::steady_clock::now() >= nextPublish) {
         // Republished rather than put once. A DHT item is held by the nodes

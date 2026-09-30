@@ -7,6 +7,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/binary_ops.hpp"
 
@@ -40,14 +41,14 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   std::istringstream in4(input);
   std::uint64_t val = 0;
   try {
-    static_cast<void>(xanadu::readVarint(in4, val));
+    std::ignore = xanadu::readVarint(in4, val);
   } catch (...) {
   }
 
   std::istringstream in5(input);
   xanadu::MicroversionId id;
   try {
-    static_cast<void>(xanadu::readMicroversionId(in5, id));
+    std::ignore = xanadu::readMicroversionId(in5, id);
   } catch (...) {
   }
 

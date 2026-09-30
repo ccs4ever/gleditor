@@ -19,6 +19,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 #include "common/xanadu/bencode.hpp"
 #include "common/xanadu/resolver.hpp"
@@ -523,7 +524,7 @@ TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
 
   const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
-  static_cast<void>(store.insert(MicroversionId{}, 0, "hello"));
+  std::ignore = store.insert(MicroversionId{}, 0, "hello");
   store.save(storeDir);
 
   const std::filesystem::path where(storeDir);

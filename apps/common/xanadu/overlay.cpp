@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 
 #include "common/xanadu/torrent.hpp"
 
@@ -213,7 +214,7 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
 
   // Minted here even though a rebase links nothing on it, so the store has
   // both overlay dimensions whichever operation came first.
-  static_cast<void>(ensureDim(kDimOverlayTargets));
+  std::ignore          = ensureDim(kDimOverlayTargets);
   const auto dimClaims = ensureDim(kDimOverlayClaims);
 
   // Mint new release cell to preserve hypertime history of old release

@@ -36,8 +36,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <gleditor/app.hpp>
-#include <gleditor/audio.hpp>
-#include <gleditor/audio_widget.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/doc.hpp>
@@ -2435,7 +2433,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
     app.commands().registerAction(
         std::string(name), help, [renderer, &linkContext, command = *command] {
           renderer->runWithState([&linkContext, command](RenderState &) {
-            static_cast<void>(linkContext.execute(command));
+            std::ignore = linkContext.execute(command);
           });
         });
   }
@@ -2526,8 +2524,8 @@ int main(const int argc, char **argv) {
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--audio")
-      .help(
-          "open an audio stream or file as an embedded AudioWidget; repeatable")
+      .help("open an audio stream or file as an embedded media widget; "
+            "repeatable")
       .append();
   parser.add_argument("--video")
       .help(
@@ -3490,8 +3488,8 @@ int main(const int argc, char **argv) {
               };
               if (std::ranges::any_of(selected->occurrences->left, holds) ||
                   std::ranges::any_of(selected->occurrences->right, holds)) {
-                static_cast<void>(linkContext.execute(
-                    xanadu::commandForPick(selected->key, whole)));
+                std::ignore = linkContext.execute(
+                    xanadu::commandForPick(selected->key, whole));
                 return;
               }
             }
@@ -4317,7 +4315,7 @@ int main(const int argc, char **argv) {
       views.selectDoc(0);
     }
 
-    std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
+    std::vector<std::shared_ptr<gleditor::MediaWidget>> audioWidgets;
     // A widget that cannot load still appears, titled, so a mistyped path
     // shows up as an empty card rather than as nothing at all.
     const auto loadOrWarn = [](auto &widget,
@@ -4330,7 +4328,7 @@ int main(const int argc, char **argv) {
     };
     if (parser.present<std::vector<std::string>>("--audio")) {
       for (const auto &mrl : parser.get<std::vector<std::string>>("--audio")) {
-        auto w = std::make_shared<gleditor::AudioWidget>("Sans 11");
+        auto w = std::make_shared<gleditor::MediaWidget>("Sans 11");
         if (mrl == "white-noise" || mrl == "test") {
           std::vector<std::byte> dummy(1024, std::byte{0x55});
           auto stream =
@@ -4683,8 +4681,8 @@ int main(const int argc, char **argv) {
               return;
             }
             if (choices.size() == 1) {
-              static_cast<void>(linkContext.execute(
-                  xanadu::nav::ActivityForward{.child = choices.front().id}));
+              std::ignore = linkContext.execute(
+                  xanadu::nav::ActivityForward{.child = choices.front().id});
               return;
             }
             gleditor::Form::Field choice;
@@ -4708,8 +4706,8 @@ int main(const int argc, char **argv) {
                   const auto child = xanadu::VisitId{
                       .value = std::stoull(answers.front().answer())};
                   renderer->runWithState([&linkContext, child](RenderState &) {
-                    static_cast<void>(linkContext.execute(
-                        xanadu::nav::ActivityForward{.child = child}));
+                    std::ignore = linkContext.execute(
+                        xanadu::nav::ActivityForward{.child = child});
                   });
                 });
           });

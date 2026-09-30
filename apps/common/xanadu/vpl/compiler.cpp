@@ -1312,7 +1312,7 @@ VPLCompiler::exportToStore(xanadu::Store &store,
       ver = store.makeCell(ver, arena.textOf(c));
     }
     cellMap[c] = store.cellRefOf(ver);
-    static_cast<void>(manifold.advance(store, ver));
+    manifold.advanceOrRefold(store, ver);
   }
 
   // 3. Link edges (posward links only)
@@ -1326,7 +1326,7 @@ VPLCompiler::exportToStore(xanadu::Store &store,
         CellRef to = cellMap.at(target);
         ver =
             store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);
-        static_cast<void>(manifold.advance(store, ver));
+        manifold.advanceOrRefold(store, ver);
       }
     }
   }

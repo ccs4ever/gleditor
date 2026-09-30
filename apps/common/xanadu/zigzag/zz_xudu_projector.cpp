@@ -613,7 +613,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
       return;
     }
     out.version = store.setLink(out.version, from, dim, dir, to, &manifold);
-    static_cast<void>(manifold.advance(store, out.version));
+    manifold.advanceOrRefold(store, out.version);
   };
 
   // An attribute is a cell of its own on the matching rank, posward of the cell
@@ -626,7 +626,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
     }
     out.version          = store.makeCell(out.version, value);
     const auto attribute = store.cellRefOf(out.version);
-    static_cast<void>(manifold.advance(store, out.version));
+    manifold.advanceOrRefold(store, out.version);
     linkTo(owner, out.dimensions.at(DimID{dimName}), DimVector::POS, attribute);
   };
 

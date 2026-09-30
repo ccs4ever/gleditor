@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/anthology.hpp"
@@ -382,8 +383,8 @@ TEST(AnthologyTest, invalidAncestryThrows) {
   const GlobalDocumentState pinnedState{.scroll  = foreignKey,
                                         .version = MicroversionId::parse("2")};
 
-  EXPECT_THROW(static_cast<void>(store.appendAnthologyEntry(
-                   at, store.homeCell(), memberRef, pinnedState)),
+  EXPECT_THROW(std::ignore = store.appendAnthologyEntry(at, store.homeCell(),
+                                                        memberRef, pinnedState),
                std::invalid_argument);
 }
 

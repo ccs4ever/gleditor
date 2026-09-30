@@ -16,6 +16,7 @@
 #include <iostream>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -252,7 +253,7 @@ void ZigzagVisualizer::adoptDocument(
        {current_view_.x_dimension, current_view_.y_dimension,
         current_view_.z_dimension, DimID{"d.clone"}}) {
     if (!wellKnown.empty()) {
-      static_cast<void>(engine_->dimensionFor(wellKnown));
+      std::ignore = engine_->dimensionFor(wellKnown);
     }
   }
 
@@ -2429,7 +2430,7 @@ void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
            {current_view_.x_dimension, current_view_.y_dimension,
             current_view_.z_dimension}) {
         if (!dName.empty()) {
-          static_cast<void>(engine_->dimensionFor(dName));
+          std::ignore = engine_->dimensionFor(dName);
         }
       }
     }
@@ -2886,7 +2887,7 @@ bool ZigzagVisualizer::translateVQLAndAttachToFocus(std::string_view vqlQuery,
          {std::string(attachDim), std::string("d.spin"), std::string("d.step"),
           std::string("d.grab"), std::string("d.vars"), std::string("d.values"),
           std::string("d.branch")}) {
-      static_cast<void>(engine_->dimensionFor(dim));
+      std::ignore = engine_->dimensionFor(dim);
     }
   }
 
@@ -3134,8 +3135,8 @@ bool ZigzagVisualizer::defineMacro(const std::string_view name,
     return false;
   }
   if (store_) {
-    static_cast<void>(
-        vortex_host_->saveMacroToStore(name, vqlExpr, keyBinding, *store_));
+    std::ignore =
+        vortex_host_->saveMacroToStore(name, vqlExpr, keyBinding, *store_);
   } else {
     vortex_host_->defineMacro(name, vqlExpr, nullptr);
   }

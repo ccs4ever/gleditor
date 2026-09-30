@@ -8,12 +8,9 @@
 #include <string>
 #include <vector>
 
-#include <gleditor/audio.hpp>
 #include <gleditor/media.hpp>
 #include <gleditor/media_stream.hpp>
 
-using gleditor::AudioMedia;
-using gleditor::AudioPlayer;
 using gleditor::ByteRange;
 using gleditor::MediaPlayer;
 using gleditor::MediaResource;
@@ -130,10 +127,10 @@ TEST(MediaTest, MediaPlayerTimeRangeBoundsAndSeeking) {
   EXPECT_FLOAT_EQ(player.positionSeconds(), 10.0F); // Looped back to start
 }
 
-TEST(MediaTest, AudioAliasesCompatibility) {
-  AudioPlayer player(true);
+TEST(MediaTest, anAudioOnlyStreamPlays) {
+  MediaPlayer player(true);
   auto memStream = std::make_shared<MemoryMediaStream>("AUDIO_TRACK_PCM");
-  auto audio     = AudioMedia::fromStream(memStream, "AudioAliasTrack");
+  auto audio     = MediaResource::fromStream(memStream, "AudioTrack");
 
   EXPECT_TRUE(player.load(audio));
   EXPECT_TRUE(player.play());

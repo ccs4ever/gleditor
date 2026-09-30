@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -104,7 +105,7 @@ namespace {
 void settleDocLoad(
     std::future<std::expected<void, gleditor::SourceError>> &load) {
   try {
-    static_cast<void>(load.get());
+    std::ignore = load.get();
   } catch (const std::exception &failure) {
     GLEDITOR_LOG_ERROR("render.scene", "background page build failed: {}",
                        failure.what());
@@ -865,7 +866,7 @@ void Renderer::advanceScript(RenderState &state) {
     if (nullptr == this->state->modal || !this->state->modal->grabbing()) {
       std::cerr << "--key with nothing to press it in; use --do first\n";
     } else {
-      static_cast<void>(this->state->modal->keyPressed(step.key, step.mods));
+      std::ignore = this->state->modal->keyPressed(step.key, step.mods);
     }
     finishStepWhenSettled();
     return;
@@ -1019,7 +1020,7 @@ void Renderer::applyTypedText(RenderState &state) {
   if (caret->documentIndex() >= state.docs.size()) {
     return;
   }
-  static_cast<void>(typeAtCaret(state, typed));
+  std::ignore = typeAtCaret(state, typed);
 }
 
 std::uint32_t Renderer::typeAtCaret(RenderState &state,
@@ -1029,8 +1030,8 @@ std::uint32_t Renderer::typeAtCaret(RenderState &state,
   // selection goes first and the text lands where it began.
   if (caret->hasSelection()) {
     const auto start = caret->selectionStart();
-    static_cast<void>(document.erase(
-        state, start, caret->selectionEnd() - start, caret.get()));
+    std::ignore = document.erase(state, start, caret->selectionEnd() - start,
+                                 caret.get());
     caret->placeAt(caret->documentIndex(), start);
   }
   // Read before insert() moves the caret past what it is about to place.

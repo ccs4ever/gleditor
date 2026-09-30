@@ -12,6 +12,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/identity/identity_layout.hpp"
@@ -353,7 +354,7 @@ TEST(UserPermascrollTest, aViewSurvivesEveryLaterAppend) {
   // Past the 4 KiB page the first append committed, and past several more, so
   // the arena has had to commit pages underneath the view's neighbourhood.
   for (int i = 0; i < 5000; i++) {
-    static_cast<void>(scroll.append("filler filler filler filler "));
+    std::ignore = scroll.append("filler filler filler filler ");
   }
 
   // Still the same bytes at the same address: an arena that reserved its
