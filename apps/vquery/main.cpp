@@ -32,7 +32,6 @@
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/parser.hpp"
-#include "common/xanadu/vql/result_store.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
@@ -380,34 +379,8 @@ int main(int argc, char *argv[]) {
                      (std::istreambuf_iterator<char>()));
   }
 
-  // The last query run and what it found: what -o and :save write.
-  std::string lastQuery;
+  // What the last query found: what -o and :save write.
   std::vector<zigzag::CellRef> lastResults;
-  const auto saveResults = [&](const std::string &path) -> bool {
-    namespace fs = std::filesystem;
-    if (fs::exists(fs::path(path) / "ops.nodes")) {
-      std::cerr << "Error: " << path
-                << " already holds a store; results are written to a new one\n";
-      return false;
-    }
-    try {
-      fs::create_directories(path);
-      xanadu::Store out(permascroll);
-      const auto stats = xanadu::vql::writeResultStore(coordinator, lastQuery,
-                                                       lastResults, out);
-      out.save(path);
-      std::cout << "Saved " << stats.cells << " result"
-                << (1 == stats.cells ? "" : "s") << " to " << path << " ("
-                << stats.quoted << " quoted, " << stats.copied
-                << " written out)\n";
-      return true;
-    } catch (const std::exception &err) {
-      std::cerr << "Error: cannot save results to " << path << ": "
-                << err.what() << "\n";
-      return false;
-    }
-  };
-
   // Query Execution Helper
   bool hasResults = false;
   auto runQuery   = [&](std::string_view qStr) -> bool {
@@ -480,7 +453,6 @@ int main(int argc, char *argv[]) {
 
     lastResults = results;
     hasResults  = true;
-    lastQuery   = std::string(qStr);
 
     // Format results
     if (format == "ascii") {
@@ -699,16 +671,6 @@ int main(int argc, char *argv[]) {
         std::cout << "Loaded store '" << label << "' from " << path << "\n";
       } else {
         std::cout << "Usage: :store <label> <path>\n";
-      }
-    } else if (line.starts_with(":save")) {
-      std::string path = line.size() > 5 ? line.substr(5) : std::string{};
-      path.erase(0, path.find_first_not_of(' '));
-      if (path.empty()) {
-        std::cout << "Usage: :save <path>\n";
-      } else if (lastQuery.empty()) {
-        std::cout << "Run a query first; :save writes its results\n";
-      } else {
-        std::ignore = saveResults(path);
       }
     } else if (line.starts_with(":ast ")) {
       std::string q = line.substr(5);
