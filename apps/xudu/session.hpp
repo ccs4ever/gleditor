@@ -43,6 +43,7 @@
 
 #include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/config.hpp"
+#include "common/xanadu/focus_target.hpp"
 #include "common/xanadu/media_manager.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/mutable_link.hpp"
@@ -148,6 +149,8 @@ private:
 struct OpenView {
   MicroversionId version;
   std::size_t storeIndex{0};
+  std::uint32_t focusedBirth{0};
+  std::vector<std::uint32_t> containmentPath;
   /// The version rebuilt, kept so that decorating does not replay the whole
   /// history once per frame per document.
   Version pieces;
@@ -508,6 +511,13 @@ public:
    * removes the view from open list, and invalidates decorations.
    */
   void viewClosed(std::uint32_t docIndex);
+
+  /// Resolve an ephemeral FocusTarget for view @p docIndex.
+  [[nodiscard]] std::optional<FocusTarget>
+  focusTargetForView(std::size_t docIndex) const;
+
+  /// Update the focused birth target for view @p docIndex.
+  void setFocusTarget(std::size_t docIndex, std::uint32_t birthOp);
 
   /**
    * @brief Create a new sovereign store bound to the author's UserPermascroll.

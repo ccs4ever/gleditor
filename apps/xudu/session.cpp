@@ -139,6 +139,10 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
+  const auto focus = focusTargetForView(docIndex);
+  if (!focus.has_value() || !focus->isValid()) {
+    return MicroversionId{};
+  }
   const auto sIdx = open[docIndex].storeIndex;
   auto &st        = store(sIdx);
 
@@ -918,13 +922,20 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 
 void Session::viewOpened(const MicroversionId &version,
                          const std::size_t storeIndex) {
-  const auto &st = store(storeIndex);
-  open.push_back(OpenView{.version        = version,
-                          .storeIndex     = storeIndex,
-                          .pieces         = st.rebuild(version),
-                          .decorations    = {},
-                          .decoratedAt    = 0,
-                          .uncommittedLog = {}});
+  const auto &st          = store(storeIndex);
+  const auto xanadocBirth = st.activeXanadocOnBranch(version);
+  std::vector<std::uint32_t> path;
+  if (xanadocBirth != 0) {
+    path = st.containmentPath(xanadocBirth);
+  }
+  open.push_back(OpenView{.version         = version,
+                          .storeIndex      = storeIndex,
+                          .focusedBirth    = xanadocBirth,
+                          .containmentPath = std::move(path),
+                          .pieces          = st.rebuild(version, xanadocBirth),
+                          .decorations     = {},
+                          .decoratedAt     = 0,
+                          .uncommittedLog  = {}});
   invalidate();
 }
 
@@ -935,6 +946,57 @@ void Session::viewClosed(const std::uint32_t docIndex) {
   flushUncommitted(docIndex);
   open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
   invalidate();
+}
+
+std::optional<FocusTarget>
+Session::focusTargetForView(const std::size_t docIndex) const {
+  if (docIndex >= open.size()) {
+    return std::nullopt;
+  }
+  const auto &view = open[docIndex];
+  const auto &st   = store(view.storeIndex);
+  if (view.focusedBirth != 0) {
+    if (!st.validateContainment(view.focusedBirth)) {
+      return std::nullopt;
+    }
+    const auto kind = st.structureKindOfOp(view.focusedBirth);
+    return FocusTarget{
+        .kind            = kind,
+        .birthOp         = view.focusedBirth,
+        .containmentPath = view.containmentPath,
+    };
+  }
+  const auto activeXanadoc = st.activeXanadocOnBranch(view.version);
+  if (activeXanadoc != 0 && st.validateContainment(activeXanadoc)) {
+    return FocusTarget{
+        .kind            = StructureKind::Xanadoc,
+        .birthOp         = activeXanadoc,
+        .containmentPath = st.containmentPath(activeXanadoc),
+    };
+  }
+  return FocusTarget{
+      .kind            = StructureKind::Xanadoc,
+      .birthOp         = 0,
+      .containmentPath = {},
+  };
+}
+
+void Session::setFocusTarget(const std::size_t docIndex,
+                             const std::uint32_t birthOp) {
+  if (docIndex >= open.size()) {
+    return;
+  }
+  auto &view     = open[docIndex];
+  const auto &st = store(view.storeIndex);
+  if (birthOp == 0) {
+    view.focusedBirth = 0;
+    view.containmentPath.clear();
+    return;
+  }
+  if (st.validateContainment(birthOp)) {
+    view.focusedBirth    = birthOp;
+    view.containmentPath = st.containmentPath(birthOp);
+  }
 }
 
 std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
@@ -1153,8 +1215,10 @@ void Session::refresh(const std::uint32_t docIndex,
   // most of the answer. Only a move that is not one step on -- travelling in
   // hypertime, or several edits recorded before anything asked to see them --
   // has to replay the history from the null document.
-  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version)) {
-    open[docIndex].pieces = st.rebuild(version);
+  const auto birth = open[docIndex].focusedBirth;
+  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version,
+                  birth)) {
+    open[docIndex].pieces = st.rebuild(version, birth);
   }
   open[docIndex].version = version;
   invalidate();
@@ -1776,9 +1840,22 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       return;
     }
 
-    const auto sIdx = view.storeIndex;
-    auto &st        = store(sIdx);
-    auto curVersion = view.version;
+    const auto focus = focusTargetForView(which);
+    if (!focus.has_value() || !focus->isValid()) {
+      view.uncommittedLog.clear();
+      return;
+    }
+
+    const auto sIdx        = view.storeIndex;
+    auto &st               = store(sIdx);
+    auto curVersion        = view.version;
+    const auto targetBirth = focus->birthOp;
+    MicroversionId ctxId{};
+    if (targetBirth != 0) {
+      const auto lastOp = st.lastOpOnStructure(curVersion, targetBirth);
+      ctxId             = (lastOp != 0) ? st.segmentedOps().idOf(lastOp)
+                                        : st.segmentedOps().idOf(targetBirth);
+    }
 
     for (const auto &op : compacted) {
       if (op.kind == OpKind::Insert) {
@@ -1792,7 +1869,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           // and under transcopyright it would have routed royalties to
           // whoever typed the line first. Storage economy is a real goal, but
           // it belongs below the address layer, not at it.
-          curVersion = st.insert(curVersion, op.at, op.text);
+          curVersion = st.insert(curVersion, op.at, op.text, ctxId);
           GLEDITOR_LOG_DEBUG("xudu.edit", "{} insert {} bytes at {}",
                              curVersion.str(), op.text.size(), op.at);
           if (swarmSource && !st.isSystem()) {
@@ -1806,7 +1883,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
         }
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
-          curVersion = st.erase(curVersion, op.at, op.length);
+          curVersion = st.erase(curVersion, op.at, op.length, ctxId);
           GLEDITOR_LOG_DEBUG("xudu.edit", "{} delete {} bytes at {}",
                              curVersion.str(), op.length, op.at);
           if (swarmSource && !st.isSystem()) {
@@ -1862,6 +1939,10 @@ void Session::textInserted(Doc &doc, const std::uint32_t at,
   if (which >= open.size()) {
     return;
   }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
+    return;
+  }
   open[which].uncommittedLog.recordInsert(at, utf8);
   if (swarmSource) {
     flushUncommitted(static_cast<std::uint32_t>(which));
@@ -1872,6 +1953,10 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
                          const std::string &removed) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
+    return;
+  }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
     return;
   }
   open[which].uncommittedLog.recordErase(at, removed);

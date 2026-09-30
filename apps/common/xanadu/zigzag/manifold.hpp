@@ -189,6 +189,8 @@ enum class FoldRefusal : std::uint8_t {
   UnknownVerb,      ///< a StructureVerb this build does not know
   InvalidMakeKind,  ///< Reserved StructureKind, or invalid fields/value on
                     ///< Slice/Xanadoc Make
+  WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
+                    ///< PageBreak on Cell)
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -210,6 +212,8 @@ toString(const FoldRefusal refusal) noexcept {
     return "unknown verb";
   case FoldRefusal::InvalidMakeKind:
     return "invalid make kind";
+  case FoldRefusal::WrongContextKind:
+    return "wrong context kind";
   }
   return "unknown refusal";
 }
@@ -630,6 +634,16 @@ public:
   /// All structure birth operations of a specific kind.
   [[nodiscard]] std::vector<std::uint32_t>
   structureBirths(xanadu::StructureKind kind) const;
+
+  /// Walk containment edges up from birth @p birthOp to top-level, returning
+  /// the sequence from top-level root down to @p birthOp, or empty if
+  /// invalid/broken.
+  [[nodiscard]] std::vector<std::uint32_t>
+  containmentPath(std::uint32_t birthOp) const;
+
+  /// Whether birth @p birthOp has a valid, unbroken, non-cyclic containment
+  /// path to a recognized top-level root.
+  [[nodiscard]] bool validateContainment(std::uint32_t birthOp) const;
 
   // -- fold path: driven only by Store ---------------------------------------
 

@@ -57,6 +57,22 @@ static_assert(EnfiladeAction<ChronoDsp, EdlTransform>);
 /// Cache-conscious interior B-enfilade crum node.
 using ChronoCrum = CrumNode<ChronoDsp, EdlTransform, 8>;
 
+struct ChronoKey {
+  std::uint32_t opIndex{0};
+  std::uint32_t xanadocBirth{0};
+
+  bool operator==(const ChronoKey &other) const noexcept {
+    return opIndex == other.opIndex && xanadocBirth == other.xanadocBirth;
+  }
+};
+
+struct ChronoKeyHash {
+  std::size_t operator()(const ChronoKey &k) const noexcept {
+    return (static_cast<std::size_t>(k.xanadocBirth) << 32) ^
+           static_cast<std::size_t>(k.opIndex);
+  }
+};
+
 /**
  * @class Chronofilade
  * @brief Timeline scrubbing and composed EDL transformation enfilade.
@@ -76,9 +92,10 @@ public:
                 const MicroversionId &produces, const Store &store);
 
   /// Rebuild the Version at @p opIndex in O(1) amortized time using checkpoints
-  /// and composed transforms.
+  /// and composed transforms, optionally scoped to @p xanadocBirth.
   [[nodiscard]] Version rebuildVersion(std::uint32_t opIndex,
-                                       const Store &store) const;
+                                       const Store &store,
+                                       std::uint32_t xanadocBirth = 0) const;
 
   /// Find the Lowest Common Ancestor of operations @p a and @p b in O(log N).
   [[nodiscard]] std::uint32_t lowestCommonAncestor(std::uint32_t a,
@@ -93,19 +110,22 @@ public:
 
   /// Carry @p document from @p fromIndex to @p toIndex.
   [[nodiscard]] bool advance(Version &document, std::uint32_t fromIndex,
-                             std::uint32_t toIndex, const Store &store) const;
+                             std::uint32_t toIndex, const Store &store,
+                             std::uint32_t xanadocBirth = 0) const;
 
   /// Compose the EDL transform along the linear ancestral path from
   /// @p fromAncestor to @p toDescendant.
   [[nodiscard]] EdlTransform composePath(std::uint32_t fromAncestor,
                                          std::uint32_t toDescendant,
-                                         const Store &store) const;
+                                         const Store &store,
+                                         std::uint32_t xanadocBirth = 0) const;
 
   /// Verify R9 conformance: confirm that rebuildVersion(opIndex) produces a
   /// state mathematically identical to @p fullRebuilt.
-  [[nodiscard]] bool verifyAgainstFullRebuild(std::uint32_t opIndex,
-                                              const Store &store,
-                                              const Version &fullRebuilt) const;
+  [[nodiscard]] bool
+  verifyAgainstFullRebuild(std::uint32_t opIndex, const Store &store,
+                           const Version &fullRebuilt,
+                           std::uint32_t xanadocBirth = 0) const;
 
   /// Total number of indexed operations.
   [[nodiscard]] std::size_t indexedCount() const noexcept {
@@ -121,7 +141,7 @@ private:
   std::vector<std::uint32_t> depth_{0};
   std::vector<std::array<std::uint32_t, MaxLiftingPower>> up_{
       std::array<std::uint32_t, MaxLiftingPower>{}};
-  std::unordered_map<std::uint32_t, Version> checkpoints_;
+  std::unordered_map<ChronoKey, Version, ChronoKeyHash> checkpoints_;
   std::unordered_map<std::uint32_t, EdlTransform> leafTransforms_;
 };
 

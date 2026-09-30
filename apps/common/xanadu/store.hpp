@@ -191,7 +191,14 @@ public:
    * number of keystrokes it has had -- so this is fast enough to do on every
    * change and would not be fast enough to do on every frame.
    */
-  [[nodiscard]] Version rebuild(const MicroversionId &version) const;
+  [[nodiscard]] Version rebuild(const MicroversionId &version,
+                                std::uint32_t xanadocBirth = 0) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index,
+                                         std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Carry @p document, which is the document at @p known, forward to
@@ -213,7 +220,8 @@ public:
    *         left untouched, and the caller wants rebuild() instead.
    */
   [[nodiscard]] bool advance(Version &document, const MicroversionId &known,
-                             const MicroversionId &version) const;
+                             const MicroversionId &version,
+                             std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Fast multi-step and branch-aware version advancement.
@@ -222,7 +230,8 @@ public:
    * using the Chronofilade in O(1) amortized time.
    */
   [[nodiscard]] bool advanceTo(Version &document, const MicroversionId &known,
-                               const MicroversionId &version) const;
+                               const MicroversionId &version,
+                               std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Verify R9 compliance: verify that Chronofilade version rebuilding
@@ -230,8 +239,11 @@ public:
    *        from State 0.
    */
   [[nodiscard]] bool
-  verifyAgainstFullRebuild(const MicroversionId &version) const;
-  [[nodiscard]] bool verifyAgainstFullRebuild(std::uint32_t index) const;
+  verifyAgainstFullRebuild(const MicroversionId &version,
+                           std::uint32_t xanadocBirth = 0) const;
+  [[nodiscard]] bool
+  verifyAgainstFullRebuild(std::uint32_t index,
+                           std::uint32_t xanadocBirth = 0) const;
 
   [[nodiscard]] const enfilade::Chronofilade *chronofilade() const noexcept {
     return chronofilade_.get();
@@ -243,7 +255,8 @@ public:
   /// The text of @p version, which is rebuild() followed by materialize().
   /// Content quoted from a torrent this machine cannot reach comes out empty,
   /// so a document is readable even when part of what it points at is not.
-  [[nodiscard]] std::string textOf(const MicroversionId &version) const;
+  [[nodiscard]] std::string textOf(const MicroversionId &version,
+                                   std::uint32_t xanadocBirth = 0) const;
 
   // -- mathematical primedia identity diffing --------------------------------
 
@@ -669,6 +682,34 @@ public:
   [[nodiscard]] std::uint32_t
   activeXanadocOnBranch(const MicroversionId &parent) const;
 
+  /// Walk containment edges up from birth @p birthOp to top-level, returning
+  /// the sequence from top-level root down to @p birthOp, or empty if
+  /// invalid/broken.
+  [[nodiscard]] std::vector<std::uint32_t>
+  containmentPath(std::uint32_t birthOp) const;
+
+  /// Whether birth @p birthOp has a valid, unbroken, non-cyclic containment
+  /// path to a recognized top-level root.
+  [[nodiscard]] bool validateContainment(std::uint32_t birthOp) const;
+
+  /// Whether op @p opIndex belongs to a Cell's edit chain or Make(Cell).
+  [[nodiscard]] bool isCellOp(std::uint32_t opIndex) const noexcept;
+
+  /// The StructureKind of the birth op @p birthOp.
+  [[nodiscard]] StructureKind
+  structureKindOfOp(std::uint32_t birthOp) const noexcept;
+
+  /// Ephemeral map of operation index to edited structure birth.
+  [[nodiscard]] const std::vector<std::uint32_t> &
+  editedBirths() const noexcept {
+    return editedBirths_;
+  }
+
+  [[nodiscard]] std::uint32_t
+  editedBirthOf(std::uint32_t opIndex) const noexcept {
+    return (opIndex < editedBirths_.size()) ? editedBirths_[opIndex] : 0;
+  }
+
   // -- links ----------------------------------------------------------------
 
   /**
@@ -750,6 +791,12 @@ public:
   /// the store's structure hyperop ranks (d.dims, d.links, d.scrolls, etc.).
   [[nodiscard]] MicroversionId structureHead() const;
   [[nodiscard]] std::vector<MicroversionId> structureHeads() const;
+
+  /// The head/leaf microversion of the specified structure birth on branch @p
+  /// branch. Defaults to latest() branch if branch is zero.
+  [[nodiscard]] MicroversionId
+  headOfStructure(std::uint32_t structureBirth,
+                  const MicroversionId &branch = {}) const;
 
   // -- Current Versions (Author-Designated Heads) --------------------------
 
@@ -1236,11 +1283,6 @@ private:
   /// what the ancestral walk already has in hand, and going back through the
   /// Op map for it cost about nine tenths of a rebuild.
   void replay(const CompactOpNode &node, Version &onto) const;
-
-  /// rebuild(), for a state already known to be in the spool at @p index.
-  /// Split out because a transclusion replays its source the same way, and it
-  /// has the index rather than the name.
-  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
 
   /**
    * @brief The head of @p cell's micro-history chain as of @p parent.

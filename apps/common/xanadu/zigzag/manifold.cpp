@@ -189,10 +189,69 @@ void Manifold::spliceContent(const std::uint32_t dense, const std::uint64_t at,
 FoldResult
 Manifold::applyStructure(const std::uint32_t opIndex,
                          const xanadu::CompactOpNode &node) noexcept {
+  foldedThrough_ = std::max(opIndex, foldedThrough_);
+
   if (xanadu::OpKind::Structure != node.kind) {
+    const auto ctx       = xanadu::contextOf(node);
+    const auto cellDense = denseOf(ctx);
+    if (noDense != cellDense) {
+      if (xanadu::OpKind::PageBreak == node.kind) {
+        return refuse(FoldRefusal::WrongContextKind);
+      }
+      if (xanadu::scratchScroll == node.span().scroll) {
+        return refuse(FoldRefusal::ScratchAddress);
+      }
+      if (xanadu::OpKind::Insert == node.kind) {
+        spliceContent(cellDense, node.at, 0, node.span());
+        slots[cellDense].lastOp = opIndex;
+        byRef.emplace(opIndex, cellDense);
+        return {};
+      }
+      if (xanadu::OpKind::Delete == node.kind) {
+        spliceContent(cellDense, node.at, node.length, xanadu::PrimediaSpan{});
+        slots[cellDense].lastOp = opIndex;
+        byRef.emplace(opIndex, cellDense);
+        return {};
+      }
+      if (xanadu::OpKind::Transclude == node.kind) {
+        if (!node.span().empty()) {
+          spliceContent(cellDense, node.at, 0, node.span());
+        } else if (store_ && node.sourceOpIndex > 0) {
+          const auto srcBirth =
+              (store_->editedBirths().size() > node.sourceOpIndex)
+                  ? store_->editedBirths()[node.sourceOpIndex]
+                  : 0;
+          const auto srcDoc =
+              store_->rebuildFromIndex(node.sourceOpIndex, srcBirth);
+          const auto spans = srcDoc.spansFor(node.sourceAt, node.sourceLength);
+          auto currentAt   = node.at;
+          for (const auto &sp : spans) {
+            spliceContent(cellDense, currentAt, 0, sp);
+            currentAt += sp.length;
+          }
+        }
+        slots[cellDense].lastOp = opIndex;
+        byRef.emplace(opIndex, cellDense);
+        return {};
+      }
+      if (xanadu::OpKind::Rearrange == node.kind) {
+        const auto existing = contentOf(slots[cellDense].birthOp);
+        xanadu::Version tmpVer;
+        for (const auto &sp : existing) {
+          tmpVer.insert(tmpVer.length(), sp);
+        }
+        tmpVer.rearrange(node.at, node.length, node.to);
+        setContent(cellDense, tmpVer.pieces());
+        slots[cellDense].lastOp = opIndex;
+        byRef.emplace(opIndex, cellDense);
+        return {};
+      }
+      slots[cellDense].lastOp = opIndex;
+      byRef.emplace(opIndex, cellDense);
+      return {};
+    }
     return {};
   }
-  foldedThrough_ = std::max(opIndex, foldedThrough_);
 
   // R8's boundary on the *address* side, and the twin of the isEphemeral()
   // check the SetLink case makes on cell refs. A span in the scratch scroll
@@ -562,11 +621,19 @@ std::vector<std::uint32_t> Manifold::historyOf(const CellRef cell) const {
       break;
     }
     const auto *const node = store_->getCompactOp(curr);
-    if (nullptr == node || xanadu::OpKind::Structure != node->kind ||
-        node->sourceOpIndex >= curr) {
+    if (nullptr == node) {
       return {};
     }
-    curr = node->sourceOpIndex;
+    std::uint32_t pred = 0;
+    if (xanadu::OpKind::Structure == node->kind) {
+      pred = node->sourceOpIndex;
+    } else {
+      pred = xanadu::contextOf(*node);
+    }
+    if (pred == 0 || pred >= curr) {
+      return {};
+    }
+    curr = pred;
   }
 
   if (curr != birth) {
@@ -589,73 +656,82 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
     return {};
   }
 
-  bool hasSplice = false;
-  for (auto curIt = history.begin(); curIt <= it; ++curIt) {
-    const auto *const node = store_->getCompactOp(*curIt);
-    if (nullptr == node) {
-      return {};
-    }
-    if (xanadu::StructureVerb::Splice == xanadu::structureVerbOf(node->flags)) {
-      hasSplice = true;
-      break;
-    }
-  }
-
-  if (!hasSplice) {
-    for (auto curIt = it;; --curIt) {
-      const auto *const node = store_->getCompactOp(*curIt);
-      if (nullptr == node) {
-        return {};
-      }
-      const auto verb = xanadu::structureVerbOf(node->flags);
-      if (verb == xanadu::StructureVerb::Make ||
-          verb == xanadu::StructureVerb::SetValue) {
-        if (!node->span().empty()) {
-          return {node->span()};
-        }
-        return {};
-      }
-      if (curIt == history.begin()) {
-        break;
-      }
-    }
-    return {};
-  }
-
   std::vector<xanadu::PrimediaSpan> currentContent;
   for (auto curIt = history.begin(); curIt <= it; ++curIt) {
     const auto *const node = store_->getCompactOp(*curIt);
     if (nullptr == node) {
       return {};
     }
-    const auto verb = xanadu::structureVerbOf(node->flags);
-    switch (verb) {
-    case xanadu::StructureVerb::Make:
-    case xanadu::StructureVerb::SetValue: {
-      if (!node->span().empty()) {
-        currentContent = {node->span()};
-      } else {
-        currentContent.clear();
+    if (xanadu::OpKind::Structure == node->kind) {
+      const auto verb = xanadu::structureVerbOf(node->flags);
+      switch (verb) {
+      case xanadu::StructureVerb::Make:
+      case xanadu::StructureVerb::SetValue: {
+        if (!node->span().empty()) {
+          currentContent = {node->span()};
+        } else {
+          currentContent.clear();
+        }
+        break;
       }
-      break;
-    }
-    case xanadu::StructureVerb::SetLink:
-      break;
-    case xanadu::StructureVerb::Splice: {
+      case xanadu::StructureVerb::SetLink:
+        break;
+      case xanadu::StructureVerb::Splice: {
+        std::vector<xanadu::PrimediaSpan> rebuilt;
+        rebuilt.reserve(currentContent.size() + 2);
+        std::uint64_t seen   = 0;
+        const auto at        = node->at;
+        const auto removing  = node->length;
+        const auto &inserted = node->span();
+        for (const auto &piece : currentContent) {
+          const auto pieceEnd = seen + piece.length;
+          if (seen < at) {
+            rebuilt.push_back(
+                piece.slice(0, std::min(piece.length, at - seen)));
+          }
+          const auto removedEnd = at + removing;
+          if (pieceEnd > removedEnd) {
+            const auto from = removedEnd > seen ? removedEnd - seen : 0;
+            rebuilt.push_back(piece.slice(from, piece.length - from));
+          }
+          seen = pieceEnd;
+        }
+        if (!inserted.empty()) {
+          std::uint64_t upTo = 0;
+          std::size_t where  = 0;
+          for (; where < rebuilt.size() && upTo < at; where++) {
+            upTo += rebuilt[where].length;
+          }
+          rebuilt.insert(rebuilt.begin() + static_cast<std::ptrdiff_t>(where),
+                         inserted);
+        }
+        std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
+        for (std::size_t i = 0; i + 1 < rebuilt.size();) {
+          if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
+              rebuilt[i].end() == rebuilt[i + 1].start) {
+            rebuilt[i].length += rebuilt[i + 1].length;
+            rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+            continue;
+          }
+          i++;
+        }
+        currentContent = std::move(rebuilt);
+        break;
+      }
+      }
+    } else if (xanadu::OpKind::Insert == node->kind) {
       std::vector<xanadu::PrimediaSpan> rebuilt;
       rebuilt.reserve(currentContent.size() + 2);
       std::uint64_t seen   = 0;
       const auto at        = node->at;
-      const auto removing  = node->length;
       const auto &inserted = node->span();
       for (const auto &piece : currentContent) {
         const auto pieceEnd = seen + piece.length;
         if (seen < at) {
           rebuilt.push_back(piece.slice(0, std::min(piece.length, at - seen)));
         }
-        const auto removedEnd = at + removing;
-        if (pieceEnd > removedEnd) {
-          const auto from = removedEnd > seen ? removedEnd - seen : 0;
+        if (pieceEnd > at) {
+          const auto from = at > seen ? at - seen : 0;
           rebuilt.push_back(piece.slice(from, piece.length - from));
         }
         seen = pieceEnd;
@@ -680,8 +756,86 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
         i++;
       }
       currentContent = std::move(rebuilt);
-      break;
-    }
+    } else if (xanadu::OpKind::Delete == node->kind) {
+      std::vector<xanadu::PrimediaSpan> rebuilt;
+      rebuilt.reserve(currentContent.size() + 2);
+      std::uint64_t seen  = 0;
+      const auto at       = node->at;
+      const auto removing = node->length;
+      for (const auto &piece : currentContent) {
+        const auto pieceEnd = seen + piece.length;
+        if (seen < at) {
+          rebuilt.push_back(piece.slice(0, std::min(piece.length, at - seen)));
+        }
+        const auto removedEnd = at + removing;
+        if (pieceEnd > removedEnd) {
+          const auto from = removedEnd > seen ? removedEnd - seen : 0;
+          rebuilt.push_back(piece.slice(from, piece.length - from));
+        }
+        seen = pieceEnd;
+      }
+      std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
+      for (std::size_t i = 0; i + 1 < rebuilt.size();) {
+        if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
+            rebuilt[i].end() == rebuilt[i + 1].start) {
+          rebuilt[i].length += rebuilt[i + 1].length;
+          rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+          continue;
+        }
+        i++;
+      }
+      currentContent = std::move(rebuilt);
+    } else if (xanadu::OpKind::Transclude == node->kind) {
+      std::vector<xanadu::PrimediaSpan> toInsert;
+      if (!node->span().empty()) {
+        toInsert.push_back(node->span());
+      } else if (store_ && node->sourceOpIndex > 0) {
+        const auto srcBirth =
+            (store_->editedBirths().size() > node->sourceOpIndex)
+                ? store_->editedBirths()[node->sourceOpIndex]
+                : 0;
+        const auto srcDoc =
+            store_->rebuildFromIndex(node->sourceOpIndex, srcBirth);
+        toInsert = srcDoc.spansFor(node->sourceAt, node->sourceLength);
+      }
+      for (const auto &sp : toInsert) {
+        std::vector<xanadu::PrimediaSpan> rebuilt;
+        rebuilt.reserve(currentContent.size() + 2);
+        std::uint64_t seen = 0;
+        const auto at      = node->at;
+        for (const auto &piece : currentContent) {
+          const auto pieceEnd = seen + piece.length;
+          if (seen < at) {
+            rebuilt.push_back(
+                piece.slice(0, std::min(piece.length, at - seen)));
+          }
+          if (pieceEnd > at) {
+            const auto from = at > seen ? at - seen : 0;
+            rebuilt.push_back(piece.slice(from, piece.length - from));
+          }
+          seen = pieceEnd;
+        }
+        if (!sp.empty()) {
+          std::uint64_t upTo = 0;
+          std::size_t where  = 0;
+          for (; where < rebuilt.size() && upTo < at; where++) {
+            upTo += rebuilt[where].length;
+          }
+          rebuilt.insert(rebuilt.begin() + static_cast<std::ptrdiff_t>(where),
+                         sp);
+        }
+        std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
+        for (std::size_t i = 0; i + 1 < rebuilt.size();) {
+          if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
+              rebuilt[i].end() == rebuilt[i + 1].start) {
+            rebuilt[i].length += rebuilt[i + 1].length;
+            rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+            continue;
+          }
+          i++;
+        }
+        currentContent = std::move(rebuilt);
+      }
     }
   }
 
@@ -1267,6 +1421,47 @@ std::map<CellRef, xanadu::Link> Manifold::links() const {
     return {};
   }
   return links(*store_);
+}
+
+std::vector<std::uint32_t>
+Manifold::containmentPath(const std::uint32_t birthOp) const {
+  if (birthOp == 0) {
+    return {};
+  }
+  std::vector<std::uint32_t> path;
+  std::unordered_set<std::uint32_t> visited;
+  auto curr = birthOp;
+  while (curr != 0) {
+    if (!visited.insert(curr).second) {
+      return {};
+    }
+    path.push_back(curr);
+    const auto it = structureBirths_.find(curr);
+    if (it == structureBirths_.end()) {
+      const auto s = slot(curr);
+      if (!s || s->birthOp != curr) {
+        return {};
+      }
+      break;
+    }
+    const auto container = it->second.containerOp;
+    if (container != 0) {
+      if (container >= curr) {
+        return {};
+      }
+      if (!structureBirths_.contains(container) && !byRef.contains(container)) {
+        return {};
+      }
+    }
+    curr = container;
+  }
+  std::reverse(path.begin(), path.end());
+  return path;
+}
+
+bool Manifold::validateContainment(const std::uint32_t birthOp) const {
+  const auto path = containmentPath(birthOp);
+  return !path.empty() && path.back() == birthOp;
 }
 
 } // namespace zigzag

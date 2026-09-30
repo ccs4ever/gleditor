@@ -186,10 +186,6 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
       contextIdx);
   const auto index = opsSpool.append(node, produces);
 
-  if (chronofilade_ && index > 0) {
-    chronofilade_->recordOp(index, node, produces, *this);
-  }
-
   if (index >= editedBirths_.size()) {
     editedBirths_.resize(index + 1, 0);
     containerBirths_.resize(index + 1, 0);
@@ -223,6 +219,10 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
                                editedBirths_[index] < containerBirths_.size())
                                   ? containerBirths_[editedBirths_[index]]
                                   : 0;
+  }
+
+  if (chronofilade_ && index > 0) {
+    chronofilade_->recordOp(index, node, produces, *this);
   }
 }
 
@@ -348,22 +348,39 @@ void Store::replay(const CompactOpNode &node, Version &onto) const {
   }
 }
 
-Version Store::rebuildFromIndex(const std::uint32_t index) const {
+Version Store::rebuildFromIndex(const std::uint32_t index,
+                                std::uint32_t xanadocBirth) const {
+  if (0 == xanadocBirth) {
+    xanadocBirth = activeXanadocOnBranch(opsSpool.idOf(index));
+  }
   if (chronofilade_) {
-    return chronofilade_->rebuildVersion(index, *this);
+    return chronofilade_->rebuildVersion(index, *this, xanadocBirth);
   }
   Version built;
-  OsmicWalker::walkAncestral(
-      opsSpool, index,
-      [this, &built](std::uint32_t, const CompactOpNode &node) {
-        replay(node, built);
-      });
+  OsmicWalker::walkAncestral(opsSpool, index,
+                             [this, &built, xanadocBirth](
+                                 std::uint32_t idx, const CompactOpNode &node) {
+                               if (xanadocBirth != 0) {
+                                 if (idx < editedBirths_.size() &&
+                                     editedBirths_[idx] == xanadocBirth) {
+                                   replay(node, built);
+                                 }
+                               } else {
+                                 if (!isCellOp(idx)) {
+                                   replay(node, built);
+                                 }
+                               }
+                             });
   return built;
 }
 
-Version Store::rebuild(const MicroversionId &version) const {
+Version Store::rebuild(const MicroversionId &version,
+                       std::uint32_t xanadocBirth) const {
+  if (0 == xanadocBirth) {
+    xanadocBirth = activeXanadocOnBranch(version);
+  }
   if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
-    return rebuildFromIndex(targetIdx);
+    return rebuildFromIndex(targetIdx, xanadocBirth);
   }
   // Nothing is filed under this name. Replaying the longest recorded prefix of
   // it is still the right answer -- asking for a state one edit past the end
@@ -372,7 +389,16 @@ Version Store::rebuild(const MicroversionId &version) const {
   Version built;
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
-      replay(*node, built);
+      const auto idx = opsSpool.indexOf(step);
+      if (xanadocBirth != 0) {
+        if (idx < editedBirths_.size() && editedBirths_[idx] == xanadocBirth) {
+          replay(*node, built);
+        }
+      } else {
+        if (!isCellOp(idx)) {
+          replay(*node, built);
+        }
+      }
     }
   }
   return built;
@@ -421,16 +447,8 @@ std::uint32_t Store::lastOpOnCell(const MicroversionId &parent,
       return slot->lastOp;
     }
   }
-  auto head = cell;
-  OsmicWalker::walkAncestral(
-      opsSpool, opsSpool.indexOf(parent),
-      [&head, cell](std::uint32_t idx, const CompactOpNode &node) {
-        if (idx > cell && OpKind::Structure == node.kind &&
-            node.sourceOpIndex == head) {
-          head = idx;
-        }
-      });
-  return head;
+  const auto last = lastOpOnStructure(parent, cell);
+  return last != 0 ? last : cell;
 }
 
 std::uint32_t
@@ -890,7 +908,8 @@ Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,
-                    const MicroversionId &version) const {
+                    const MicroversionId &version,
+                    std::uint32_t xanadocBirth) const {
   // One step on means the op filed under `version` names `known` as its
   // parent -- which is what putOp() checks when it is recorded, so asking
   // MicroversionId is asking the same question the spool already answered.
@@ -901,43 +920,77 @@ bool Store::advance(Version &document, const MicroversionId &known,
   if (nullptr == node) {
     return false;
   }
-  replay(*node, document);
+  const auto idx = opsSpool.indexOf(version);
+  if (0 == xanadocBirth) {
+    xanadocBirth = activeXanadocOnBranch(version);
+  }
+  if (xanadocBirth != 0) {
+    if (idx < editedBirths_.size() && editedBirths_[idx] == xanadocBirth) {
+      replay(*node, document);
+    }
+  } else {
+    if (!isCellOp(idx)) {
+      replay(*node, document);
+    }
+  }
   return true;
 }
 
 bool Store::advanceTo(Version &document, const MicroversionId &known,
-                      const MicroversionId &version) const {
+                      const MicroversionId &version,
+                      std::uint32_t xanadocBirth) const {
   if (known == version) {
     return true;
   }
   const auto fromIdx = opsSpool.indexOf(known);
   const auto toIdx   = opsSpool.indexOf(version);
-  if (chronofilade_ && toIdx > 0) {
-    return chronofilade_->advance(document, fromIdx, toIdx, *this);
+  if (0 == xanadocBirth) {
+    xanadocBirth = activeXanadocOnBranch(version);
   }
-  document = rebuild(version);
+  if (chronofilade_ && toIdx > 0) {
+    return chronofilade_->advance(document, fromIdx, toIdx, *this,
+                                  xanadocBirth);
+  }
+  document = rebuild(version, xanadocBirth);
   return true;
 }
 
-bool Store::verifyAgainstFullRebuild(const std::uint32_t index) const {
+bool Store::verifyAgainstFullRebuild(const std::uint32_t index,
+                                     std::uint32_t xanadocBirth) const {
+  if (0 == xanadocBirth) {
+    xanadocBirth = activeXanadocOnBranch(opsSpool.idOf(index));
+  }
   Version raw;
   OsmicWalker::walkAncestral(
-      opsSpool, index, [this, &raw](std::uint32_t, const CompactOpNode &node) {
-        replay(node, raw);
+      opsSpool, index,
+      [this, &raw, xanadocBirth](std::uint32_t idx, const CompactOpNode &node) {
+        if (xanadocBirth != 0) {
+          if (idx < editedBirths_.size() &&
+              editedBirths_[idx] == xanadocBirth) {
+            replay(node, raw);
+          }
+        } else {
+          if (!isCellOp(idx)) {
+            replay(node, raw);
+          }
+        }
       });
   if (chronofilade_) {
-    return chronofilade_->verifyAgainstFullRebuild(index, *this, raw);
+    return chronofilade_->verifyAgainstFullRebuild(index, *this, raw,
+                                                   xanadocBirth);
   }
   return true;
 }
 
-bool Store::verifyAgainstFullRebuild(const MicroversionId &version) const {
+bool Store::verifyAgainstFullRebuild(const MicroversionId &version,
+                                     const std::uint32_t xanadocBirth) const {
   const auto idx = opsSpool.indexOf(version);
-  return verifyAgainstFullRebuild(idx);
+  return verifyAgainstFullRebuild(idx, xanadocBirth);
 }
 
-std::string Store::textOf(const MicroversionId &version) const {
-  return rebuild(version).materialize(*this);
+std::string Store::textOf(const MicroversionId &version,
+                          const std::uint32_t xanadocBirth) const {
+  return rebuild(version, xanadocBirth).materialize(*this);
 }
 
 MultiVersionDiffResult
@@ -1397,10 +1450,24 @@ MicroversionId Store::transcludeExternal(const MicroversionId &parent,
 MicroversionId Store::insertBreak(const MicroversionId &parent,
                                   const std::uint32_t at,
                                   const MicroversionId &context) {
+  if (!context.isZero()) {
+    const auto cIdx = opsSpool.indexOf(context);
+    if (cIdx < editedBirths_.size() && isCellOp(cIdx)) {
+      throw std::invalid_argument(
+          "PageBreak requires a Xanadoc context, cannot target a Cell");
+    }
+  }
   Op op;
   op.kind    = OpKind::PageBreak;
   op.at      = at;
   op.context = resolveTextContext(parent, context);
+  if (!op.context.isZero()) {
+    const auto ctxIdx = opsSpool.indexOf(op.context);
+    if (ctxIdx < editedBirths_.size() && isCellOp(ctxIdx)) {
+      throw std::invalid_argument(
+          "PageBreak requires a Xanadoc context, cannot target a Cell");
+    }
+  }
   return apply(parent, op);
 }
 
@@ -3863,6 +3930,95 @@ void Store::load(const std::string &directory) {
     chronofilade_->clear();
     chronofilade_->indexSpool(*this);
   }
+}
+
+std::vector<std::uint32_t>
+Store::containmentPath(const std::uint32_t birthOp) const {
+  if (birthOp == 0 || birthOp >= containerBirths_.size()) {
+    return {};
+  }
+  std::vector<std::uint32_t> path;
+  std::unordered_set<std::uint32_t> visited;
+  auto curr = birthOp;
+  while (curr != 0) {
+    if (!visited.insert(curr).second) {
+      return {};
+    }
+    path.push_back(curr);
+    if (curr >= containerBirths_.size()) {
+      return {};
+    }
+    const auto container = containerBirths_[curr];
+    if (container != 0) {
+      if (container >= curr) {
+        return {};
+      }
+      const auto *const cNode = opsSpool.get(container);
+      if (!cNode || cNode->kind != OpKind::Structure ||
+          structureVerbOf(cNode->flags) != StructureVerb::Make) {
+        return {};
+      }
+    }
+    curr = container;
+  }
+  std::reverse(path.begin(), path.end());
+  return path;
+}
+
+bool Store::validateContainment(const std::uint32_t birthOp) const {
+  const auto path = containmentPath(birthOp);
+  return !path.empty() && path.back() == birthOp;
+}
+
+bool Store::isCellOp(const std::uint32_t opIndex) const noexcept {
+  if (opIndex == 0 || opIndex >= editedBirths_.size()) {
+    return false;
+  }
+  const auto birth = editedBirths_[opIndex];
+  if (birth == 0 || birth > opsSpool.size()) {
+    return false;
+  }
+  const auto *const bNode = opsSpool.get(birth);
+  return bNode && OpKind::Structure == bNode->kind &&
+         StructureVerb::Make == structureVerbOf(bNode->flags) &&
+         StructureKind::Cell == structureKindOf(bNode->flags);
+}
+
+StructureKind
+Store::structureKindOfOp(const std::uint32_t birthOp) const noexcept {
+  if (birthOp == 0 || birthOp > opsSpool.size()) {
+    return StructureKind::Cell;
+  }
+  const auto *const node = opsSpool.get(birthOp);
+  if (node && OpKind::Structure == node->kind &&
+      StructureVerb::Make == structureVerbOf(node->flags)) {
+    return structureKindOf(node->flags);
+  }
+  return StructureKind::Cell;
+}
+
+MicroversionId Store::headOfStructure(const std::uint32_t structureBirth,
+                                      const MicroversionId &branch) const {
+  if (structureBirth == 0 || structureBirth > opsSpool.size()) {
+    return {};
+  }
+  const auto br     = branch.isZero() ? latest() : branch;
+  const auto lastOp = lastOpOnStructure(br, structureBirth);
+  if (lastOp != 0) {
+    return opsSpool.idOf(lastOp);
+  }
+  auto curr = opsSpool.indexOf(br);
+  while (curr != 0 && curr >= structureBirth) {
+    if (curr == structureBirth) {
+      return opsSpool.idOf(structureBirth);
+    }
+    const auto *const node = opsSpool.get(curr);
+    if (!node || node->parentIndex == 0 || node->parentIndex >= curr) {
+      break;
+    }
+    curr = node->parentIndex;
+  }
+  return {};
 }
 
 } // namespace xanadu

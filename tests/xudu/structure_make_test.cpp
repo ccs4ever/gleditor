@@ -12,6 +12,7 @@
 #include <string_view>
 
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/focus_target.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/scalar.hpp"
@@ -514,6 +515,223 @@ TEST(StructureMakeTest, ContextValidationRejections) {
 
   // 2. Context on sibling branch (unreachable from parent)
   EXPECT_THROW(store.insert(vA1, 0, "fail", docB), std::invalid_argument);
+}
+
+TEST(StructureMakeTest, ScopedReplayInterleavedXanadocs) {
+  Store store;
+  const auto docA   = store.makeXanadoc(MicroversionId{}, "DocA");
+  const auto docB   = store.makeXanadoc(docA, "DocB");
+  const auto birthA = store.segmentedOps().indexOf(docA);
+  const auto birthB = store.segmentedOps().indexOf(docB);
+
+  const auto v1 = store.insert(docB, 0, "Hello DocA! ", docA);
+  const auto v2 = store.insert(v1, 0, "Greetings from DocB! ", docB);
+  const auto v3 = store.insert(v2, 12, "More DocA text.", docA);
+
+  EXPECT_EQ(store.textOf(v3, birthA), "Hello DocA! More DocA text.");
+  EXPECT_EQ(store.textOf(v3, birthB), "Greetings from DocB! ");
+
+  // Single-step advance on scoped version
+  Version stepDocA = store.rebuild(docB, birthA);
+  EXPECT_TRUE(store.advance(stepDocA, docB, v1, birthA));
+  EXPECT_EQ(stepDocA.materialize(store), "Hello DocA! ");
+
+  // Multi-step advanceTo on scoped version
+  Version docAVer = store.rebuild(v1, birthA);
+  EXPECT_TRUE(store.advanceTo(docAVer, v1, v3, birthA));
+  EXPECT_EQ(docAVer.materialize(store), "Hello DocA! More DocA text.");
+}
+
+TEST(StructureMakeTest, CellTargetedTextEdits) {
+  Store store;
+  const auto slice      = store.makeSlice(MicroversionId{}, "Slice1");
+  const auto sliceBirth = store.segmentedOps().indexOf(slice);
+  const auto cell       = store.makeCell(slice, "", slice);
+  const auto cellBirth  = store.segmentedOps().indexOf(cell);
+
+  EXPECT_TRUE(store.isCellOp(cellBirth));
+  EXPECT_FALSE(store.isCellOp(sliceBirth));
+
+  // Insert into cell
+  const auto vC1  = store.insert(cell, 0, "Cell content here", cell);
+  const auto opC1 = store.segmentedOps().indexOf(vC1);
+  EXPECT_TRUE(store.isCellOp(opC1));
+  EXPECT_EQ(store.editedBirthOf(opC1), cellBirth);
+
+  // Erase from cell
+  const auto vC2  = store.erase(vC1, 4, 8, cell);
+  const auto opC2 = store.segmentedOps().indexOf(vC2);
+  EXPECT_TRUE(store.isCellOp(opC2));
+  EXPECT_EQ(store.editedBirthOf(opC2), cellBirth);
+
+  // Document concatext must NOT include cell-targeted text edits
+  const auto docVer = store.rebuild(vC2, 0);
+  EXPECT_EQ(docVer.length(), 0U);
+  EXPECT_EQ(store.textOf(vC2, 0), "");
+
+  // Replay into manifold and verify cell text
+  zigzag::Manifold manifold;
+  manifold.setStore(&store);
+  for (std::uint32_t i = 1; i <= opC2; ++i) {
+    const auto *node = store.getCompactOp(i);
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(manifold.applyStructure(i, *node).has_value());
+  }
+  EXPECT_EQ(manifold.textOf(cellBirth, store), "Cell here");
+}
+
+TEST(StructureMakeTest, CellTargetedTransclusion) {
+  Store store;
+  const auto doc  = store.makeXanadoc(MicroversionId{}, "Doc");
+  const auto vDoc = store.insert(doc, 0, "Quoted Source", doc);
+
+  const auto slice     = store.makeSlice(vDoc, "Slice");
+  const auto cell      = store.makeCell(slice, "", slice);
+  const auto cellBirth = store.segmentedOps().indexOf(cell);
+
+  const auto vTrans  = store.transclude(cell, 0, vDoc, 0, 6, cell);
+  const auto opTrans = store.segmentedOps().indexOf(vTrans);
+  EXPECT_TRUE(store.isCellOp(opTrans));
+  EXPECT_EQ(store.editedBirthOf(opTrans), cellBirth);
+
+  zigzag::Manifold manifold;
+  manifold.setStore(&store);
+  for (std::uint32_t i = 1; i <= opTrans; ++i) {
+    const auto *node = store.getCompactOp(i);
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(manifold.applyStructure(i, *node).has_value());
+  }
+  EXPECT_EQ(manifold.textOf(cellBirth, store), "Quoted");
+}
+
+TEST(StructureMakeTest, CellHistoryAndInterleavedStructureOps) {
+  Store store;
+  const auto slice     = store.makeSlice(MicroversionId{}, "Slice1");
+  const auto cell      = store.makeCell(slice, "", slice);
+  const auto cellBirth = store.segmentedOps().indexOf(cell);
+
+  const auto v1 = store.insert(cell, 0, "First ", cell);
+  const auto v2 = store.setScalar(v1, cellBirth, 42.0);
+  const auto v3 = store.insert(v2, 6, "Second", cell);
+
+  zigzag::Manifold manifold;
+  manifold.setStore(&store);
+  const auto opV3 = store.segmentedOps().indexOf(v3);
+  for (std::uint32_t i = 1; i <= opV3; ++i) {
+    const auto *node = store.getCompactOp(i);
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(manifold.applyStructure(i, *node).has_value());
+  }
+
+  // historyOf returns operations from birth to head: [cellBirth, opV1, opV2,
+  // opV3]
+  const auto history = manifold.historyOf(cellBirth);
+  ASSERT_EQ(history.size(), 4U);
+  EXPECT_EQ(history.front(), cellBirth);
+  EXPECT_EQ(history.back(), opV3);
+
+  // contentAsOf at intermediate points
+  auto readSpans = [&](const std::vector<PrimediaSpan> &spans) {
+    std::string s;
+    for (const auto &sp : spans) {
+      s += store.read(sp);
+    }
+    return s;
+  };
+  const auto opV1 = store.segmentedOps().indexOf(v1);
+  const auto opV2 = store.segmentedOps().indexOf(v2);
+  EXPECT_EQ(readSpans(manifold.contentAsOf(cellBirth, opV1)), "First ");
+  EXPECT_EQ(readSpans(manifold.contentAsOf(cellBirth, opV2)), "42");
+  EXPECT_EQ(readSpans(manifold.contentAsOf(cellBirth, opV3)), "42Second");
+}
+
+TEST(StructureMakeTest, ContainmentHierarchyAndPath) {
+  Store store;
+  const auto sliceA = store.makeSlice(MicroversionId{}, "SliceA");
+  const auto birthA = store.segmentedOps().indexOf(sliceA);
+  const auto cellB  = store.makeCell(sliceA, "", sliceA);
+  const auto birthB = store.segmentedOps().indexOf(cellB);
+  const auto sliceC = store.makeSlice(cellB, "SliceC", cellB);
+  const auto birthC = store.segmentedOps().indexOf(sliceC);
+  const auto cellD  = store.makeCell(sliceC, "", sliceC);
+  const auto birthD = store.segmentedOps().indexOf(cellD);
+
+  EXPECT_EQ(store.containmentPath(birthA), std::vector<std::uint32_t>{birthA});
+  EXPECT_EQ(store.containmentPath(birthB),
+            (std::vector<std::uint32_t>{birthA, birthB}));
+  EXPECT_EQ(store.containmentPath(birthC),
+            (std::vector<std::uint32_t>{birthA, birthB, birthC}));
+  EXPECT_EQ(store.containmentPath(birthD),
+            (std::vector<std::uint32_t>{birthA, birthB, birthC, birthD}));
+
+  EXPECT_TRUE(store.validateContainment(birthA));
+  EXPECT_TRUE(store.validateContainment(birthB));
+  EXPECT_TRUE(store.validateContainment(birthC));
+  EXPECT_TRUE(store.validateContainment(birthD));
+
+  zigzag::Manifold manifold;
+  manifold.setStore(&store);
+  for (std::uint32_t i = 1; i <= birthD; ++i) {
+    const auto *node = store.getCompactOp(i);
+    ASSERT_NE(node, nullptr);
+    EXPECT_TRUE(manifold.applyStructure(i, *node).has_value());
+  }
+  EXPECT_EQ(manifold.containmentPath(birthD),
+            (std::vector<std::uint32_t>{birthA, birthB, birthC, birthD}));
+  EXPECT_TRUE(manifold.validateContainment(birthD));
+}
+
+TEST(StructureMakeTest, PageBreakCellContextRejection) {
+  Store store;
+  const auto slice     = store.makeSlice(MicroversionId{}, "Slice");
+  const auto cell      = store.makeCell(slice, "", slice);
+  const auto cellBirth = store.segmentedOps().indexOf(cell);
+
+  // Store::insertBreak rejects cell context
+  EXPECT_THROW(store.insertBreak(cell, 0, cell), std::invalid_argument);
+
+  // Manifold raw fold rejects PageBreak on cell context
+  zigzag::Manifold manifold;
+  manifold.setStore(&store);
+  for (std::uint32_t i = 1; i <= cellBirth; ++i) {
+    EXPECT_TRUE(manifold.applyStructure(i, *store.getCompactOp(i)).has_value());
+  }
+  CompactOpNode pbNode{};
+  pbNode.kind          = OpKind::PageBreak;
+  pbNode.sourceOpIndex = cellBirth;
+  const auto refusal   = manifold.applyStructure(cellBirth + 1, pbNode);
+  ASSERT_FALSE(refusal.has_value());
+  EXPECT_EQ(refusal.error(), zigzag::FoldRefusal::WrongContextKind);
+}
+
+TEST(StructureMakeTest, HeadOfStructureResolution) {
+  Store store;
+  const auto doc1   = store.makeXanadoc(MicroversionId{}, "Doc1");
+  const auto birth1 = store.segmentedOps().indexOf(doc1);
+  const auto doc2   = store.makeXanadoc(doc1, "Doc2");
+  const auto birth2 = store.segmentedOps().indexOf(doc2);
+
+  const auto v1 = store.insert(doc2, 0, "A", doc1);
+  const auto v2 = store.insert(v1, 0, "B", doc2);
+  const auto v3 = store.insert(v2, 1, "C", doc1);
+
+  EXPECT_EQ(store.headOfStructure(birth1, v3), v3);
+  EXPECT_EQ(store.headOfStructure(birth2, v3), v2);
+  EXPECT_EQ(store.headOfStructure(birth1, v2), v1);
+  EXPECT_EQ(store.headOfStructure(birth2, v2), v2);
+}
+
+TEST(StructureMakeTest, FocusTargetStruct) {
+  FocusTarget target{};
+  EXPECT_FALSE(target.isValid());
+
+  target.kind            = StructureKind::Cell;
+  target.birthOp         = 42;
+  target.containmentPath = {1, 10, 42};
+  EXPECT_TRUE(target.isValid());
+  EXPECT_EQ(target.kind, StructureKind::Cell);
+  EXPECT_EQ(target.birthOp, 42U);
+  EXPECT_EQ(target.containmentPath.size(), 3U);
 }
 
 } // namespace
