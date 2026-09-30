@@ -682,6 +682,17 @@ public:
   [[nodiscard]] std::uint32_t
   activeXanadocOnBranch(const MicroversionId &parent) const;
 
+  struct StructureBirth {
+    std::uint32_t opIndex{0};
+    StructureKind kind{StructureKind::Cell};
+    std::string name;
+  };
+
+  /// Discover all high-level structure births (Slices and Xanadocs) in the
+  /// store.
+  [[nodiscard]] std::vector<StructureBirth>
+  discoverStructureBirths(const MicroversionId &version = {}) const;
+
   /// Walk containment edges up from birth @p birthOp to top-level, returning
   /// the sequence from top-level root down to @p birthOp, or empty if
   /// invalid/broken.

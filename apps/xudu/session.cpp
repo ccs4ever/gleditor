@@ -921,18 +921,20 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 }
 
 void Session::viewOpened(const MicroversionId &version,
-                         const std::size_t storeIndex) {
-  const auto &st          = store(storeIndex);
-  const auto xanadocBirth = st.activeXanadocOnBranch(version);
+                         const std::size_t storeIndex,
+                         const std::uint32_t focusedBirth) {
+  const auto &st = store(storeIndex);
+  const auto targetBirth =
+      (focusedBirth != 0) ? focusedBirth : st.activeXanadocOnBranch(version);
   std::vector<std::uint32_t> path;
-  if (xanadocBirth != 0) {
-    path = st.containmentPath(xanadocBirth);
+  if (targetBirth != 0) {
+    path = st.containmentPath(targetBirth);
   }
   open.push_back(OpenView{.version         = version,
                           .storeIndex      = storeIndex,
-                          .focusedBirth    = xanadocBirth,
+                          .focusedBirth    = targetBirth,
                           .containmentPath = std::move(path),
-                          .pieces          = st.rebuild(version, xanadocBirth),
+                          .pieces          = st.rebuild(version, targetBirth),
                           .decorations     = {},
                           .decoratedAt     = 0,
                           .uncommittedLog  = {}});
@@ -1476,10 +1478,10 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
 } // namespace
 
 std::shared_ptr<VersionTextSource>
-Session::sourceFor(const MicroversionId &version,
-                   const std::size_t storeIndex) const {
+Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
+                   const std::uint32_t scopedBirth) const {
   const auto &st     = store(storeIndex);
-  const auto rebuilt = st.rebuild(version);
+  const auto rebuilt = st.rebuild(version, scopedBirth);
   gleditor::MagicMimeDetector magic;
 
   std::string concatext;
@@ -1576,7 +1578,10 @@ Session::sourceFor(const MicroversionId &version,
       std::make_move_iterator(formattingResult.blockStyles.end()));
 
   std::string title;
-  if (st.isSystem()) {
+  if (scopedBirth != 0) {
+    title = st.resolveStructureName(version, scopedBirth);
+  }
+  if (title.empty() && st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
       title = std::string(systemDocUri(*kind));
     }
@@ -1586,6 +1591,12 @@ Session::sourceFor(const MicroversionId &version,
         ann && !ann->alias.empty()) {
       title = ann->alias;
     }
+  }
+  if (title.empty() && scopedBirth != 0) {
+    title =
+        (st.structureKindOfOp(scopedBirth) == StructureKind::Slice ? "Slice "
+                                                                   : "Doc ") +
+        std::to_string(scopedBirth);
   }
 
   auto target =

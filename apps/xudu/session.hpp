@@ -504,7 +504,8 @@ public:
 
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.
-  void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0);
+  void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0,
+                  std::uint32_t focusedBirth = 0);
 
   /**
    * @brief Close an open document view. Flushes any uncommitted edits,
@@ -579,7 +580,8 @@ public:
    * line pitch it is flowing into.
    */
   [[nodiscard]] std::shared_ptr<VersionTextSource>
-  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
+  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0,
+            std::uint32_t scopedBirth = 0) const;
 
   struct MediaSpanInfo {
     PrimediaSpan span;

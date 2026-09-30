@@ -3148,6 +3148,30 @@ Store::resolveStructureName(const MicroversionId &version,
   return "";
 }
 
+std::vector<Store::StructureBirth>
+Store::discoverStructureBirths(const MicroversionId &version) const {
+  std::vector<StructureBirth> result;
+  for (std::uint32_t idx = 1; idx <= opsSpool.size(); ++idx) {
+    const auto *const node = opsSpool.get(idx);
+    if (!node) {
+      continue;
+    }
+    if (node->kind == OpKind::Structure &&
+        structureVerbOf(node->flags) == StructureVerb::Make) {
+      const auto kind = structureKindOf(node->flags);
+      if (kind == StructureKind::Slice || kind == StructureKind::Xanadoc) {
+        auto name = resolveStructureName(version, idx);
+        if (name.empty()) {
+          name = (kind == StructureKind::Slice ? "Slice " : "Doc ") +
+                 std::to_string(idx);
+        }
+        result.push_back(StructureBirth{idx, kind, std::move(name)});
+      }
+    }
+  }
+  return result;
+}
+
 std::optional<TimestampInstant>
 Store::resolveStructureCreated(const MicroversionId &version,
                                const std::uint32_t structureBirth) const {
