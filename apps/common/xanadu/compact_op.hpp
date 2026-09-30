@@ -91,6 +91,12 @@ struct alignas(kCacheLineBytes) CompactOpNode {
     op.flags        = flags;
     op.value        = value;
     op.context      = contextVersion;
+    if (kind == OpKind::Transclude) {
+      op.to = 0;
+    } else if (kind == OpKind::Structure &&
+               structureVerbOf(flags) != StructureVerb::Make) {
+      op.sourceAt = 0;
+    }
     return op;
   }
 

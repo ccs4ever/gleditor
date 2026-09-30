@@ -332,9 +332,9 @@ TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
   const auto rebuilt = store.rebuild(ver);
 
   EXPECT_GE(rebuilt.forcedBreaks().size(), 2U);
-  EXPECT_EQ(ver.str(), "27");
+  EXPECT_EQ(ver.str(), "28");
   EXPECT_GT(rebuilt.length(), 350000U);
-  EXPECT_EQ(store.allVersions().size(), 27U);
+  EXPECT_EQ(store.allVersions().size(), 28U);
   ASSERT_FALSE(store.currentVersions().empty());
   EXPECT_EQ(store.currentVersions().front().str(), "8");
 }

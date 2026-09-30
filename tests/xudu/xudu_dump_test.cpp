@@ -330,4 +330,51 @@ TEST_F(XuduDumpTest, aBareSegmentFileCanBePointedAtDirectly) {
   EXPECT_THAT(run.output, testing::Not(testing::HasSubstr("text=")));
 }
 
+TEST_F(XuduDumpTest, renameAnnotationsAndStructureKindsAreRendered) {
+  const auto root = scratch("renamedump");
+  const Sample sample{root / "store", root / "permascroll"};
+  {
+    Store store(sample.scroll());
+    auto at = store.sliceGenesis(MicroversionId{});
+    at      = store.renameStructure(at, 1, "renamed_slice");
+    store.save(sample.store.string());
+  }
+
+  const auto run = runDump("--section=ops " + sample.args());
+  EXPECT_EQ(run.exitCode, 0) << run.output;
+  EXPECT_THAT(run.output, testing::HasSubstr("[make slice]"));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("[make cell ctx=1] text=\"home\""));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("rename target=1 name=\"renamed_slice\""));
+}
+
+TEST_F(XuduDumpTest, reservedStructureKindReportedAsInvalid) {
+  const auto root = scratch("reservedkind");
+  const Sample sample{root / "store", root / "permascroll"};
+  {
+    Store store(sample.scroll());
+    static_cast<void>(store.sliceGenesis(MicroversionId{}));
+    store.save(sample.store.string());
+  }
+
+  // Corrupt op 1's flags to StructureKind::Reserved (verb=0, reserved=0x88)
+  {
+    const auto nodesPath = sample.store / "ops.nodes";
+    std::fstream file(nodesPath,
+                      std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+    file.seekg(xanadu::opsSegmentHeaderBytes);
+    CompactOpNode node;
+    file.read(reinterpret_cast<char *>(&node), sizeof(node));
+    node.flags = 0x88; // verb=Make, kind=Reserved
+    file.seekp(xanadu::opsSegmentHeaderBytes);
+    file.write(reinterpret_cast<const char *>(&node), sizeof(node));
+  }
+
+  const auto run = runDump("--section=ops " + sample.args());
+  EXPECT_NE(run.exitCode, 0) << run.output;
+  EXPECT_THAT(run.output, testing::HasSubstr("invalid (reserved)"));
+}
+
 } // namespace

@@ -247,8 +247,27 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
       const auto verb = xanadu::structureVerbOf(node.flags);
       line << "  [" << xanadu::structureVerbName(verb);
       if (xanadu::StructureVerb::Make == verb) {
-        line << ' '
-             << xanadu::structureKindName(xanadu::structureKindOf(node.flags));
+        const auto skind = xanadu::structureKindOf(node.flags);
+        switch (skind) {
+        case xanadu::StructureKind::Cell:
+          line << " cell";
+          break;
+        case xanadu::StructureKind::Slice:
+          line << " slice";
+          break;
+        case xanadu::StructureKind::Xanadoc:
+          line << " xanadoc";
+          break;
+        case xanadu::StructureKind::Reserved:
+          line << " invalid (reserved)";
+          trouble("op " + std::to_string(index) +
+                  " has reserved StructureKind");
+          break;
+        default:
+          line << " invalid (unknown)";
+          trouble("op " + std::to_string(index) + " has unknown StructureKind");
+          break;
+        }
       }
       if (xanadu::StructureVerb::SetLink == verb) {
         line << (xanadu::structureIsNegward(node.flags) ? " negward"
@@ -257,6 +276,29 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
              << (0 == node.to ? std::string{"nothing"}
                               : std::to_string(node.to))
              << " cell@" << node.sourceOpIndex;
+        if (node.sourceOpIndex >= file.firstOpIndex &&
+            node.sourceOpIndex < file.firstOpIndex + file.nodes.size()) {
+          const auto &subjNode =
+              file.nodes[node.sourceOpIndex - file.firstOpIndex];
+          if (subjNode.kind == xanadu::OpKind::Structure &&
+              xanadu::valueKindOf(subjNode.flags) ==
+                  xanadu::ValueKind::OpHandle) {
+            line << " rename target=" << subjNode.value;
+            if (node.to >= file.firstOpIndex &&
+                node.to < file.firstOpIndex + file.nodes.size()) {
+              const auto &aliasNode = file.nodes[node.to - file.firstOpIndex];
+              const auto aSpan      = aliasNode.span();
+              if (xanadu::localScroll == aliasNode.scrollId &&
+                  0 != aSpan.length &&
+                  aSpan.start + aSpan.length <= primedia.size()) {
+                line << " name="
+                     << excerpt(std::string_view{primedia}.substr(
+                            static_cast<std::size_t>(aSpan.start),
+                            static_cast<std::size_t>(aSpan.length)));
+              }
+            }
+          }
+        }
       } else if (xanadu::ValueKind::None != xanadu::valueKindOf(node.flags)) {
         line << ' ' << xanadu::valueKindName(xanadu::valueKindOf(node.flags));
       }
@@ -264,6 +306,10 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
         line << " ctx=" << ctx;
       }
       line << ']';
+    } else {
+      if (const auto ctx = xanadu::contextOf(node); ctx != 0) {
+        line << "  [ctx=" << ctx << ']';
+      }
     }
 
     // The text the span names, which is the whole point of rendering an

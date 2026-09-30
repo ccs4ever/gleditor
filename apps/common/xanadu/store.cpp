@@ -3419,13 +3419,25 @@ Store::opRecords(const std::uint32_t sinceExclusive) const {
         }
       }
     }
+    const auto ctxIdx = contextOf(*node);
+    const auto contextVersion =
+        ctxIdx != 0 ? opsSpool.idOf(ctxIdx) : MicroversionId{};
+    MicroversionId sourceVersion{};
+    if (node->kind == OpKind::Transclude ||
+        (node->kind == OpKind::Structure &&
+         structureVerbOf(node->flags) != StructureVerb::Make)) {
+      if (node->sourceOpIndex != 0) {
+        sourceVersion = opsSpool.idOf(node->sourceOpIndex);
+      }
+    }
     records.push_back(
         OpRecord{.produces = opsSpool.idOf(idx),
                  .op       = node->toOp(opsSpool.idOf(node->parentIndex),
-                                        opsSpool.idOf(node->sourceOpIndex)),
+                                        sourceVersion, contextVersion),
                  .structureDimension   = dimId,
                  .structureTarget      = targetId,
-                 .structureValueTarget = valTargetId});
+                 .structureValueTarget = valTargetId,
+                 .context              = contextVersion});
   }
   std::ranges::sort(records, [](const OpRecord &lhs, const OpRecord &rhs) {
     return lhs.produces < rhs.produces;
@@ -3453,6 +3465,10 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
       }
       if (!rec.op.source.isZero()) {
         deps.push_back(rec.op.source);
+      }
+      const auto &ctx = !rec.context.isZero() ? rec.context : rec.op.context;
+      if (!ctx.isZero()) {
+        deps.push_back(ctx);
       }
       if (OpKind::Structure == rec.op.kind) {
         const auto verb = structureVerbOf(rec.op.flags);
@@ -3536,6 +3552,23 @@ void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
     for (const auto idx : scheduled) {
       const auto &record = pending[idx];
       Op op              = record.op;
+
+      const auto &ctx =
+          !record.context.isZero() ? record.context : record.op.context;
+      if (!ctx.isZero()) {
+        const auto contextSpoolIdx = opsSpool.indexOf(ctx);
+        if (0 == contextSpoolIdx) {
+          throw std::invalid_argument("unresolved context " + ctx.str());
+        }
+        op.context = ctx;
+      }
+      if (!op.source.isZero() && OpKind::Transclude == op.kind) {
+        const auto srcIdx = opsSpool.indexOf(op.source);
+        if (0 == srcIdx) {
+          throw std::invalid_argument("unresolved transclude source " +
+                                      op.source.str());
+        }
+      }
 
       if (OpKind::Structure == op.kind) {
         const auto verb = structureVerbOf(op.flags);
