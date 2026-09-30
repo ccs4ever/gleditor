@@ -28,7 +28,7 @@ EdlSlice EdlSlice::subSlice(const std::uint32_t offsetInSlice,
                     .length       = 0,
                     .sourceOffset = 0,
                     .span         = PrimediaSpan{
-                                .scroll = breakMarkerScroll, .start = 0, .length = 0}};
+                        .scroll = breakMarkerScroll, .start = 0, .length = 0}};
   }
   return {};
 }

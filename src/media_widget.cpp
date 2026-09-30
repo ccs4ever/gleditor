@@ -533,9 +533,9 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
             static_cast<float>(std::max(videoFrameWidth_, videoFrameHeight_));
         const float frameAspect = static_cast<float>(videoFrameWidth_) /
                                   static_cast<float>(videoFrameHeight_);
-        const float areaAspect = mediaAreaWidth / mediaAreaHeight;
-        float drawW            = mediaAreaWidth;
-        float drawH            = mediaAreaHeight;
+        const float areaAspect  = mediaAreaWidth / mediaAreaHeight;
+        float drawW             = mediaAreaWidth;
+        float drawH             = mediaAreaHeight;
         if (frameAspect > areaAspect) {
           drawH = mediaAreaWidth / frameAspect;
         } else {
@@ -680,8 +680,8 @@ void MediaWidget::describe(a11y::Builder &into) {
   auto &seekNode    = into.add(seekId, a11y::Role::Label);
   seekNode.label    = "Playback Position";
   seekNode.value    = formatTime(player_->positionSeconds()) + " of " +
-                   formatTime(player_->durationSeconds());
-  seekNode.actions = a11y::bit(a11y::Action::Click);
+                      formatTime(player_->durationSeconds());
+  seekNode.actions  = a11y::bit(a11y::Action::Click);
   mediaNode.children.push_back(into.id(seekId));
 
   into.contribute(into.id(rootId));

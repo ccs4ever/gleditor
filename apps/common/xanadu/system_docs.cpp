@@ -1221,9 +1221,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                = store.makeCell(cur, storeNoteText);
-    const auto noteRef = store.cellRefOf(cur);
-    manifold           = store.rebuildManifold(cur);
+    cur                             = store.makeCell(cur, storeNoteText);
+    const auto noteRef              = store.cellRefOf(cur);
+    manifold                        = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
                         noteRef, &manifold);
     manifold = store.rebuildManifold(cur);
@@ -1236,9 +1236,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
-                                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
-    manifold                 = store.rebuildManifold(cur);
+    cur      = store.setLink(cur, store.homeCell(), groupsDim,
+                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
+    manifold = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -1745,9 +1745,9 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements = entry.value.valueCells |
-                           std::views::transform(valueOf) |
-                           std::ranges::to<std::vector>();
+    entry.value.elements   = entry.value.valueCells |
+                             std::views::transform(valueOf) |
+                             std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -2368,7 +2368,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                                  static_cast<double>(cfg.physics.maxVelocity)));
+                      static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 

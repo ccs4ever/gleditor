@@ -1082,7 +1082,7 @@ SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
   InfoHash h;
   const std::string key = "xudu:collab:" + std::string(hostFingerprint) + ":" +
                           std::string(roomName);
-  h.bytes = sha1(key);
+  h.bytes               = sha1(key);
   return h;
 }
 

@@ -288,7 +288,7 @@ TEST(PublishedVocabulariesTest, equalNamesDoNotBindByIdentity) {
   const auto spaceAlice = arena.attach(zigzag::Space{
       .manifold = &mAlice, .store = alice.store.get(), .label = "Alice"});
   const auto spaceBob   = arena.attach(zigzag::Space{
-        .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
 
   // Bind by identity only
   arena.bindSharedIdentities();
@@ -346,7 +346,7 @@ TEST(PublishedVocabulariesTest, sharedPublishedIdentityBindsAcrossStores) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 
@@ -403,7 +403,7 @@ TEST(PublishedVocabulariesTest, renamingATermPreservesItsIdentity) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 
@@ -462,7 +462,7 @@ TEST(PublishedVocabulariesTest, replacingATermDoesNotHijackExistingBindings) {
 
   zigzag::ArenaManifold arena;
   const auto spaceBob     = arena.attach(zigzag::Space{
-          .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
+      .manifold = &mBob, .store = bob.store.get(), .label = "Bob"});
   const auto spaceCharlie = arena.attach(zigzag::Space{
       .manifold = &mCharlie, .store = charlie.store.get(), .label = "Charlie"});
 

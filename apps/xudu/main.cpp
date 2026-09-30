@@ -741,11 +741,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret   = renderer->editCaret();
-      const auto which    = nullptr != caret && caret->active() &&
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                                ? caret->documentIndex()
-                                : 0U;
+                             ? caret->documentIndex()
+                             : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -1110,7 +1110,7 @@ public:
       }
       auto *const caret   = renderer->editCaret();
       const auto which    = (nullptr != caret && caret->active() &&
-                          caret->documentIndex() < session.views().size())
+                             caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto storeIdx = session.storeIndexOf(which);
@@ -1134,11 +1134,11 @@ public:
                               std::istreambuf_iterator<char>());
       auto *const caret   = renderer->editCaret();
       const auto docIdx   = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                             caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto at       = (nullptr != caret && caret->active() &&
-                       caret->documentIndex() == docIdx)
+                             caret->documentIndex() == docIdx)
                                 ? caret->byteOffset()
                                 : 0U;
       const auto detected = gleditor::MimeDetector::detectFile(filePath);
