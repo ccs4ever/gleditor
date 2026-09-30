@@ -24,7 +24,8 @@ zigzag::CellRef traceMakeCell(const Store &store,
     if (nullptr == node || OpKind::Structure != node->kind) {
       break;
     }
-    if (structureVerbOf(node->flags) == StructureVerb::MakeCell) {
+    if (structureVerbOf(node->flags) == StructureVerb::Make &&
+        structureKindOf(node->flags) == StructureKind::Cell) {
       return curr;
     }
     if (node->sourceOpIndex >= curr || node->sourceOpIndex == 0) {

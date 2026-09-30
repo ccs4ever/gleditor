@@ -170,14 +170,25 @@ inline constexpr CellRef ephemeralBit = 0x8000'0000U;
  * trace; this says which rule the operation broke, so a caller that has just
  * minted one can tell its own mistake from a stale fold.
  */
+struct StructureBirthInfo {
+  std::uint32_t opIndex{0};
+  xanadu::StructureKind kind{xanadu::StructureKind::Cell};
+  std::uint32_t containerOp{0};
+  xanadu::PrimediaSpan nameSpan{};
+
+  bool operator==(const StructureBirthInfo &) const = default;
+};
+
 enum class FoldRefusal : std::uint8_t {
   ScratchAddress,   ///< content names scratchScroll (R8, address side)
-  DuplicateCell,    ///< a second MakeCell at one operation index
+  DuplicateCell,    ///< a second Make at one operation index
   UnknownSubject,   ///< the R7 chain reaches no cell this fold holds
   UnknownDimension, ///< a SetLink along a dimension this fold does not hold
   EphemeralTarget,  ///< a SetLink into a derived cell (R8, ref side)
   UnknownTarget,    ///< a SetLink to a cell this fold does not hold
   UnknownVerb,      ///< a StructureVerb this build does not know
+  InvalidMakeKind,  ///< Reserved StructureKind, or invalid fields/value on
+                    ///< Slice/Xanadoc Make
 };
 
 [[nodiscard]] constexpr std::string_view
@@ -197,6 +208,8 @@ toString(const FoldRefusal refusal) noexcept {
     return "unknown target";
   case FoldRefusal::UnknownVerb:
     return "unknown verb";
+  case FoldRefusal::InvalidMakeKind:
+    return "invalid make kind";
   }
   return "unknown refusal";
 }
@@ -560,6 +573,64 @@ public:
     return unresolvedExternals_;
   }
 
+  /// Whether @p op is a live Cell in this manifold.
+  [[nodiscard]] bool isCell(const CellRef op) const noexcept {
+    return contains(op);
+  }
+
+  /// Whether @p op is a recognized structure birth (Cell, Slice, or Xanadoc).
+  [[nodiscard]] bool isStructureBirth(const std::uint32_t op) const noexcept {
+    return structureBirths_.contains(op);
+  }
+
+  /// The StructureKind of birth @p op, or nullopt if not a structure birth.
+  [[nodiscard]] std::optional<xanadu::StructureKind>
+  structureKind(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.kind;
+    }
+    return std::nullopt;
+  }
+
+  /// The immediate container birth of @p op (0 for top-level), or nullopt if
+  /// not a birth.
+  [[nodiscard]] std::optional<std::uint32_t>
+  containerOf(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.containerOp;
+    }
+    return std::nullopt;
+  }
+
+  /// The birth name span of @p op, or nullopt if not a birth.
+  [[nodiscard]] std::optional<xanadu::PrimediaSpan>
+  structureNameSpan(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.nameSpan;
+    }
+    return std::nullopt;
+  }
+
+  /// The structure birth info for @p op, or nullopt.
+  [[nodiscard]] std::optional<StructureBirthInfo>
+  structureBirth(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  /// All structure birth operations folded in this manifold.
+  [[nodiscard]] std::vector<std::uint32_t> structureBirths() const;
+
+  /// All structure birth operations of a specific kind.
+  [[nodiscard]] std::vector<std::uint32_t>
+  structureBirths(xanadu::StructureKind kind) const;
+
   // -- fold path: driven only by Store ---------------------------------------
 
   /**
@@ -675,6 +746,7 @@ private:
   std::uint32_t refusedOps_{0};
   std::vector<CellRef> externalCells_;
   std::uint32_t unresolvedExternals_{0};
+  std::unordered_map<std::uint32_t, StructureBirthInfo> structureBirths_;
 
   /// dimensions() is a rank walk, and a span has to point at something.
   mutable std::vector<DimRef> dimsCache;

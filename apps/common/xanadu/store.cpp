@@ -175,7 +175,8 @@ void Store::indexGenesisCells() {
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
     const auto *const node = opsSpool.get(idx);
     if (nullptr == node || OpKind::Structure != node->kind ||
-        StructureVerb::MakeCell != structureVerbOf(node->flags)) {
+        StructureVerb::Make != structureVerbOf(node->flags) ||
+        StructureKind::Cell != structureKindOf(node->flags)) {
       continue;
     }
     if (zigzag::noCell == homeCell_) {

@@ -207,10 +207,54 @@ Manifold::applyStructure(const std::uint32_t opIndex,
   }
 
   switch (xanadu::structureVerbOf(node.flags)) {
-  case xanadu::StructureVerb::MakeCell: {
-    if (byRef.contains(opIndex)) {
+  case xanadu::StructureVerb::Make: {
+    const auto kind = xanadu::structureKindOf(node.flags);
+    if (xanadu::StructureKind::Reserved == kind) {
+      return refuse(FoldRefusal::InvalidMakeKind);
+    }
+    if (byRef.contains(opIndex) || structureBirths_.contains(opIndex)) {
       return refuse(FoldRefusal::DuplicateCell);
     }
+
+    if (xanadu::StructureKind::Slice == kind ||
+        xanadu::StructureKind::Xanadoc == kind) {
+      if (node.at != 0 || node.length != 0 || node.to != 0 ||
+          node.sourceAt != 0 || node.sourceLength != 0 || node.linkId != 0) {
+        return refuse(FoldRefusal::InvalidMakeKind);
+      }
+      if (xanadu::valueKindOf(node.flags) != xanadu::ValueKind::None ||
+          node.value != 0) {
+        return refuse(FoldRefusal::InvalidMakeKind);
+      }
+      if (node.sourceOpIndex != 0) {
+        if (!structureBirths_.contains(node.sourceOpIndex) &&
+            !byRef.contains(node.sourceOpIndex)) {
+          return refuse(FoldRefusal::UnknownSubject);
+        }
+      }
+      structureBirths_.emplace(opIndex, StructureBirthInfo{
+                                            .opIndex     = opIndex,
+                                            .kind        = kind,
+                                            .containerOp = node.sourceOpIndex,
+                                            .nameSpan    = node.span(),
+                                        });
+      return {};
+    }
+
+    // StructureKind::Cell:
+    if (node.sourceOpIndex != 0) {
+      if (!structureBirths_.contains(node.sourceOpIndex) &&
+          !byRef.contains(node.sourceOpIndex)) {
+        return refuse(FoldRefusal::UnknownSubject);
+      }
+    }
+    structureBirths_.emplace(opIndex, StructureBirthInfo{
+                                          .opIndex = opIndex,
+                                          .kind = xanadu::StructureKind::Cell,
+                                          .containerOp = node.sourceOpIndex,
+                                          .nameSpan    = node.span(),
+                                      });
+
     const auto dense = static_cast<std::uint32_t>(slots.size());
     // The empty runs start at the arenas' tails, so this cell's first link and
     // first span are appends in place rather than relocations.
@@ -564,7 +608,7 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
         return {};
       }
       const auto verb = xanadu::structureVerbOf(node->flags);
-      if (verb == xanadu::StructureVerb::MakeCell ||
+      if (verb == xanadu::StructureVerb::Make ||
           verb == xanadu::StructureVerb::SetValue) {
         if (!node->span().empty()) {
           return {node->span()};
@@ -586,7 +630,7 @@ Manifold::contentAsOf(const CellRef cell, const std::uint32_t op) const {
     }
     const auto verb = xanadu::structureVerbOf(node->flags);
     switch (verb) {
-    case xanadu::StructureVerb::MakeCell:
+    case xanadu::StructureVerb::Make:
     case xanadu::StructureVerb::SetValue: {
       if (!node->span().empty()) {
         currentContent = {node->span()};
@@ -699,7 +743,8 @@ bool Manifold::equivalentTo(const Manifold &other) const {
   if (slots.size() != other.slots.size() || home_ != other.home_ ||
       dimsDim_ != other.dimsDim_ ||
       unresolvedExternals_ != other.unresolvedExternals_ ||
-      externalCells_ != other.externalCells_) {
+      externalCells_ != other.externalCells_ ||
+      structureBirths_ != other.structureBirths_) {
     return false;
   }
   for (const auto &cell : slots) {
@@ -736,6 +781,28 @@ bool Manifold::equivalentTo(const Manifold &other) const {
     }
   }
   return true;
+}
+
+std::vector<std::uint32_t> Manifold::structureBirths() const {
+  std::vector<std::uint32_t> ops;
+  ops.reserve(structureBirths_.size());
+  for (const auto &[op, info] : structureBirths_) {
+    ops.push_back(op);
+  }
+  std::ranges::sort(ops);
+  return ops;
+}
+
+std::vector<std::uint32_t>
+Manifold::structureBirths(const xanadu::StructureKind kind) const {
+  std::vector<std::uint32_t> ops;
+  for (const auto &[op, info] : structureBirths_) {
+    if (info.kind == kind) {
+      ops.push_back(op);
+    }
+  }
+  std::ranges::sort(ops);
+  return ops;
 }
 
 std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,

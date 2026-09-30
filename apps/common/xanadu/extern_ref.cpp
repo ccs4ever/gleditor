@@ -99,7 +99,8 @@ ExternResolution resolveExternCell(const Store &localStore,
     return ExternResolution{.status = ExternResolutionStatus::Absent};
   }
   if (node->kind != OpKind::Structure ||
-      structureVerbOf(node->flags) != StructureVerb::MakeCell) {
+      structureVerbOf(node->flags) != StructureVerb::Make ||
+      structureKindOf(node->flags) != StructureKind::Cell) {
     return ExternResolution{.status = ExternResolutionStatus::Unintelligible};
   }
   if (nullptr != foreignFold && !foreignFold->contains(opIndex)) {

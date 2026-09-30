@@ -16,6 +16,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
@@ -199,6 +200,129 @@ TEST(StructureMakeTest, StorePutOpWithContext) {
   const auto *node = store.getCompactOp(sliceId);
   ASSERT_NE(node, nullptr);
   EXPECT_EQ(contextOf(*node), 1U); // genId is at index 1 in spool
+}
+
+TEST(StructureMakeTest, ManifoldTypeAwareFold) {
+  zigzag::Manifold manifold;
+
+  // 1. Reserved StructureKind is refused
+  {
+    CompactOpNode node{};
+    node.kind  = OpKind::Structure;
+    node.flags = makeStructureFlags(StructureKind::Reserved, ValueKind::None);
+    const auto res = manifold.applyStructure(1, node);
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(res.error(), zigzag::FoldRefusal::InvalidMakeKind);
+    EXPECT_EQ(manifold.refusedOps(), 1U);
+  }
+
+  // 2. Slice birth validations: idle fields non-zero
+  {
+    CompactOpNode badNode{};
+    badNode.kind   = OpKind::Structure;
+    badNode.flags  = makeStructureFlags(StructureKind::Slice, ValueKind::None);
+    badNode.at     = 10;
+    const auto res = manifold.applyStructure(2, badNode);
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(res.error(), zigzag::FoldRefusal::InvalidMakeKind);
+  }
+
+  // Slice birth validations: non-zero value
+  {
+    CompactOpNode badNode{};
+    badNode.kind   = OpKind::Structure;
+    badNode.flags  = makeStructureFlags(StructureKind::Slice, ValueKind::None);
+    badNode.value  = 42;
+    const auto res = manifold.applyStructure(2, badNode);
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(res.error(), zigzag::FoldRefusal::InvalidMakeKind);
+  }
+
+  // Slice birth validations: unknown container
+  {
+    CompactOpNode badNode{};
+    badNode.kind  = OpKind::Structure;
+    badNode.flags = makeStructureFlags(StructureKind::Slice, ValueKind::None);
+    badNode.sourceOpIndex = 999;
+    const auto res        = manifold.applyStructure(2, badNode);
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(res.error(), zigzag::FoldRefusal::UnknownSubject);
+  }
+
+  // 3. Valid Top-Level Slice birth
+  PrimediaSpan sliceSpan{.scroll = localScroll, .start = 0, .length = 10};
+  CompactOpNode sliceNode{};
+  sliceNode.kind  = OpKind::Structure;
+  sliceNode.flags = makeStructureFlags(StructureKind::Slice, ValueKind::None);
+  sliceNode.setSpan(sliceSpan);
+  ASSERT_TRUE(manifold.applyStructure(10, sliceNode).has_value());
+
+  EXPECT_EQ(manifold.cellCount(), 0U);
+  EXPECT_FALSE(manifold.isCell(10));
+  EXPECT_TRUE(manifold.isStructureBirth(10));
+  EXPECT_EQ(manifold.structureKind(10), StructureKind::Slice);
+  EXPECT_EQ(manifold.containerOf(10), 0U);
+  EXPECT_EQ(manifold.structureNameSpan(10), sliceSpan);
+
+  // 4. Valid Top-Level Xanadoc birth
+  PrimediaSpan xanadocSpan{.scroll = localScroll, .start = 10, .length = 15};
+  CompactOpNode xanadocNode{};
+  xanadocNode.kind = OpKind::Structure;
+  xanadocNode.flags =
+      makeStructureFlags(StructureKind::Xanadoc, ValueKind::None);
+  xanadocNode.setSpan(xanadocSpan);
+  ASSERT_TRUE(manifold.applyStructure(20, xanadocNode).has_value());
+
+  EXPECT_EQ(manifold.cellCount(), 0U);
+  EXPECT_FALSE(manifold.isCell(20));
+  EXPECT_TRUE(manifold.isStructureBirth(20));
+  EXPECT_EQ(manifold.structureKind(20), StructureKind::Xanadoc);
+  EXPECT_EQ(manifold.containerOf(20), 0U);
+  EXPECT_EQ(manifold.structureNameSpan(20), xanadocSpan);
+
+  // 5. Valid Cell birth nested inside Slice (op 10)
+  PrimediaSpan cellSpan{.scroll = localScroll, .start = 25, .length = 5};
+  CompactOpNode cellNode{};
+  cellNode.kind  = OpKind::Structure;
+  cellNode.flags = makeStructureFlags(StructureKind::Cell, ValueKind::None);
+  cellNode.sourceOpIndex = 10; // container is Slice
+  cellNode.setSpan(cellSpan);
+  ASSERT_TRUE(manifold.applyStructure(30, cellNode).has_value());
+
+  EXPECT_EQ(manifold.cellCount(), 1U);
+  EXPECT_TRUE(manifold.isCell(30));
+  EXPECT_TRUE(manifold.isStructureBirth(30));
+  EXPECT_EQ(manifold.structureKind(30), StructureKind::Cell);
+  EXPECT_EQ(manifold.containerOf(30), 10U);
+  EXPECT_EQ(manifold.structureNameSpan(30), cellSpan);
+
+  // 6. Duplicate birth refused
+  const auto dupRes = manifold.applyStructure(30, cellNode);
+  ASSERT_FALSE(dupRes.has_value());
+  EXPECT_EQ(dupRes.error(), zigzag::FoldRefusal::DuplicateCell);
+
+  // 7. Structure query lists
+  const auto allBirths = manifold.structureBirths();
+  EXPECT_THAT(allBirths, testing::ElementsAre(10U, 20U, 30U));
+  EXPECT_THAT(manifold.structureBirths(StructureKind::Slice),
+              testing::ElementsAre(10U));
+  EXPECT_THAT(manifold.structureBirths(StructureKind::Xanadoc),
+              testing::ElementsAre(20U));
+  EXPECT_THAT(manifold.structureBirths(StructureKind::Cell),
+              testing::ElementsAre(30U));
+
+  // 8. Manifold equivalence
+  zigzag::Manifold manifold2;
+  ASSERT_TRUE(manifold2.applyStructure(10, sliceNode).has_value());
+  ASSERT_TRUE(manifold2.applyStructure(20, xanadocNode).has_value());
+  ASSERT_TRUE(manifold2.applyStructure(30, cellNode).has_value());
+  EXPECT_TRUE(manifold.equivalentTo(manifold2));
+
+  // Without the xanadoc birth in manifold3
+  zigzag::Manifold manifold3;
+  ASSERT_TRUE(manifold3.applyStructure(10, sliceNode).has_value());
+  ASSERT_TRUE(manifold3.applyStructure(30, cellNode).has_value());
+  EXPECT_FALSE(manifold.equivalentTo(manifold3));
 }
 
 } // namespace
