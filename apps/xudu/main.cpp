@@ -4745,7 +4745,7 @@ int main(const int argc, char **argv) {
 #endif
     session->setSystemDocChangedCallback(
         [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
-         &views, &overview, readablePx
+         &views, &overview, readablePx, &session
 #ifdef XUZZ_BUILD
          ,
          &zigzagPresentation, &bridgeCoordinator, &showKeyHints
@@ -4774,6 +4774,8 @@ int main(const int argc, char **argv) {
             break;
           }
           case xudu::SystemDocKind::Settings: {
+            session->setAutoSave(std::chrono::seconds(
+                xudu::SettingsConfig::fromStore(store).autoSaveSeconds));
 #ifdef XUZZ_BUILD
             if (auto vHost = zigzagPresentation->vortexHost()) {
               vHost->loadConfigFromStore(store);
@@ -4814,6 +4816,10 @@ int main(const int argc, char **argv) {
 
     // Apply active system doc configurations at launch
     {
+      session->setAutoSave(std::chrono::seconds(
+          xudu::SettingsConfig::fromStore(
+              session->systemStore(xudu::SystemDocKind::Settings))
+              .autoSaveSeconds));
       const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
       const auto &kmStore = session->store(kmIdx);
       if (kmStore.opCount() > 0) {

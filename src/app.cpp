@@ -1354,6 +1354,11 @@ int Application::run() {
   };
   const auto onButtonDown = [&](const int x, const int y,
                                 const std::uint8_t button) {
+    // A press is where the pointer is, even with no motion before it -- a
+    // touch, a tablet tap, a scripted press -- and what opens at the pointer
+    // (the radial menu) reads it from here.
+    state->mouseX = x;
+    state->mouseY = y;
     // Held while a modal is up, along with the drag above: the caret is not
     // what is being moved when there is a question on screen.
     if (nullptr != state->modal && state->modal->grabbing()) {

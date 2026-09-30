@@ -719,7 +719,17 @@ public:
                     std::uint32_t length, gleditor::TextAlign align);
 
   // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
-  static constexpr auto idleFlushTimeout = std::chrono::seconds(5);
+  /**
+   * @brief How long typing may sit idle before it is written to the store,
+   *        from system://settings' autoSaveSeconds.
+   *
+   * Typed text is held in a replay log and compacted before it is written,
+   * so a burst of typing costs one operation rather than one per key; this
+   * bounds how much of it an unexpected exit can lose.
+   */
+  void setAutoSave(std::chrono::seconds idle) noexcept {
+    idleFlushTimeout = idle;
+  }
 
   /**
    * @brief Flush any uncommitted edits in the replay log for @p docIndex (or
@@ -810,6 +820,9 @@ private:
     std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
+  /// See setAutoSave(); the settings' own default until they are read.
+  std::chrono::seconds idleFlushTimeout{
+      xanadu::SettingsConfig{}.autoSaveSeconds};
 
   /// system://activity, opened on first use; see activity().
   std::unique_ptr<Store> activityStore;

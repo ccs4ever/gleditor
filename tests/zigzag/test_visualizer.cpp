@@ -1270,3 +1270,27 @@ TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
   EXPECT_EQ(viz.currentView().x_dimension, "d.result")
       << "home links along d.2, which the view still shows";
 }
+
+// In xuzz the documents describe themselves first and take the focus at the
+// caret; ZigZag used to take it after them whatever had the keyboard, so an
+// assistive technology always reported a cell while the reader typed.
+TEST(ZigzagVisualizerTest, theFocusIsTakenOnlyWithTheKeyboard) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto before = viz.accessibilityRevision();
+
+  viz.setHasKeyboard(false);
+  EXPECT_NE(viz.accessibilityRevision(), before)
+      << "a change of pane has to reach the accessibility tree";
+  gleditor::a11y::Tree elsewhere;
+  elsewhere.focus = 7U;
+  gleditor::a11y::Builder away(elsewhere, 3);
+  viz.describe(away);
+  EXPECT_EQ(elsewhere.focus, 7U) << "the document keeps the focus";
+
+  viz.setHasKeyboard(true);
+  gleditor::a11y::Tree here;
+  here.focus = 7U;
+  gleditor::a11y::Builder home(here, 3);
+  viz.describe(home);
+  EXPECT_NE(here.focus, 7U) << "ZigZag's focused cell takes it";
+}

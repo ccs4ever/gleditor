@@ -2233,7 +2233,10 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
                          gleditor::a11y::bit(gleditor::a11y::Action::Focus);
       rootChildren.push_back(into.id(nextNodeId));
 
-      if (isFocus) {
+      // Only while ZigZag has the keyboard: otherwise the document's caret
+      // is where an assistive technology should be, and describing this
+      // after the documents took that focus away from the text.
+      if (isFocus && keyboardHere_.load()) {
         into.takeFocus(into.id(nextNodeId));
       }
 
@@ -2254,7 +2257,9 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
                          gleditor::a11y::bit(gleditor::a11y::Action::Focus);
       rootChildren.push_back(into.id(nextNodeId));
-      into.takeFocus(into.id(nextNodeId));
+      if (keyboardHere_.load()) {
+        into.takeFocus(into.id(nextNodeId));
+      }
       nextNodeId++;
     }
   }

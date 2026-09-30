@@ -136,7 +136,8 @@ public:
   // -- gleditor::a11y::Source -----------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return revision_;
+    // Both only grow, so the sum moves whenever either does.
+    return revision_ + keyboardMoves_.load();
   }
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
@@ -282,7 +283,13 @@ public:
   void setKeyHints(std::string here, std::string elsewhere);
   /// Whether ZigZag has the keyboard; always, in a program with no other
   /// pane.
-  void setHasKeyboard(bool has) noexcept { keyboardHere_ = has; }
+  void setHasKeyboard(bool has) noexcept {
+    // Counted rather than folded into revision_, which the render thread
+    // owns: this is called from the event thread.
+    if (keyboardHere_.exchange(has) != has) {
+      ++keyboardMoves_;
+    }
+  }
 
   // -- Naming and linking cells from the keyboard ---------------------------
   /**
@@ -625,6 +632,9 @@ private:
   std::string keyHintsHere_;
   std::string keyHintsElsewhere_;
   std::atomic<bool> keyboardHere_{true};
+  /// How often the keyboard changed pane: part of accessibilityRevision(),
+  /// since which pane holds the accessibility focus follows it.
+  std::atomic<std::uint64_t> keyboardMoves_{0};
 
   bool cellEditing_{false};
   /// The text starts selected, as a rename does: the first character typed
