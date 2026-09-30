@@ -153,9 +153,9 @@ TEST_F(XuduDumpTest, aSlicesStructureOperationsSayWhatTheyDid) {
   // The verb decoded beside the raw flags byte, because "flags=0x01" is not
   // what an operation means -- and a cell's content read back through the
   // permascroll, which is the check that nothing shifted underneath it.
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"home\""));
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"d.doc\""));
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"a cell\""));
+  EXPECT_THAT(run.output, testing::HasSubstr("[make cell] text=\"home\""));
+  EXPECT_THAT(run.output, testing::HasSubstr("[make cell] text=\"d.doc\""));
+  EXPECT_THAT(run.output, testing::HasSubstr("[make cell] text=\"a cell\""));
   // A link says which way, along which dimension, to what -- and whose it is,
   // which is the chain rather than a field.
   EXPECT_THAT(run.output, testing::HasSubstr("[setLink posward dim=" +

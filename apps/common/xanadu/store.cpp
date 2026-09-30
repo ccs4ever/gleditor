@@ -138,10 +138,17 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
     throw std::invalid_argument("operation filed under " + produces.str() +
                                 " names unknown source " + op.source.str());
   }
+  const auto contextIdx =
+      op.context.isZero() ? 0U : opsSpool.indexOf(op.context);
+  if (!op.context.isZero() && 0 == contextIdx) {
+    throw std::invalid_argument("operation filed under " + produces.str() +
+                                " names unknown context " + op.context.str());
+  }
   // The ordinal is what makes the name recoverable from the tree, which is
   // how a sealed segment -- a file of nodes and nothing else -- gets indexed.
   const auto node = CompactOpNode::fromOp(
-      op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces));
+      op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces),
+      contextIdx);
   const auto index = opsSpool.append(node, produces);
 
   if (chronofilade_ && index > 0) {
@@ -152,7 +159,8 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   // here costs a comparison per operation and saves a scan per question. See
   // homeCell() for why they are not simply indices 1 and 2.
   if (OpKind::Structure == op.kind &&
-      StructureVerb::MakeCell == structureVerbOf(op.flags)) {
+      StructureVerb::Make == structureVerbOf(op.flags) &&
+      StructureKind::Cell == structureKindOf(op.flags)) {
     if (zigzag::noCell == homeCell_) {
       homeCell_ = index;
     } else if (zigzag::noCell == dimsDimension_) {
@@ -184,10 +192,17 @@ std::optional<Op> Store::getOp(const MicroversionId &id) const {
   if (nullptr == node) {
     return std::nullopt;
   }
-  // The node names its parent and source by spool index; an Op names them the
-  // way a person writes them, so both come back through idOf().
-  return node->toOp(opsSpool.idOf(node->parentIndex),
-                    opsSpool.idOf(node->sourceOpIndex));
+  const auto ctxIdx = contextOf(*node);
+  const auto contextVersion =
+      ctxIdx != 0 ? opsSpool.idOf(ctxIdx) : MicroversionId{};
+  MicroversionId sourceVersion{};
+  if (node->kind == OpKind::Transclude ||
+      (node->kind == OpKind::Structure &&
+       structureVerbOf(node->flags) != StructureVerb::Make)) {
+    sourceVersion = opsSpool.idOf(node->sourceOpIndex);
+  }
+  return node->toOp(opsSpool.idOf(node->parentIndex), sourceVersion,
+                    contextVersion);
 }
 
 std::vector<MicroversionId> Store::opsFor(const MicroversionId &version) const {
@@ -1994,10 +2009,10 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
           currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
       if (placeholder && *placeholder != zigzag::noCell) {
         const auto dimOriginCell = ensureDim("d.origin-cell");
-        curHead                  = setLink(curHead, itemCell, dimOriginCell,
-                                           zigzag::DimVector::POS, *placeholder, currentFold);
-        folded                   = rebuildManifold(curHead);
-        currentFold              = &folded.value();
+        curHead = setLink(curHead, itemCell, dimOriginCell,
+                          zigzag::DimVector::POS, *placeholder, currentFold);
+        folded  = rebuildManifold(curHead);
+        currentFold = &folded.value();
       }
     }
   }

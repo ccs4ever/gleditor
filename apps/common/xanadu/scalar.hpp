@@ -88,6 +88,27 @@ struct ScalarValue {
 
 [[nodiscard]] ScalarValue scalarValue(std::int64_t value);
 
+/// A timestamp instant as signed nanoseconds since 1970-01-01T00:00:00Z.
+struct TimestampInstant {
+  std::int64_t epochNanos{0};
+  bool operator==(const TimestampInstant &) const = default;
+};
+
+/// A timestamp scalar ready to become a cell.
+[[nodiscard]] ScalarValue scalarTimestamp(std::int64_t epochNanos);
+
+/// Canonical UTC RFC 3339 string at nanosecond resolution.
+[[nodiscard]] std::string formatUtcTimestampIso8601(std::int64_t epochNanos);
+
+/// Parse an RFC 3339 / ISO 8601 UTC timestamp to signed epoch nanoseconds.
+[[nodiscard]] bool parseUtcTimestampIso8601(std::string_view text,
+                                            std::int64_t &outNanos) noexcept;
+
+/// Round @p nanos to the nearest multiple of @p unitNanos using ties-to-even.
+[[nodiscard]] std::int64_t
+roundInstantToNearestTiesToEven(std::int64_t nanos,
+                                std::int64_t unitNanos) noexcept;
+
 /// The double @p text renders, if it renders one exactly. Round-tripping a
 /// rendering is the property a test asserts and a reader of a foreign cell
 /// checks; it is not how a query reads a value, which is what the bits are for.

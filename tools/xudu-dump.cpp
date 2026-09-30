@@ -246,6 +246,10 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
     if (xanadu::OpKind::Structure == node.kind) {
       const auto verb = xanadu::structureVerbOf(node.flags);
       line << "  [" << xanadu::structureVerbName(verb);
+      if (xanadu::StructureVerb::Make == verb) {
+        line << ' '
+             << xanadu::structureKindName(xanadu::structureKindOf(node.flags));
+      }
       if (xanadu::StructureVerb::SetLink == verb) {
         line << (xanadu::structureIsNegward(node.flags) ? " negward"
                                                         : " posward")
@@ -255,6 +259,9 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
              << " cell@" << node.sourceOpIndex;
       } else if (xanadu::ValueKind::None != xanadu::valueKindOf(node.flags)) {
         line << ' ' << xanadu::valueKindName(xanadu::valueKindOf(node.flags));
+      }
+      if (const auto ctx = xanadu::contextOf(node); ctx != 0) {
+        line << " ctx=" << ctx;
       }
       line << ']';
     }
