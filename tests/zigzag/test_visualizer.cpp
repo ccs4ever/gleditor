@@ -1244,3 +1244,29 @@ TEST(ZigzagVisualizerTest, ReadableScaleOnlyEnlargesInQuarterSteps) {
   EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 0.0F), 1.0F);
   EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(0.0F, 14.0F), 1.0F);
 }
+
+// A slice whose home links along neither view dimension -- a query's result
+// store, on d.result -- opens along the dimension it does use rather than
+// as a lone home cell; one whose home the view already shows keeps it.
+TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
+  xanadu::Store results;
+  auto at         = results.sliceGenesis(xanadu::MicroversionId{});
+  const auto rank = results.makeDimension(at, "d.result");
+  at              = results.makeCell(rank.version, "first result");
+  at = results.setLink(at, results.homeCell(), rank.dim, zigzag::DimVector::POS,
+                       results.cellRefOf(at));
+
+  ZigzagVisualizer viz("Sans 12");
+  viz.bindXuduStore(results, at);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.result");
+
+  xanadu::Store sequence;
+  auto seq       = sequence.sliceGenesis(xanadu::MicroversionId{});
+  const auto two = sequence.makeDimension(seq, "d.2");
+  seq            = sequence.makeCell(two.version, "below");
+  seq            = sequence.setLink(seq, sequence.homeCell(), two.dim,
+                                    zigzag::DimVector::POS, sequence.cellRefOf(seq));
+  viz.bindXuduStore(sequence, seq);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.result")
+      << "home links along d.2, which the view still shows";
+}

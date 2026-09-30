@@ -268,6 +268,7 @@ void ZigzagVisualizer::adoptDocument(
 
   preview_cell_.reset();
   visible_cells_.clear();
+  fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
     cell.current_pos   = cell.target_pos;
@@ -275,6 +276,50 @@ void ZigzagVisualizer::adoptDocument(
   }
   ensureVortexHost();
   invalidateAccessibility();
+}
+
+void ZigzagVisualizer::fitViewToHome() {
+  if (!engine_ || nullptr == store_) {
+    return;
+  }
+  const auto &manifold = engine_->manifold();
+  const auto home      = manifold.home();
+  if (zigzag::noCell == home) {
+    return;
+  }
+  const auto linksOn = [&](const DimID &name) {
+    const auto dim = manifold.dimensionNamed(name, *store_);
+    return dim && (zigzag::noCell != manifold.linked(home, *dim) ||
+                   zigzag::noCell !=
+                       manifold.linked(home, *dim, zigzag::DimVector::NEG));
+  };
+  if (linksOn(current_view_.x_dimension) ||
+      linksOn(current_view_.y_dimension)) {
+    GLEDITOR_LOG_DEBUG("zigzag.view", "home already links along {} or {}",
+                       current_view_.x_dimension, current_view_.y_dimension);
+    return;
+  }
+  // A slice whose home links along neither view dimension -- a result store
+  // on d.result, say -- would open as a lone home cell. Show it along the
+  // dimensions it does use instead, d.dims aside, which every slice has.
+  std::vector<DimID> used;
+  for (const auto &link : manifold.dimensionsOf(home)) {
+    auto name = manifold.textOf(link.dim, *store_);
+    GLEDITOR_LOG_TRACE("zigzag.view", "home links along #{} \"{}\"", link.dim,
+                       name);
+    if ("d.dims" != name && !name.empty()) {
+      used.push_back(std::move(name));
+    }
+  }
+  GLEDITOR_LOG_DEBUG("zigzag.view",
+                     "home links along {} dimension(s) off the view",
+                     used.size());
+  if (!used.empty()) {
+    current_view_.x_dimension = used[0];
+  }
+  if (used.size() > 1) {
+    current_view_.y_dimension = used[1];
+  }
 }
 
 void ZigzagVisualizer::adoptXuduStore(
@@ -302,6 +347,7 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   preview_cell_.reset();
   visible_cells_.clear();
+  fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
     cell.current_pos   = cell.target_pos;

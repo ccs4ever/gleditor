@@ -551,6 +551,9 @@ private:
   }
 
   void refreshCellLayouts();
+  /// Point the view at the dimensions the home cell links along when it
+  /// links along neither of the current two; see bindXuduStore().
+  void fitViewToHome();
 
   std::string fontName_;
   std::uint64_t revision_{1};
