@@ -4279,6 +4279,31 @@ int main(const int argc, char **argv) {
       // historical operations are navigation material, not nine overlapping
       // document planes at startup.
       views.showAlongside(primaryStore.primaryCurrentVersion(), 0.0F, 0);
+      // A store that is all slice -- a query's result, say -- has an empty
+      // page to show and its cells pinned at the page's edge, the rows off
+      // the window. Open on what it holds: the slice, as Alt+Home would.
+      if (primaryStore.homeCell() != zigzag::noCell &&
+          primaryStore.rebuild(primaryStore.primaryCurrentVersion()).length() ==
+              0) {
+        // Queued, as a resumed session's is: the pane's change handler,
+        // which tells the presentation it has the keyboard, is set below.
+        renderer->runWithState(
+            [&views, &state, &keyboardPane, zigzagPresentation](RenderState &) {
+              keyboardPane.enterZigzag();
+              views.placeCameraWhenReady([&views, &state, zigzagPresentation,
+                                          placedFrames = 0]() mutable {
+                if (!views.presentationTransform() || ++placedFrames < 2) {
+                  return false;
+                }
+                if (const auto centre = zigzagPresentation->focusCentre()) {
+                  std::scoped_lock locker(state->view);
+                  state->view.pos.x = centre->x;
+                  state->view.pos.y = centre->y;
+                }
+                return true;
+              });
+            });
+      }
 #else
       const auto allVers = primaryStore.allVersions();
       if (allVers.size() > 1) {
