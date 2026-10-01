@@ -1512,10 +1512,17 @@ $(OBJDIR)/%.o: %.cpp
 # make never builds, so header edits silently produce a stale binary.
 # -MP adds phony targets for the headers so that deleting one does not wedge
 # the build with "No rule to make target".
-$(OBJDIR)/%.dep: %.cpp
+#
+# The .dep is a target of the headers it lists, as the object is. Otherwise a
+# header that moved or was deleted stays listed forever: -MP's phony target
+# for it is always out of date, so every object naming it was rebuilt on
+# every make, and nothing ever regenerated the .dep that named it. Depending
+# on the Makefile as well regenerates every .dep once when this rule changes,
+# which is what clears ones an older rule wrote.
+$(OBJDIR)/%.dep: %.cpp Makefile
 	set -e; $(RM) -f $@; \
 	$(REAL_CXX) -MM -MP $(CXXFLAGS) $< > $@.$$$$; \
-	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
 $(OBJDIR)/%.j: %.cpp
@@ -1530,10 +1537,10 @@ $(OBJDIR)/%.j: %.cpp
 $(OBJDIR)/%.o: %.c
 	$(CC) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -c -o $@ $<
 
-$(OBJDIR)/%.dep: %.c
+$(OBJDIR)/%.dep: %.c Makefile
 	set -e; $(RM) -f $@; \
 	$(CC) -MM -MP $(ZSTD_SEEKABLE_CFLAGS) $< > $@.$$$$; \
-	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
 $(OBJDIR)/%.j: %.c
