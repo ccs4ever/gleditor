@@ -428,7 +428,10 @@ TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {
   const auto minted   = sliceToStore(doc, store, xanadu::MicroversionId{});
   const auto manifold = store.rebuildManifold(minted.version);
 
-  const auto back = storeToSlice(store, manifold, minted.focus);
+  const auto back       = storeToSlice(store, manifold, minted.focus);
+  const auto backDirect = storeToSlice(manifold, minted.focus);
+  EXPECT_EQ(backDirect.cells.size(), back.cells.size());
+  EXPECT_EQ(backDirect.focus, back.focus);
 
   // Same number of cells: the dimension cells and the attribute cells are
   // structure, so they do not come back as content cells. Without that, a round

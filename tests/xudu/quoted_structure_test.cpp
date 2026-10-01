@@ -146,6 +146,13 @@ TEST(QuotedStructureTest, aQuotedKeymapIsOneQuotation) {
   const auto bobFold = bob.store->rebuildManifold(bob.head);
   const auto readQ = readQuotation(bobFold, *bob.store, appended.quotationCell);
   ASSERT_TRUE(readQ.has_value());
+  const auto readQDirect = readQuotation(bobFold, appended.quotationCell);
+  ASSERT_TRUE(readQDirect.has_value());
+  EXPECT_EQ(readQDirect->head, readQ->head);
+  EXPECT_EQ(readQDirect->placeholderCell, readQ->placeholderCell);
+  EXPECT_EQ(readQDirect->stateCell, readQ->stateCell);
+  EXPECT_EQ(readQDirect->selectorCell, readQ->selectorCell);
+  EXPECT_EQ(readQDirect->label, readQ->label);
   EXPECT_EQ(readQ->selectorSpec.kind, Selector::Kind::Closure);
   EXPECT_EQ(readQ->selectorSpec.carryRefs.size(), 4U);
 

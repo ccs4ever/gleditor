@@ -95,11 +95,12 @@ public:
     return a11yRevision_;
   }
 
-  void setVisible(bool visible);
-  void toggle();
+  QuotationBuilderOverlay *setVisible(bool visible);
+  QuotationBuilderOverlay *toggle();
   [[nodiscard]] bool isVisible() const noexcept { return visible_; }
-  void setActiveVersion(MicroversionId version) noexcept {
+  QuotationBuilderOverlay *setActiveVersion(MicroversionId version) noexcept {
     activeVersion_ = version;
+    return this;
   }
   [[nodiscard]] MicroversionId activeVersion() const noexcept {
     return activeVersion_;
@@ -111,12 +112,12 @@ public:
     return builder_;
   }
 
-  void selectStore(std::size_t index);
-  void selectRootCell(std::size_t index);
-  void setMode(Selector::Kind mode);
-  void toggleCarriedDimension(zigzag::DimRef dim);
-  void setVqlQuery(std::string query);
-  void refreshSources();
+  QuotationBuilderOverlay *selectStore(std::size_t index);
+  QuotationBuilderOverlay *selectRootCell(std::size_t index);
+  QuotationBuilderOverlay *setMode(Selector::Kind mode);
+  QuotationBuilderOverlay *toggleCarriedDimension(zigzag::DimRef dim);
+  QuotationBuilderOverlay *setVqlQuery(std::string query);
+  QuotationBuilderOverlay *refreshSources();
   bool commitQuotation();
 
 private:

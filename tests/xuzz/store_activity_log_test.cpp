@@ -29,11 +29,11 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
                          .target  = xanadu::CellSite{document, {}, 7, {2, 5}},
                          .arrival = xanadu::Arrival::EnteredEndpoint,
                          .link    = xanadu::LinkVisitContext{
-                                .key    = {document, 12},
-                                .active = xanadu::LinkSide::Right,
-                                .left   = {.member = 0, .occurrence = 0},
-                                .right  = {.member = 1, .occurrence = 0},
-                                .origin = origin}});
+                             .key    = {document, 12},
+                             .active = xanadu::LinkSide::Right,
+                             .left   = {.member = 0, .occurrence = 0},
+                             .right  = {.member = 1, .occurrence = 0},
+                             .origin = origin}});
     log.select(origin);
     second = log.append({.parent = origin,
                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});

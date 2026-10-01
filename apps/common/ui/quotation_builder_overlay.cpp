@@ -63,7 +63,8 @@ void QuotationBuilderOverlay::deviceReady(
 
 bool QuotationBuilderOverlay::busy() const { return false; }
 
-void QuotationBuilderOverlay::setVisible(const bool visible) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setVisible(const bool visible) {
   visible_ = visible;
   if (visible_) {
     if (activeVersion_.isZero() &&
@@ -74,11 +75,15 @@ void QuotationBuilderOverlay::setVisible(const bool visible) {
     recomputePreview();
   }
   ++a11yRevision_;
+  return this;
 }
 
-void QuotationBuilderOverlay::toggle() { setVisible(!visible_); }
+QuotationBuilderOverlay *QuotationBuilderOverlay::toggle() {
+  setVisible(!visible_);
+  return this;
+}
 
-void QuotationBuilderOverlay::refreshSources() {
+QuotationBuilderOverlay *QuotationBuilderOverlay::refreshSources() {
   foreignStores_.clear();
   const auto &reg = localStore_.scrollRegistry();
   for (const auto &rec : reg.scrolls) {
@@ -114,11 +119,13 @@ void QuotationBuilderOverlay::refreshSources() {
   }
 
   selectStore(0);
+  return this;
 }
 
-void QuotationBuilderOverlay::selectStore(const std::size_t index) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::selectStore(const std::size_t index) {
   if (index >= foreignStores_.size()) {
-    return;
+    return this;
   }
   selectedStoreIndex_ = index;
   const auto &key     = foreignStores_[index];
@@ -177,11 +184,13 @@ void QuotationBuilderOverlay::selectStore(const std::size_t index) {
   }
 
   selectRootCell(0);
+  return this;
 }
 
-void QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
   if (index >= candidateRootCells_.size()) {
-    return;
+    return this;
   }
   selectedRootCellIndex_ = index;
   const auto rootCell    = candidateRootCells_[index].first;
@@ -189,26 +198,33 @@ void QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
     builder_.setRootCell(rootCell);
   }
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
   builder_.setMode(mode);
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
   if (selectedCarriedDims_.contains(dim)) {
     selectedCarriedDims_.erase(dim);
   } else {
     selectedCarriedDims_.insert(dim);
   }
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::setVqlQuery(std::string query) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setVqlQuery(std::string query) {
   vqlQueryText_ = std::move(query);
   builder_.setVqlQuery(vqlQueryText_);
   recomputePreview();
+  return this;
 }
 
 void QuotationBuilderOverlay::recomputePreview() {

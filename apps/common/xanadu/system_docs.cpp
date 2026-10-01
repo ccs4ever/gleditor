@@ -1555,7 +1555,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
       "- d.alternates: alternative schema shape choices (posward between blank "
       "cells)\n"
       "- d.default: default value cell (posward from each schema type clone)";
-  cur      = store.setCellText(cur, store.homeCell(), kHomeDesc, &manifold);
+  cur      = store.setCellText(cur, store.homeCell(), kHomeDesc);
   manifold = store.rebuildManifold(cur);
 
   // Mint store-level notes cell off home along +d.notes
@@ -1565,11 +1565,11 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                = store.makeCell(cur, storeNoteText);
-    const auto noteRef = store.cellRefOf(cur);
-    manifold           = store.rebuildManifold(cur);
+    cur                             = store.makeCell(cur, storeNoteText);
+    const auto noteRef              = store.cellRefOf(cur);
+    manifold                        = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
-                        noteRef, &manifold);
+                        noteRef);
     manifold = store.rebuildManifold(cur);
   }
 
@@ -1580,9 +1580,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
-                                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
-    manifold                 = store.rebuildManifold(cur);
+    cur      = store.setLink(cur, store.homeCell(), groupsDim,
+                             zigzag::DimVector::POS, emptyGroupRef);
+    manifold = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -1596,8 +1596,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
       cur             = store.makeCell(cur, typeStr);
       const auto cell = store.cellRefOf(cur);
       manifold        = store.rebuildManifold(cur);
-      cur = store.setLink(cur, prev, schemasDim, zigzag::DimVector::POS, cell,
-                          &manifold);
+      cur = store.setLink(cur, prev, schemasDim, zigzag::DimVector::POS, cell);
       manifold = store.rebuildManifold(cur);
       prev     = cell;
     }
@@ -1608,24 +1607,19 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
 }
 
 MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
-                             const SettingSpec &spec,
-                             const zigzag::Manifold *const known) {
+                             const SettingSpec &spec) {
   auto cur = resolveStartingVersion(store, parent);
   if (store.homeCell() == zigzag::noCell) {
     cur = initializeSystemStoreGenesis(store, SystemDocKind::Layout, cur);
   }
 
   std::optional<zigzag::Manifold> folded;
-  if (known == nullptr) {
+  if (const auto act = store.manifoldAt(cur)) {
+    folded = **act;
+  } else {
     folded = store.rebuildManifold(cur);
   }
-  // folded is unconditionally assigned just above whenever known == nullptr
-  // (the only time this branch is taken), and rebuildManifold() never
-  // returns an empty optional.
-  zigzag::Manifold localM =
-      (known != nullptr)
-          ? *known
-          : folded.value(); // NOLINT(bugprone-unchecked-optional-access)
+  zigzag::Manifold localM   = folded.value();
   const auto varsDim        = getOrMakeDim(store, cur, localM, kDimVars);
   const auto valuesDim      = getOrMakeDim(store, cur, localM, kDimValues);
   const auto groupsDim      = getOrMakeDim(store, cur, localM, kDimGroups);
@@ -1666,7 +1660,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       folded                  = store.rebuildManifold(cur);
       m                       = &folded.value();
       cur = store.setLink(cur, lastTopGroup, groupsDim, zigzag::DimVector::POS,
-                          topGroupCell, m);
+                          topGroupCell);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
     }
@@ -1689,10 +1683,10 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
         m                     = &folded.value();
         if (firstChild == zigzag::noCell) {
           cur = store.setLink(cur, currentGroup, subgroupsDim,
-                              zigzag::DimVector::POS, matchedSub, m);
+                              zigzag::DimVector::POS, matchedSub);
         } else {
           cur = store.setLink(cur, lastSub, groupsDim, zigzag::DimVector::POS,
-                              matchedSub, m);
+                              matchedSub);
         }
         folded       = store.rebuildManifold(cur);
         m            = &folded.value();
@@ -1708,7 +1702,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   folded                = store.rebuildManifold(cur);
   m                     = &folded.value();
   cur    = store.setLink(cur, lastMasterVar, varsDim, zigzag::DimVector::POS,
-                         masterCell, m);
+                         masterCell);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
 
@@ -1721,11 +1715,11 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   folded               = store.rebuildManifold(cur);
   m                    = &folded.value();
   cur    = store.setLink(cur, lastGroupVar, varsDim, zigzag::DimVector::POS,
-                         cloneRef, m);
+                         cloneRef);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
   cur    = store.setLink(cur, masterCell, cloneDim, zigzag::DimVector::POS,
-                         cloneRef, m);
+                         cloneRef);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
 
@@ -1736,7 +1730,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
     folded             = store.rebuildManifold(cur);
     m                  = &folded.value();
     cur    = store.setLink(cur, masterCell, notesDim, zigzag::DimVector::POS,
-                           noteRef, m);
+                           noteRef);
     folded = store.rebuildManifold(cur);
     m      = &folded.value();
   }
@@ -1759,10 +1753,10 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
 
     if (s == 0) {
       cur = store.setLink(cur, masterCell, schemasDim, zigzag::DimVector::POS,
-                          blankRef, m);
+                          blankRef);
     } else {
       cur = store.setLink(cur, prevBlank, altsDim, zigzag::DimVector::POS,
-                          blankRef, m);
+                          blankRef);
     }
     folded    = store.rebuildManifold(cur);
     m         = &folded.value();
@@ -1777,7 +1771,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       m                    = &folded.value();
 
       cur           = store.setLink(cur, prevTypeClone, schemasDim,
-                                    zigzag::DimVector::POS, typeRef, m);
+                                    zigzag::DimVector::POS, typeRef);
       folded        = store.rebuildManifold(cur);
       m             = &folded.value();
       prevTypeClone = typeRef;
@@ -1786,7 +1780,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       if (const auto protoCell =
               findPrototypeCell(*m, schemasDim, typeName, reader)) {
         cur = store.setLink(cur, *protoCell, cloneDim, zigzag::DimVector::POS,
-                            typeRef, m);
+                            typeRef);
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
       }
@@ -1798,7 +1792,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
         cur    = store.setLink(cur, typeRef, defaultDim, zigzag::DimVector::POS,
-                               defValRef, m);
+                               defValRef);
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
       }
@@ -1813,8 +1807,8 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
     cur    = makeValueCell(store, cur, val, valRef);
     folded = store.rebuildManifold(cur);
     m      = &folded.value();
-    cur = store.setLink(cur, prevVal, valuesDim, zigzag::DimVector::POS, valRef,
-                        m);
+    cur =
+        store.setLink(cur, prevVal, valuesDim, zigzag::DimVector::POS, valRef);
     folded  = store.rebuildManifold(cur);
     m       = &folded.value();
     prevVal = valRef;
@@ -2090,9 +2084,9 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements = entry.value.valueCells |
-                           std::views::transform(valueOf) |
-                           std::ranges::to<std::vector>();
+    entry.value.elements   = entry.value.valueCells |
+                             std::views::transform(valueOf) |
+                             std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -2331,8 +2325,7 @@ bool SystemStoreModel::validate(const SettingSchema &schema,
 MicroversionId
 SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
                                 const std::string_view name,
-                                const std::span<const CellValue> values,
-                                const zigzag::Manifold *const known) {
+                                const std::span<const CellValue> values) {
   const auto curVer = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model  = fromStore(store, curVer);
   const auto entry  = model.find(name);
@@ -2348,14 +2341,12 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
   }
 
   std::optional<zigzag::Manifold> folded;
-  if (known == nullptr) {
+  if (const auto act = store.manifoldAt(curVer)) {
+    folded = **act;
+  } else {
     folded = store.rebuildManifold(curVer);
   }
-  // folded is populated in exactly the branch where the ternary below reads
-  // it (known == nullptr), so .value() can't actually throw here -- the
-  // analyzer just can't correlate the two conditions.
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  const zigzag::Manifold *m = (known != nullptr) ? known : &folded.value();
+  const zigzag::Manifold *m = &folded.value();
   const auto &reader        = static_cast<const SpanReader &>(store);
   const auto valuesDim      = m->dimensionNamed(kDimValues, reader);
 
@@ -2365,13 +2356,13 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       const auto c  = entry->value.valueCells[i];
       const auto &v = values[i];
       if (std::holds_alternative<double>(v)) {
-        cur = store.setScalar(cur, c, std::get<double>(v), m);
+        cur = store.setScalar(cur, c, std::get<double>(v));
       } else if (std::holds_alternative<std::int64_t>(v)) {
-        cur = store.setScalar(cur, c, std::get<std::int64_t>(v), m);
+        cur = store.setScalar(cur, c, std::get<std::int64_t>(v));
       } else if (std::holds_alternative<bool>(v)) {
-        cur = store.setScalar(cur, c, std::get<bool>(v), m);
+        cur = store.setScalar(cur, c, std::get<bool>(v));
       } else {
-        cur = store.setCellText(cur, c, std::get<std::string>(v), m);
+        cur = store.setCellText(cur, c, std::get<std::string>(v));
       }
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
@@ -2390,8 +2381,8 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       cur    = makeValueCell(store, cur, v, valRef);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
-      cur = store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS, valRef,
-                          m);
+      cur =
+          store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS, valRef);
       prev = valRef;
     }
   }
@@ -2399,10 +2390,9 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
   return cur;
 }
 
-MicroversionId
-SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
-                                 const std::string_view name,
-                                 const zigzag::Manifold *const known) {
+MicroversionId SystemStoreModel::resetToDefault(Store &store,
+                                                const MicroversionId &parent,
+                                                const std::string_view name) {
   auto curVer      = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model = fromStore(store, curVer);
   const auto entry = model.find(name);
@@ -2415,7 +2405,7 @@ SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
     return curVer;
   }
   return updateSetting(store, curVer, name,
-                       entry->schema.alternatives[0].defaultValues, known);
+                       entry->schema.alternatives[0].defaultValues);
 }
 
 std::vector<CellValue> getSetting(const Store &store,
@@ -2426,15 +2416,13 @@ std::vector<CellValue> getSetting(const Store &store,
 
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
                           const std::string_view name,
-                          const std::span<const CellValue> values,
-                          const zigzag::Manifold *const known) {
-  return SystemStoreModel::updateSetting(store, parent, name, values, known);
+                          const std::span<const CellValue> values) {
+  return SystemStoreModel::updateSetting(store, parent, name, values);
 }
 
 MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
-                                     const std::string_view name,
-                                     const zigzag::Manifold *const known) {
-  return SystemStoreModel::resetToDefault(store, parent, name, known);
+                                     const std::string_view name) {
+  return SystemStoreModel::resetToDefault(store, parent, name);
 }
 
 // -----------------------------------------------------------------------------
@@ -2744,7 +2732,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                                  static_cast<double>(cfg.physics.maxVelocity)));
+                      static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 
@@ -3014,7 +3002,7 @@ MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
                                      static_cast<std::int64_t>(spec.auraColor),
                                      static_cast<double>(spec.heightWeight)}}},
   };
-  cur = ensureSetting(store, cur, sspec, nullptr);
+  cur = ensureSetting(store, cur, sspec);
   if (cellOut != nullptr) {
     const auto m       = store.rebuildManifold(cur);
     const auto &reader = static_cast<const SpanReader &>(store);

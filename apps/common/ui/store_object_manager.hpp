@@ -80,24 +80,36 @@ public:
     return a11yRevision_;
   }
 
-  void setVisible(bool visible);
-  void toggle();
+  StoreObjectManager *setVisible(bool visible);
+  StoreObjectManager *toggle();
   [[nodiscard]] bool isVisible() const noexcept { return visible_; }
 
-  void refresh();
+  StoreObjectManager *refresh();
   [[nodiscard]] const std::vector<ObjectItem> &items() const noexcept {
     return items_;
   }
 
-  void setOnToggle(ToggleCallback cb) { onToggle_ = std::move(cb); }
-  void setOnCreate(CreateCallback cb) { onCreate_ = std::move(cb); }
-  void setOnClose(CloseCallback cb) { onClose_ = std::move(cb); }
-  void setIsOpenPredicate(IsOpenPredicate pred) { isOpen_ = std::move(pred); }
+  StoreObjectManager *setOnToggle(ToggleCallback cb) {
+    onToggle_ = std::move(cb);
+    return this;
+  }
+  StoreObjectManager *setOnCreate(CreateCallback cb) {
+    onCreate_ = std::move(cb);
+    return this;
+  }
+  StoreObjectManager *setOnClose(CloseCallback cb) {
+    onClose_ = std::move(cb);
+    return this;
+  }
+  StoreObjectManager *setIsOpenPredicate(IsOpenPredicate pred) {
+    isOpen_ = std::move(pred);
+    return this;
+  }
 
-  void createSlice();
-  void createXanadoc();
-  void toggleItem(std::size_t index);
-  void closeItem(std::size_t index);
+  StoreObjectManager *createSlice();
+  StoreObjectManager *createXanadoc();
+  StoreObjectManager *toggleItem(std::size_t index);
+  StoreObjectManager *closeItem(std::size_t index);
 
 private:
   Store &store_;

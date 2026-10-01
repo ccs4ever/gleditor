@@ -547,9 +547,8 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
     const DimRef dimRef = *attach;
     manifold.advanceOrRefold(store, promoted->version);
     const CellRef persistentEntryOp = promoted->cells.front();
-    promoted->version =
-        store.setLink(promoted->version, persistentTarget, dimRef, dir,
-                      persistentEntryOp, &manifold);
+    promoted->version = store.setLink(promoted->version, persistentTarget,
+                                      dimRef, dir, persistentEntryOp);
   }
 
   return promoted;

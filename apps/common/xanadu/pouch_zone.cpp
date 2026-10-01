@@ -18,12 +18,13 @@ namespace xanadu {
 
 DropZone::DropZone(DropZoneConfig config) : config_(std::move(config)) {}
 
-void DropZone::setRect(const float x, const float y, const float width,
-                       const float height) noexcept {
+DropZone *DropZone::setRect(const float x, const float y, const float width,
+                            const float height) noexcept {
   x_      = x;
   y_      = y;
   width_  = width;
   height_ = height;
+  return this;
 }
 
 bool DropZone::contains(const float screenX,
@@ -35,7 +36,10 @@ bool DropZone::contains(const float screenX,
          screenY <= (y_ + height_);
 }
 
-void DropZone::addItem(PouchItem item) { items_.push_back(std::move(item)); }
+DropZone *DropZone::addItem(PouchItem item) {
+  items_.push_back(std::move(item));
+  return this;
+}
 
 bool DropZone::removeItem(const std::uint64_t itemId) {
   const auto it = std::ranges::find_if(items_, [itemId](const PouchItem &item) {
@@ -48,7 +52,10 @@ bool DropZone::removeItem(const std::uint64_t itemId) {
   return false;
 }
 
-void DropZone::clear() { items_.clear(); }
+DropZone *DropZone::clear() {
+  items_.clear();
+  return this;
+}
 
 std::vector<PrimediaSpan> DropZone::allSpans() const {
   std::vector<PrimediaSpan> result;
@@ -81,7 +88,7 @@ PouchManager::PouchManager(Store &systemStore) : systemStore_(&systemStore) {
   initDefaultZones();
 }
 
-void PouchManager::initDefaultZones() {
+PouchManager *PouchManager::initDefaultZones() {
   zones_.clear();
 
   if (store().opCount() > 0 && store().homeCell() != zigzag::noCell) {
@@ -108,7 +115,7 @@ void PouchManager::initDefaultZones() {
         }
         addZone(std::move(cfg));
       }
-      return;
+      return this;
     }
   }
 
@@ -147,6 +154,7 @@ void PouchManager::initDefaultZones() {
       .auraColor       = 0x10B981FFU,
       .heightWeight    = 1.0F,
   });
+  return this;
 }
 
 DropZone &PouchManager::addZone(DropZoneConfig config) {
@@ -206,9 +214,9 @@ DropZone &PouchManager::zoneOrDefault(const std::string_view id) {
   return *zones_.front();
 }
 
-void PouchManager::ensureZoneCell(DropZone &zone) {
+PouchManager *PouchManager::ensureZoneCell(DropZone &zone) {
   if (zigzag::noCell != zone.cell()) {
-    return;
+    return this;
   }
   if (store().opCount() == 0 || store().homeCell() == zigzag::noCell) {
     initializeSystemStore(store(), SystemDocKind::Pouches);
@@ -218,7 +226,7 @@ void PouchManager::ensureZoneCell(DropZone &zone) {
   for (const auto &spec : pouchCfg.zones) {
     if (spec.id == zone.id() && zigzag::noCell != spec.cell) {
       zone.setCell(spec.cell);
-      return;
+      return this;
     }
   }
 
@@ -231,11 +239,12 @@ void PouchManager::ensureZoneCell(DropZone &zone) {
                                           .label        = zone.label(),
                                           .auraColor    = zone.auraColor(),
                                           .heightWeight = zone.heightWeight(),
-                                 },
+                                      },
                                       &cell);
   if (zigzag::noCell != cell) {
     zone.setCell(cell);
   }
+  return this;
 }
 
 PouchItem PouchManager::dropSpan(const std::string_view zoneId,
@@ -399,12 +408,13 @@ bool PouchManager::dismissItem(const std::uint64_t itemId) {
   return false;
 }
 
-void PouchManager::saveManifest() {
+PouchManager *PouchManager::saveManifest() {
   // Pouch item and zone states are persisted as first-class structure cells
   // in the backing store (§5.8).
+  return this;
 }
 
-void PouchManager::loadManifest() {
+PouchManager *PouchManager::loadManifest() {
   if (store().opCount() > 0 && store().homeCell() != zigzag::noCell) {
     const auto pouchCfg = PouchConfig::fromStore(store());
     if (!pouchCfg.zones.empty()) {
@@ -521,6 +531,7 @@ void PouchManager::loadManifest() {
       }
     }
   }
+  return this;
 }
 
 } // namespace xanadu

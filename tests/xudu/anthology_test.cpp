@@ -129,6 +129,18 @@ TEST(AnthologyTest, anAnthologyMixesLocalAndForeignMembersOnOneRank) {
   EXPECT_EQ(members[0].cell, entryA.entryCell);
   EXPECT_EQ(members[1].cell, localCell);
   EXPECT_EQ(members[2].cell, entryB.entryCell);
+
+  // Consolidated manifold-only overloads
+  const auto m1Direct = readAnthologyMember(manifold, visited[0]);
+  EXPECT_EQ(m1Direct, m1);
+  const auto membersDirect = anthologyMembers(manifold, home);
+  EXPECT_EQ(membersDirect, members);
+  std::vector<AnthologyMember> visitedIter;
+  forEachAnthologyMember(manifold, home, [&](const AnthologyMember &m) {
+    visitedIter.push_back(m);
+    return true;
+  });
+  EXPECT_EQ(visitedIter, members);
 }
 
 TEST(AnthologyTest, anAnthologyMemberPinsItsState) {

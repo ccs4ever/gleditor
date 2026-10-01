@@ -102,6 +102,31 @@ std::vector<AnthologyMember> anthologyMembers(const zigzag::Manifold &manifold,
   return members;
 }
 
+std::optional<AnthologyMember>
+readAnthologyMember(const zigzag::Manifold &manifold,
+                    const zigzag::CellRef cell) {
+  if (const auto *store = manifold.store()) {
+    return readAnthologyMember(manifold, *store, cell);
+  }
+  return std::nullopt;
+}
+
+void forEachAnthologyMember(
+    const zigzag::Manifold &manifold, const zigzag::CellRef root,
+    gleditor::cpp26::function_ref<bool(const AnthologyMember &)> visitor) {
+  if (const auto *store = manifold.store()) {
+    forEachAnthologyMember(manifold, *store, root, visitor);
+  }
+}
+
+std::vector<AnthologyMember> anthologyMembers(const zigzag::Manifold &manifold,
+                                              const zigzag::CellRef root) {
+  if (const auto *store = manifold.store()) {
+    return anthologyMembers(manifold, *store, root);
+  }
+  return {};
+}
+
 ResolvedAnthologyMember
 resolveAnthologyMember(const Store &localStore, const AnthologyMember &member,
                        const Store &foreignStore, const Scroll &sealedAs,

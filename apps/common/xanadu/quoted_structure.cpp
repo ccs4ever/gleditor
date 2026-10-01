@@ -384,6 +384,26 @@ evaluateSelector(const Selector &selector,
   return results;
 }
 
+std::optional<Quotation> readQuotation(const zigzag::Manifold &manifold,
+                                       const zigzag::CellRef qCell) {
+  if (const auto *store = manifold.store()) {
+    return readQuotation(manifold, *store, qCell);
+  }
+  return std::nullopt;
+}
+
+std::vector<zigzag::CellRef>
+evaluateSelector(const Selector &selector,
+                 const zigzag::Manifold &foreignManifold,
+                 const QuotationBudget &budget, QuotationState &outState) {
+  if (const auto *store = foreignManifold.store()) {
+    return evaluateSelector(selector, foreignManifold, *store, budget,
+                            outState);
+  }
+  outState = QuotationState::Unintelligible;
+  return {};
+}
+
 void resolveQuotations(zigzag::ArenaManifold &arena,
                        const zigzag::Manifold &base, const Store &localStore,
                        IForeignSource &source, const QuotationBudget budget,

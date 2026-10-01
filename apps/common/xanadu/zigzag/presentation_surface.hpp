@@ -86,8 +86,8 @@ public:
    */
   virtual void setCellHighlights(std::vector<CellHighlight> highlights,
                                  std::uint32_t borderColour) {
-    static_cast<void>(highlights);
-    static_cast<void>(borderColour);
+    std::ignore = highlights;
+    std::ignore = borderColour;
   }
 
   /**

@@ -343,4 +343,52 @@ TEST(UnifyResultTest, FailureSaysWhichRuleFailed) {
   EXPECT_TRUE(vlog.unify(vlog.makeVar(), arena.makeCell("x")));
 }
 
+TEST(RankWalkTest, ArenaManifoldRankContainsAndUnbrokenInsertion) {
+  Line line;
+  const CellRef stranger = line.arena.makeCell("stranger");
+
+  // rankContains checks both directions and self
+  EXPECT_TRUE(line.arena.rankContains(line.c1, line.c1, line.d1));
+  EXPECT_TRUE(line.arena.rankContains(line.c1, line.c2, line.d1));
+  EXPECT_TRUE(line.arena.rankContains(line.c1, line.c3, line.d1));
+  EXPECT_TRUE(line.arena.rankContains(line.c3, line.c1, line.d1));
+  EXPECT_FALSE(line.arena.rankContains(line.c1, stranger, line.d1));
+  EXPECT_FALSE(line.arena.rankContains(noCell, line.c1, line.d1));
+  EXPECT_FALSE(line.arena.rankContains(line.c1, noCell, line.d1));
+  EXPECT_FALSE(line.arena.rankContains(line.c1, line.c2, noCell));
+
+  // Splice insertion between c1 and c2: c1 -> splice1 -> c2 -> c3
+  const CellRef splice1 = line.arena.makeCell("splice1");
+  auto *result =
+      line.arena.insertIntoRank(splice1, line.c1, line.d1, DimVector::POS);
+  EXPECT_EQ(result, &line.arena);
+  EXPECT_TRUE(line.arena.rankContains(line.c1, splice1, line.d1));
+
+  const auto afterSplice =
+      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+  EXPECT_EQ(afterSplice, (std::vector{line.c1, splice1, line.c2, line.c3}));
+
+  // Idempotency: re-inserting splice1 does nothing to rank topology
+  line.arena.insertIntoRank(splice1, line.c1, line.d1, DimVector::POS);
+  const auto afterReinsert =
+      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+  EXPECT_EQ(afterReinsert, (std::vector{line.c1, splice1, line.c2, line.c3}));
+
+  // Tail insertion after c3: c1 -> splice1 -> c2 -> c3 -> tailCell
+  const CellRef tailCell = line.arena.makeCell("tailCell");
+  line.arena.insertIntoRank(tailCell, line.c3, line.d1, DimVector::POS);
+  const auto afterTail =
+      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+  EXPECT_EQ(afterTail,
+            (std::vector{line.c1, splice1, line.c2, line.c3, tailCell}));
+
+  // Fluent chaining
+  const CellRef cA = line.arena.makeCell("cA");
+  const CellRef cB = line.arena.makeCell("cB");
+  line.arena.insertIntoRank(cA, tailCell, line.d1, DimVector::POS)
+      ->insertIntoRank(cB, cA, line.d1, DimVector::POS);
+  EXPECT_TRUE(line.arena.rankContains(line.c1, cA, line.d1));
+  EXPECT_TRUE(line.arena.rankContains(line.c1, cB, line.d1));
+}
+
 } // namespace

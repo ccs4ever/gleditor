@@ -405,9 +405,9 @@ int main(int argc, char *argv[]) {
       const auto first = currentStore->manifold->linked(
           currentStore->manifold->home(), *dim, DimVector::POS);
       if (first != noCell) {
-        for (auto cell = first, remaining = static_cast<CellRef>(
-                                    currentStore->manifold->cellCount());
-             cell != noCell && remaining-- > 0;
+        auto remaining =
+            static_cast<CellRef>(currentStore->manifold->cellCount());
+        for (auto cell = first; cell != noCell && remaining-- > 0;
              cell =
                  currentStore->manifold->linked(cell, *dim, DimVector::POS)) {
           arena.proxyFor(currentStore->spaceId, cell);

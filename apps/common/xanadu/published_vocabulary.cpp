@@ -26,7 +26,7 @@ publishVocabularyRelease(Store &store, const MicroversionId &parent,
   auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
     auto dim = currentFold.dimensionNamed(name, store);
     if (!dim) {
-      const auto minted = store.makeDimension(curHead, name, &currentFold);
+      const auto minted = store.makeDimension(curHead, name);
       curHead           = minted.version;
       currentFold       = store.rebuildManifold(curHead);
       return minted.dim;
@@ -52,7 +52,7 @@ publishVocabularyRelease(Store &store, const MicroversionId &parent,
       tail = next;
     }
     curHead     = store.setLink(curHead, tail, dimDims, zigzag::DimVector::POS,
-                                releaseCell, &currentFold);
+                                releaseCell);
     currentFold = store.rebuildManifold(curHead);
   }
 
@@ -62,14 +62,14 @@ publishVocabularyRelease(Store &store, const MicroversionId &parent,
     if (term == zigzag::noCell || term == prevCell) {
       continue;
     }
-    curHead = store.setLink(curHead, prevCell, dimDims, zigzag::DimVector::POS,
-                            term, &currentFold);
+    curHead =
+        store.setLink(curHead, prevCell, dimDims, zigzag::DimVector::POS, term);
     currentFold = store.rebuildManifold(curHead);
     prevCell    = term;
   }
 
   // Touch releaseCell last to pin publication state (§5.11 §3)
-  curHead = store.setCellText(curHead, releaseCell, releaseLabel, &currentFold);
+  curHead     = store.setCellText(curHead, releaseCell, releaseLabel);
   currentFold = store.rebuildManifold(curHead);
 
   std::string sKey = store.bootstrapPermascrollKey();
@@ -132,7 +132,7 @@ AppendedQuotation adoptVocabulary(Store &localStore,
     if (dimVocabOpt) {
       quoteDim = *dimVocabOpt;
     } else {
-      const auto minted = localStore.makeDimension(curHead, kDimVocab, &fold);
+      const auto minted = localStore.makeDimension(curHead, kDimVocab);
       curHead           = minted.version;
       quoteDim          = minted.dim;
       fold              = localStore.rebuildManifold(curHead);
@@ -142,7 +142,7 @@ AppendedQuotation adoptVocabulary(Store &localStore,
       localRankTail != zigzag::noCell ? localRankTail : localStore.homeCell();
 
   return localStore.quote(curHead, quoteTail, quoteDim, localLabel, vocab.state,
-                          selector, &fold);
+                          selector);
 }
 
 AdoptedDimension adoptPublishedDimension(Store &store,
@@ -163,7 +163,7 @@ AdoptedDimension adoptPublishedDimension(Store &store,
   auto registry = fold.scrollRegistry(store);
   auto sidOpt   = registry.scrollIdForKey(term.scroll);
   if (!sidOpt.has_value()) {
-    curHead  = store.registerScroll(curHead, term.scroll, &fold);
+    curHead  = store.registerScroll(curHead, term.scroll);
     fold     = store.rebuildManifold(curHead);
     registry = fold.scrollRegistry(store);
     sidOpt   = registry.scrollIdForKey(term.scroll);
@@ -174,7 +174,7 @@ AdoptedDimension adoptPublishedDimension(Store &store,
   }
 
   const ExternOpRef extRef{.scroll = *sidOpt, .produces = term.produces};
-  curHead  = store.makeExternRef(curHead, extRef, &fold);
+  curHead  = store.makeExternRef(curHead, extRef);
   fold     = store.rebuildManifold(curHead);
   registry = fold.scrollRegistry(store);
 
@@ -199,7 +199,7 @@ AdoptedDimension adoptPublishedDimension(Store &store,
     tail = next;
   }
   curHead = store.setLink(curHead, tail, dimDims, zigzag::DimVector::POS,
-                          placeholder, &fold);
+                          placeholder);
   fold    = store.rebuildManifold(curHead);
 
   if (!localAlias.empty()) {
@@ -208,7 +208,7 @@ AdoptedDimension adoptPublishedDimension(Store &store,
     if (dimAliasOpt) {
       dimAlias = *dimAliasOpt;
     } else {
-      const auto minted = store.makeDimension(curHead, "d.alias", &fold);
+      const auto minted = store.makeDimension(curHead, "d.alias");
       curHead           = minted.version;
       dimAlias          = minted.dim;
       fold              = store.rebuildManifold(curHead);
@@ -218,7 +218,7 @@ AdoptedDimension adoptPublishedDimension(Store &store,
     curHead             = aliasOp;
     fold                = store.rebuildManifold(curHead);
     curHead             = store.setLink(curHead, placeholder, dimAlias,
-                                        zigzag::DimVector::POS, aliasRef, &fold);
+                                        zigzag::DimVector::POS, aliasRef);
     zigzag::DimensionRegistry::instance().registerDim(store, localAlias,
                                                       placeholder);
   }
@@ -260,7 +260,7 @@ MicroversionId updateAdoptedVocabulary(Store &localStore,
   }
 
   if (!localStore.scrollRegistry().scrollIdForKey(newVocab.state.scroll)) {
-    curHead = localStore.registerScroll(curHead, newVocab.state.scroll, &fold);
+    curHead = localStore.registerScroll(curHead, newVocab.state.scroll);
     fold    = localStore.rebuildManifold(curHead);
   }
   const auto sidOpt =
@@ -295,24 +295,24 @@ MicroversionId updateAdoptedVocabulary(Store &localStore,
 
   // Link rank dimension placeholder from selector cell if needed
   if (newSpec.rankDimRef.has_value()) {
-    curHead = localStore.makeExternRef(curHead, *newSpec.rankDimRef, &fold);
-    fold    = localStore.rebuildManifold(curHead);
+    curHead          = localStore.makeExternRef(curHead, *newSpec.rankDimRef);
+    fold             = localStore.rebuildManifold(curHead);
     const auto dimPh = fold.scrollRegistry(localStore)
                            .placeholderForExtern(*newSpec.rankDimRef);
     if (dimPh && *dimPh != zigzag::noCell) {
       curHead = localStore.setLink(curHead, newSelCell, dimQuotes,
-                                   zigzag::DimVector::POS, *dimPh, &fold);
+                                   zigzag::DimVector::POS, *dimPh);
       fold    = localStore.rebuildManifold(curHead);
     }
   }
 
   // Repoint quotation cell to new state cell and new selector cell
   curHead = localStore.setLink(curHead, quotationCell, dimState,
-                               zigzag::DimVector::POS, newStateCell, &fold);
+                               zigzag::DimVector::POS, newStateCell);
   fold    = localStore.rebuildManifold(curHead);
 
   curHead = localStore.setLink(curHead, quotationCell, dimSel,
-                               zigzag::DimVector::POS, newSelCell, &fold);
+                               zigzag::DimVector::POS, newSelCell);
   return curHead;
 }
 

@@ -82,36 +82,41 @@ public:
   }
 
   // -- Visibility & Navigation ------------------------------------------------
-  void setVisible(bool show) noexcept {
-    if (visible_ == show) return;
+  HypertimeGraph *setVisible(bool show) noexcept {
+    if (visible_ == show) return this;
     visible_ = show;
     revision_++;
+    return this;
   }
-  void toggle() noexcept {
+  HypertimeGraph *toggle() noexcept {
     visible_ = !visible_;
     revision_++;
+    return this;
   }
   [[nodiscard]] bool isVisible() const noexcept { return visible_; }
   void scroll(float horizontal, float vertical, bool zoom, bool shift,
               float pointerX, float pointerY);
 
-  void setCurrent(const MicroversionId &id) {
-    if (current_ == id) return;
+  HypertimeGraph *setCurrent(const MicroversionId &id) {
+    if (current_ == id) return this;
     current_ = id;
     revision_++;
+    return this;
   }
-  void invalidate() {
+  HypertimeGraph *invalidate() {
     nodes_.clear();
     revision_++;
+    return this;
   }
-  void setStoreIndex(std::size_t index) {
-    if (storeIndex_ == index) return;
+  HypertimeGraph *setStoreIndex(std::size_t index) {
+    if (storeIndex_ == index) return this;
     storeIndex_ = index;
     nodes_.clear();
     comparedVersions_.clear();
     selectedOperation_.reset();
     diffNeedsUpdate_ = true;
     revision_++;
+    return this;
   }
   [[nodiscard]] std::size_t storeIndex() const noexcept { return storeIndex_; }
   [[nodiscard]] const std::optional<MicroversionId> &
@@ -123,32 +128,41 @@ public:
   }
 
   // -- Callbacks --------------------------------------------------------------
-  void setGoer(std::function<void(const MicroversionId &)> aGoer) {
+  HypertimeGraph *setGoer(std::function<void(const MicroversionId &)> aGoer) {
     goer_ = std::move(aGoer);
+    return this;
   }
-  void setScrubHandler(std::function<void(const MicroversionId &)> aScrubber) {
+  HypertimeGraph *
+  setScrubHandler(std::function<void(const MicroversionId &)> aScrubber) {
     scrubHandler_ = std::move(aScrubber);
+    return this;
   }
-  void setQuoteHandler(std::function<void(const MicroversionId &sourceVer,
-                                          std::uint32_t at, std::uint32_t len)>
-                           aQuoter) {
+  HypertimeGraph *
+  setQuoteHandler(std::function<void(const MicroversionId &sourceVer,
+                                     std::uint32_t at, std::uint32_t len)>
+                      aQuoter) {
     quoteHandler_ = std::move(aQuoter);
+    return this;
   }
-  void setAnnotateHandler(std::function<void(const MicroversionId &)> handler) {
+  HypertimeGraph *
+  setAnnotateHandler(std::function<void(const MicroversionId &)> handler) {
     annotateHandler_ = std::move(handler);
+    return this;
   }
-  void setCompareHandler(
+  HypertimeGraph *setCompareHandler(
       std::function<void(const std::vector<MicroversionId> &)> aComparer) {
     compareHandler_ = std::move(aComparer);
+    return this;
   }
-  void setOnionSkinHandler(
+  HypertimeGraph *setOnionSkinHandler(
       std::function<void(const std::vector<MicroversionId> &)> aOnionHandler) {
     onionSkinHandler_ = std::move(aOnionHandler);
+    return this;
   }
 
   // -- Multi-Selection for Comparison -----------------------------------------
-  void toggleComparison(const MicroversionId &id);
-  void clearComparison();
+  HypertimeGraph *toggleComparison(const MicroversionId &id);
+  HypertimeGraph *clearComparison();
   [[nodiscard]] const std::vector<MicroversionId> &
   comparedVersions() const noexcept {
     return comparedVersions_;

@@ -130,7 +130,7 @@ void main() {
   vTexCoord = vec2(float(atlas >> 16), float(atlas & 65535u)) +
               vec2((0 != (corner & 1)) ? whlk.x : 0.0,
                    (0 != (corner & 2)) ? whlk.y : 0.0);
-  vLayer = whlk.z;
+  vLayer    = whlk.z;
   // The document and page are the draw's; the kind is the quad's. Assembled
   // here so the fragment stage sees one identity word, as it did when every
   // instance carried the whole thing.

@@ -278,7 +278,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  std::ignore = std::system(py.c_str());
+  std::ignore    = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -478,8 +478,8 @@ TEST(E2EBinaryOrchestrationTest,
   Store storeA(permascrollAt(testRoot / "permascroll"));
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  auto pubA      = publish(storeA, vA1, authorA, "xanadoc_a",
-                           "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
+  auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
+                      "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
   pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
 
   const auto pubAPath = testRoot / "xanadoc_a.manifest";
@@ -797,9 +797,9 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-                               " XDG_DATA_HOME=" + (testRoot / "data").string() +
-                               " timeout 120 " + xuduBin.string() + " --backend " +
-                               activeBackend() + " --profile " + script);
+                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                          " timeout 120 " + xuduBin.string() + " --backend " +
+                          activeBackend() + " --profile " + script);
   };
   const auto untitled = [&] {
     std::vector<fs::path> found;
@@ -1383,8 +1383,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pages) +
                                  "x" + std::to_string(pages) + "_pages";
-    const auto ppmPath = screenshotDir / (filename + ".ppm");
-    const auto pngPath = screenshotDir / (filename + ".png");
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1459,8 +1459,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
                                  "x" + std::to_string(pagesB) + "_asymmetric";
-    const auto ppmPath = screenshotDir / (filename + ".ppm");
-    const auto pngPath = screenshotDir / (filename + ".png");
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1893,10 +1893,10 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
            "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
   }
   const auto storePath = testRoot / "store";
-  const auto res       = executeProcess(xuduBin.string() +
-                                        permascrollFlag(testRoot / "permascroll") +
-                                        " --headless --structure-script " +
-                                        script.string() + " " + storePath.string());
+  const auto res = executeProcess(xuduBin.string() +
+                                  permascrollFlag(testRoot / "permascroll") +
+                                  " --headless --structure-script " +
+                                  script.string() + " " + storePath.string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   Store store(permascrollAt(testRoot / "permascroll"));
@@ -2107,8 +2107,8 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer          = store.transclude(textVer, at, pngVersion, 0,
-                                      static_cast<std::uint32_t>(pngBytes.size()));
+  textVer = store.transclude(textVer, at, pngVersion, 0,
+                             static_cast<std::uint32_t>(pngBytes.size()));
   at += static_cast<std::uint32_t>(pngBytes.size());
   textVer = store.insert(textVer, at, between);
   at += static_cast<std::uint32_t>(between.size());

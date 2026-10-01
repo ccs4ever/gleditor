@@ -208,7 +208,7 @@ DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
   if (noCell == store.homeCell()) {
     head = store.sliceGenesis(head);
   }
-  const auto minted = store.makeDimension(head, dimName.name(), &manifold);
+  const auto minted = store.makeDimension(head, dimName.name());
   head              = minted.version;
   auto newManifold  = store.rebuildManifold(head);
   newManifold.setStore(&store);

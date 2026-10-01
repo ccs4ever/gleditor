@@ -116,9 +116,9 @@ TEST(LinkPanelTest, EachSideShowsItsOwnChoice) {
                                          "· document",
                                  .tone = PanelLine::Tone::Normal}));
   EXPECT_EQ(lines[2],
-            (PanelLine{.text = "Right 3/3 · occurrence "
-                               "5/5 · cell " +
-                               std::to_string(p.f.partCell) + " (part)",
+            (PanelLine{.text   = "Right 3/3 · occurrence "
+                                 "5/5 · cell " +
+                                 std::to_string(p.f.partCell) + " (part)",
                        .tone   = PanelLine::Tone::Active,
                        .active = true}));
   EXPECT_EQ(lines[3].text, "origin: document");

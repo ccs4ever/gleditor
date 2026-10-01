@@ -1324,8 +1324,7 @@ VPLCompiler::exportToStore(xanadu::Store &store,
       CellRef target = arena.linked(c, dimRef, DimVector::POS);
       if (target != zigzag::noCell && cellMap.contains(target)) {
         CellRef to = cellMap.at(target);
-        ver =
-            store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);
+        ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
         manifold.advanceOrRefold(store, ver);
       }
     }

@@ -32,10 +32,13 @@
 #include <ranges>
 #include <span>
 
+#include <gleditor/ranges.hpp>
+#include <gleditor/sentinel.hpp>
+#include <gleditor/stepped_view.hpp>
+
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
-#include <gleditor/ranges.hpp>
 
 namespace zigzag {
 
@@ -48,7 +51,7 @@ namespace zigzag {
  */
 template <typename M>
 concept CellGraph = requires(const M &m, CellRef c, DimRef d, DimVector v) {
-  { m.linked(c, d, v) } noexcept -> std::same_as<CellRef>;
+  { m.linked(c, d, v) } noexcept -> std::convertible_to<std::optional<CellRef>>;
   { m.dimensionsOf(c) } noexcept -> std::same_as<std::span<const DimLink>>;
   { m.cells() } noexcept -> std::same_as<std::span<const CellSlot>>;
   { m.cellCount() } noexcept -> std::convertible_to<std::size_t>;
@@ -58,8 +61,9 @@ concept CellGraph = requires(const M &m, CellRef c, DimRef d, DimVector v) {
 };
 
 /// A sentinel-encoded CellRef as an optional: noCell becomes nullopt.
-[[nodiscard]] constexpr std::optional<CellRef> present(const CellRef ref) {
-  return noCell == ref ? std::nullopt : std::optional{ref};
+[[nodiscard]] constexpr std::optional<CellRef>
+present(const CellRef ref) noexcept {
+  return gleditor::fromSentinel<noCell>(ref);
 }
 
 /// @p from's neighbour along @p dim, or nullopt. linked() with the sentinel
@@ -68,7 +72,9 @@ template <CellGraph M>
 [[nodiscard]] constexpr std::optional<CellRef>
 step(const M &m, const CellRef from, const DimRef dim,
      const DimVector dir = DimVector::POS) noexcept {
-  return present(m.linked(from, dim, dir));
+  const auto cell = m.linked(from, dim, dir);
+  return cell.has_value() && *cell != noCell ? std::optional<CellRef>{*cell}
+                                             : std::nullopt;
 }
 
 template <CellGraph M>
@@ -148,7 +154,10 @@ public:
         return *this;
       }
       const auto next = m_->linked(cur_, dim_, dir_);
-      cur_            = (next == cur_ || next == start_) ? noCell : next;
+      cur_ = (!next.has_value() || *next == noCell || *next == cur_ ||
+              *next == start_)
+                 ? noCell
+                 : *next;
       return *this;
     }
 
@@ -338,7 +347,7 @@ template <CellGraph M>
 [[nodiscard]] auto linksAlong(const M &m, const DimRef dim,
                               const DimVector dir = DimVector::POS) noexcept {
   return [&m, dim, dir](const CellRef ref) noexcept {
-    return noCell != m.linked(ref, dim, dir);
+    return m.linked(ref, dim, dir).has_value();
   };
 }
 
@@ -348,8 +357,38 @@ template <CellGraph M>
   return [&m, kind](const CellRef ref) { return m.valueKindOf(ref) == kind; };
 }
 
+/// Whether @p cell is a member of @p anchor's rank along @p dim.
+template <CellGraph M>
+[[nodiscard]] bool rankContains(const M &m, const CellRef anchor,
+                                const CellRef cell, const DimRef dim) noexcept {
+  if constexpr (requires {
+                  { m.rankContains(anchor, cell, dim) } -> std::same_as<bool>;
+                }) {
+    return m.rankContains(anchor, cell, dim);
+  } else {
+    if (noCell == anchor || noCell == cell || noCell == dim) {
+      return false;
+    }
+    if (anchor == cell) {
+      return true;
+    }
+    for (const auto c : rank(m, anchor, dim, DimVector::POS)) {
+      if (c == cell) {
+        return true;
+      }
+    }
+    for (const auto c : rankAfter(m, anchor, dim, DimVector::NEG)) {
+      if (c == cell) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
 // -- ranges to optionals ------------------------------------------------------
 
+using gleditor::filter_present;
 using gleditor::firstOf;
 using gleditor::lastOf;
 

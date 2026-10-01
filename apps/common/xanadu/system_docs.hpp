@@ -746,13 +746,11 @@ public:
   static MicroversionId updateSetting(Store &store,
                                       const MicroversionId &parent,
                                       std::string_view name,
-                                      std::span<const CellValue> values,
-                                      const zigzag::Manifold *known = nullptr);
+                                      std::span<const CellValue> values);
 
   static MicroversionId resetToDefault(Store &store,
                                        const MicroversionId &parent,
-                                       std::string_view name,
-                                       const zigzag::Manifold *known = nullptr);
+                                       std::string_view name);
 
 private:
   bool isValid_{true};
@@ -767,8 +765,7 @@ private:
 
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
                           std::string_view name,
-                          std::span<const CellValue> values,
-                          const zigzag::Manifold *known = nullptr);
+                          std::span<const CellValue> values);
 
 template <typename... Args>
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
@@ -780,15 +777,13 @@ MicroversionId setSetting(Store &store, const MicroversionId &parent,
 }
 
 MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
-                                     std::string_view name,
-                                     const zigzag::Manifold *known = nullptr);
+                                     std::string_view name);
 
 MicroversionId initializeSystemStoreGenesis(Store &store, SystemDocKind kind,
                                             const MicroversionId &parent = {});
 
 MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
-                             const SettingSpec &spec,
-                             const zigzag::Manifold *known = nullptr);
+                             const SettingSpec &spec);
 
 MicroversionId ensureAllSettings(Store &store, const MicroversionId &parent,
                                  SystemDocKind kind);

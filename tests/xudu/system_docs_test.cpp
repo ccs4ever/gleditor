@@ -583,7 +583,7 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   ASSERT_NE(variable, 0U);
   const auto value = manifold.linked(variable, values);
   const auto revised =
-      store.setScalar(store.primaryCurrentVersion(), value, 9.5, &manifold);
+      store.setScalar(store.primaryCurrentVersion(), value, 9.5);
   store.repointCurrentVersion(revised);
   EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store).zigzag.connectionBeamWidthPx,
                   9.5F);

@@ -172,7 +172,7 @@ void SatelloidOverlay::synchronizeSelection() {
         }
         found->selected = side == selected->active && cursor.member == member &&
                           cursor.occurrence == occurrence;
-        found->active      = true;
+        found->active   = true;
         found->targetAlpha = 1.0F;
         if (anchorResolver_) {
           if (const auto anchor = anchorResolver_(cell->cell)) {
@@ -208,8 +208,8 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
       if (s.active && s.neighborhoodRevision != revision) {
         s.neighborhood         = neighborhoodResolver_(s.cellRef);
         s.neighborhoodRevision = revision;
-        s.text                 = s.neighborhood.empty() ? std::string{}
-                                                        : s.neighborhood.front().text;
+        s.text = s.neighborhood.empty() ? std::string{}
+                                        : s.neighborhood.front().text;
         if (axisNameResolver_) s.dimName = axisNameResolver_();
       }
     }
@@ -410,10 +410,10 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
         const float theta2 = 2.0F * std::numbers::pi_v<float> *
                              static_cast<float>(i + 1) /
                              static_cast<float>(kRingSegments);
-        const float x1 = cx + r * std::cos(theta1);
-        const float y1 = cy + r * std::sin(theta1);
-        const float x2 = cx + r * std::cos(theta2);
-        const float y2 = cy + r * std::sin(theta2);
+        const float x1     = cx + r * std::cos(theta1);
+        const float y1     = cy + r * std::sin(theta1);
+        const float x2     = cx + r * std::cos(theta2);
+        const float y2     = cy + r * std::sin(theta2);
         cardCanvas->addLine(x1, y1, x2, y2, 2.0F, ringCol);
       }
     }
@@ -447,9 +447,9 @@ bool SatelloidOverlay::picked(const render::PickingResult &pick,
                                                    : xanadu::LinkSide::Right;
       std::ignore     = linkContext_->execute(
           xanadu::nav::EnterAt{.key        = selected->key,
-                                   .side       = side,
-                                   .member     = card.occurrence->member,
-                                   .occurrence = card.occurrence->occurrence});
+                               .side       = side,
+                               .member     = card.occurrence->member,
+                               .occurrence = card.occurrence->occurrence});
       return true;
     }
   }

@@ -1125,7 +1125,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                            changedCell != zigzag::noCell;
+                             changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -1239,11 +1239,11 @@ int XuzzApp::run(const int argc, char **argv) {
                 const auto next =
                     folded.linked(anchor, *dim, zigzag::DimVector::POS);
                 head = store.setLink(head, anchor, *dim, zigzag::DimVector::POS,
-                                     *handle, &folded);
+                                     *handle);
                 if (next != zigzag::noCell && next != *handle) {
                   folded = store.rebuildManifold(head);
                   head   = store.setLink(head, *handle, *dim,
-                                         zigzag::DimVector::POS, next, &folded);
+                                         zigzag::DimVector::POS, next);
                 }
                 bindZigzag(rState, index, head);
                 zigzagPresentation->focusCell(*handle);
@@ -2473,13 +2473,12 @@ int XuzzApp::run(const int argc, char **argv) {
                       folded.contains(focus) ? focus : folded.home();
                   const auto next =
                       folded.linked(anchor, *dim, zigzag::DimVector::POS);
-                  head =
-                      local.setLink(head, anchor, *dim, zigzag::DimVector::POS,
-                                    *placeholder, &folded);
+                  head = local.setLink(head, anchor, *dim,
+                                       zigzag::DimVector::POS, *placeholder);
                   if (next != zigzag::noCell && next != *placeholder) {
                     folded = local.rebuildManifold(head);
                     head   = local.setLink(head, *placeholder, *dim,
-                                           zigzag::DimVector::POS, next, &folded);
+                                           zigzag::DimVector::POS, next);
                   }
                   bindZigzag(rState, localIndex, head);
                   zigzagPresentation->focusCell(*placeholder);

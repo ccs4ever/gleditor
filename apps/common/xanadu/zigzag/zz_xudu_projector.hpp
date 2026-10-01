@@ -130,6 +130,11 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
                    const std::string &salt = "zigzag_slice",
                    std::int64_t sequence = 1, const std::string &title = "");
 
+[[nodiscard]] xanadu::LinkPackage
+storeToLinkPackage(const Manifold &manifold, const xanadu::MutableKeys &keys,
+                   const std::string &salt = "zigzag_slice",
+                   std::int64_t sequence = 1, const std::string &title = "");
+
 /**
  * @brief Convert a xanadu::LinkPackage containing dimensional links back into a
  *        ZzStructureDocument.
@@ -197,6 +202,9 @@ sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
  */
 [[nodiscard]] ZzStructureDocument storeToSlice(const xanadu::Store &store,
                                                const Manifold &manifold,
+                                               CellRef focus = noCell);
+
+[[nodiscard]] ZzStructureDocument storeToSlice(const Manifold &manifold,
                                                CellRef focus = noCell);
 
 /**

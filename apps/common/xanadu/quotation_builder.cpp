@@ -9,9 +9,10 @@
 
 namespace xanadu {
 
-void QuotationBuilder::setForeignStore(
-    std::string scrollKey, const Store *store, const Scroll *sealedAs,
-    std::optional<MicroversionId> pinnedVersion) {
+QuotationBuilder *
+QuotationBuilder::setForeignStore(std::string scrollKey, const Store *store,
+                                  const Scroll *sealedAs,
+                                  std::optional<MicroversionId> pinnedVersion) {
   config_.foreignScrollKey = std::move(scrollKey);
   foreignStore_            = store;
   sealedAs_                = sealedAs;
@@ -28,58 +29,70 @@ void QuotationBuilder::setForeignStore(
   } else {
     foreignFold_.reset();
   }
+  return this;
 }
 
-void QuotationBuilder::setRootCell(const zigzag::CellRef cell) {
+QuotationBuilder *QuotationBuilder::setRootCell(const zigzag::CellRef cell) {
   if (nullptr == foreignStore_ || zigzag::noCell == cell) {
-    return;
+    return this;
   }
   const auto op   = foreignStore_->segmentedOps().idOf(cell);
   config_.rootRef = ExternOpRef{.scroll = 1, .produces = op};
   if (foreignFold_ && foreignFold_->contains(cell)) {
     config_.rootLabel = foreignFold_->textOf(cell, *foreignStore_);
   }
+  return this;
 }
 
-void QuotationBuilder::setRootRef(ExternOpRef ref, std::string label) {
+QuotationBuilder *QuotationBuilder::setRootRef(ExternOpRef ref,
+                                               std::string label) {
   config_.rootRef   = ref;
   config_.rootLabel = std::move(label);
+  return this;
 }
 
-void QuotationBuilder::setRankStep(const ExternOpRef dimRef,
-                                   const zigzag::DimVector dir) {
+QuotationBuilder *QuotationBuilder::setRankStep(const ExternOpRef dimRef,
+                                                const zigzag::DimVector dir) {
   config_.rankDimRef    = dimRef;
   config_.rankDirection = dir;
+  return this;
 }
 
-void QuotationBuilder::setCarriedDimensions(
-    std::vector<ExternOpRef> carryRefs) {
+QuotationBuilder *
+QuotationBuilder::setCarriedDimensions(std::vector<ExternOpRef> carryRefs) {
   config_.carryRefs = std::move(carryRefs);
+  return this;
 }
 
-void QuotationBuilder::addCarriedDimension(const ExternOpRef dimRef) {
+QuotationBuilder *
+QuotationBuilder::addCarriedDimension(const ExternOpRef dimRef) {
   if (!std::ranges::contains(config_.carryRefs, dimRef)) {
     config_.carryRefs.push_back(dimRef);
   }
+  return this;
 }
 
-void QuotationBuilder::removeCarriedDimension(const ExternOpRef &dimRef) {
+QuotationBuilder *
+QuotationBuilder::removeCarriedDimension(const ExternOpRef &dimRef) {
   std::erase(config_.carryRefs, dimRef);
+  return this;
 }
 
-void QuotationBuilder::setVqlQuery(std::string query,
-                                   const std::uint32_t version) {
+QuotationBuilder *QuotationBuilder::setVqlQuery(std::string query,
+                                                const std::uint32_t version) {
   config_.vqlQuery             = std::move(query);
   config_.queryLanguageVersion = version;
+  return this;
 }
 
-void QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
+QuotationBuilder *
+QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
   if (nullptr == foreignStore_ || nullptr == foreignFold_) {
     preview_.isValid       = false;
     preview_.state         = QuotationState::NotFetched;
     preview_.statusMessage = "Foreign document not loaded";
     preview_.cells.clear();
-    return;
+    return this;
   }
 
   // Check foreign op path budget
@@ -89,7 +102,7 @@ void QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
     preview_.state         = QuotationState::TooLarge;
     preview_.statusMessage = "Foreign store exceeds op-path byte budget";
     preview_.cells.clear();
-    return;
+    return this;
   }
 
   // Localise root ref
@@ -101,7 +114,7 @@ void QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
     preview_.statusMessage =
         "Root cell not found in foreign store at pinned version";
     preview_.cells.clear();
-    return;
+    return this;
   }
 
   Selector selector;
@@ -140,7 +153,7 @@ void QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
     } else {
       preview_.statusMessage = "Failed to evaluate selector";
     }
-    return;
+    return this;
   }
 
   const std::unordered_set<zigzag::CellRef> selectedSet(selected.begin(),
@@ -180,17 +193,20 @@ void QuotationBuilder::recomputePreview(const QuotationBudget &budget) {
   if (preview_.focusedIndex >= preview_.cells.size()) {
     preview_.focusedIndex = 0;
   }
+  return this;
 }
 
-void QuotationBuilder::focusPreviewCell(const std::size_t index) noexcept {
+QuotationBuilder *
+QuotationBuilder::focusPreviewCell(const std::size_t index) noexcept {
   if (index < preview_.cells.size()) {
     preview_.focusedIndex = index;
   }
+  return this;
 }
 
-void QuotationBuilder::navigatePreview(const int delta) noexcept {
+QuotationBuilder *QuotationBuilder::navigatePreview(const int delta) noexcept {
   if (preview_.cells.empty()) {
-    return;
+    return this;
   }
   const auto count = static_cast<int>(preview_.cells.size());
   int cur          = static_cast<int>(preview_.focusedIndex);
@@ -199,6 +215,7 @@ void QuotationBuilder::navigatePreview(const int delta) noexcept {
     cur += count;
   }
   preview_.focusedIndex = static_cast<std::size_t>(cur);
+  return this;
 }
 
 AppendedQuotation QuotationBuilder::commit(Store &localStore,

@@ -70,12 +70,12 @@ struct TestStore {
                                         const MicroversionId &produces) {
     auto fold = store->rebuildManifold(head);
     if (!store->scrollRegistry().scrollIdForKey(targetScroll)) {
-      head = store->registerScroll(head, targetScroll, &fold);
+      head = store->registerScroll(head, targetScroll);
       fold = store->rebuildManifold(head);
     }
     const auto sid = *store->scrollRegistry().scrollIdForKey(targetScroll);
     const ExternOpRef ext{.scroll = sid, .produces = produces};
-    head          = store->makeExternRef(head, ext, &fold);
+    head          = store->makeExternRef(head, ext);
     fold          = store->rebuildManifold(head);
     const auto ph = fold.scrollRegistry(*store).placeholderForExtern(ext);
     return ph.value_or(zigzag::noCell);

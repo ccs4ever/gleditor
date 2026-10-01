@@ -328,19 +328,56 @@ using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
  */
 class Manifold {
 public:
+  Manifold();
+  ~Manifold();
+  Manifold(const Manifold &other);
+  Manifold &operator=(const Manifold &other);
+  Manifold(Manifold &&other) noexcept;
+  Manifold &operator=(Manifold &&other) noexcept;
+
   // -- read path: no allocation, no locks, no Store access -------------------
 
-  /// The cell @p from's neighbour along @p dim, or noCell.
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               DimVector dir = DimVector::POS) const noexcept;
-  [[nodiscard]] CellRef linked(CellRef from,
-                               DirectedDim target) const noexcept {
+  /// The cell @p from's neighbour along @p dim, or nullopt.
+  [[nodiscard]] OptionalCell
+  linked(CellRef from, DimRef dim,
+         DimVector dir = DimVector::POS) const noexcept;
+  [[nodiscard]] OptionalCell linked(CellRef from,
+                                    DirectedDim target) const noexcept {
     return linked(from, target.dim, target.dir);
   }
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               bool negward) const noexcept {
+  [[nodiscard]] OptionalCell linked(CellRef from, DimRef dim,
+                                    bool negward) const noexcept {
     return linked(from, dim, fromNegward(negward));
   }
+
+  /// Establish or break a link between @p from and @p to along @p dim in @p
+  /// dir. If @p to is nullopt, unlinks @p from in that direction. Returns this
+  /// pointer for fluent chaining.
+  Manifold *link(CellRef from, DimRef dim, DimVector dir,
+                 std::optional<CellRef> to = std::nullopt);
+  Manifold *link(CellRef from, DirectedDim target,
+                 std::optional<CellRef> to = std::nullopt) {
+    return link(from, target.dim, target.dir, to);
+  }
+  Manifold *link(CellRef from, DimRef dim, bool negward,
+                 std::optional<CellRef> to = std::nullopt) {
+    return link(from, dim, fromNegward(negward), to);
+  }
+
+  /// Remove link along @p dim in @p dir from @p from.
+  Manifold *unlink(CellRef from, DimRef dim, DimVector dir) {
+    return link(from, dim, dir, std::nullopt);
+  }
+
+  /// Whether @p cell is a member of @p anchor's rank along @p dim.
+  [[nodiscard]] bool rankContains(CellRef anchor, CellRef cell,
+                                  DimRef dim) const noexcept;
+
+  /// Insert @p cell into @p anchor's rank along @p dim in @p dir without
+  /// severing links. Idempotent if @p cell is already in the rank. Returns this
+  /// pointer for fluent chaining.
+  Manifold *insertIntoRank(CellRef cell, CellRef anchor, DimRef dim,
+                           DimVector dir = DimVector::POS);
 
   /**
    * @brief The slot for @p ref, or nullptr.
@@ -447,7 +484,7 @@ public:
 
   /// The backing Store for this manifold view, or nullptr if unattached.
   [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
-  void setStore(xanadu::Store *s) noexcept { store_ = s; }
+  Manifold *setStore(xanadu::Store *s) noexcept;
 
   // -- store-backed queries: need the associated Store -----------------------
 
@@ -495,14 +532,19 @@ public:
   /// Look up the VersionAnnotation associated with @p targetOp in this folded
   /// state.
   [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotation(std::uint32_t targetOp) const;
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
   versionAnnotation(std::uint32_t targetOp, const xanadu::Store &store) const;
 
   /// Look up the VersionAnnotation associated with handle cell @p handle.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotationForHandle(CellRef handle) const;
   [[nodiscard]] std::optional<xanadu::VersionAnnotation>
   versionAnnotationForHandle(CellRef handle, const xanadu::Store &store) const;
 
   /// All aliases recorded in this folded state (both on d.editions and
   /// d.alias), paired with their target operation index.
+  [[nodiscard]] std::vector<std::pair<std::string, CellRef>> aliases() const;
   [[nodiscard]] std::vector<std::pair<std::string, CellRef>>
   aliases(const xanadu::Store &store) const;
 
@@ -545,7 +587,7 @@ public:
   cellsWithinRadiusSet(CellRef start = noCell, int radius = 3) const;
 
   /// Set presentation formatting flags on @p ref.
-  void setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
+  Manifold *setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never
@@ -686,13 +728,13 @@ public:
    * parent, where a manifold left behind is a programming error nothing can
    * detect. A refusal is logged, not swallowed.
    */
-  void advanceOrRefold(const xanadu::Store &store,
-                       const xanadu::MicroversionId &version);
+  Manifold *advanceOrRefold(const xanadu::Store &store,
+                            const xanadu::MicroversionId &version);
 
   /// Discard the arena's dead runs, leaving every cell's links contiguous in
   /// dense order. A full fold ends with one of these, so a freshly rebuilt
   /// manifold has a tight arena and the per-cell cost R12 quotes.
-  void compact();
+  Manifold *compact();
 
   // -- honesty ---------------------------------------------------------------
 
@@ -720,8 +762,10 @@ private:
     return std::unexpected{why};
   }
 
-  /// The dense id for @p ref, or npos. Resolves chain indices as slot() does.
-  [[nodiscard]] std::uint32_t denseOf(CellRef ref) const noexcept;
+  /// The dense id for @p ref, or nullopt. Resolves chain indices as slot()
+  /// does.
+  [[nodiscard]] std::optional<std::uint32_t>
+  denseOf(CellRef ref) const noexcept;
 
   /// @p cell's link to @p dim, appending an entry to its run if it has none.
   /// Returns nullptr only if the run cannot be grown.

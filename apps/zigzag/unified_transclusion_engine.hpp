@@ -30,6 +30,7 @@
 #include "gleditor/render/stream_buffer.hpp"
 #include "gleditor/text/font.hpp"
 #include "gleditor/text/layout.hpp"
+#include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace zigzag {
 
@@ -195,7 +196,8 @@ public:
    * @brief Every dimension @p cell has active connections on, including
    *        d.meta-dims itself.
    */
-  [[nodiscard]] std::vector<DimRef> metaDimensionsOf(CellRef cell) const;
+  [[nodiscard]] gleditor::cpp26::inplace_vector<DimRef, 64>
+  metaDimensionsOf(CellRef cell) const;
 
   /**
    * @brief Neighbor of @p from along @p dim. Seamlessly resolves stored

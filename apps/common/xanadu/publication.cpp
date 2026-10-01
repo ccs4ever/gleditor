@@ -1167,7 +1167,7 @@ std::vector<Library::Sighting> Library::showing(const GlobalSpan &span) const {
             static_cast<std::uint32_t>(shared.start - piece.start);
         out.push_back(Sighting{.document = &pub,
                                .start    = at + into,
-                               .end      = at + into +
+                               .end = at + into +
                                       static_cast<std::uint32_t>(shared.length),
                                .shared = shared});
       }

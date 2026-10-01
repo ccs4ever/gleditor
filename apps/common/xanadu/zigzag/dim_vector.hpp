@@ -8,14 +8,99 @@
 #include <compare>
 #include <cstdint>
 #include <format>
+#include <optional>
+#include <ostream>
 #include <string_view>
 #include <type_traits>
+#include <utility>
+
+#include <gleditor/sentinel.hpp>
 
 namespace zigzag {
 
 using CellRef                   = std::uint32_t;
 using DimRef                    = CellRef;
 inline constexpr CellRef noCell = 0;
+
+/**
+ * @class OptionalCell
+ * @brief Zero-overhead std::optional<CellRef> with sentinel-compatibility
+ * bridging.
+ *
+ * Exposes full std::optional<CellRef> monadic interface (has_value, operator*,
+ * and_then, transform, filter_present, etc.) while bridging to legacy call
+ * sites via implicit conversion to CellRef (returning noCell if empty).
+ */
+class OptionalCell : public std::optional<CellRef> {
+public:
+  using std::optional<CellRef>::optional;
+  constexpr OptionalCell() noexcept = default;
+  constexpr OptionalCell(std::nullopt_t) noexcept
+      : std::optional<CellRef>(std::nullopt) {}
+  constexpr explicit OptionalCell(const CellRef c) noexcept
+      : std::optional<CellRef>(c == noCell ? std::nullopt
+                                           : std::optional<CellRef>(c)) {}
+  constexpr OptionalCell(const std::optional<CellRef> &opt) noexcept
+      : std::optional<CellRef>(opt) {}
+  constexpr OptionalCell(std::optional<CellRef> &&opt) noexcept
+      : std::optional<CellRef>(std::move(opt)) {}
+
+  constexpr OptionalCell &
+  operator=(const std::optional<CellRef> &opt) noexcept {
+    std::optional<CellRef>::operator=(opt);
+    return *this;
+  }
+  constexpr OptionalCell &operator=(std::optional<CellRef> &&opt) noexcept {
+    std::optional<CellRef>::operator=(std::move(opt));
+    return *this;
+  }
+  constexpr OptionalCell &operator=(const CellRef c) noexcept {
+    if (c == noCell) {
+      this->reset();
+    } else {
+      std::optional<CellRef>::operator=(c);
+    }
+    return *this;
+  }
+
+  [[nodiscard]] constexpr operator CellRef() const noexcept {
+    return value_or(noCell);
+  }
+
+  friend constexpr bool operator==(const OptionalCell &opt,
+                                   const CellRef c) noexcept {
+    if (c == noCell) {
+      return !opt.has_value();
+    }
+    return opt.has_value() && *opt == c;
+  }
+
+  friend constexpr bool operator==(const CellRef c,
+                                   const OptionalCell &opt) noexcept {
+    return opt == c;
+  }
+
+  friend constexpr bool operator!=(const OptionalCell &opt,
+                                   const CellRef c) noexcept {
+    return !(opt == c);
+  }
+
+  friend constexpr bool operator!=(const CellRef c,
+                                   const OptionalCell &opt) noexcept {
+    return !(opt == c);
+  }
+
+  friend constexpr bool operator==(const OptionalCell &a,
+                                   const OptionalCell &b) noexcept = default;
+
+  template <typename OStream>
+  friend OStream &operator<<(OStream &os, const OptionalCell &opt) {
+    if (opt.has_value()) {
+      return os << "OptionalCell(" << *opt << ")";
+    }
+    return os << "OptionalCell(nullopt)";
+  }
+};
 
 /**
  * @enum DimVector

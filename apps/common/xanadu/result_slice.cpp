@@ -42,15 +42,14 @@ MicroversionId writeResultSlice(Store &store,
       // The quoted bytes, transcluded: the first span makes the cell and
       // each after it is spliced on, one span per operation (U3).
       const auto &spans = row.quote->spans;
-      version           = store.makeCell(version,
-                                         *carrySpan(*row.quote->store, store, spans[0]));
-      cell              = store.cellRefOf(version);
+      version = store.makeCell(version,
+                               *carrySpan(*row.quote->store, store, spans[0]));
+      cell    = store.cellRefOf(version);
       manifold.advanceOrRefold(store, version);
       std::uint64_t at = spans[0].length;
       for (const auto &quoted : spans | std::views::drop(1)) {
         version = store.spliceCellSpan(
-            version, cell, at, 0, *carrySpan(*row.quote->store, store, quoted),
-            &manifold);
+            version, cell, at, 0, *carrySpan(*row.quote->store, store, quoted));
         manifold.advanceOrRefold(store, version);
         at += quoted.length;
       }
@@ -60,7 +59,7 @@ MicroversionId writeResultSlice(Store &store,
       manifold.advanceOrRefold(store, version);
     }
     version = store.setLink(version, previous, result.dim,
-                            zigzag::DimVector::POS, cell, &manifold);
+                            zigzag::DimVector::POS, cell);
     manifold.advanceOrRefold(store, version);
     previous = cell;
     if (!row.source.empty()) {
@@ -68,7 +67,7 @@ MicroversionId writeResultSlice(Store &store,
       const auto sourceCell = store.cellRefOf(version);
       manifold.advanceOrRefold(store, version);
       version = store.setLink(version, cell, source.dim, zigzag::DimVector::POS,
-                              sourceCell, &manifold);
+                              sourceCell);
       manifold.advanceOrRefold(store, version);
     }
   }

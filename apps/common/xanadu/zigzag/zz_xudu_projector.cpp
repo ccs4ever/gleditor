@@ -612,7 +612,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
         zigzag::noCell == to) {
       return;
     }
-    out.version = store.setLink(out.version, from, dim, dir, to, &manifold);
+    out.version = store.setLink(out.version, from, dim, dir, to);
     manifold.advanceOrRefold(store, out.version);
   };
 
@@ -765,6 +765,14 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
   return doc;
 }
 
+ZzStructureDocument storeToSlice(const Manifold &manifold,
+                                 const CellRef focus) {
+  if (const auto *store = manifold.store()) {
+    return storeToSlice(*store, manifold, focus);
+  }
+  return {};
+}
+
 xanadu::LinkPackage
 storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
                    const xanadu::MutableKeys &keys, const std::string &salt,
@@ -808,9 +816,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
 
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
-                          &localScroll](const xanadu::PrimediaSpan &span) {
+                            &localScroll](const xanadu::PrimediaSpan &span) {
     return span.isLocal() ? gleditor::refOf(&localScroll)
-                            : store.scroll(span.scroll);
+                          : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
@@ -871,6 +879,17 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
       keys, salt, pkgTitle, sequence,
       static_cast<std::uint64_t>(std::time(nullptr)), std::move(links),
       std::move(scrolls));
+}
+
+xanadu::LinkPackage storeToLinkPackage(const Manifold &manifold,
+                                       const xanadu::MutableKeys &keys,
+                                       const std::string &salt,
+                                       const std::int64_t sequence,
+                                       const std::string &title) {
+  if (const auto *store = manifold.store()) {
+    return storeToLinkPackage(*store, manifold, keys, salt, sequence, title);
+  }
+  return {};
 }
 
 xanadu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,

@@ -356,7 +356,7 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     slice.at = slice.store.setLink(slice.at, slice.store.homeCell(),
                                    slice.store.dimsDimension(), DimVector::POS,
-                                   dims.back(), &manifold);
+                                   dims.back());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
   const auto dim  = dims.front();
@@ -371,10 +371,10 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
       // the arena and have to be relocated, which is the part of the CSR
       // arrangement a cold fold would never exercise.
       slice.at = slice.store.setLink(slice.at, rank[rank.size() - 2], dim,
-                                     DimVector::POS, rank.back(), &manifold);
+                                     DimVector::POS, rank.back());
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
       slice.at = slice.store.setLink(slice.at, rank.back(), meta,
-                                     DimVector::NEG, rank.front(), &manifold);
+                                     DimVector::NEG, rank.front());
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
@@ -651,24 +651,24 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
 
   for (int i = 0; i + 1 < cellCount; i++) {
     slice.at = slice.store.setLink(slice.at, cells[i], dims[0], DimVector::POS,
-                                   cells[i + 1], &manifold);
+                                   cells[i + 1]);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     slice.at = slice.store.setLink(slice.at, shuffled[i], dims[1],
-                                   DimVector::POS, shuffled[i + 1], &manifold);
+                                   DimVector::POS, shuffled[i + 1]);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     for (int d = 2; d < dimCount; d++) {
       slice.at =
           slice.store.setLink(slice.at, cells[i], dims[d], DimVector::POS,
-                              cells[(i + d * 977) % cellCount], &manifold);
+                              cells[(i + d * 977) % cellCount]);
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
   // Close both ranks into cycles so a chase never runs off the end.
   slice.at = slice.store.setLink(slice.at, cells.back(), dims[0],
-                                 DimVector::POS, cells.front(), &manifold);
+                                 DimVector::POS, cells.front());
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   slice.at = slice.store.setLink(slice.at, shuffled.back(), dims[1],
-                                 DimVector::POS, shuffled.front(), &manifold);
+                                 DimVector::POS, shuffled.front());
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   manifold.compact();
 
@@ -895,7 +895,7 @@ TEST(ManifoldTest, splicingFoldsTheSameIncrementallyAsCold) {
 
   for (int i = 0; i < 12; i++) {
     slice.at = slice.store.spliceCell(slice.at, cell, (i * 3) % 6, 1,
-                                      "X" + std::to_string(i), &manifold);
+                                      "X" + std::to_string(i));
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
 
@@ -1289,11 +1289,11 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
   // An annotation without claimed timestamp has an empty timestamp field;
   // it is never synthesized or derived from the MicroversionId
   const auto v2 = slice.store.insert(slice.at, 15, " and another");
-  slice.at      = slice.store.annotateVersion(v2, v2,
-                                              {.alias       = "v2.0",
-                                               .description = "No clock reading",
-                                               .tag         = "unclocked",
-                                               .timestamp   = ""});
+  slice.at = slice.store.annotateVersion(v2, v2,
+                                         {.alias       = "v2.0",
+                                          .description = "No clock reading",
+                                          .tag         = "unclocked",
+                                          .timestamp   = ""});
 
   const auto ann2 = slice.store.versionAnnotation(v2);
   ASSERT_TRUE(ann2.has_value());
@@ -1895,4 +1895,60 @@ TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
 
   const auto manifold = storeMine.rebuildManifold(storeMine.latest());
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(storeMine));
+}
+
+TEST(ManifoldTest, RankContainsAndUnbrokenInsertion) {
+  Slice slice;
+
+  const DimRef d1        = slice.dimension("d.1");
+  const CellRef c1       = slice.cell("c1");
+  const CellRef c2       = slice.cell("c2");
+  const CellRef c3       = slice.cell("c3");
+  const CellRef stranger = slice.cell("stranger");
+  const CellRef splice1  = slice.cell("splice1");
+  const CellRef tailCell = slice.cell("tailCell");
+  const CellRef cA       = slice.cell("cA");
+  const CellRef cB       = slice.cell("cB");
+
+  auto manifold = slice.store.rebuildManifold(slice.at);
+
+  // Link c1 -> c2 -> c3
+  manifold.link(c1, d1, DimVector::POS, c2);
+  manifold.link(c2, d1, DimVector::POS, c3);
+
+  // rankContains
+  EXPECT_TRUE(manifold.rankContains(c1, c1, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, c2, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, c3, d1));
+  EXPECT_TRUE(manifold.rankContains(c3, c1, d1));
+
+  EXPECT_FALSE(manifold.rankContains(c1, stranger, d1));
+  EXPECT_FALSE(manifold.rankContains(noCell, c1, d1));
+  EXPECT_FALSE(manifold.rankContains(c1, noCell, d1));
+
+  // Splice insertion: c1 -> splice1 -> c2 -> c3
+  auto *result = manifold.insertIntoRank(splice1, c1, d1, DimVector::POS);
+  EXPECT_EQ(result, &manifold);
+  EXPECT_TRUE(manifold.rankContains(c1, splice1, d1));
+
+  EXPECT_EQ(manifold.linked(c1, d1, DimVector::POS), splice1);
+  EXPECT_EQ(manifold.linked(splice1, d1, DimVector::POS), c2);
+  EXPECT_EQ(manifold.linked(c2, d1, DimVector::NEG), splice1);
+  EXPECT_EQ(manifold.linked(c2, d1, DimVector::POS), c3);
+
+  // Idempotency: reinserting splice1 does not duplicate or break links
+  manifold.insertIntoRank(splice1, c1, d1, DimVector::POS);
+  EXPECT_EQ(manifold.linked(c1, d1, DimVector::POS), splice1);
+  EXPECT_EQ(manifold.linked(splice1, d1, DimVector::POS), c2);
+
+  // Tail insertion: c3 -> tailCell
+  manifold.insertIntoRank(tailCell, c3, d1, DimVector::POS);
+  EXPECT_EQ(manifold.linked(c3, d1, DimVector::POS), tailCell);
+  EXPECT_EQ(manifold.linked(tailCell, d1, DimVector::NEG), c3);
+
+  // Fluent chaining
+  manifold.insertIntoRank(cA, tailCell, d1, DimVector::POS)
+      ->insertIntoRank(cB, cA, d1, DimVector::POS);
+  EXPECT_TRUE(manifold.rankContains(c1, cA, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, cB, d1));
 }

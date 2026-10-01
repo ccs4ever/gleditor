@@ -86,15 +86,16 @@ void ZigzagVisualizer::setCellRadius(const int radius) noexcept {
   invalidateAccessibility();
 }
 
-void ZigzagVisualizer::setPresentationConfig(
+ZigzagVisualizer *ZigzagVisualizer::setPresentationConfig(
     xanadu::ZigzagPresentationConfig config) {
   if (presentation_config_ == config) {
-    return;
+    return this;
   }
   presentation_config_ = config;
   cell_layouts_dirty_  = true;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::deviceReady(
@@ -145,7 +146,7 @@ void ZigzagVisualizer::populateFallbackStructure() {
   doc.meta.name = "Xanadu ZigZag Sample Structure";
   doc.focus     = 1;
   doc.view      = ViewAxisBinding{
-           .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
 
   Cell c1;
   c1.id         = 1;
@@ -638,13 +639,14 @@ bool ZigzagVisualizer::deleteFocusCell() {
   return true;
 }
 
-void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
+ZigzagVisualizer *
+ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if (!engine_ || accursed_cell_focus_ == 0) {
-    return;
+    return this;
   }
   const auto focus = static_cast<CellRef>(accursed_cell_focus_);
   if (!engine_->findCell(focus)) {
-    return;
+    return this;
   }
   const CellRef targetCell = engine_->manifold()
                                  .dimensionNamed("d.clone", engine_->store())
@@ -655,11 +657,12 @@ void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if ((targetCell == engine_->manifold().home() ||
        targetCell == engine_->manifold().dimsDimension()) &&
       text.empty()) {
-    return;
+    return this;
   }
   engine_->updateCellText(targetCell, text);
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 bool ZigzagVisualizer::saveStore(const std::string &filePath) const {
@@ -1124,7 +1127,7 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
   metrics.titleTop         = metrics.height - verticalPadding;
   const float titleBottom  = metrics.titleTop - titleMetrics.height;
   const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
-                                           presentation_config_.cellBandGapPx
+                                            presentation_config_.cellBandGapPx
                                       : verticalPadding;
   const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
   metrics.labelTop =
@@ -1386,12 +1389,14 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   }
 }
 
-void ZigzagVisualizer::setPreviewCell(std::optional<CellRef> cell) {
+ZigzagVisualizer *
+ZigzagVisualizer::setPreviewCell(std::optional<CellRef> cell) {
   if (cell && (!engine_ || !engine_->findCell(*cell))) cell.reset();
-  if (cell == preview_cell_) return;
+  if (cell == preview_cell_) return this;
   preview_cell_ = cell;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
@@ -1453,25 +1458,29 @@ void ZigzagVisualizer::navigateFocusTo(const CellID id) {
   invalidateAccessibility();
 }
 
-void ZigzagVisualizer::setViewMode(const ViewMode mode) {
+ZigzagVisualizer *ZigzagVisualizer::setViewMode(const ViewMode mode) {
   view_mode_ = mode;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::toggleViewMode() {
+ZigzagVisualizer *ZigzagVisualizer::toggleViewMode() {
   setViewMode(view_mode_ == ViewMode::CellContent ? ViewMode::Topology
                                                   : ViewMode::CellContent);
+  return this;
 }
 
-void ZigzagVisualizer::setPresentationVisible(const bool visible) {
-  if (presentation_visible_ == visible) return;
+ZigzagVisualizer *ZigzagVisualizer::setPresentationVisible(const bool visible) {
+  if (presentation_visible_ == visible) return this;
   presentation_visible_ = visible;
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
-                                    const float opacityMultiplier) {
+ZigzagVisualizer *
+ZigzagVisualizer::setDepthTier(const float baseDepthZ,
+                               const float opacityMultiplier) {
   const float deltaZ  = baseDepthZ - depth_tier_;
   depth_tier_         = baseDepthZ;
   depth_tier_opacity_ = std::clamp(opacityMultiplier, 0.0F, 1.0F);
@@ -1480,14 +1489,17 @@ void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
   }
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::setPresentationOrigin(const glm::vec3 origin) {
+ZigzagVisualizer *
+ZigzagVisualizer::setPresentationOrigin(const glm::vec3 origin) {
   presentation_origin_ = origin;
   presentation_transform_ =
       glm::translate(glm::mat4{1.0F}, origin) *
       glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {
@@ -1945,7 +1957,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   const float structureTop = hudTop - presentation_config_.hudVerticalPaddingPx;
   const float focusTop     = structureTop - structureMetrics.height -
-                         presentation_config_.hudVerticalPaddingPx;
+                             presentation_config_.hudVerticalPaddingPx;
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
                       structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
@@ -1973,7 +1985,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
-  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+  float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
   for (const auto &[label, colour] :
        {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
         std::pair{std::cref(modeLabel), 0xF59E0BFFU},
@@ -2486,7 +2498,7 @@ ZigzagVisualizer::cellAnchor(const CellRef cell) const {
   };
 }
 
-void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
+ZigzagVisualizer *ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
   dimension_bundle_ = bundle;
   if (bundle != DimensionBundle::Custom) {
     current_view_ = dimensionBundleAxes(bundle);
@@ -2503,9 +2515,10 @@ void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
     rebuildActiveViewTopology();
     invalidateAccessibility();
   }
+  return this;
 }
 
-void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
+ZigzagVisualizer *ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
   auto current = static_cast<int>(dimension_bundle_);
   if (forward) {
     current = (current >= 5) ? 1 : current + 1;
@@ -2513,11 +2526,13 @@ void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
     current = (current <= 1) ? 5 : current - 1;
   }
   setDimensionBundle(static_cast<DimensionBundle>(current));
+  return this;
 }
 
-void ZigzagVisualizer::attachVortexHost(
-    std::shared_ptr<vortex::VortexHost> host) {
+ZigzagVisualizer *
+ZigzagVisualizer::attachVortexHost(std::shared_ptr<vortex::VortexHost> host) {
   vortex_host_ = std::move(host);
+  return this;
 }
 
 std::shared_ptr<vortex::VortexHost> ZigzagVisualizer::vortexHost() noexcept {
@@ -2527,7 +2542,7 @@ std::shared_ptr<vortex::VortexHost> ZigzagVisualizer::vortexHost() noexcept {
   return vortex_host_;
 }
 
-void ZigzagVisualizer::ensureVortexHost() {
+ZigzagVisualizer *ZigzagVisualizer::ensureVortexHost() {
   if (engine_) {
     vortex_host_ = std::make_shared<vortex::VortexHost>(&engine_->manifold());
     if (store_) {
@@ -2536,6 +2551,7 @@ void ZigzagVisualizer::ensureVortexHost() {
       vortex_host_->bindStore(&engine_->store());
     }
   }
+  return this;
 }
 
 bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
@@ -2871,35 +2887,41 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
   return false;
 }
 
-void ZigzagVisualizer::togglePalette() { setPaletteVisible(!paletteVisible_); }
+ZigzagVisualizer *ZigzagVisualizer::togglePalette() {
+  setPaletteVisible(!paletteVisible_);
+  return this;
+}
 
-void ZigzagVisualizer::setPaletteVisible(const bool visible) {
+ZigzagVisualizer *ZigzagVisualizer::setPaletteVisible(const bool visible) {
   paletteVisible_ = visible;
   if (visible) {
     paletteSelectedIndex_ = 0;
   }
+  return this;
 }
 
-void ZigzagVisualizer::paletteNext() {
+ZigzagVisualizer *ZigzagVisualizer::paletteNext() {
   const auto items = paletteItems();
   if (items.empty()) {
     paletteSelectedIndex_ = 0;
-    return;
+    return this;
   }
   paletteSelectedIndex_ = (paletteSelectedIndex_ + 1) % items.size();
+  return this;
 }
 
-void ZigzagVisualizer::palettePrev() {
+ZigzagVisualizer *ZigzagVisualizer::palettePrev() {
   const auto items = paletteItems();
   if (items.empty()) {
     paletteSelectedIndex_ = 0;
-    return;
+    return this;
   }
   if (paletteSelectedIndex_ == 0) {
     paletteSelectedIndex_ = items.size() - 1;
   } else {
     --paletteSelectedIndex_;
   }
+  return this;
 }
 
 bool ZigzagVisualizer::paletteCloneSelectedToFocus() {
@@ -3005,21 +3027,25 @@ ZigzagVisualizer::compileVQL(std::string_view vqlQuery) const {
   return vortex_host_->vqlCompiler().compile(vqlQuery, options);
 }
 
-void ZigzagVisualizer::setPaletteFilter(std::string filter) {
+ZigzagVisualizer *ZigzagVisualizer::setPaletteFilter(std::string filter) {
   paletteFilter_        = std::move(filter);
   paletteSelectedIndex_ = 0;
+  return this;
 }
 
-void ZigzagVisualizer::paletteInputText(const std::string_view text) {
+ZigzagVisualizer *
+ZigzagVisualizer::paletteInputText(const std::string_view text) {
   paletteFilter_.append(text);
   paletteSelectedIndex_ = 0;
+  return this;
 }
 
-void ZigzagVisualizer::paletteBackspace() {
+ZigzagVisualizer *ZigzagVisualizer::paletteBackspace() {
   if (!paletteFilter_.empty()) {
     paletteFilter_.pop_back();
     paletteSelectedIndex_ = 0;
   }
+  return this;
 }
 
 std::vector<std::string> ZigzagVisualizer::paletteItems() const {
@@ -3081,43 +3107,52 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
   return filtered;
 }
 
-void ZigzagVisualizer::toggleCommandBar() {
+ZigzagVisualizer *ZigzagVisualizer::toggleCommandBar() {
   setCommandBarVisible(!commandBarVisible_);
+  return this;
 }
 
-void ZigzagVisualizer::setCommandBarVisible(const bool visible) {
+ZigzagVisualizer *ZigzagVisualizer::setCommandBarVisible(const bool visible) {
   commandBarVisible_ = visible;
   if (commandBarVisible_) {
     commandBarFeedback_.clear();
     commandBarFeedbackIsError_ = false;
   }
+  return this;
 }
 
-void ZigzagVisualizer::commandBarInputChar(const char ch) {
+ZigzagVisualizer *ZigzagVisualizer::commandBarInputChar(const char ch) {
   commandBarText_.push_back(ch);
+  return this;
 }
 
-void ZigzagVisualizer::commandBarInputText(const std::string_view text) {
+ZigzagVisualizer *
+ZigzagVisualizer::commandBarInputText(const std::string_view text) {
   commandBarText_.append(text);
+  return this;
 }
 
-void ZigzagVisualizer::setKeyHints(std::string here, std::string elsewhere) {
+ZigzagVisualizer *ZigzagVisualizer::setKeyHints(std::string here,
+                                                std::string elsewhere) {
   keyHintsHere_      = std::move(here);
   keyHintsElsewhere_ = std::move(elsewhere);
+  return this;
 }
 
-void ZigzagVisualizer::beginCellEdit() {
+ZigzagVisualizer *ZigzagVisualizer::beginCellEdit() {
   if (!engine_ || 0 == accursed_cell_focus_ ||
       !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
-    return;
+    return this;
   }
   cellEditText_  = inspectCell(static_cast<CellRef>(accursed_cell_focus_)).text;
   cellEditing_   = true;
   cellEditWhole_ = !cellEditText_.empty();
+  return this;
 }
 
-void ZigzagVisualizer::markFocus() noexcept {
+ZigzagVisualizer *ZigzagVisualizer::markFocus() noexcept {
   markedCell_ = accursed_cell_focus_;
+  return this;
 }
 
 bool ZigzagVisualizer::linkMarkedAlongX(const bool positive) {
@@ -3132,20 +3167,23 @@ bool ZigzagVisualizer::linkMarkedAlongX(const bool positive) {
   return linked;
 }
 
-void ZigzagVisualizer::commandBarBackspace() {
+ZigzagVisualizer *ZigzagVisualizer::commandBarBackspace() {
   if (!commandBarText_.empty()) {
     commandBarText_.pop_back();
   }
+  return this;
 }
 
-void ZigzagVisualizer::commandBarClear() {
+ZigzagVisualizer *ZigzagVisualizer::commandBarClear() {
   commandBarText_.clear();
   commandBarFeedback_.clear();
   commandBarFeedbackIsError_ = false;
+  return this;
 }
 
-void ZigzagVisualizer::setCommandBarText(std::string text) {
+ZigzagVisualizer *ZigzagVisualizer::setCommandBarText(std::string text) {
   commandBarText_ = std::move(text);
+  return this;
 }
 
 bool ZigzagVisualizer::navigateVQL(const std::string_view pathExpr) {
@@ -3536,9 +3574,8 @@ bool ZigzagVisualizer::executeCommandBar() {
         engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
 
     try {
-      const auto q =
-          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
-                        selector, engine_ ? &engine_->manifold() : nullptr);
+      const auto q = store_->quote(commitParent, tailRef, dimRef, label,
+                                   pinnedState, selector);
       reloadStoreVersion(q.version, q.quotationCell);
       commandBarFeedback_ = std::format(
           "Quoted structure '{}' minted as cell #{}", label, q.quotationCell);
@@ -3663,9 +3700,8 @@ bool ZigzagVisualizer::executeCommandBar() {
         engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
 
     try {
-      const auto q =
-          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
-                        selector, engine_ ? &engine_->manifold() : nullptr);
+      const auto q = store_->quote(commitParent, tailRef, dimRef, label,
+                                   pinnedState, selector);
       reloadStoreVersion(q.version, q.quotationCell);
       commandBarFeedback_ = std::format("Quoted query '{}' minted as cell #{}",
                                         label, q.quotationCell);

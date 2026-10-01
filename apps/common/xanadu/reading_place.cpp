@@ -155,8 +155,8 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto anchor    = dim(kAnchor);
   const auto active    = dim(kActive);
   const auto along     = [&](const zigzag::CellRef from,
-                         const std::optional<zigzag::DimRef> onto) {
-    return onto ? manifold.linked(from, *onto) : zigzag::noCell;
+                             const std::optional<zigzag::DimRef> onto) {
+    return onto ? manifold.linked(from, *onto) : zigzag::OptionalCell{};
   };
   const auto activeCell = along(here, active);
   for (auto cell = along(here, documents); zigzag::noCell != cell;
@@ -203,7 +203,7 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
         place.zigzagVersion = manifold.textOf(head, store);
       }
       const auto focus = zigzag::noCell == head
-                             ? zigzag::noCell
+                             ? zigzag::OptionalCell{}
                              : manifold.linked(head, *zigzagDim);
       if (zigzag::noCell != focus) {
         place.zigzagFocus = manifold.asInt64(focus).value_or(0);

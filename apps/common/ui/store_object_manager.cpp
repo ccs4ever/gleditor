@@ -36,7 +36,7 @@ void StoreObjectManager::deviceReady(
   canvas_->createPipeline(documentPipeline, false);
 }
 
-void StoreObjectManager::setVisible(const bool visible) {
+StoreObjectManager *StoreObjectManager::setVisible(const bool visible) {
   if (visible_ != visible) {
     visible_ = visible;
     if (visible_) {
@@ -44,11 +44,15 @@ void StoreObjectManager::setVisible(const bool visible) {
     }
     a11yRevision_++;
   }
+  return this;
 }
 
-void StoreObjectManager::toggle() { setVisible(!visible_); }
+StoreObjectManager *StoreObjectManager::toggle() {
+  setVisible(!visible_);
+  return this;
+}
 
-void StoreObjectManager::refresh() {
+StoreObjectManager *StoreObjectManager::refresh() {
   items_.clear();
   const auto births = store_.discoverStructureBirths(store_.latest());
   for (const auto &b : births) {
@@ -66,18 +70,19 @@ void StoreObjectManager::refresh() {
     });
   }
   a11yRevision_++;
+  return this;
 }
 
-void StoreObjectManager::createSlice() {
+StoreObjectManager *StoreObjectManager::createSlice() {
   if (onCreate_) {
     onCreate_(StructureKind::Slice);
   } else {
     const auto parent = store_.latest();
     const auto name   = "Slice " + std::to_string(store_.opCount() + 1);
     if (store_.homeCell() == zigzag::noCell) {
-      static_cast<void>(store_.sliceGenesis(parent, name));
+      std::ignore = store_.sliceGenesis(parent, name);
     } else {
-      static_cast<void>(store_.makeSlice(parent, name));
+      std::ignore = store_.makeSlice(parent, name);
     }
   }
   refresh();
@@ -87,15 +92,16 @@ void StoreObjectManager::createSlice() {
       onToggle_(last.birthOp, last.kind, true);
     }
   }
+  return this;
 }
 
-void StoreObjectManager::createXanadoc() {
+StoreObjectManager *StoreObjectManager::createXanadoc() {
   if (onCreate_) {
     onCreate_(StructureKind::Xanadoc);
   } else {
     const auto parent = store_.latest();
     const auto name   = "Document " + std::to_string(store_.opCount() + 1);
-    static_cast<void>(store_.makeXanadoc(parent, name));
+    std::ignore       = store_.makeXanadoc(parent, name);
   }
   refresh();
   if (!items_.empty() && onToggle_) {
@@ -104,11 +110,12 @@ void StoreObjectManager::createXanadoc() {
       onToggle_(last.birthOp, last.kind, true);
     }
   }
+  return this;
 }
 
-void StoreObjectManager::toggleItem(const std::size_t index) {
+StoreObjectManager *StoreObjectManager::toggleItem(const std::size_t index) {
   if (index >= items_.size()) {
-    return;
+    return this;
   }
   auto &item          = items_[index];
   const bool newState = !item.isOpen;
@@ -117,11 +124,12 @@ void StoreObjectManager::toggleItem(const std::size_t index) {
     onToggle_(item.birthOp, item.kind, newState);
   }
   a11yRevision_++;
+  return this;
 }
 
-void StoreObjectManager::closeItem(const std::size_t index) {
+StoreObjectManager *StoreObjectManager::closeItem(const std::size_t index) {
   if (index >= items_.size()) {
-    return;
+    return this;
   }
   auto &item = items_[index];
   if (item.isOpen) {
@@ -133,6 +141,7 @@ void StoreObjectManager::closeItem(const std::size_t index) {
     }
     a11yRevision_++;
   }
+  return this;
 }
 
 void StoreObjectManager::drawFrame(gleditor::FrameContext &ctx) {
