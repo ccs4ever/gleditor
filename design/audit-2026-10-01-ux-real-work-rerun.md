@@ -202,9 +202,11 @@ literal leading bracket in `--type` (`e420bc5`). Found while fixing finding 5:
 `DocumentSwitcher::describe()` pushed children through a node reference the next `add()` could leave
 dangling (`5929b08`).
 
-Still open: the accessibility actions on pouch cards are untested against a real assistive
-technology, since this build has no AccessKit; the "1" to "3" tab label seen in J5; and a `find` hit
-holds its line as scratch text, so a saved result row is a copy, as every saved row is.
+Since then: a tab names its store and branch rather than its version, which was the "1" to "3" seen
+in J5 (`3d09f06`); `find` hits and saved result rows quote the bytes they came from, by address,
+instead of copying them (`1b0f784`); the window icon moved into `assets/` (`d289ed9`). Still open:
+the accessibility actions on pouch cards are untested against a real assistive technology, since
+this build has no AccessKit.
 
 ## Not validated
 
