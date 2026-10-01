@@ -111,9 +111,11 @@ void Chronofilade::recordOp(const std::uint32_t opIndex,
 
   if (depth_[opIndex] % CheckpointInterval == 0) {
     const auto prevCP = jumpAncestor(opIndex, CheckpointInterval);
+    const auto birth =
+        store.activeXanadocOnBranch(store.segmentedOps().idOf(opIndex));
     Version base;
     if (prevCP > 0) {
-      const auto it = checkpoints_.find(prevCP);
+      const auto it = checkpoints_.find(ChronoKey{prevCP, birth});
       if (it != checkpoints_.end()) {
         base = it->second;
       }
@@ -121,11 +123,20 @@ void Chronofilade::recordOp(const std::uint32_t opIndex,
 
     OsmicWalker::walkPath(
         store.segmentedOps(), prevCP, opIndex,
-        [&store, &base](std::uint32_t, const CompactOpNode &n) {
-          store.replay(n, base);
+        [&store, &base, birth](std::uint32_t idx, const CompactOpNode &n) {
+          if (birth != 0) {
+            if (idx < store.editedBirths().size() &&
+                store.editedBirths()[idx] == birth) {
+              store.replay(n, base);
+            }
+          } else {
+            if (!store.isCellOp(idx)) {
+              store.replay(n, base);
+            }
+          }
         });
 
-    checkpoints_[opIndex] = base;
+    checkpoints_[ChronoKey{opIndex, birth}] = base;
   }
 }
 
@@ -143,41 +154,77 @@ void Chronofilade::indexSpool(const Store &store) {
 }
 
 Version Chronofilade::rebuildVersion(const std::uint32_t opIndex,
-                                     const Store &store) const {
+                                     const Store &store,
+                                     std::uint32_t xanadocBirth) const {
   if (0 == opIndex) {
     return Version{};
   }
   if (opIndex >= depth_.size()) {
     return Version{};
   }
+  if (0 == xanadocBirth) {
+    xanadocBirth =
+        store.activeXanadocOnBranch(store.segmentedOps().idOf(opIndex));
+  }
 
   const auto d        = depth_[opIndex];
   const auto distToCP = d % CheckpointInterval;
   const auto cp       = jumpAncestor(opIndex, distToCP);
 
+  bool foundCp = false;
   Version doc;
   if (cp > 0) {
-    const auto it = checkpoints_.find(cp);
+    const auto it = checkpoints_.find(ChronoKey{cp, xanadocBirth});
     if (it != checkpoints_.end()) {
-      doc = it->second;
+      doc     = it->second;
+      foundCp = true;
     }
   }
 
-  if (0 == distToCP) {
+  if (0 == distToCP && foundCp) {
     return doc;
   }
 
-  OsmicWalker::walkPath(store.segmentedOps(), cp, opIndex,
-                        [&store, &doc](std::uint32_t, const CompactOpNode &n) {
-                          store.replay(n, doc);
-                        });
+  const auto startFrom = (!foundCp && cp > 0) ? 0 : cp;
+  if (0 == startFrom) {
+    OsmicWalker::walkAncestral(
+        store.segmentedOps(), opIndex,
+        [&store, &doc, xanadocBirth](std::uint32_t idx,
+                                     const CompactOpNode &n) {
+          if (xanadocBirth != 0) {
+            if (idx < store.editedBirths().size() &&
+                store.editedBirths()[idx] == xanadocBirth) {
+              store.replay(n, doc);
+            }
+          } else {
+            if (!store.isCellOp(idx)) {
+              store.replay(n, doc);
+            }
+          }
+        });
+  } else {
+    OsmicWalker::walkPath(store.segmentedOps(), startFrom, opIndex,
+                          [&store, &doc, xanadocBirth](std::uint32_t idx,
+                                                       const CompactOpNode &n) {
+                            if (xanadocBirth != 0) {
+                              if (idx < store.editedBirths().size() &&
+                                  store.editedBirths()[idx] == xanadocBirth) {
+                                store.replay(n, doc);
+                              }
+                            } else {
+                              if (!store.isCellOp(idx)) {
+                                store.replay(n, doc);
+                              }
+                            }
+                          });
+  }
 
   return doc;
 }
 
 bool Chronofilade::advance(Version &document, const std::uint32_t fromIndex,
-                           const std::uint32_t toIndex,
-                           const Store &store) const {
+                           const std::uint32_t toIndex, const Store &store,
+                           const std::uint32_t xanadocBirth) const {
   if (fromIndex == toIndex) {
     return true;
   }
@@ -185,32 +232,56 @@ bool Chronofilade::advance(Version &document, const std::uint32_t fromIndex,
   if (lca == fromIndex) {
     return OsmicWalker::walkPath(
         store.segmentedOps(), fromIndex, toIndex,
-        [&store, &document](std::uint32_t, const CompactOpNode &n) {
-          store.replay(n, document);
+        [&store, &document, xanadocBirth](std::uint32_t idx,
+                                          const CompactOpNode &n) {
+          if (xanadocBirth != 0) {
+            if (idx < store.editedBirths().size() &&
+                store.editedBirths()[idx] == xanadocBirth) {
+              store.replay(n, document);
+            }
+          } else {
+            if (!store.isCellOp(idx)) {
+              store.replay(n, document);
+            }
+          }
         });
   }
 
-  document = rebuildVersion(toIndex, store);
+  document = rebuildVersion(toIndex, store, xanadocBirth);
   return true;
 }
 
 EdlTransform Chronofilade::composePath(const std::uint32_t fromAncestor,
                                        const std::uint32_t toDescendant,
-                                       const Store &store) const {
+                                       const Store &store,
+                                       const std::uint32_t xanadocBirth) const {
   if (fromAncestor == toDescendant || 0 == toDescendant) {
     return EdlTransform::identity(0);
   }
 
-  const auto startDoc = rebuildVersion(fromAncestor, store);
+  const auto startDoc = rebuildVersion(fromAncestor, store, xanadocBirth);
   auto transform      = EdlTransform::identity(startDoc.length());
 
   const bool walked = OsmicWalker::walkPath(
       store.segmentedOps(), fromAncestor, toDescendant,
-      [&](std::uint32_t, const CompactOpNode &n) {
+      [&](std::uint32_t idx, const CompactOpNode &n) {
+        if (xanadocBirth != 0) {
+          if (idx >= store.editedBirths().size() ||
+              store.editedBirths()[idx] != xanadocBirth) {
+            return;
+          }
+        } else {
+          if (store.isCellOp(idx)) {
+            return;
+          }
+        }
         std::vector<PrimediaSpan> resolved;
         if (n.kind == OpKind::Transclude && n.span().empty() &&
             n.sourceOpIndex > 0) {
-          const auto srcDoc = rebuildVersion(n.sourceOpIndex, store);
+          const auto srcBirth = (store.editedBirths().size() > n.sourceOpIndex)
+                                    ? store.editedBirths()[n.sourceOpIndex]
+                                    : 0;
+          const auto srcDoc = rebuildVersion(n.sourceOpIndex, store, srcBirth);
           resolved          = srcDoc.spansFor(n.sourceAt, n.sourceLength);
         }
         const auto stepTransform =
@@ -225,10 +296,10 @@ EdlTransform Chronofilade::composePath(const std::uint32_t fromAncestor,
   return transform;
 }
 
-bool Chronofilade::verifyAgainstFullRebuild(const std::uint32_t opIndex,
-                                            const Store &store,
-                                            const Version &fullRebuilt) const {
-  const auto fast = rebuildVersion(opIndex, store);
+bool Chronofilade::verifyAgainstFullRebuild(
+    const std::uint32_t opIndex, const Store &store, const Version &fullRebuilt,
+    const std::uint32_t xanadocBirth) const {
+  const auto fast = rebuildVersion(opIndex, store, xanadocBirth);
   if (fast.length() != fullRebuilt.length()) {
     return false;
   }

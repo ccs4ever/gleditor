@@ -462,8 +462,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const float phase, const float zNudge) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
-  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
-  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
+  const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan   = std::abs(farSide.top.y - farSide.bottom.y);
 
   // How many strands comes from the taller of the two ends, so that end is
   // drawn at its full reach rather than reduced to whatever the other end
@@ -1043,7 +1043,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     auto &view             = renderer->appState()->view;
     const float aspect     = (view.screenHeight > 0 && view.screenWidth > 0)
                                  ? static_cast<float>(view.screenWidth) /
-                                   static_cast<float>(view.screenHeight)
+                                       static_cast<float>(view.screenHeight)
                                  : fallbackAspect;
     const float fovRad     = glm::radians(view.fov);
     const float tanHalfFov = std::tan(fovRad * 0.5F);
@@ -1148,11 +1148,11 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   docBody.position        = docPos;
   docBody.restingPosition = docPos;
   docBody.width           = docHalfW * 2.0F;
-  docBody.height          = doc->page(0)
-                                ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
-                                : fallbackDocHeight;
-  docBody.isForeground    = true;
-  docBody.pinned          = true;
+  docBody.height = doc->page(0)
+                       ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
+                       : fallbackDocHeight;
+  docBody.isForeground = true;
+  docBody.pinned       = true;
   tensionEngine_.setBody(docBody);
 
   // 2. Add collinear alignment constraint
@@ -1989,7 +1989,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable = true;
+    node.focusable   = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }

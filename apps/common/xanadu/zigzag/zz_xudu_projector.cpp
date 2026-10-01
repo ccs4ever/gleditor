@@ -826,9 +826,9 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
 
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
-                          &localScroll](const xanadu::PrimediaSpan &span) {
+                            &localScroll](const xanadu::PrimediaSpan &span) {
     return span.isLocal() ? gleditor::refOf(&localScroll)
-                            : store.scroll(span.scroll);
+                          : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;

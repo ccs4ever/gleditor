@@ -75,7 +75,8 @@ struct alignas(kCacheLineBytes) CompactOpNode {
   }
 
   [[nodiscard]] Op toOp(const MicroversionId &parentVersion,
-                        const MicroversionId &sourceVersion) const {
+                        const MicroversionId &sourceVersion,
+                        const MicroversionId &contextVersion = {}) const {
     Op op;
     op.kind         = kind;
     op.parent       = parentVersion;
@@ -89,6 +90,13 @@ struct alignas(kCacheLineBytes) CompactOpNode {
     op.link         = linkId;
     op.flags        = flags;
     op.value        = value;
+    op.context      = contextVersion;
+    if (kind == OpKind::Transclude) {
+      op.to = 0;
+    } else if (kind == OpKind::Structure &&
+               structureVerbOf(flags) != StructureVerb::Make) {
+      op.sourceAt = 0;
+    }
     return op;
   }
 
@@ -114,8 +122,9 @@ struct alignas(kCacheLineBytes) CompactOpNode {
   }
 
   static CompactOpNode fromOp(const Op &op, const std::uint32_t parentIdx,
-                              const std::uint32_t sourceIdx = 0,
-                              const std::uint16_t branchOrd = 0) {
+                              const std::uint32_t sourceIdx  = 0,
+                              const std::uint16_t branchOrd  = 0,
+                              const std::uint32_t contextIdx = 0) {
     CompactOpNode node;
     node.parentIndex   = parentIdx;
     node.branchOrdinal = branchOrd;
@@ -139,11 +148,45 @@ struct alignas(kCacheLineBytes) CompactOpNode {
     node.linkId = static_cast<std::uint32_t>(op.link);
     node.flags  = op.flags;
     node.value  = op.value;
+
+    if (contextIdx != 0) {
+      if (node.kind == OpKind::Structure) {
+        if (structureVerbOf(node.flags) == StructureVerb::Make) {
+          node.sourceOpIndex = contextIdx;
+        } else {
+          node.sourceAt = contextIdx;
+        }
+      } else if (node.kind == OpKind::Transclude) {
+        node.to = contextIdx;
+      } else {
+        node.sourceOpIndex = contextIdx;
+      }
+    }
     return node;
   }
 
   bool operator==(const CompactOpNode &) const = default;
 };
+
+[[nodiscard]] constexpr std::uint32_t
+contextOf(const CompactOpNode &node) noexcept {
+  switch (node.kind) {
+  case OpKind::Structure:
+    if (structureVerbOf(node.flags) == StructureVerb::Make) {
+      return node.sourceOpIndex;
+    }
+    return node.sourceAt;
+  case OpKind::Transclude:
+    return node.to;
+  default:
+    return node.sourceOpIndex;
+  }
+}
+
+[[nodiscard]] constexpr std::uint32_t
+subjectOf(const CompactOpNode &node) noexcept {
+  return node.sourceOpIndex;
+}
 
 static_assert(sizeof(CompactOpNode) == kCacheLineBytes,
               "CompactOpNode must be exactly 64 bytes (1 cache line)");

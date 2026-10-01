@@ -47,7 +47,7 @@ inline constexpr std::array<std::uint8_t, 12> opsSegmentSignature{
 /// is host-ordered by construction; the signature is a byte array and would
 /// pass, but a version of 1 read the wrong way round is 16,777,216, which is
 /// not a version this reader knows.
-inline constexpr std::uint32_t opsSegmentFormatVersion = 1;
+inline constexpr std::uint32_t opsSegmentFormatVersion = 2;
 
 /**
  * @brief Bytes from the start of the file to the first node. 65,536.

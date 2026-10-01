@@ -244,7 +244,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
   doc.meta.name = "Clone Sync Test";
   doc.focus     = 2;
   doc.view      = {
-           .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
+      .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
   doc.cells[1] = Cell{.id         = 1,
                       .data       = std::string("Original Text"),
                       .dimensions = {{"d.clone", LinkPairs{.pos = 2}}}};

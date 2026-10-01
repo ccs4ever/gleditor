@@ -29,27 +29,29 @@ inline constexpr std::string_view binaryOpsMagicPrefix = "\x7fXOP";
  * parses is a permanent tax paid to protect data nobody has. Version 1 wrote a
  * branch as a literal ASCII letter, which is why a branch could only ever have
  * one; version 2 wrote the ordinal instead; version 3 wrote Structure
- * operations with local spool indices for link endpoints and source. All three
- * are refused now, by number, rather than read.
+ * operations with local spool indices for link endpoints and source; version 4
+ * omitted context microversion names. All four are refused now, by number,
+ * rather than read.
  */
 enum class OpsSpoolVersion : std::uint8_t {
   StandardOsmicText =
-      0, ///< Standard human-readable OSMIC text format (version 0).
+      0,           ///< Standard human-readable OSMIC text format (version 0).
+  OsmicTextV1 = 1, ///< Human-readable OSMIC text format with explicit version
+                   ///< and context.
   /**
-   * Version 4: Structure addresses (source, SetLink dimension and target, and
-   * OpHandle value target) travel by microversion name rather than local spool
-   * index, surviving publication and foreign branch renumbering. Splice
-   * carries at and length offsets.
+   * Version 5: Structure addresses (source, SetLink dimension and target, and
+   * OpHandle value target) and context target travel by microversion name for
+   * every edit, alongside the independent transclusion source name.
    */
-  CompactBinaryV4 = 4,
+  CompactBinaryV5 = 5,
 };
 
 /// 4-byte magic prefix + 1-byte version for compact binary ops spools. What is
 /// written now, and the only binary version that is read.
-inline constexpr std::string_view binaryOpsMagicV4 = "\x7fXOP\x04";
+inline constexpr std::string_view binaryOpsMagicV5 = "\x7fXOP\x05";
 
 /// The magic a new store is written with.
-inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV4;
+inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV5;
 
 /// Human-readable name for an operations spool version.
 const char *opsSpoolVersionName(OpsSpoolVersion version);
@@ -84,17 +86,18 @@ bool readMicroversionId(std::istream &in, MicroversionId &id);
 struct OpRecord {
   MicroversionId produces;
   Op op;
-  MicroversionId structureDimension;
-  MicroversionId structureTarget;
-  MicroversionId structureValueTarget;
+  MicroversionId structureDimension{};
+  MicroversionId structureTarget{};
+  MicroversionId structureValueTarget{};
+  MicroversionId context{};
 
   bool operator==(const OpRecord &) const = default;
 };
 
-/// Write operations in compact binary format (version 4).
+/// Write operations in compact binary format (version 5).
 void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops);
 
-/// Read operations from compact binary format, version 4, in the order the
+/// Read operations from compact binary format, version 5, in the order the
 /// file holds them -- which the caller needs, since a record may name its
 /// state only relative to the one before it.
 void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops);

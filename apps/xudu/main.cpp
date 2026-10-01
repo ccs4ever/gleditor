@@ -51,6 +51,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "common/ui/quotation_builder_overlay.hpp"
+#include "common/ui/store_object_manager.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/kinetic_tether.hpp"
 #include "common/xanadu/microversion.hpp"
@@ -107,6 +108,8 @@ using xudu::TranscopyrightLogic;
 using xudu::TranscopyrightOverlay;
 using xudu::WireframeHullOverlay;
 namespace crypto = xudu::crypto;
+using xanadu::StoreObjectManager;
+using xanadu::StructureKind;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
@@ -396,19 +399,21 @@ public:
 
   /// Open @p version as another document beside whatever is already there.
   void showAlongside(const MicroversionId &version, const float depthZ = 0.0F,
-                     const std::size_t storeIndex = 0) {
-    renderer->push(
-        RenderItemOpenDoc(session.sourceFor(version, storeIndex), depthZ));
-    renderer->runWithState([this, version, storeIndex](RenderState &rState) {
-      if (rState.docs.empty()) {
-        return;
-      }
-      primaryDocument_ = rState.docs.front();
-      rState.docs.back()->addObserver(&session);
-      session.viewOpened(version, storeIndex);
-      map.setCurrent(session.views().front().version);
-      syncMediaWidgets(rState);
-    });
+                     const std::size_t storeIndex     = 0,
+                     const std::uint32_t focusedBirth = 0) {
+    renderer->push(RenderItemOpenDoc(
+        session.sourceFor(version, storeIndex, focusedBirth), depthZ));
+    renderer->runWithState(
+        [this, version, storeIndex, focusedBirth](RenderState &rState) {
+          if (rState.docs.empty()) {
+            return;
+          }
+          primaryDocument_ = rState.docs.front();
+          rState.docs.back()->addObserver(&session);
+          session.viewOpened(version, storeIndex, focusedBirth);
+          map.setCurrent(session.views().front().version);
+          syncMediaWidgets(rState);
+        });
   }
 
   [[nodiscard]] std::optional<glm::mat4> presentationTransform() const {
@@ -741,11 +746,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret   = renderer->editCaret();
-      const auto which    = nullptr != caret && caret->active() &&
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                                ? caret->documentIndex()
-                                : 0U;
+                             ? caret->documentIndex()
+                             : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -1110,7 +1115,7 @@ public:
       }
       auto *const caret   = renderer->editCaret();
       const auto which    = (nullptr != caret && caret->active() &&
-                          caret->documentIndex() < session.views().size())
+                             caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto storeIdx = session.storeIndexOf(which);
@@ -1134,11 +1139,11 @@ public:
                               std::istreambuf_iterator<char>());
       auto *const caret   = renderer->editCaret();
       const auto docIdx   = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                             caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto at       = (nullptr != caret && caret->active() &&
-                       caret->documentIndex() == docIdx)
+                             caret->documentIndex() == docIdx)
                                 ? caret->byteOffset()
                                 : 0U;
       const auto detected = gleditor::MimeDetector::detectFile(filePath);
@@ -2534,6 +2539,60 @@ int main(const int argc, char **argv) {
           }
         });
 
+    StoreObjectManager storeObjectManager(
+        session->store(), "Sans 10",
+        [&views, &session](const std::uint32_t birthOp,
+                           const StructureKind /*kind*/,
+                           const bool shouldBeOpen) {
+          if (!shouldBeOpen) {
+            for (std::size_t i = 0; i < session->views().size(); ++i) {
+              if (session->views()[i].focusedBirth == birthOp) {
+                views.closeDocument(static_cast<std::uint32_t>(i));
+                break;
+              }
+            }
+          } else {
+            const auto ver = session->store().latest();
+            views.showAlongside(ver, 0.0F, 0, birthOp);
+          }
+        },
+        [&views, &session](const StructureKind kind) {
+          auto &st          = session->store();
+          const auto parent = st.latest();
+          MicroversionId newVer;
+          std::uint32_t newBirth = 0;
+          if (kind == StructureKind::Slice) {
+            const auto name = "Slice " + std::to_string(st.opCount() + 1);
+            if (st.homeCell() == zigzag::noCell) {
+              newVer = st.sliceGenesis(parent, name);
+            } else {
+              newVer = st.makeSlice(parent, name);
+            }
+            newBirth = static_cast<std::uint32_t>(st.opCount());
+          } else {
+            const auto name = "Document " + std::to_string(st.opCount() + 1);
+            newVer          = st.makeXanadoc(parent, name);
+            newBirth        = static_cast<std::uint32_t>(st.opCount());
+          }
+          views.showAlongside(newVer, 0.0F, 0, newBirth);
+        },
+        [&views, &session](const std::uint32_t birthOp) {
+          for (std::size_t i = 0; i < session->views().size(); ++i) {
+            if (session->views()[i].focusedBirth == birthOp) {
+              views.closeDocument(static_cast<std::uint32_t>(i));
+              break;
+            }
+          }
+        },
+        [&session](const std::uint32_t birthOp) -> bool {
+          for (const auto &v : session->views()) {
+            if (v.focusedBirth == birthOp) {
+              return true;
+            }
+          }
+          return false;
+        });
+
     state->wheelHandler = [&views](float /*wx*/, float wy,
                                    std::uint16_t /*mods*/) -> bool {
       if (!views.onionSkinMode()) {
@@ -2597,6 +2656,8 @@ int main(const int argc, char **argv) {
       views.closeDocument(docIndex);
     });
     docSwitcher->setNewDocHandler([&views]() { views.newDocument(); });
+    docSwitcher->setManagerHandler(
+        [&storeObjectManager]() { storeObjectManager.toggle(); });
     docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
       renderer->runWithState([&renderer, docIndex](RenderState &rState) {
         if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
@@ -2752,6 +2813,7 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
     state->accessibility->addSource(&quotationOverlay);
+    state->accessibility->addSource(&storeObjectManager);
     state->accessibility->addSource(radialMenu.get());
     state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
@@ -2801,6 +2863,7 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&pouchDrawer);
     renderer->addFrameContributor(&swarmTelescope);
     renderer->addFrameContributor(&quotationOverlay);
+    renderer->addFrameContributor(&storeObjectManager);
 #ifdef XUZZ_BUILD
     gleditor::CompositeModalInput compositeModal(
         {&publishForm, zigzagPresentation.get(), &quotationOverlay});
@@ -2816,6 +2879,7 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
     renderer->addPickObserver(&quotationOverlay);
+    renderer->addPickObserver(&storeObjectManager);
 
     state->mouseDownHandler = [&kineticTetherEngine, &session, renderer, state
 #ifdef XUZZ_BUILD
