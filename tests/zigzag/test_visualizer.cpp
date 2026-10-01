@@ -7,8 +7,8 @@
 
 #include <gleditor/doc.hpp>
 
+#include "common/xanadu/zigzag/zzstructure.hpp"
 #include "xudu/core/format.hpp"
-#include "zigzag/core/zzstructure.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
 
 using namespace zigzag;

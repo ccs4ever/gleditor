@@ -3,8 +3,8 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
-#include "core/format_resolver.hpp"
-#include "core/zzcore.hpp"
+#include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,6 +17,7 @@
 #include <glm/ext/matrix_transform.hpp>
 
 #include <gleditor/color.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
@@ -84,6 +85,9 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
+  if (!presentationVisible_) {
+    return false;
+  }
   return std::ranges::any_of(visible_cells_, [](const auto &entry) {
     const auto &cell = entry.second;
     return std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
@@ -1254,6 +1258,9 @@ bool ZigzagVisualizer::picked(const render::PickingResult &pick,
 }
 
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  if (!presentationVisible_) {
+    return;
+  }
   if (presentationTransformResolver_) {
     const auto transform = presentationTransformResolver_();
     if (!transform) {
@@ -1297,7 +1304,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // --- 1. Draw 3D Connection Beams ---
   beams_->clear();
-  std::vector<std::pair<CellID, CellID>> drawnEdges;
+  drawnEdges_.clear();
 
   if (engine_) {
     const auto &manifold = engine_->manifold();
@@ -1335,10 +1342,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
           const auto edge =
               std::pair{std::min(id, static_cast<CellID>(neighborId)),
                         std::max(id, static_cast<CellID>(neighborId))};
-          if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+          if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
             continue;
           }
-          drawnEdges.push_back(edge);
+          drawnEdges_.push_back(edge);
 
           const auto &neighborCell = visible_cells_.at(neighborId);
           const auto visual        = dimensionVisual(dimName);
@@ -1371,10 +1378,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
             const auto edge =
                 std::pair{std::min(id, static_cast<CellID>(neighborId)),
                           std::max(id, static_cast<CellID>(neighborId))};
-            if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+            if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
               continue;
             }
-            drawnEdges.push_back(edge);
+            drawnEdges_.push_back(edge);
 
             const auto &neighborCell = visible_cells_.at(neighborId);
             const float edgeAlpha =
@@ -1407,6 +1414,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     pickTargets_.clear();
     pickTargetVersion_ = pickVersion;
   }
+
+  const auto vpPresentation = ctx.viewProjection * presentation_transform_;
 
   for (const auto &[id, cell] : visible_cells_) {
     if (cell.current_alpha < 0.02F) {
@@ -1448,6 +1457,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const auto &layout     = cellLayout(id, cell, isFocus);
     const float nodeWidth  = layout.width;
     const float nodeHeight = layout.height;
+
+    const auto cellMvp =
+        vpPresentation * glm::translate(glm::mat4(1.0F), cell.current_pos);
+    if (!isFocus &&
+        outsideFrustum(cellMvp, nodeWidth / 2.0F, nodeHeight / 2.0F, 10.0F)) {
+      continue;
+    }
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -2262,6 +2278,9 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
       if (vortex_host_->dispatchAction(
               actionName, static_cast<CellRef>(accursed_cell_focus_),
               current_view_, newFocus)) {
+        if (engine_) {
+          engine_->syncIncremental();
+        }
         if (newFocus != zigzag::noCell) {
           navigateFocusTo(static_cast<CellID>(newFocus));
           return true;

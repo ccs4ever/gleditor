@@ -17,9 +17,9 @@
 
 #include <gleditor/text_source.hpp>
 
-#include "xudu/core/format.hpp"
-#include "xudu/core/system_docs.hpp"
-#include "xudu/core/torrent.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace xudu {
 

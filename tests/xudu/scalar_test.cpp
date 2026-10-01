@@ -19,10 +19,10 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/scalar.hpp>
 #include <xudu/core/store.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 

@@ -13,7 +13,7 @@
 
 #include <gleditor/render/types.hpp>
 
-#include "xudu/core/system_docs.hpp"
+#include "common/xanadu/system_docs.hpp"
 
 namespace xudu {
 

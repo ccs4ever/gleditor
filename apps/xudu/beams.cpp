@@ -25,9 +25,9 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
-#include "xudu/core/anchor_lanes.hpp"
-#include "xudu/core/framing.hpp"
+#include "common/xanadu/framing.hpp"
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
@@ -1444,27 +1444,9 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
              !state.docs[end.doc]->isFullyLoaded();
     };
 
-    struct MarginAnchor {
-      Edge edge;
-      std::uint32_t colour{};
-      std::uint32_t tagId{};
-      bool farEnd{};
-      bool isActive{};
-      std::size_t docIndex{};
-      bool towardsRight{};
-      std::uint64_t linkId{};
-      ProminenceTier tier{};
-      LinkType type{};
-      /// Whether this anchor belongs to an emergent transclusion rather than
-      /// to a link. A transclusion has no link id to be told apart by, so
-      /// without this every transclusion along one margin would answer to the
-      /// same one and be joined into a single multi-span link that nobody
-      /// made.
-      bool transclusion{};
-    };
-
-    std::vector<MarginAnchor> allAnchors;
-    allAnchors.reserve((strands.size() + transclusionStrands.size()) * 2);
+    allAnchors_.clear();
+    allAnchors_.reserve((strands.size() + transclusionStrands.size()) * 2);
+    auto &allAnchors = allAnchors_;
 
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];

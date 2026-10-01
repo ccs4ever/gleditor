@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/vortex.hpp"
 #include "xudu/core/vortex_stdlib.hpp"
-#include "zigzag/core/arena_manifold.hpp"
 
 namespace {
 

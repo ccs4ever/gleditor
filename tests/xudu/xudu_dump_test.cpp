@@ -19,12 +19,12 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <xudu/core/binary_ops.hpp>
 #include <xudu/core/compact_op.hpp>
 #include <xudu/core/segmented_ops_spool.hpp>
 #include <xudu/core/store.hpp>
 #include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 

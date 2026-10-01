@@ -10,14 +10,14 @@
 #include <cstring>
 
 #include "../lib/mocks/device.hpp"
+#include "common/xanadu/zigzag/compact_zzcell.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/font.hpp"
 #include "xudu/core/format.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/store.hpp"
-#include "zigzag/core/compact_zzcell.hpp"
-#include "zigzag/core/unified_transclusion_engine.hpp"
+#include "zigzag/unified_transclusion_engine.hpp"
 
 using namespace zigzag;
 

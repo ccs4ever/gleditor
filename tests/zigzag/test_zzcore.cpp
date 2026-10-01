@@ -13,8 +13,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "zigzag/core/zzcore.hpp"
-#include "zigzag/core/zzstructure.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 
 using namespace zigzag;
 using namespace zigzag::zzcore;

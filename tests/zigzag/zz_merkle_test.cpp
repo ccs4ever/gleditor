@@ -5,9 +5,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 #include <xudu/core/merkle_ledger.hpp>
-#include <zigzag/core/zz_xudu_projector.hpp>
-#include <zigzag/core/zzstructure.hpp>
 
 namespace zigzag {
 namespace {

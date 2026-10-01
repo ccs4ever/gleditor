@@ -8,16 +8,16 @@
 #include <stdexcept>
 #include <variant>
 
+#include "common/xanadu/zigzag/manifold.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 #include "xudu/core/link_package.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/scroll.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm.hpp"
-#include "zigzag/core/manifold.hpp"
-#include "zigzag/core/zz_xudu_projector.hpp"
-#include "zigzag/core/zzcore.hpp"
-#include "zigzag/core/zzstructure.hpp"
 
 using namespace zigzag;
 

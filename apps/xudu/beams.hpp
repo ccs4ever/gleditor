@@ -39,13 +39,13 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
 #include "common/xanadu/system_docs.hpp"
-#include "xudu/core/anchor_lanes.hpp"
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/tension_layout.hpp"
+#include "common/xanadu/tension_layout.hpp"
 #include "xudu/session.hpp"
 
 namespace xudu {
@@ -554,6 +554,22 @@ private:
   SpanfiladeCacheSignature spanfiladeSignature_{};
   bool spanfiladeClean_{false};
   int cellRadius_{3};
+
+  struct MarginAnchor {
+    Edge edge;
+    std::uint32_t colour{};
+    std::uint32_t tagId{};
+    bool farEnd{};
+    bool isActive{};
+    std::size_t docIndex{};
+    bool towardsRight{};
+    std::uint64_t linkId{};
+    ProminenceTier tier{};
+    LinkType type{};
+    bool transclusion{};
+  };
+
+  std::vector<MarginAnchor> allAnchors_;
 };
 
 } // namespace xudu

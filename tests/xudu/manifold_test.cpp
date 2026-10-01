@@ -23,11 +23,11 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
 #include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 

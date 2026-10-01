@@ -23,12 +23,12 @@
 #include <string_view>
 #include <vector>
 
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <xudu/core/compact_op.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
-#include <zigzag/core/arena_manifold.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 

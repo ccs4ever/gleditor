@@ -9,12 +9,12 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "core/manifold.hpp"
-#include "core/unified_transclusion_engine.hpp"
-#include "core/zz_xudu_projector.hpp"
-#include "core/zzcore.hpp"
-#include "core/zzstructure.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+#include "zigzag/unified_transclusion_engine.hpp"
 
 #include <array>
 #include <chrono>
@@ -313,6 +313,12 @@ public:
   [[nodiscard]] glm::vec3 presentationOrigin() const noexcept {
     return presentation_origin_;
   }
+  void setPresentationVisible(const bool visible) noexcept {
+    presentationVisible_ = visible;
+  }
+  [[nodiscard]] bool presentationVisible() const noexcept {
+    return presentationVisible_;
+  }
 
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(const std::string &text = "",
@@ -474,6 +480,7 @@ private:
   glm::mat4 presentation_transform_{1.0F};
   PresentationTransformResolver presentationTransformResolver_;
   PresentationOriginResolver presentationOriginResolver_;
+  bool presentationVisible_{true};
   float depth_tier_{0.0F};
   float depth_tier_opacity_{1.0F};
   xanadu::ZigzagPresentationConfig presentation_config_{};
@@ -488,6 +495,7 @@ private:
   std::unique_ptr<gleditor::Canvas> worldCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
+  std::vector<std::pair<CellID, CellID>> drawnEdges_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;
   std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
       pickTargets_;

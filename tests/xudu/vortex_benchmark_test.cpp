@@ -10,8 +10,8 @@
 #include <iostream>
 #include <vector>
 
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "xudu/core/vortex.hpp"
-#include "zigzag/core/arena_manifold.hpp"
 
 namespace {
 

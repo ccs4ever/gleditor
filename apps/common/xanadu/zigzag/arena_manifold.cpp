@@ -9,6 +9,7 @@
 
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag {
 
@@ -589,7 +590,17 @@ std::optional<Promoted> promote(xanadu::Store &store,
   order.push_back(root);
   seen.insert(root);
   for (std::size_t i = 0; i < order.size(); i++) {
+    // Only newly invented ephemeral cells (and the promotion root) need their
+    // neighbors discovered and promoted. Base cells reached through boundary
+    // links are already in the store, so expanding them would walk the entire
+    // document manifold.
+    if (order[i] != root && !isEphemeral(order[i])) {
+      continue;
+    }
     for (const auto &edge : from.dimensionsOf(order[i])) {
+      if (from.textOf(edge.dim) == "d.dims") {
+        continue;
+      }
       for (const CellRef next : {edge.dim, edge.pos, edge.neg}) {
         if (noCell != next && from.contains(next) && seen.insert(next).second) {
           order.push_back(next);
@@ -669,23 +680,35 @@ std::optional<Promoted> promote(xanadu::Store &store,
   // to let a caller avoid.
   auto known = store.rebuildManifold(out.version);
   for (const CellRef arena : order) {
+    if (!from.holdsOwn(arena)) {
+      continue;
+    }
     for (const auto &edge : from.dimensionsOf(arena)) {
       // Only the posward side: the negward one is the same edge read from the
       // other end, and setLink() maintains both.
       if (noCell == edge.pos) {
         continue;
       }
-      const auto dim = real.find(edge.dim);
-      const auto to  = real.find(edge.pos);
-      if (dim == real.end() || to == real.end()) {
+      DimRef dimCell = noCell;
+      if (const auto found = real.find(edge.dim); found != real.end()) {
+        dimCell = found->second;
+      } else {
+        const std::string dimName = from.textOf(edge.dim);
+        if (!dimName.empty()) {
+          dimCell = DimensionRegistry::instance().getOrCreate(
+              store, out.version, known, dimName);
+          real.emplace(edge.dim, dimCell);
+        }
+      }
+      const auto to = real.find(edge.pos);
+      if (dimCell == noCell || to == real.end()) {
         continue;
       }
-      out.version = store.setLink(out.version, real.at(arena), dim->second,
-                                  false, to->second, &known);
+      out.version = store.setLink(out.version, real.at(arena), dimCell, false,
+                                  to->second, &known);
       known.advance(store, out.version);
     }
   }
-
   return out;
 }
 
