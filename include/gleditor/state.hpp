@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <deque>
 #include <functional>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
@@ -59,6 +61,32 @@ struct AppState {
    * answer, and typing waits for the reflow it causes, so what the next step
    * sees is what the last one produced.
    */
+  /**
+   * @brief One input event a script makes, handled by the event loop exactly
+   *        as the same event from the platform would be: the same modal
+   *        first refusal, key table, mouse handlers and click and drag state.
+   *
+   * Decoded rather than an SDL_Event, so that SDL 2 and 3 share one path.
+   */
+  struct SyntheticInput {
+    enum class Kind : std::uint8_t {
+      KeyDown,
+      Motion,
+      ButtonDown,
+      ButtonUp,
+      Wheel
+    };
+    Kind kind{};
+    int x{}; ///< Pointer events: window pixels, top-down.
+    int y{};
+    int scancode{};        ///< KeyDown.
+    std::uint32_t mods{};  ///< KeyDown: gleditor::Mod; Wheel: SDL key mods.
+    std::uint8_t button{}; ///< ButtonDown and ButtonUp: 1 left, 3 right.
+    std::uint32_t held{};  ///< Motion: the buttons held, as SDL's mask.
+    float wheelX{};        ///< Wheel: horizontal delta.
+    float wheelY{};        ///< Wheel: vertical delta.
+  };
+
   struct AutomationStep {
     enum class Kind : std::uint8_t {
       Pick,    ///< Report what is at a pixel.
@@ -68,6 +96,7 @@ struct AppState {
       Command, ///< Run a bound command by name.
       Press,   ///< A key a modal takes: tab, enter, escape and friends.
       Capture, ///< Write the frame drawn for this point in the script.
+      Input,   ///< Make one input event; see SyntheticInput.
     };
     Kind kind{};
     int x{}; ///< Pick and click: the pixel.
@@ -82,10 +111,26 @@ struct AppState {
     /// --type's value, stripped from text above. Zero -- the default, and
     /// every --type before this existed -- means plain text.
     gleditor::DecorationMask decorations{};
+    SyntheticInput input{}; ///< Input: the event.
   };
   /// The script, in command line order. Written before the render thread
   /// starts and only read after.
   std::vector<AutomationStep> script;
+
+  /// Script input waiting for the event loop, and how much of it has been
+  /// handled: queueSynthetic() answers the count a step waits for.
+  std::mutex syntheticGuard;
+  std::deque<SyntheticInput> syntheticQueue;
+  std::uint64_t syntheticQueued{};
+  std::atomic<std::uint64_t> syntheticHandled;
+
+  /// Queue @p input for the event loop; answers the syntheticHandled value
+  /// at which it has been handled.
+  std::uint64_t queueSynthetic(const SyntheticInput &input) {
+    const std::scoped_lock locker(syntheticGuard);
+    syntheticQueue.push_back(input);
+    return ++syntheticQueued;
+  }
 
   /// Whether the script asks for any picking report, which is what decides
   /// whether hovering is reported: a run that named pixels wants those and not
@@ -215,6 +260,23 @@ struct AppState {
    * If set and returns true, consumes the mouse button down event.
    */
   std::function<bool(int mx, int my, std::uint8_t button)> mouseDownHandler;
+  /**
+   * @brief Whether typed text goes to the documents' caret right now.
+   *
+   * Unset means always. A program with a second pane that takes keys -- xuzz's
+   * ZigZag -- answers false while that pane has the keyboard, so that a
+   * letter bound to a command there is not also typed into the text.
+   */
+  std::function<bool()> documentTakesText;
+  /**
+   * @brief Asked on the render thread when a left press lands inside the
+   *        selection, at byte @p offset of document @p docIndex and window
+   *        pixel @p x, @p y: whether the program picks the selection up to
+   *        drag it. False, or unset, starts a new selection there instead.
+   */
+  std::function<bool(std::uint32_t docIndex, std::uint32_t offset, int x,
+                     int y)>
+      pressOnSelection;
 
   /**
    * @brief Interceptor for mouse motion events on the event thread.

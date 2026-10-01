@@ -22,10 +22,10 @@
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
-#include "common/xanadu/enfilade/crum_node.hpp"
 #include "common/xanadu/enfilade/edl_transform.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/version.hpp"
+#include <gleditor/enfilade/crum_node.hpp>
 
 namespace xanadu {
 class Store;
@@ -50,12 +50,12 @@ struct ChronoDsp {
   bool operator==(const ChronoDsp &) const = default;
 };
 
-static_assert(DisplacementMonoid<ChronoDsp>);
-static_assert(WidthMonoid<EdlTransform>);
-static_assert(EnfiladeAction<ChronoDsp, EdlTransform>);
+static_assert(gleditor::enfilade::DisplacementMonoid<ChronoDsp>);
+static_assert(gleditor::enfilade::WidthMonoid<EdlTransform>);
+static_assert(gleditor::enfilade::EnfiladeAction<ChronoDsp, EdlTransform>);
 
 /// Cache-conscious interior B-enfilade crum node.
-using ChronoCrum = CrumNode<ChronoDsp, EdlTransform, 8>;
+using ChronoCrum = gleditor::enfilade::CrumNode<ChronoDsp, EdlTransform, 8>;
 
 struct ChronoKey {
   std::uint32_t opIndex{0};

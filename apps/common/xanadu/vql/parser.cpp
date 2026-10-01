@@ -86,9 +86,19 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
 
   AnchorNode anchor = parseAnchorNode();
   std::vector<PathStep> steps;
+  std::vector<BooleanExpr> anchorPredicates;
 
   if (implicitContext) {
     steps.push_back(parsePathStep(false /*requireSlash*/));
+  } else {
+    // Predicates straight after the anchor filter its own cells. They used
+    // to be left unparsed and dropped, so `#[. = "x"]` answered # whatever x
+    // was.
+    while (check(TokenKind::OpenBracket)) {
+      consume(TokenKind::OpenBracket, "Expected '['");
+      anchorPredicates.push_back(parseBooleanExpr());
+      consume(TokenKind::CloseBracket, "Expected ']' after predicate");
+    }
   }
 
   while (check(TokenKind::Slash) || check(TokenKind::Dot)) {
@@ -125,9 +135,10 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
     cloneTail = parseCloneTail();
   }
 
-  return PathExpression{.anchor    = std::move(anchor),
-                        .steps     = std::move(steps),
-                        .cloneTail = std::move(cloneTail)};
+  return PathExpression{.anchor           = std::move(anchor),
+                        .anchorPredicates = std::move(anchorPredicates),
+                        .steps            = std::move(steps),
+                        .cloneTail        = std::move(cloneTail)};
 }
 
 AnchorNode Parser::parseAnchorNode() {

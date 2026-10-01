@@ -519,7 +519,7 @@ fi
 XUDU_TEST_BIN="${XUDU_TEST_BIN:-build/xudu_test}"
 if [ -x "$XUDU_TEST_BIN" ]; then
   echo "comparing E2E binary orchestration integration scenarios across backends"
-  XUDU_STEPS="step1_source_torrents step2_xanadocs_loaded step3_cross_linking step4_transclusion full_page_transclusion_lifecycle full_page_many_to_many_hypermesh full_page_one_to_many_fan full_page_multi_type_links full_page_three_doc_depth_routing extreme_framing_3x3_pages extreme_framing_5x5_pages extreme_framing_8x8_pages extreme_framing_10x10_pages extreme_framing_3x8_asymmetric extreme_framing_5x10_asymmetric large_multipage_background_flyin"
+  XUDU_STEPS="step1_source_torrents step2_xanadocs_loaded step3_cross_linking step4_transclusion full_page_transclusion_lifecycle full_page_many_to_many_hypermesh full_page_one_to_many_fan full_page_multi_type_links full_page_three_doc_depth_routing extreme_framing_3x3_pages extreme_framing_5x5_pages extreme_framing_8x8_pages extreme_framing_10x10_pages extreme_framing_3x8_asymmetric extreme_framing_5x10_asymmetric large_multipage_background_flyin default_fov_text"
 
   for backend in $backends; do
     mkdir -p "$OUT/xudu_$backend"

@@ -242,6 +242,30 @@ TEST(SatelloidPhysicsTest, CellSatelloidFocusRingAndAlphaDynamics) {
   EXPECT_LT(sat.alpha, 0.01F);
 }
 
+TEST(SatelloidPhysicsTest, SelectedOccurrenceOccupiesFrontLayer) {
+  EXPECT_EQ(satelloidLayer(3, 3, 5), 0U);
+  EXPECT_EQ(satelloidLayer(4, 3, 5), 1U);
+  EXPECT_EQ(satelloidLayer(0, 3, 5), 2U);
+  EXPECT_EQ(satelloidLayer(1, 3, 5), 3U);
+  EXPECT_EQ(satelloidLayer(2, 3, 5), 4U);
+}
+
+TEST(SatelloidPhysicsTest, SatelloidGlidesToNewWorldDepth) {
+  CellSatelloid sat;
+  sat.screenPlaced = true;
+  sat.screenPos    = {32.0F, 100.0F};
+  sat.screenTarget = {32.0F, 300.0F};
+  sat.targetDepth  = -8.0F;
+  sat.updateDynamics(0.016F);
+  EXPECT_GT(sat.screenPos.y, 100.0F);
+  EXPECT_LT(sat.screenPos.y, 300.0F);
+  EXPECT_LT(sat.depth, 0.0F);
+  EXPECT_GT(sat.depth, -8.0F);
+  for (int frame = 0; frame < 120; ++frame) sat.updateDynamics(0.016F);
+  EXPECT_NEAR(sat.screenPos.y, 300.0F, 0.5F);
+  EXPECT_NEAR(sat.depth, -8.0F, 0.02F);
+}
+
 TEST(SatelloidPhysicsTest, EquilibriumAnalyticalSolverAlignsSatelloids) {
   TensionParams params;
   params.satelloidGap = 12.0F;

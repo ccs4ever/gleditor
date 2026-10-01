@@ -23,11 +23,6 @@ namespace {
 constexpr auto keyLocalSegments = "local";
 constexpr auto keyDocumentId    = "document";
 
-std::string rawBytes(const std::array<std::uint8_t, 32> &bytes) {
-  return std::string{reinterpret_cast<const char *>(bytes.data()),
-                     bytes.size()};
-}
-
 /// A registry segment: the shared encoding, plus the MIME type.
 ///
 /// The shared codec has no key for a MIME type because a publication's

@@ -176,6 +176,8 @@ struct CloneTail {
 
 struct PathExpression {
   AnchorNode anchor{};
+  /// `#[...]`: predicates on the anchor's own cells, before any step.
+  std::vector<BooleanExpr> anchorPredicates;
   std::vector<PathStep> steps;
   std::optional<CloneTail> cloneTail{std::nullopt};
 };

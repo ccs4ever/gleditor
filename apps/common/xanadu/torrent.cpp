@@ -21,12 +21,12 @@ namespace {
 const bencode::Value &require(const bencode::Value &dict,
                               const std::string_view key,
                               const std::string_view what) {
-  const auto found = dict.find(key);
+  const auto &found = dict.find(key);
   if (!found) {
     throw std::runtime_error("torrent: " + std::string{what} + " has no \"" +
                              std::string{key} + "\"");
   }
-  return *found;
+  return found.value();
 }
 
 } // namespace

@@ -20,6 +20,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -911,11 +912,11 @@ TEST(ManifoldTest, aSplicePublishesSuccessfullyInCompactBinaryV4) {
 
   // In CompactBinaryV4, splice offset and length are carried on the wire, so
   // publishing a spliced slice succeeds.
-  EXPECT_NO_THROW(static_cast<void>(slice.store.exportBinaryOps()));
+  EXPECT_NO_THROW(std::ignore = slice.store.exportBinaryOps());
 
   Slice plain;
-  static_cast<void>(plain.cell("unspliced"));
-  EXPECT_NO_THROW(static_cast<void>(plain.store.exportBinaryOps()));
+  std::ignore = plain.cell("unspliced");
+  EXPECT_NO_THROW(std::ignore = plain.store.exportBinaryOps());
 }
 
 TEST(ManifoldTest, aCellsHistoryIsEveryOperationThatShapedIt) {
@@ -1129,12 +1130,12 @@ TEST(ManifoldTest, aHandleMayNameAnyKindOfOperation) {
 
 TEST(ManifoldTest, anEphemeralTargetIsRefused) {
   Slice slice;
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(
-                   slice.at, zigzag::ephemeralBit | 42)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(
+                   slice.at, zigzag::ephemeralBit | 42),
                std::invalid_argument);
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 0)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(slice.at, 0),
                std::invalid_argument);
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 999999)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(slice.at, 999999),
                std::invalid_argument);
 }
 
@@ -1395,7 +1396,7 @@ TEST(ManifoldTest, anUnrootedRegistryDependencyIsRefused) {
   slice.link(cell1, dimScrolls, DimVector::POS, unrootedCell);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_THROW(static_cast<void>(manifold.scrollRegistry(slice.store)),
+  EXPECT_THROW(std::ignore = manifold.scrollRegistry(slice.store),
                zigzag::UnrootedRegistryDependency);
 }
 

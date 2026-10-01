@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/segmented_primedia_spool.hpp"
 
@@ -119,7 +120,7 @@ TEST(SegmentedPrimediaSpoolTest, ErrorsAndBounds) {
 
   // Non-local span throws
   PrimediaSpan nonLocal{42U, 0, 5};
-  EXPECT_THROW(static_cast<void>(spool.read(nonLocal)), std::runtime_error);
+  EXPECT_THROW(std::ignore = spool.read(nonLocal), std::runtime_error);
   EXPECT_TRUE(spool.readView(nonLocal).empty());
 
   // Empty span

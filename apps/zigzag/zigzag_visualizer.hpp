@@ -18,11 +18,13 @@
 #include "zigzag/unified_transclusion_engine.hpp"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -67,6 +69,9 @@ struct RenderStateCell {
   glm::vec3 base_color{0.7F, 0.7F, 0.75F};
   std::vector<gleditor::DecoratedRange> decorated_ranges;
   std::vector<gleditor::BlockStyleRange> block_styles;
+  /// Holds part of the selected link, so its border is drawn in the host's
+  /// highlight colour.
+  bool link_highlighted{false};
 };
 
 /// Measured presentation geometry shared by drawing, rank layout, and bridge
@@ -80,6 +85,7 @@ struct CellLayoutMetrics {
   float labelTop{};
   float badgeTop{};
   float labelLineHeight{};
+  float horizontalPadding{};
   std::string idText;
   std::string badgeText;
 };
@@ -107,7 +113,9 @@ class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::ModalInput,
                          public xanadu::ZigzagPresentationSurface {
 public:
-  explicit ZigzagVisualizer(std::string aFontName);
+  explicit ZigzagVisualizer(
+      std::string aFontName,
+      std::shared_ptr<xanadu::UserPermascroll> userPermascroll = {});
   ~ZigzagVisualizer() override;
 
   ZigzagVisualizer(const ZigzagVisualizer &)            = delete;
@@ -128,7 +136,8 @@ public:
   // -- gleditor::a11y::Source -----------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return revision_;
+    // Both only grow, so the sum moves whenever either does.
+    return revision_ + keyboardMoves_.load();
   }
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
@@ -188,6 +197,12 @@ public:
   void setViewMode(ViewMode mode);
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
   void toggleViewMode();
+
+  /// Xuzz may hide the slice without unbinding its store or losing focus.
+  void setPresentationVisible(bool visible);
+  [[nodiscard]] bool presentationVisible() const noexcept {
+    return presentation_visible_;
+  }
 
   // -- Dimension Bundles ---------------------------------------------------
   using DimensionBundle = zigzag::DimensionBundle;
@@ -253,6 +268,52 @@ public:
   /// and disassembly.
   [[nodiscard]] xanadu::vql::CompilationResult
   compileVQL(std::string_view vqlQuery) const;
+
+  /// The version of the store the slice shown was folded at; zero for none.
+  [[nodiscard]] xanadu::MicroversionId sliceHead() const {
+    return engine_ ? engine_->head() : xanadu::MicroversionId{};
+  }
+
+  // -- Key hints ------------------------------------------------------------
+  /**
+   * @brief The hint line along the bottom, built by the host from the
+   *        bindings it actually has: @p here while ZigZag has the keyboard,
+   *        @p elsewhere while another pane does.
+   */
+  void setKeyHints(std::string here, std::string elsewhere);
+  /// Whether ZigZag has the keyboard; always, in a program with no other
+  /// pane.
+  void setHasKeyboard(bool has) noexcept {
+    // Counted rather than folded into revision_, which the render thread
+    // owns: this is called from the event thread.
+    if (keyboardHere_.exchange(has) != has) {
+      ++keyboardMoves_;
+    }
+  }
+
+  // -- Naming and linking cells from the keyboard ---------------------------
+  /**
+   * @brief Start editing the focused cell's text in place.
+   *
+   * Takes the keyboard (grabbing()) until Return commits the text through
+   * updateFocusCellText() or Escape drops it. The home cell and d.dims keep
+   * their names, as updateFocusCellText() already insists.
+   */
+  void beginCellEdit();
+  [[nodiscard]] bool isCellEditing() const noexcept { return cellEditing_; }
+  [[nodiscard]] const std::string &cellEditText() const noexcept {
+    return cellEditText_;
+  }
+  /// Remember the focused cell as the far end of the next link.
+  void markFocus() noexcept;
+  [[nodiscard]] CellID markedCell() const noexcept { return markedCell_; }
+  /**
+   * @brief Link the focused cell to the marked one along the active X
+   *        dimension, then forget the mark.
+   * @return false with nothing marked, the mark on the focus itself, or a
+   *         link linkFocusAlong() refuses.
+   */
+  bool linkMarkedAlongX(bool positive);
 
   // -- VQL Command Omnibar --------------------------------------------------
   void toggleCommandBar();
@@ -324,18 +385,13 @@ public:
   [[nodiscard]] glm::vec3 presentationOrigin() const noexcept {
     return presentation_origin_;
   }
-  void setPresentationVisible(const bool visible) noexcept {
-    presentationVisible_ = visible;
-  }
-  [[nodiscard]] bool presentationVisible() const noexcept {
-    return presentationVisible_;
-  }
 
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(const std::string &text = "",
                     const std::string &role = "text");
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            DimVector dir = DimVector::POS);
+  bool insertConnectedTransclusion(std::span<const xanadu::PrimediaSpan> spans);
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            bool positive) {
     return insertConnectedCell(text, dimension,
@@ -369,6 +425,9 @@ public:
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(CellRef cell) const override;
+  /// Show a chosen link occurrence outside the focused neighborhood without
+  /// changing the reader's cell focus or recording a visit.
+  void setPreviewCell(std::optional<CellRef> cell);
 
   // -- Embedded presentation surface ---------------------------------------
   [[nodiscard]] const Manifold &manifold() const noexcept override {
@@ -386,6 +445,10 @@ public:
       override {
     cellActivationCallback_ = std::move(callback);
   }
+  void setExternInspector(std::function<std::string(CellRef)> inspector) {
+    externInspector_ = std::move(inspector);
+    invalidateAccessibility();
+  }
   [[nodiscard]] int cellRadius() const noexcept override {
     return scene_.neighborhood_radius;
   }
@@ -399,6 +462,24 @@ public:
     return engine_ ? engine_->cellRoyalty(cell) : std::nullopt;
   }
   bool unlockCell(CellRef cell) override;
+  [[nodiscard]] std::optional<glm::vec3> focusCentre() const override {
+    // The focused card always settles at the presentation's origin, on the
+    // current depth tier; see rebuildActiveViewTopology().
+    return glm::vec3(presentation_transform_ *
+                     glm::vec4(0.0F, 0.0F, depth_tier_, 1.0F));
+  }
+  /**
+   * @brief The enlargement that brings a line of card text drawn
+   *        @p lineOnScreenPx tall up to @p wantedPx: never below 1, in quarter
+   *        steps so a zoom re-lays the cards a few times rather than every
+   *        frame.
+   */
+  [[nodiscard]] static float readableScaleFor(float lineOnScreenPx,
+                                              float wantedPx) noexcept;
+  /// The factor the embedded presentation is currently enlarged by.
+  [[nodiscard]] float readableScale() const noexcept { return readable_scale_; }
+  void setCellHighlights(std::vector<xanadu::CellHighlight> highlights,
+                         std::uint32_t borderColour) override;
 
   [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
     return revision_;
@@ -459,6 +540,7 @@ public:
   };
 
   [[nodiscard]] CellInfo inspectCell(CellRef id) const;
+  [[nodiscard]] std::string cellBadge(CellRef id, std::string_view role) const;
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
   [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
                                                     bool isFocus) const;
@@ -476,27 +558,46 @@ private:
   }
 
   void refreshCellLayouts();
+  /// Point the view at the dimensions the home cell links along when it
+  /// links along neither of the current two; see bindXuduStore().
+  void fitViewToHome();
 
   std::string fontName_;
   std::uint64_t revision_{1};
+  /// The host's selected-link marks, folded into each cell's decorations
+  /// when the view is rebuilt rather than per frame.
+  /// Enlarge the embedded presentation, when its text would draw below
+  /// minReadableTextPx, and fold that into presentation_transform_.
+  void applyReadableScale(const gleditor::FrameContext &ctx);
+  /// Factor the embedded presentation is enlarged by so its text meets
+  /// minReadableTextPx on screen, in quarter steps so a zoom re-lays the
+  /// cards a few times rather than every frame. Kept out of the host's
+  /// transform so anchors and picking see the same scale the cards draw at.
+  float readable_scale_{1.0F};
+  /// One line of card text, in layout pixels, measured once per canvas.
+  float card_line_px_{};
+  std::vector<xanadu::CellHighlight> linkHighlights_;
+  std::uint32_t linkHighlightBorder_{};
   xanadu::ZigzagPresentationSurface::InvalidationCallback
       bridgeInvalidationCallback_;
 
   std::string structure_name_;
   std::string current_slice_path_;
   std::unique_ptr<xanadu::Store> ownedStore_;
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll_;
   xanadu::Store *store_{nullptr};
   std::unique_ptr<UnifiedTransclusionEngine> engine_;
   CellID accursed_cell_focus_{0};
+  std::optional<CellRef> preview_cell_;
   ViewAxisBinding current_view_;
 
   SceneVisual scene_;
   ViewMode view_mode_{ViewMode::CellContent};
+  bool presentation_visible_{true};
   glm::vec3 presentation_origin_{0.0F, 0.0F, 0.0F};
   glm::mat4 presentation_transform_{1.0F};
   PresentationTransformResolver presentationTransformResolver_;
   PresentationOriginResolver presentationOriginResolver_;
-  bool presentationVisible_{true};
   float depth_tier_{0.0F};
   float depth_tier_opacity_{1.0F};
   xanadu::ZigzagPresentationConfig presentation_config_{};
@@ -509,6 +610,7 @@ private:
   std::chrono::steady_clock::time_point last_frame_time_;
 
   std::unique_ptr<gleditor::Canvas> worldCanvas_;
+  std::unique_ptr<gleditor::Canvas> ancillaryCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::vector<std::pair<CellID, CellID>> drawnEdges_;
@@ -522,10 +624,25 @@ private:
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};
   xanadu::ZigzagPresentationSurface::CellActivationCallback
       cellActivationCallback_;
+  std::function<std::string(CellRef)> externInspector_;
 
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};
   std::string paletteFilter_;
+
+  std::string keyHintsHere_;
+  std::string keyHintsElsewhere_;
+  std::atomic<bool> keyboardHere_{true};
+  /// How often the keyboard changed pane: part of accessibilityRevision(),
+  /// since which pane holds the accessibility focus follows it.
+  std::atomic<std::uint64_t> keyboardMoves_{0};
+
+  bool cellEditing_{false};
+  /// The text starts selected, as a rename does: the first character typed
+  /// replaces it, so a new cell's placeholder is not typed after.
+  bool cellEditWhole_{false};
+  std::string cellEditText_;
+  CellID markedCell_{0};
 
   bool commandBarVisible_{false};
   std::string commandBarText_;

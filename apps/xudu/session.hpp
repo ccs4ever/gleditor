@@ -49,11 +49,13 @@
 #include "common/xanadu/mutable_link.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/reading_place.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/transcopyright_logic.hpp"
 #include "common/xanadu/uncommitted_op_log.hpp"
-#include "hypertime_graph.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 class Caret;
 class Doc;
@@ -62,6 +64,16 @@ namespace xudu {
 using namespace ::xanadu;
 
 class Session;
+
+/**
+ * @brief Where the reader's xanadocs live unless they say otherwise:
+ *        `$XDG_DATA_HOME/xudu/xanadocs`.
+ *
+ * New and imported documents start here, under generated names, rather than
+ * in a temporary directory: a xanadoc is saved as it is typed, so one kept
+ * anywhere that is cleared on quit loses work nobody chose to discard.
+ */
+[[nodiscard]] std::filesystem::path xanadocsDirectory();
 
 struct RemoteCollaborator {
   std::string authorScrollKey;
@@ -467,6 +479,24 @@ public:
   void save(std::size_t index = 0) const;
   void saveAll() const;
 
+  /**
+   * @brief Where the reader was when the last session ended, from the
+   *        activity store (system://activity), or nothing.
+   */
+  [[nodiscard]] std::optional<xanadu::ReadingPlace> lastPlace();
+
+  /**
+   * @brief Append @p place to the activity store and save it.
+   *
+   * An activity store that could not be read is left exactly as it was and
+   * nothing is recorded: it is the reader's history, and writing a fresh one
+   * over it would lose that. Said once, on stderr.
+   */
+  void rememberPlace(const xanadu::ReadingPlace &place);
+
+  /// The reader-owned store shared by places and branching navigation visits.
+  Store *activityForNavigation() { return activity(); }
+
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] std::vector<OpenView> &views() { return open; }
@@ -523,8 +553,8 @@ public:
   /**
    * @brief Create a new sovereign store bound to the author's UserPermascroll.
    *
-   * @param path File system directory to persist this store. If empty, a
-   * temporary directory is allocated.
+   * @param path File system directory to persist this store. If empty, an
+   * untitled directory under xanadocsDirectory(), kept once written to.
    * @return The store index.
    */
   std::size_t createNewStore(const std::string &path = "");
@@ -701,7 +731,17 @@ public:
                     std::uint32_t length, gleditor::TextAlign align);
 
   // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
-  static constexpr auto idleFlushTimeout = std::chrono::seconds(5);
+  /**
+   * @brief How long typing may sit idle before it is written to the store,
+   *        from system://settings' autoSaveSeconds.
+   *
+   * Typed text is held in a replay log and compacted before it is written,
+   * so a burst of typing costs one operation rather than one per key; this
+   * bounds how much of it an unexpected exit can lose.
+   */
+  void setAutoSave(std::chrono::seconds idle) noexcept {
+    idleFlushTimeout = idle;
+  }
 
   /**
    * @brief Flush any uncommitted edits in the replay log for @p docIndex (or
@@ -784,9 +824,24 @@ private:
   struct StoreEntry {
     std::unique_ptr<Store> store;
     std::string path;
+    /// Untitled: in xanadocsDirectory() under a generated name, and
+    /// removed at teardown if nothing was written to it.
     bool isTemporary{false};
+    /// What opCount() was when the store joined the session; see
+    /// isTemporary.
+    std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
+  /// See setAutoSave(); the settings' own default until they are read.
+  std::chrono::seconds idleFlushTimeout{
+      xanadu::SettingsConfig{}.autoSaveSeconds};
+
+  /// system://activity, opened on first use; see activity().
+  std::unique_ptr<Store> activityStore;
+  bool activityRefused{false};
+  /// The activity store, loaded against this session's permascroll, or null
+  /// when it exists and cannot be read.
+  Store *activity();
 
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.

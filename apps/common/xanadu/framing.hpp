@@ -21,8 +21,10 @@
 #define XUDU_FRAMING_H
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
+#include <glm/ext/vector_float2.hpp>
 #include <glm/ext/vector_float3.hpp>
 
 namespace xanadu {
@@ -159,6 +161,46 @@ pageStackExtent(const std::vector<float> &pageHeightsWorld, float pageGapWorld);
                                                   const glm::vec3 &fromTangent,
                                                   const glm::vec3 &toTangent,
                                                   std::size_t segments = 16);
+
+/**
+ * @brief How far back a camera sits for a line of text @p lineHeightWorld
+ *        tall to draw @p readablePx tall, on a screen @p screenHeightPx high
+ *        seen through a vertical field of view of @p fovDegrees.
+ *
+ * The other half of framing: fitting everything is one answer to "how far
+ * back", reading is another, and a reader asked to read wants this one. The
+ * perspective relation is exact for text facing the camera at that distance.
+ *
+ * @return Nothing when any input could not describe a real view.
+ */
+[[nodiscard]] std::optional<float> readableCameraDistance(float lineHeightWorld,
+                                                          float screenHeightPx,
+                                                          float fovDegrees,
+                                                          float readablePx);
+
+/**
+ * @brief A world-space rectangle fitted into a panel: uniform scale, centred,
+ *        aspect kept -- the overview panel's one piece of geometry.
+ *
+ * Both spaces are y-up. A zero-sized world rectangle maps to the panel's
+ * centre rather than dividing by zero.
+ */
+struct OverviewFit {
+  glm::vec2 worldCentre{};
+  glm::vec2 panelCentre{};
+  /// Panel pixels per world unit.
+  float scale{1.0F};
+
+  [[nodiscard]] static OverviewFit fit(glm::vec2 worldMin, glm::vec2 worldMax,
+                                       glm::vec2 panelMin, glm::vec2 panelSize);
+
+  [[nodiscard]] glm::vec2 toPanel(const glm::vec2 world) const noexcept {
+    return panelCentre + ((world - worldCentre) * scale);
+  }
+  [[nodiscard]] glm::vec2 toWorld(const glm::vec2 panel) const noexcept {
+    return worldCentre + ((panel - panelCentre) / scale);
+  }
+};
 
 } // namespace xanadu
 

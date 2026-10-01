@@ -19,6 +19,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <gleditor/caret.hpp>
+#include <gleditor/caret_motion.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
 #include <gleditor/media_widget.hpp>
@@ -26,17 +27,21 @@
 #include <gleditor/renderer.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/ui/hypertime_graph.hpp"
+#include "common/xanadu/framing.hpp"
 #include "common/xanadu/microversion.hpp"
+#include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
-#include "xudu/hypertime_graph.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 #include "xudu/wireframe_hull.hpp"
 
 namespace xudu {
+
+using HypertimeMap = xanadu::ui::HypertimeGraph;
 
 struct OnionSkinPolicy {
   glm::vec3 offsetPerVersion{18.0F, 14.0F, -10.0F};
@@ -56,6 +61,18 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
+
+  void cancelReadingFrame() {
+    frameTarget_.reset();
+    readingFramed_ = true;
+  }
+
+  void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
+  void frameForReading(const gleditor::FrameContext &ctx);
+  void placeCameraWhenReady(std::function<bool()> place) {
+    pendingCamera_ = std::move(place);
+  }
+  void keepInView(const Doc &doc, std::uint32_t offset);
 
   [[nodiscard]] std::optional<Doc::Anchor>
   widgetRectFor(const Doc &doc, std::uint32_t docOffset) const;
@@ -100,15 +117,22 @@ public:
   void focusSpan(zigzag::CellRef cell, const PrimediaSpan &span);
   void focusSpan(std::size_t docIndex, std::uint32_t charStart,
                  std::uint32_t charEnd);
+  void focusContent(std::vector<PrimediaSpan> content);
 
   void back();
   void forward();
   void scrubHistory(bool backward);
 
   void deleteSelection();
+  void deleteForward();
+  void moveCaret(gleditor::CaretMotion motion, bool extend);
+
   void transcludeSelection();
   void linkSelection();
   void cancelLink();
+
+  void addCellToPendingLink(std::span<const PrimediaSpan> content);
+  void finishCellLink();
 
   void publishCurrent(const std::string &salt);
   void publishAnswers(const MicroversionId &version, std::uint32_t which,
@@ -121,7 +145,27 @@ public:
 
   void closeDocument(std::uint32_t docIndex);
   void closeActive();
-  void newDocument();
+  void activateNewest();
+  void activateDocument(RenderState &rState, std::uint32_t index);
+  std::size_t newDocument();
+
+  [[nodiscard]] xanadu::ReadingPlace currentPlace() const;
+  void restorePlace(const xanadu::ReadingPlace &place,
+                    std::vector<std::optional<std::uint32_t>> opened,
+                    std::vector<std::uint32_t> lengths);
+  void keepFinalPlace() { finalPlace_ = currentPlace(); }
+  [[nodiscard]] xanadu::ReadingPlace finalPlace() const {
+    return finalPlace_ ? *finalPlace_ : currentPlace();
+  }
+
+  void anchorPresentation(std::weak_ptr<Doc> doc) {
+    presentationAnchor_ = std::move(doc);
+  }
+
+  void insertSpanAtCaret(const PrimediaSpan &span);
+  void transcludeSpansAtCaret(std::vector<PrimediaSpan> spans);
+  void insertSpanAt(RenderState &rState, std::uint32_t doc, std::uint32_t at,
+                    const PrimediaSpan &span);
 
   void spawnTranscludedDocument(const TetherPayload &payload,
                                 float screenX = 0.0F, float screenY = 0.0F);
@@ -162,6 +206,8 @@ private:
     std::uint32_t start{};
     std::uint32_t end{};
     std::vector<xudu::PrimediaSpan> spans;
+    std::vector<xudu::PrimediaSpan> right;
+    std::size_t rightCells{};
   };
 
   Session &session;
@@ -172,6 +218,12 @@ private:
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
+  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  bool readingFramed_{false};
+  std::weak_ptr<Doc> frameTarget_;
+  std::weak_ptr<Doc> presentationAnchor_;
+  std::function<bool()> pendingCamera_;
+  std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};

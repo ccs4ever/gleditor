@@ -54,8 +54,9 @@ TEST(UniversalLinkEndpointTest, abiSizeAndAlignmentRequirements) {
 // -- 2. Aggregate Initialization & Legacy Compatibility ----------------------
 
 TEST(UniversalLinkEndpointTest, aggregateInitializationMatchesLegacyLinkEnd) {
-  // Legacy code initializes LinkEnd{doc, start, end}
-  const LinkEnd end{2U, 100U, 145U};
+  // Legacy code initializes LinkEnd{doc, start, end}; the braces round the
+  // first value are the anonymous union's, which -Wmissing-braces requires.
+  const LinkEnd end{{2U}, 100U, 145U};
 
   EXPECT_EQ(end.doc, 2U);
   EXPECT_EQ(end.targetId, 2U);

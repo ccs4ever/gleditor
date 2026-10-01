@@ -82,6 +82,8 @@ struct CliOptions {
   bool physicsEnabled{false};
   bool noBeams{false};
   bool noSworph{false};
+  bool wholePages{false};
+  bool hasExplicitStore{false};
 
   // Media & Widgets
   std::vector<std::string> audioMrls;

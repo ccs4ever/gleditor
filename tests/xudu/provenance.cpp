@@ -25,6 +25,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/binary_ops.hpp"
@@ -169,11 +170,11 @@ TEST(ProvenanceTest, textThatIsNotARecordIsNotReadAsOne) {
 TEST(ProvenanceTest, signingRefusesForAnAuthorWithNoNameOrEmail) {
   Provenance record;
   record.title = "Anonymous";
-  EXPECT_THROW(static_cast<void>(xanadu::signProvenance(record)),
+  EXPECT_THROW(std::ignore = xanadu::signProvenance(record),
                std::runtime_error);
 
   record.author.name = "Only a name";
-  EXPECT_THROW(static_cast<void>(xanadu::signProvenance(record)),
+  EXPECT_THROW(std::ignore = xanadu::signProvenance(record),
                std::runtime_error);
 }
 
@@ -233,7 +234,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   }
 
   Store store;
-  static_cast<void>(store.insert(MicroversionId{}, 0, "Written here first."));
+  std::ignore       = store.insert(MicroversionId{}, 0, "Written here first.");
   const auto &bytes = store.primedia().bytes();
 
   auto record          = signable();
@@ -314,7 +315,7 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
 
   // Write more after the first seal, then seal again knowing what that seal
   // already covered.
-  static_cast<void>(store.insert(one, 6, " And more."));
+  std::ignore        = store.insert(one, 6, " And more.");
   const auto signed2 = xanadu::signProvenance(signable());
   const auto second =
       xanadu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
@@ -354,7 +355,7 @@ TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
   }
 
   Store store;
-  static_cast<void>(store.insert(MicroversionId{}, 0, "Unchanging."));
+  std::ignore = store.insert(MicroversionId{}, 0, "Unchanging.");
 
   const auto signed1 = xanadu::signProvenance(signable());
   const auto mine    = xanadu::createMutableKeys();
@@ -428,7 +429,7 @@ TEST(ProvenanceTest, aSealedHistoryComesBackWithThePublishersOwnNames) {
   const auto two   = publisher.insert(one, 5, " world");
   const auto three = publisher.erase(two, 0, 1);
   const auto other = publisher.insert(one, 5, " there");
-  static_cast<void>(publisher.insert(other, 0, "X"));
+  std::ignore      = publisher.insert(other, 0, "X");
 
   const auto sealed = xanadu::sealableOps(publisher);
   ASSERT_FALSE(sealed.empty());
@@ -471,11 +472,11 @@ TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
   // the writer's, and any structure that had referred to operations by index
   // would come back pointing at the wrong ones.
   Store publisher;
-  const auto one = publisher.insert(MicroversionId{}, 0, "hello");
-  const auto two = publisher.insert(one, 5, " world");
-  static_cast<void>(publisher.erase(two, 0, 1));
+  const auto one      = publisher.insert(MicroversionId{}, 0, "hello");
+  const auto two      = publisher.insert(one, 5, " world");
+  std::ignore         = publisher.erase(two, 0, 1);
   const auto branched = publisher.insert(one, 5, " there");
-  static_cast<void>(publisher.insert(branched, 0, "X"));
+  std::ignore         = publisher.insert(branched, 0, "X");
 
   Scroll became;
   became.publisher = xanadu::createMutableKeys().publicKey;
@@ -550,7 +551,7 @@ TEST(ProvenanceTest, historyFromSealAssemblesSegmentsSealedAcrossTwoPublishes) {
   const auto firstSegment = xanadu::sealableOps(publisher);
 
   const auto three = publisher.erase(two, 0, 1);
-  static_cast<void>(publisher.insert(one, 5, " again"));
+  std::ignore      = publisher.insert(one, 5, " again");
   const auto secondSegment =
       xanadu::sealableOps(publisher, static_cast<std::uint32_t>(firstOpCount));
 
@@ -602,7 +603,7 @@ TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
   Scroll theirs;
   theirs.publisher = xanadu::createMutableKeys().publicKey;
   theirs.salt      = "theirs";
-  static_cast<void>(publisher.transcludeExternal(typed, 0, theirs, 0, 4));
+  std::ignore      = publisher.transcludeExternal(typed, 0, theirs, 0, 4);
 
   const auto sealed = xanadu::sealableOps(publisher);
   Scroll became;
@@ -610,7 +611,7 @@ TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
 
   // Handed no scrolls, the entry cannot be resolved and the whole thing is
   // refused rather than read with a hole in it.
-  EXPECT_THROW(static_cast<void>(xanadu::historyFromSeal(sealed, became, {})),
+  EXPECT_THROW(std::ignore = xanadu::historyFromSeal(sealed, became, {}),
                std::runtime_error);
 
   // Handed the scroll it names, it reads.
@@ -621,24 +622,24 @@ TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
   EXPECT_EQ(history->opCount(), publisher.opCount());
 
   // Bytes that are not a seal's operations are not read as one.
-  EXPECT_THROW(
-      static_cast<void>(xanadu::historyFromSeal("not a seal", became, carried)),
-      std::runtime_error);
+  EXPECT_THROW(std::ignore =
+                   xanadu::historyFromSeal("not a seal", became, carried),
+               std::runtime_error);
 }
 
 TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
   Store store;
-  static_cast<void>(store.insert(MicroversionId{}, 0, "Written here first."));
+  std::ignore     = store.insert(MicroversionId{}, 0, "Written here first.");
   const auto mine = xanadu::createMutableKeys();
 
-  EXPECT_THROW(static_cast<void>(
-                   xanadu::sealLocalSpool(store, mine, "primedia", "", {})),
+  EXPECT_THROW(std::ignore =
+                   xanadu::sealLocalSpool(store, mine, "primedia", "", {}),
                std::runtime_error);
   // Half of one is no better: a record with no signature over it is a claim
   // anybody could have written.
   SignedProvenance halfway;
   halfway.tsv = sample().toTsv();
-  EXPECT_THROW(static_cast<void>(xanadu::sealLocalSpool(store, mine, "primedia",
-                                                        "", halfway)),
+  EXPECT_THROW(std::ignore =
+                   xanadu::sealLocalSpool(store, mine, "primedia", "", halfway),
                std::runtime_error);
 }

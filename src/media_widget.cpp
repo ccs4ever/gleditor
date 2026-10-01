@@ -397,7 +397,8 @@ MediaWidget::rectFor(const Doc &doc, const std::uint32_t docOffset) const {
 }
 
 void MediaWidget::drawFrame(FrameContext &ctx) {
-  if (!visible_ || nullptr == canvas_ || nullptr == player_) {
+  if (!ctx.state.documentsVisible || !visible_ || nullptr == canvas_ ||
+      nullptr == player_) {
     return;
   }
   if (awaitingPlaybackStart_ && (player_->state() != PlaybackState::Stopped ||

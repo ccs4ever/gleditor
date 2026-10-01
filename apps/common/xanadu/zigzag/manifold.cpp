@@ -7,6 +7,8 @@
 #include <limits>
 #include <ranges>
 
+#include <gleditor/logging.hpp>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
@@ -422,7 +424,10 @@ Manifold::applyStructure(const std::uint32_t opIndex,
       return refuse(FoldRefusal::UnknownSubject);
     }
     spliceContent(dense, node.at, node.length, node.span());
-    slots[dense].lastOp = opIndex;
+    auto &cell     = slots[dense];
+    cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
+    cell.valueBits = node.value;
+    cell.lastOp    = opIndex;
     byRef.emplace(opIndex, dense);
     return {};
   }
@@ -452,6 +457,22 @@ Manifold::applyStructure(const std::uint32_t opIndex,
   // point of refusedOps() is that a fold cannot throw and still must not
   // silently mean something else.
   return refuse(FoldRefusal::UnknownVerb);
+}
+
+void Manifold::advanceOrRefold(const xanadu::Store &store,
+                               const xanadu::MicroversionId &version) {
+  const auto stepped = advance(store, version);
+  if (stepped) {
+    return;
+  }
+  GLEDITOR_LOG_DEBUG("zigzag.manifold", "folding {} afresh: {}", version.str(),
+                     AdvanceError::Kind::Refused == stepped.error().kind
+                         ? toString(stepped.error().refusal)
+                         : std::string_view{AdvanceError::Kind::MissingNode ==
+                                                    stepped.error().kind
+                                                ? "no node for that operation"
+                                                : "not a step from this fold"});
+  *this = store.rebuildManifold(version);
 }
 
 AdvanceResult Manifold::advance(const xanadu::Store &store,

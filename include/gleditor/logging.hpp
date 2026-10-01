@@ -40,24 +40,45 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
 // spdlog names the error level `err` and its logging method `error`, so the
 // level and the method are passed separately; one name for both is why
 // GLEDITOR_LOG_ERROR once expanded to a level that does not exist.
-#define GLEDITOR_LOG_AT(category_name, level_enum, method, ...)                \
-  do {                                                                         \
-    static const auto gleditorCategoryLogger =                                 \
-        ::gleditor::logging::category(category_name);                          \
-    if (gleditorCategoryLogger->should_log(::spdlog::level::level_enum)) {     \
-      gleditorCategoryLogger->method(__VA_ARGS__);                             \
-    }                                                                          \
-  } while (false)
+template <typename... Args>
+void constexpr log_at(const char *category_name, auto level_enum,
+                      spdlog::format_string_t<Args...> fmt, Args &&...args) {
+  static const auto gleditorCategoryLogger =
+      gleditor::logging::category(category_name);
+  if (gleditorCategoryLogger->should_log(level_enum)) {
+    gleditorCategoryLogger->log(level_enum, fmt, std::forward<Args>(args)...);
+  }
+}
 
-#define GLEDITOR_LOG_TRACE(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, trace, trace, __VA_ARGS__)
-#define GLEDITOR_LOG_DEBUG(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, debug, debug, __VA_ARGS__)
-#define GLEDITOR_LOG_INFO(category_name, ...)                                  \
-  GLEDITOR_LOG_AT(category_name, info, info, __VA_ARGS__)
-#define GLEDITOR_LOG_WARN(category_name, ...)                                  \
-  GLEDITOR_LOG_AT(category_name, warn, warn, __VA_ARGS__)
-#define GLEDITOR_LOG_ERROR(category_name, ...)                                 \
-  GLEDITOR_LOG_AT(category_name, err, error, __VA_ARGS__)
+template <typename... Args>
+void constexpr GLEDITOR_LOG_TRACE(const char *category_name,
+                                  spdlog::format_string_t<Args...> fmt,
+                                  Args &&...args) {
+  log_at(category_name, spdlog::level::trace, fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+void constexpr GLEDITOR_LOG_DEBUG(const char *category_name,
+                                  spdlog::format_string_t<Args...> fmt,
+                                  Args &&...args) {
+  log_at(category_name, spdlog::level::debug, fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+void constexpr GLEDITOR_LOG_INFO(const char *category_name,
+                                 spdlog::format_string_t<Args...> fmt,
+                                 Args &&...args) {
+  log_at(category_name, spdlog::level::info, fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+void constexpr GLEDITOR_LOG_WARN(const char *category_name,
+                                 spdlog::format_string_t<Args...> fmt,
+                                 Args &&...args) {
+  log_at(category_name, spdlog::level::warn, fmt, std::forward<Args>(args)...);
+}
+template <typename... Args>
+void constexpr GLEDITOR_LOG_ERROR(const char *category_name,
+                                  spdlog::format_string_t<Args...> fmt,
+                                  Args &&...args) {
+  log_at(category_name, spdlog::level::err, fmt, std::forward<Args>(args)...);
+}
 
 #endif // GLEDITOR_LOGGING_HPP

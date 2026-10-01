@@ -90,7 +90,7 @@ TEST(ClickableRegistryTest, DynamicLabels) {
   EXPECT_EQ("🔊", ctrl->getLabel());
   EXPECT_EQ("Mute", ctrl->getA11yLabel());
 
-  registry.dispatch(4U);
+  EXPECT_TRUE(registry.dispatch(4U));
   EXPECT_TRUE(muted);
   EXPECT_EQ("🔈", ctrl->getLabel());
   EXPECT_EQ("Unmute", ctrl->getA11yLabel());

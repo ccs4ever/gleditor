@@ -15,6 +15,7 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_tables.hpp"
@@ -80,7 +81,7 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
     out << "scroll 1 - - text/plain\n";
   }
   try {
-    static_cast<void>(xanadu::readStoreTables(dir / "store.tables"));
+    std::ignore = xanadu::readStoreTables(dir / "store.tables");
     FAIL() << "a file with no signature must not be read as side tables";
   } catch (const xanadu::StoreTablesUnreadable &e) {
     EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("signature"));
@@ -98,7 +99,7 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
     out.write(reinterpret_cast<const char *>(&later), sizeof(later));
   }
   try {
-    static_cast<void>(xanadu::readStoreTables(dir / "future.tables"));
+    std::ignore = xanadu::readStoreTables(dir / "future.tables");
     FAIL() << "a version this build does not know must not be guessed at";
   } catch (const xanadu::StoreTablesUnreadable &e) {
     EXPECT_THAT(
@@ -122,7 +123,7 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
     out.write(reinterpret_cast<const char *>(&version), sizeof(version));
     out << "not bencode";
   }
-  EXPECT_THROW(static_cast<void>(xanadu::readStoreTables(dir / "torn.tables")),
+  EXPECT_THROW(std::ignore = xanadu::readStoreTables(dir / "torn.tables"),
                xanadu::StoreTablesUnreadable);
 }
 

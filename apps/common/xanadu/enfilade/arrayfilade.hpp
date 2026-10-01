@@ -41,10 +41,10 @@
 #include <string_view>
 #include <vector>
 
-#include "common/xanadu/enfilade/crum_node.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
+#include <gleditor/enfilade/crum_node.hpp>
 
 namespace xanadu {
 class SpanReader;
@@ -196,9 +196,9 @@ inline ArrayWid ArrayDsp::act(const ArrayWid &w) const noexcept {
   return res;
 }
 
-static_assert(DisplacementMonoid<ArrayDsp>);
-static_assert(WidthMonoid<ArrayWid>);
-static_assert(EnfiladeAction<ArrayDsp, ArrayWid>);
+static_assert(gleditor::enfilade::DisplacementMonoid<ArrayDsp>);
+static_assert(gleditor::enfilade::WidthMonoid<ArrayWid>);
+static_assert(gleditor::enfilade::EnfiladeAction<ArrayDsp, ArrayWid>);
 
 /**
  * @struct ArrayCellEntry
@@ -414,7 +414,8 @@ struct QueryPlanStats {
 class Arrayfilade {
 public:
   static constexpr std::size_t BranchingFactor = 8;
-  using Crum = CrumNode<ArrayDsp, ArrayWid, BranchingFactor>;
+  using Crum =
+      gleditor::enfilade::CrumNode<ArrayDsp, ArrayWid, BranchingFactor>;
 
   Arrayfilade() = default;
 

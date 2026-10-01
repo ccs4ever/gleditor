@@ -235,9 +235,10 @@ rather than literals.
 
 This is the ruling that answers the non-text payload problem without giving anything up.
 
-> **Every persistent cell has a real `PrimediaSpan` in a real scroll. A scalar cell's span holds its
-> shortest-round-trip rendering; the same op additionally carries the canonical IEEE-754 or boolean
-> bits in `CompactOpNode::value`, with a type tag in `flags`.**
+> **Every persistent cell has a real `PrimediaSpan` in a real scroll. A programmatically created
+> scalar cell's span holds its shortest-round-trip rendering. User-entered scalar text retains its
+> exact spelling. Its Structure op also carries canonical bits in `CompactOpNode::value`, with a
+> type tag in `flags`.**
 
 - The span is ordinary spooled permascroll text, so a scalar cell **is** a link endpoint, **is**
   formattable via `LinkType::Format` unchanged, **is** transcludable, diffable, publishable and
@@ -246,9 +247,12 @@ This is the ruling that answers the non-text payload problem without giving anyt
 - The bits are the typed value. VQL comparison, arithmetic and `d.clone` resolution never parse text
   and never round-trip through a formatter. `PrimediaSpan::intersect()` never sees a bit pattern, so
   two adjacent doubles can never be mistaken for an overlapping transclusion.
-- The rendering is pinned to `std::to_chars(first, last, value)` with **no precision argument** —
-  shortest round-trip, which the standard mandates to be exact. That is a mathematical function of
-  the value rather than a formatting choice. `bool` renders `true`/`false`.
+- The programmatic rendering is pinned to `std::to_chars(first, last, value)` with **no precision
+  argument** — shortest round-trip, which the standard mandates to be exact. That is a mathematical
+  function of the value rather than a formatting choice. `bool` renders `true`/`false`. Editing cell
+  text instead infers an `int64`, `double`, or explicit truthiness literal when the complete text
+  matches; the original bytes remain in the scroll. Prose and out-of-range integers clear the type
+  and value bits. Boolean words follow Vortex truthiness; arbitrary nonempty prose is still text.
 - Canonicalisation applies to the **bits only**, and only for value equality: all NaN →
   `0x7ff8000000000000`, `-0.0` → `+0.0`, signalling NaN rejected at the API boundary. It is
   explicitly *not* an address canonicalisation.

@@ -55,7 +55,13 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "hypertime-map: Action shortcut to toggle visual hypertime tree "
            "display. Default is Ctrl+H.\n"
            "radial-menu: Action shortcut to open context-sensitive radial "
-           "menu. Default is Ctrl+M.\n";
+           "menu. Default is Ctrl+M.\n"
+           "Selected-link navigation, all on Alt+Shift: link next and "
+           "previous N and P; member next and previous J and K; place next "
+           "and previous L and H; cross X; enter Return; return to origin O; "
+           "dismiss D; activity back B, which steps back through visits "
+           "rather than document versions. overview-toggle: show or hide the "
+           "overview of every open page, Alt+Shift+V.\n";
   case SystemDocKind::Settings:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -96,6 +102,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "Default is right.\n"
            "documentSpacingX: Horizontal gap between parallel document columns "
            "in pixels. Default is 70.\n"
+           "readableTextPx: On-screen height, in screen pixels, of a line of "
+           "document text at the default zoom and wherever the camera frames "
+           "a passage for reading, including bringing a linked document "
+           "alongside; the overview panel shows the whole scene instead. Zero "
+           "frames whole pages. Default is 16.\n"
            "transclusionPrisms: Enable Identity Gold volumetric prisms for "
            "transcluded spans. Default is true.\n"
            "transclusionLoom: Bundle adjacent rank transclusions into "
@@ -160,7 +171,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "4.0.\n"
            "zigzag: System-slice presentation policy for cell card padding, "
            "content width limits, rank clearance, HUD spacing, and "
-           "connection beam width. All lengths are logical pixels.\n";
+           "connection beam width. All lengths are logical pixels.\n"
+           "zigzag.minReadableTextPx: Smallest on-screen height, in screen "
+           "pixels, of a line of card text when the presentation sits beside "
+           "a page; below it the presentation is scaled up, never down. Zero "
+           "keeps the page's own scale. Default is 14.\n";
   case SystemDocKind::UI:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -179,7 +194,30 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "hypertimeMapVisible: Flag indicating whether hypertime graph "
            "overlay is open. Default is false.\n"
            "radialMenu: Nested configuration dictionary defining action items, "
-           "icons, and radial radius.\n";
+           "icons, and radial radius.\n"
+           "overview.visible, overview.widthPx, overview.heightPx, "
+           "overview.leftPx, overview.bottomPx: Whether the overview panel "
+           "is shown -- every open page condensed into the lower left, with "
+           "the camera's view outlined -- its size, and its distance from the "
+           "window's left and bottom edges, in logical pixels. Defaults are "
+           "true, 220, 160, 16 and 56.\n"
+           "overview.backgroundColour, overview.pageColour, "
+           "overview.viewportColour, overview.markColour: Its colours as RGBA "
+           "integers; marks show the selected link's chosen places and the "
+           "focused ZigZag card.\n"
+           "linkPanel.font: Font of the selected-link panel. Default is Sans "
+           "10.\n"
+           "linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, "
+           "linkPanel.lineGapPx: The panel's distance from the window's right "
+           "and top edges, its inner space and its line spacing, in logical "
+           "pixels. Defaults are 16, 44, 10 and 4.\n"
+           "linkPanel.backgroundColour, linkPanel.textColour, "
+           "linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as "
+           "RGBA integers, the muted one for unset choices, members not in "
+           "view and buttons that would be refused.\n"
+           "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
+           "Highlights behind the chosen occurrence and behind the chosen "
+           "member's other occurrences in the text, as RGBA integers.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -425,6 +463,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPageWidthPx),
          .notes   = "Width of each virtual page in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {800.0}}}},
+        {.name    = std::string(settings::kReadableTextPx),
+         .notes   = "On-screen height of a line of text at the default zoom",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          LayoutConfig{}.readableTextPx}}}}},
         {.name    = std::string(settings::kPageHeightPx),
          .notes   = "Height of each virtual page in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1000.0}}}},
@@ -553,6 +596,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kZigzagConnectionBeamWidthPx),
          .notes   = "Connection beam line width",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {4.0}}}},
+        {.name    = std::string(settings::kZigzagMinReadableTextPx),
+         .notes   = "Smallest on-screen line of embedded card text, in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          ZigzagPresentationConfig{}.minReadableTextPx}}}}},
         {.name    = std::string(settings::kBridgeCellRadius),
          .notes   = "Discovery and visual neighborhood cell radius",
          .schemas = {{.expectedTypes = {"integer"},
@@ -639,8 +687,51 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     };
     break;
 
-  case SystemDocKind::UI:
+  case SystemDocKind::UI: {
+    const LinkPanelConfig panel;
+    const OverviewConfig overview;
+    const auto colourSpec = [](std::string_view name, const char *notes,
+                               const std::uint32_t colour) {
+      return SettingSpec{
+          .name    = std::string(name),
+          .notes   = notes,
+          .schemas = {{.expectedTypes = {"integer"},
+                       .defaultValues = {std::int64_t{colour}}}}};
+    };
+    const auto lengthSpec = [](std::string_view name, const char *notes,
+                               const float px) {
+      return SettingSpec{.name    = std::string(name),
+                         .notes   = notes,
+                         .schemas = {{.expectedTypes = {"float"},
+                                      .defaultValues = {double{px}}}}};
+    };
     specs = {
+        {.name    = std::string(settings::kOverviewVisible),
+         .notes   = "Whether the overview panel is shown",
+         .schemas = {{.expectedTypes = {"bool"},
+                      .defaultValues = {overview.visible}}}},
+        lengthSpec(settings::kOverviewWidthPx, "Overview panel width in pixels",
+                   overview.widthPx),
+        lengthSpec(settings::kOverviewHeightPx,
+                   "Overview panel height in pixels", overview.heightPx),
+        lengthSpec(settings::kOverviewLeftPx,
+                   "Gap between the overview and the window's left edge",
+                   overview.leftPx),
+        lengthSpec(settings::kOverviewBottomPx,
+                   "Gap between the overview and the window's bottom edge",
+                   overview.bottomPx),
+        colourSpec(settings::kOverviewBackgroundColour,
+                   "Overview background RGBA hexadecimal colour",
+                   overview.backgroundColour),
+        colourSpec(settings::kOverviewPageColour,
+                   "Overview page RGBA hexadecimal colour",
+                   overview.pageColour),
+        colourSpec(settings::kOverviewViewportColour,
+                   "Overview outline of the camera's view, RGBA hexadecimal",
+                   overview.viewportColour),
+        colourSpec(settings::kOverviewMarkColour,
+                   "Overview marks for chosen link places, RGBA hexadecimal",
+                   overview.markColour),
         {.name    = std::string(settings::kTabBarVisible),
          .notes   = "Visibility of the document tab switcher bar",
          .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {true}}}},
@@ -664,8 +755,56 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
+        {.name    = std::string(settings::kLinkPanelFont),
+         .notes   = "Font of the selected-link panel",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {panel.font}}}},
+        {.name    = std::string(settings::kLinkPanelMarginPx),
+         .notes   = "Gap between the link panel and the window edge in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.marginPx}}}}},
+        {.name    = std::string(settings::kLinkPanelTopPx),
+         .notes   = "Gap between the link panel and the window top in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.topPx}}}}},
+        {.name    = std::string(settings::kLinkPanelPaddingPx),
+         .notes   = "Space inside the link panel's border in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.paddingPx}}}}},
+        {.name    = std::string(settings::kLinkPanelLineGapPx),
+         .notes   = "Space between the link panel's lines in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.lineGapPx}}}}},
+        {.name    = std::string(settings::kLinkPanelBackgroundColour),
+         .notes   = "Link panel background RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.backgroundColour}}}}},
+        {.name    = std::string(settings::kLinkPanelTextColour),
+         .notes   = "Link panel text RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.textColour}}}}},
+        {.name    = std::string(settings::kLinkPanelMutedColour),
+         .notes   = "Link panel colour for unset and out-of-view entries",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.mutedColour}}}}},
+        {.name    = std::string(settings::kLinkPanelButtonColour),
+         .notes   = "Link panel button RGBA hexadecimal colour",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.buttonColour}}}}},
+        {.name    = std::string(settings::kLinkPanelChosenHighlightColour),
+         .notes   = "Highlight behind the chosen occurrence in the text",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.chosenHighlightColour}}}}},
+        {.name    = std::string(settings::kLinkPanelMemberHighlightColour),
+         .notes   = "Highlight behind the chosen member's other occurrences",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          panel.memberHighlightColour}}}}},
     };
     break;
+  }
 
   case SystemDocKind::Keymap:
     specs = {
@@ -742,10 +881,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to open a document",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+O"}}}}},
-        {.name    = std::string(settings::kKeymapCloseDoc),
-         .notes   = "Shortcut to close active document",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+W"}}}}},
         {.name    = std::string(settings::kKeymapOnionSkin),
          .notes   = "Shortcut to toggle 3D onion skinning",
          .schemas = {{.expectedTypes = {"string"},
@@ -770,10 +905,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Function key to toggle 3-way tension spring layout",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"F4"}}}}},
-        {.name    = std::string(settings::kKeymapUnlockTranscopyright),
-         .notes   = "Shortcut to unlock transcopyright span",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+U"}}}}},
         {.name    = std::string(settings::kKeymapUnlockTranscopyrightF5),
          .notes   = "Function key to unlock transcopyright span",
          .schemas = {{.expectedTypes = {"string"},
@@ -798,6 +929,227 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to forge a xanalink",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+L"}}}}},
+        {.name    = std::string(settings::kKeymapLinkNext),
+         .notes   = "Select the next link on screen",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+N"}}}}},
+        {.name    = std::string(settings::kKeymapLinkPrevious),
+         .notes   = "Select the previous link on screen",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+P"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMemberNext),
+         .notes   = "Choose the next member on the active side",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+J"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMemberPrevious),
+         .notes   = "Choose the previous member on the active side",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+K"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOccurrenceNext),
+         .notes   = "Choose the next place the chosen member appears",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+L"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOccurrencePrevious),
+         .notes   = "Choose the previous place the chosen member appears",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+H"}}}}},
+        {.name    = std::string(settings::kKeymapLinkCross),
+         .notes   = "Make the other side of the selected link active",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+X"}}}}},
+        {.name    = std::string(settings::kKeymapLinkEnter),
+         .notes   = "Go to the chosen place of the selected link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Return"}}}}},
+        {.name    = std::string(settings::kKeymapLinkOrigin),
+         .notes   = "Return to where the selected link was selected",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+O"}}}}},
+        {.name    = std::string(settings::kKeymapLinkDismiss),
+         .notes   = "Put the selected link away",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+D"}}}}},
+        {.name    = std::string(settings::kKeymapActivityBack),
+         .notes   = "Return to the previous visit, not the previous version",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+B"}}}}},
+        {.name    = std::string(settings::kKeymapActivityForward),
+         .notes   = "Choose a saved forward visit",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Y"}}}}},
+        {.name    = std::string(settings::kKeymapLinkAddCell),
+         .notes   = "Add the focused cell content to the pending xanalink",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+A"}}}}},
+        {.name    = std::string(settings::kKeymapLinkFinish),
+         .notes   = "Finish the document-to-cell xanalink",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+F"}}}}},
+        {.name    = std::string(settings::kKeymapTranscludeCellToDoc),
+         .notes   = "Transclude focused cell content at the document caret",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+T"}}}}},
+        {.name    = std::string(settings::kKeymapTranscludeCellToCell),
+         .notes   = "Transclude that content into a new connected cell",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+T"}}}}},
+        {.name    = std::string(settings::kKeymapInsertExternRef),
+         .notes   = "Choose a cell in another loaded slice and reference it",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+R"}}}}},
+        {.name    = std::string(settings::kKeymapFocusToggle),
+         .notes   = "Shortcut to move the keyboard between the document and "
+                    "ZigZag",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"F6"}}}}},
+        {.name    = std::string(settings::kKeymapViewXanadocs),
+         .notes   = "Show only xanadocs in Xuzz",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+1"}}}}},
+        {.name    = std::string(settings::kKeymapViewSlices),
+         .notes   = "Show only slices in Xuzz",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+2"}}}}},
+        {.name    = std::string(settings::kKeymapViewBoth),
+         .notes   = "Show xanadocs and slices together in Xuzz",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+3"}}}}},
+        {.name    = std::string(settings::kKeymapCaretLeft),
+         .notes   = "Move the caret one character left",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Left"}}}}},
+        {.name    = std::string(settings::kKeymapCaretRight),
+         .notes   = "Move the caret one character right",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Right"}}}}},
+        {.name    = std::string(settings::kKeymapCaretUp),
+         .notes   = "Move the caret up a line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Up"}}}}},
+        {.name    = std::string(settings::kKeymapCaretDown),
+         .notes   = "Move the caret down a line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Down"}}}}},
+        {.name    = std::string(settings::kKeymapCaretWordLeft),
+         .notes   = "Move the caret to the previous word",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Left"}}}}},
+        {.name    = std::string(settings::kKeymapCaretWordRight),
+         .notes   = "Move the caret to the next word",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Right"}}}}},
+        {.name    = std::string(settings::kKeymapCaretLineStart),
+         .notes   = "Move the caret to the start of the line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Home"}}}}},
+        {.name    = std::string(settings::kKeymapCaretLineEnd),
+         .notes   = "Move the caret to the end of the line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"End"}}}}},
+        {.name    = std::string(settings::kKeymapCaretDocStart),
+         .notes   = "Move the caret to the start of the document",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Home"}}}}},
+        {.name    = std::string(settings::kKeymapCaretDocEnd),
+         .notes   = "Move the caret to the end of the document",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+End"}}}}},
+        {.name    = std::string(settings::kKeymapSelectLeft),
+         .notes   = "Extend the selection one character left",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+Left"}}}}},
+        {.name    = std::string(settings::kKeymapSelectRight),
+         .notes   = "Extend the selection one character right",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+Right"}}}}},
+        {.name    = std::string(settings::kKeymapSelectUp),
+         .notes   = "Extend the selection up a line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+Up"}}}}},
+        {.name    = std::string(settings::kKeymapSelectDown),
+         .notes   = "Extend the selection down a line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+Down"}}}}},
+        {.name    = std::string(settings::kKeymapSelectWordLeft),
+         .notes   = "Extend the selection to the previous word",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+Left"}}}}},
+        {.name    = std::string(settings::kKeymapSelectWordRight),
+         .notes   = "Extend the selection to the next word",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+Right"}}}}},
+        {.name    = std::string(settings::kKeymapSelectLineStart),
+         .notes   = "Extend the selection to the start of the line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+Home"}}}}},
+        {.name    = std::string(settings::kKeymapSelectLineEnd),
+         .notes   = "Extend the selection to the end of the line",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+End"}}}}},
+        {.name    = std::string(settings::kKeymapNewline),
+         .notes   = "Start a new line at the caret",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Return"}}}}},
+        {.name    = std::string(settings::kKeymapDeleteForward),
+         .notes   = "Delete the selection or the character after the caret",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Delete"}}}}},
+        {.name    = std::string(settings::kKeymapNewSlice),
+         .notes   = "Shortcut to start a new ZigZag slice in a new store",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+N"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDrop),
+         .notes   = "Drop the selection into the notes pouch",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+D"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropToLinkLeft),
+         .notes   = "Drop the selection into the to-link-left pouch",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+1"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropToLinkRight),
+         .notes   = "Drop the selection into the to-link-right pouch",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+2"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropNotes),
+         .notes   = "Drop the selection into the notes pouch",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+3"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropScratch),
+         .notes   = "Drop the selection into the scratch pouch",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+4"}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropLeft),
+         .notes   = "Drop the selection onto the clasp homestead bench",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+["}}}}},
+        {.name    = std::string(settings::kKeymapPouchDropRight),
+         .notes   = "Drop the selection onto the clasp toward bench",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+]"}}}}},
+        {.name    = std::string(settings::kKeymapForgeClasp),
+         .notes   = "Forge a link from the clasp benches",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+L"}}}}},
+        {.name    = std::string(settings::kKeymapEditCell),
+         .notes   = "Key to edit the focused cell text",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"E"}}}}},
+        {.name    = std::string(settings::kKeymapMarkCell),
+         .notes   = "Key to mark the focused cell as the far end of a link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"M"}}}}},
+        {.name    = std::string(settings::kKeymapLinkMarkedXPos),
+         .notes   = "Key to link the focused cell to the marked one along X",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"L"}}}}},
+        {.name  = std::string(settings::kKeymapLinkMarkedXNeg),
+         .notes = "Key to link the marked cell before the focused one along X",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Shift+L"}}}}},
+        {.name    = std::string(settings::kKeymapOverviewToggle),
+         .notes   = "Show or hide the overview of every open page",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+V"}}}}},
         {.name    = std::string(settings::kKeymapCancelLink),
          .notes   = "Shortcut to cancel pending xanalink mark",
          .schemas = {{.expectedTypes = {"string"},
@@ -830,14 +1182,6 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to toggle hypertime map",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+H"}}}}},
-        {.name    = std::string(settings::kKeymapMap),
-         .notes   = "Shortcut to toggle hypertime map",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+H"}}}}},
-        {.name    = std::string(settings::kKeymapScrubBack),
-         .notes   = "Shortcut to scrub hypertime backward",
-         .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+["}}}}},
         {.name    = std::string(settings::kKeymapRadialMenu),
          .notes   = "Shortcut to invoke radial menu",
          .schemas = {{.expectedTypes = {"string"},
@@ -981,7 +1325,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapExportLinkPackage),
          .notes   = "Shortcut to export current slice as Xudu LinkPackage",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+S"}}}}},
+                      .defaultValues = {std::string{"Ctrl+E"}}}}},
         {.name = std::string(settings::kKeymapInsertCellXPos),
          .notes =
              "Shortcut to insert connected cell positive along X dimension",
@@ -1027,15 +1371,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapZigzagTogglePalette),
          .notes   = "Shortcut to toggle presentation palette HUD in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F4"}}}}},
+                      .defaultValues = {std::string{"Shift+F4"}}}}},
         {.name    = std::string(settings::kKeymapZigzagVqlTranslateAttach),
          .notes   = "Shortcut to translate and attach VQL in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F5"}}}}},
+                      .defaultValues = {std::string{"Shift+F5"}}}}},
         {.name    = std::string(settings::kKeymapZigzagToggleCommandBar),
          .notes   = "Shortcut to toggle Command Omnibar in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"F2"}}}}},
+                      .defaultValues = {std::string{"Shift+F2"}}}}},
         {.name    = std::string(settings::kKeymapZigzagOpenCommandBarSlash),
          .notes   = "Shortcut to open Omnibar with / prefix in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
@@ -1079,15 +1423,15 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapZigzagSwapXY),
          .notes   = "Shortcut to swap X and Y axes in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Space"}}}}},
+                      .defaultValues = {std::string{"Alt+X"}}}}},
         {.name    = std::string(settings::kKeymapZigzagCycleDimsForward),
          .notes   = "Shortcut to cycle active dimensions forward in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Tab"}}}}},
+                      .defaultValues = {std::string{"Alt+]"}}}}},
         {.name    = std::string(settings::kKeymapZigzagCycleDimsBackward),
          .notes   = "Shortcut to cycle active dimensions backward in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Alt+Shift+Tab"}}}}},
+                      .defaultValues = {std::string{"Alt+["}}}}},
         {.name    = std::string(settings::kKeymapZigzagJumpHome),
          .notes   = "Shortcut to jump focus to home cell in Xuzz",
          .schemas = {{.expectedTypes = {"string"},
@@ -2123,7 +2467,7 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "new-doc", .canonical = "std:xudu/new_doc"},
     {.legacy = "forward", .canonical = "std:xudu/forward"},
     {.legacy = "open-doc", .canonical = "std:xudu/open_doc"},
-    {.legacy = "close-doc", .canonical = "std:xudu/close_doc"},
+    {.legacy = "close-doc", .canonical = "std:xudu/close"},
     {.legacy = "onion-skin", .canonical = "std:xudu/onion_skin"},
     {.legacy = "pouch-toggle", .canonical = "std:xudu/pouch_toggle"},
     {.legacy = "pouch-toggle-f2", .canonical = "std:xudu/pouch_toggle_f2"},
@@ -2133,7 +2477,7 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy    = "tension-physics-toggle",
      .canonical = "std:xudu/tension_physics_toggle"},
     {.legacy    = "unlock-transcopyright",
-     .canonical = "std:xudu/unlock_transcopyright"},
+     .canonical = "std:xudu/unlock_transcopyright_ctrl_u"},
     {.legacy    = "unlock-transcopyright-f5",
      .canonical = "std:xudu/unlock_transcopyright_f5"},
     {.legacy    = "unlock-transcopyright-ctrl-u",
@@ -2150,9 +2494,20 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "delete", .canonical = "std:xudu/delete"},
     {.legacy = "page-break", .canonical = "std:xudu/page_break"},
     {.legacy = "hypertime-map", .canonical = "std:xudu/hypertime_map"},
-    {.legacy = "map", .canonical = "std:xudu/map"},
-    {.legacy = "scrub-back", .canonical = "std:xudu/scrub_back"},
+    {.legacy = "map", .canonical = "std:xudu/hypertime_map"},
+    {.legacy = "scrub-back", .canonical = "std:xudu/scrub_backward"},
     {.legacy = "radial-menu", .canonical = "std:xudu/radial_menu"},
+    {.legacy = "pouch-drop", .canonical = "std:xudu/pouch_drop"},
+    {.legacy    = "pouch-drop-to-link-left",
+     .canonical = "std:xudu/pouch_drop_to_link_left"},
+    {.legacy    = "pouch-drop-to-link-right",
+     .canonical = "std:xudu/pouch_drop_to_link_right"},
+    {.legacy = "pouch-drop-notes", .canonical = "std:xudu/pouch_drop_notes"},
+    {.legacy    = "pouch-drop-scratch",
+     .canonical = "std:xudu/pouch_drop_scratch"},
+    {.legacy = "pouch-drop-left", .canonical = "std:xudu/pouch_drop_left"},
+    {.legacy = "pouch-drop-right", .canonical = "std:xudu/pouch_drop_right"},
+    {.legacy = "forge-clasp", .canonical = "std:xudu/forge_clasp"},
 
     // Zigzag Visualizer & Pure Vortex Actions
     {.legacy    = "view-mode-content-1",
@@ -2259,6 +2614,24 @@ constexpr ActionAlias kActionAliases[] = {
 };
 } // namespace
 
+std::string_view keymapScope(const std::string_view action) {
+  const auto slash = action.find('/');
+  if (std::string_view::npos == slash) {
+    return {};
+  }
+  const auto family = action.substr(0, slash);
+  if (action.substr(slash + 1).starts_with("zigzag_")) {
+    return {};
+  }
+  if ("std:nav" == family || "std:ui" == family || "std:zigzag" == family) {
+    return kKeyScopeZigzag;
+  }
+  if ("std:edit" == family) {
+    return kKeyScopeDocument;
+  }
+  return {};
+}
+
 std::string_view canonicalKeymapAction(const std::string_view action) {
   for (const auto &alias : kActionAliases) {
     if (alias.legacy == action) {
@@ -2330,12 +2703,14 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   }
   const auto model = SystemStoreModel::fromStore(store);
 
-  cfg.columns      = static_cast<std::uint32_t>(model.getInt64(
+  cfg.columns        = static_cast<std::uint32_t>(model.getInt64(
       settings::kColumns, static_cast<std::int64_t>(cfg.columns)));
-  cfg.pageWidthPx  = static_cast<float>(model.getDouble(
+  cfg.pageWidthPx    = static_cast<float>(model.getDouble(
       settings::kPageWidthPx, static_cast<double>(cfg.pageWidthPx)));
-  cfg.pageHeightPx = static_cast<float>(model.getDouble(
+  cfg.pageHeightPx   = static_cast<float>(model.getDouble(
       settings::kPageHeightPx, static_cast<double>(cfg.pageHeightPx)));
+  cfg.readableTextPx = static_cast<float>(model.getDouble(
+      settings::kReadableTextPx, static_cast<double>(cfg.readableTextPx)));
   cfg.transclusionPrisms =
       model.getBool(settings::kTransclusionPrisms, cfg.transclusionPrisms);
   cfg.transclusionLoom =
@@ -2443,6 +2818,9 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.zigzag.connectionBeamWidthPx = static_cast<float>(
       model.getDouble(settings::kZigzagConnectionBeamWidthPx,
                       static_cast<double>(cfg.zigzag.connectionBeamWidthPx)));
+  cfg.zigzag.minReadableTextPx = static_cast<float>(
+      model.getDouble(settings::kZigzagMinReadableTextPx,
+                      static_cast<double>(cfg.zigzag.minReadableTextPx)));
 
   cfg.bridge = BridgeRuntimeConfig::fromSystemDocs(store);
 
@@ -2476,7 +2854,20 @@ gleditor::RadialConfig createDefaultRadialConfig() {
       makeAction("align:justify", "Justify", "|=", "align:justify"),
   };
 
+  // Entries naming a keymap action run it, so a menu and a key reach the
+  // same command and neither can drift from the other.
+  auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
+  fileAction.desc = "New and Open";
+  fileAction.subActions = {
+      makeAction("run:std:xudu/new_doc", "New xanadoc", "+",
+                 "run:std:xudu/new_doc"),
+      makeAction("run:std:xuzz/new_slice", "New slice", "#",
+                 "run:std:xuzz/new_slice"),
+      makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
+  };
+
   cfg.actions = {
+      std::move(fileAction),
       makeAction("format:bold", "Bold", "B", "format:bold"),
       makeAction("format:italic", "Italic", "I", "format:italic"),
       makeAction("format:underline", "Underline", "U", "format:underline"),
@@ -2516,6 +2907,47 @@ UIConfig UIConfig::fromStore(const Store &store) {
   cfg.radialMenu.innerRadius = static_cast<float>(
       model.getDouble(settings::kRadialMenuInnerRadius,
                       static_cast<double>(cfg.radialMenu.innerRadius)));
+
+  auto &overview = cfg.overview;
+  overview.visible =
+      model.getBool(settings::kOverviewVisible, overview.visible);
+  const auto overviewLength = [&model](std::string_view name, float &into) {
+    into = static_cast<float>(model.getDouble(name, double{into}));
+  };
+  const auto overviewColour = [&model](std::string_view name,
+                                       std::uint32_t &into) {
+    into = static_cast<std::uint32_t>(model.getInt64(name, std::int64_t{into}));
+  };
+  overviewLength(settings::kOverviewWidthPx, overview.widthPx);
+  overviewLength(settings::kOverviewHeightPx, overview.heightPx);
+  overviewLength(settings::kOverviewLeftPx, overview.leftPx);
+  overviewLength(settings::kOverviewBottomPx, overview.bottomPx);
+  overviewColour(settings::kOverviewBackgroundColour,
+                 overview.backgroundColour);
+  overviewColour(settings::kOverviewPageColour, overview.pageColour);
+  overviewColour(settings::kOverviewViewportColour, overview.viewportColour);
+  overviewColour(settings::kOverviewMarkColour, overview.markColour);
+
+  auto &panel       = cfg.linkPanel;
+  panel.font        = model.getString(settings::kLinkPanelFont, panel.font);
+  const auto length = [&model](std::string_view name, float &into) {
+    into = static_cast<float>(model.getDouble(name, double{into}));
+  };
+  const auto colour = [&model](std::string_view name, std::uint32_t &into) {
+    into = static_cast<std::uint32_t>(model.getInt64(name, std::int64_t{into}));
+  };
+  length(settings::kLinkPanelMarginPx, panel.marginPx);
+  length(settings::kLinkPanelTopPx, panel.topPx);
+  length(settings::kLinkPanelPaddingPx, panel.paddingPx);
+  length(settings::kLinkPanelLineGapPx, panel.lineGapPx);
+  colour(settings::kLinkPanelBackgroundColour, panel.backgroundColour);
+  colour(settings::kLinkPanelTextColour, panel.textColour);
+  colour(settings::kLinkPanelMutedColour, panel.mutedColour);
+  colour(settings::kLinkPanelButtonColour, panel.buttonColour);
+  colour(settings::kLinkPanelChosenHighlightColour,
+         panel.chosenHighlightColour);
+  colour(settings::kLinkPanelMemberHighlightColour,
+         panel.memberHighlightColour);
   return cfg;
 }
 

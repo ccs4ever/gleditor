@@ -8,12 +8,15 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <tuple>
 
 #include "../lib/mocks/device.hpp"
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/compact_zzcell.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/font.hpp"
@@ -88,9 +91,85 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
   // into a document mints nothing: a xanadoc's pieces become cells when
   // something says they are cells, which is sliceToStore() or the verbs below.
   const auto v1 = store.insert(xanadu::MicroversionId{}, 0, "Everything is");
-  static_cast<void>(store.insert(v1, 13, " deeply intertwingled."));
+  std::ignore   = store.insert(v1, 13, " deeply intertwingled.");
   engine.syncIncremental();
   EXPECT_EQ(engine.cellCount(), 0U);
+}
+
+TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
+  xanadu::Store store;
+  const auto genesis   = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto common    = store.makeCell(genesis, "common");
+  const auto left      = store.makeCell(common, "left");
+  const auto leftCell  = store.cellRefOf(left);
+  const auto right     = store.makeCell(common, "right");
+  const auto rightCell = store.cellRefOf(right);
+
+  UnifiedTransclusionEngine engine(store, left);
+  const auto extra = engine.addCell("left next");
+  EXPECT_TRUE(engine.manifold().contains(leftCell));
+  EXPECT_TRUE(engine.manifold().contains(extra));
+  EXPECT_FALSE(engine.manifold().contains(rightCell));
+  EXPECT_EQ(engine.manifold().cellCount(),
+            store.rebuildManifold(engine.head()).cellCount());
+
+  engine.syncTo(right);
+  EXPECT_TRUE(engine.manifold().contains(rightCell));
+  EXPECT_FALSE(engine.manifold().contains(leftCell));
+  EXPECT_FALSE(engine.manifold().contains(extra));
+}
+
+TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
+  xanadu::Store store;
+  UnifiedTransclusionEngine engine(store);
+  const auto source   = engine.addCell("quoted cell content");
+  const auto original = engine.manifold().contentOf(source);
+  ASSERT_EQ(original.size(), 1U);
+  const std::vector<xanadu::PrimediaSpan> quoted(original.begin(),
+                                                 original.end());
+
+  const auto target = engine.addCellFromSpans(quoted);
+  ASSERT_NE(source, target);
+  const auto copied = engine.manifold().contentOf(target);
+  ASSERT_EQ(copied.size(), quoted.size());
+  EXPECT_EQ(copied.front().scroll, quoted.front().scroll);
+  EXPECT_EQ(copied.front().start, quoted.front().start);
+  EXPECT_EQ(copied.front().length, quoted.front().length);
+  EXPECT_EQ(engine.manifold().textOf(target, store), "quoted cell content");
+}
+
+TEST(UnifiedTransclusionEngineTest,
+     OrdinarySliceEditReopensAtLatestWithoutDesignatingAnEdition) {
+  const auto dir =
+      std::filesystem::temp_directory_path() / "zigzag_slice_edit_resume";
+  std::filesystem::remove_all(dir);
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
+  CellRef first    = noCell;
+  CellRef second   = noCell;
+  xanadu::MicroversionId edited;
+  {
+    xanadu::Store store(perma);
+    UnifiedTransclusionEngine engine(store);
+    first  = engine.addCell("first");
+    second = engine.addCell("New Cell");
+    engine.linkCells(first, second, DimOrdinal::D1);
+    engine.updateCellText(second, "saved edit");
+    edited = engine.head();
+    ASSERT_EQ(store.primaryCurrentVersion(), edited);
+    store.save(dir.string());
+  }
+
+  xanadu::Store reopened(perma);
+  reopened.load(dir.string());
+  const auto current = reopened.primaryCurrentVersion();
+  const auto folded  = reopened.rebuildManifold(current);
+  EXPECT_EQ(current, edited);
+  EXPECT_EQ(folded.textOf(second, reopened), "saved edit");
+  const auto dim = folded.dimensionNamed("d.1", reopened);
+  ASSERT_TRUE(dim.has_value());
+  EXPECT_EQ(folded.linked(first, *dim, DimVector::POS), second);
+  EXPECT_TRUE(folded.editions().empty());
+  std::filesystem::remove_all(dir);
 }
 
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
@@ -418,16 +497,14 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   const auto req   = UnifiedTransclusionEngine::RenderSliceRequest{
       .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
 
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto afterFirst = rig.engine.shapingCacheStats();
 
   // A second cell whose text differs only in its last character.
   const auto second = rig.engine.addCell("Alpha content y");
   const auto req2   = UnifiedTransclusionEngine::RenderSliceRequest{
       .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache);
   const auto afterSecond = rig.engine.shapingCacheStats();
 
   EXPECT_GT(afterSecond.misses, afterFirst.misses)
@@ -443,8 +520,7 @@ TEST(ShapingCacheTest, StaysWithinItsCapacity) {
       static_cast<int>(UnifiedTransclusionEngine::kShapingCacheCapacity) + 40;
   const auto req = rig.buildChain(cells);
 
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   const auto stats = rig.engine.shapingCacheStats();
 
   EXPECT_LE(stats.entries, UnifiedTransclusionEngine::kShapingCacheCapacity);
@@ -455,8 +531,7 @@ TEST(ShapingCacheTest, ClearingDropsEverything) {
   StagingRig rig;
   ASSERT_NE(rig.font, nullptr);
   const auto req = rig.buildChain(4);
-  static_cast<void>(
-      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
+  std::ignore    = rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
   ASSERT_GT(rig.engine.shapingCacheStats().entries, 0U);
 
   rig.engine.clearShapingCache();
@@ -484,7 +559,7 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
     return std::chrono::duration<double, std::milli>(t1 - t0).count();
   };
 
-  static_cast<void>(timeOne(false)); // warm the glyph atlas
+  std::ignore = timeOne(false); // warm the glyph atlas
 
   double cold        = 0.0;
   double warm        = 0.0;
@@ -584,8 +659,7 @@ TEST(UnifiedTransclusionEngineTest,
   const auto plain1 = rig.engine.addCell("Plain cell 1");
   const auto plain2 = rig.engine.addCell("Plain cell 2");
   rig.engine.linkCells(plain1, plain2, DimOrdinal::D1);
-  static_cast<void>(
-      rig.store.insert(rig.engine.head(), 0, "Unrelated text in doc"));
+  std::ignore = rig.store.insert(rig.engine.head(), 0, "Unrelated text in doc");
 
   rig.engine.syncIncremental();
 

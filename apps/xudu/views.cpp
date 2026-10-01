@@ -24,6 +24,7 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/media.hpp>
 #include <gleditor/media_stream.hpp>
 #include <gleditor/media_widget.hpp>
@@ -32,6 +33,7 @@
 #include <gleditor/renderer.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/ui/hypertime_graph.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
@@ -42,7 +44,6 @@
 #include "common/xanadu/transcopyright_crypto.hpp"
 #include "common/xanadu/transcopyright_logic.hpp"
 #include "xudu/beams.hpp"
-#include "xudu/hypertime_graph.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
@@ -66,7 +67,85 @@ void Views::deviceReady(render::RenderDevice &device,
   documentDesc_ = documentPipeline;
 }
 
-void Views::drawFrame(gleditor::FrameContext & /*ctx*/) {}
+void Views::drawFrame(gleditor::FrameContext &ctx) {
+  if (ctx.state.documentsVisible) frameForReading(ctx);
+  if (pendingCamera_ && pendingCamera_()) {
+    pendingCamera_ = {};
+  }
+}
+
+void Views::frameForReading(const gleditor::FrameContext &ctx) {
+  auto target = frameTarget_.lock();
+  if (!target && !readingFramed_ && !ctx.state.docs.empty()) {
+    target = ctx.state.docs.front();
+  }
+  if (!target || readableTextPx_ <= 0.0F) {
+    return;
+  }
+  const auto &doc      = *target;
+  const auto frame     = doc.pageFrame(0);
+  const auto firstLine = doc.anchorFor(0);
+  if (!frame || !firstLine) {
+    return;
+  }
+  const float toWorld = glm::length(glm::vec3(frame->localToWorld[1]));
+  std::scoped_lock locker(state->view);
+  auto &view          = state->view;
+  const auto distance = xanadu::readableCameraDistance(
+      firstLine->height * toWorld, static_cast<float>(view.screenHeight),
+      view.fov, readableTextPx_);
+  if (!distance || view.screenWidth <= 0) {
+    return;
+  }
+  const glm::vec3 topLeft(frame->localToWorld *
+                          glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
+  const glm::vec3 topRight(frame->localToWorld *
+                           glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
+  const float halfH       = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW       = halfH * static_cast<float>(view.screenWidth) /
+                            static_cast<float>(view.screenHeight);
+  const float x           = topRight.x - topLeft.x <= 2.0F * halfW
+                                ? 0.5F * (topLeft.x + topRight.x)
+                                : topLeft.x + halfW;
+  const float chromeTopPx = std::max(ctx.chrome.top, ctx.settledChrome.top);
+  const float worldPerPx = 2.0F * halfH / static_cast<float>(view.screenHeight);
+  view.pos       = glm::vec3(x, topLeft.y - halfH + (chromeTopPx * worldPerPx),
+                             topLeft.z + *distance);
+  readingFramed_ = true;
+  frameTarget_.reset();
+}
+
+void Views::keepInView(const Doc &doc, const std::uint32_t offset) {
+  const auto anchor = doc.anchorFor(offset);
+  if (!anchor) {
+    return;
+  }
+  const auto found = doc.worldPoint(*anchor);
+  if (!found) {
+    return;
+  }
+  const auto point = *found;
+  std::scoped_lock locker(state->view);
+  auto &view = state->view;
+  if (view.screenHeight <= 0 || view.pos.z <= point.z) {
+    return;
+  }
+  constexpr float kComfort = 0.8F;
+  const float halfH =
+      (view.pos.z - point.z) * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW = halfH * static_cast<float>(view.screenWidth) /
+                      static_cast<float>(view.screenHeight);
+  const auto follow = [](float &camera, const float at, const float half) {
+    const float reach = half * kComfort;
+    if (at > camera + reach) {
+      camera = at - reach;
+    } else if (at < camera - reach) {
+      camera = at + reach;
+    }
+  };
+  follow(view.pos.x, point.x, halfW);
+  follow(view.pos.y, point.y, halfH);
+}
 
 std::optional<Doc::Anchor>
 Views::widgetRectFor(const Doc &doc, const std::uint32_t docOffset) const {
@@ -125,7 +204,7 @@ void Views::syncMediaWidgets(RenderState &rState) {
         widget->deviceReady(*device_, documentDesc_);
       }
       auto stream = std::make_shared<gleditor::MemoryMediaStream>(bytes);
-      widget->loadFragment(
+      std::ignore = widget->loadFragment(
           gleditor::MediaResource::fromStream(stream, mSpan.label),
           gleditor::ByteRange{.start  = mSpan.containerOffset,
                               .length = mSpan.span.length},
@@ -161,7 +240,10 @@ void Views::showAlongside(const MicroversionId &version, const float depthZ,
 }
 
 std::optional<glm::mat4> Views::presentationTransform() const {
-  const auto document = primaryDocument_.lock();
+  auto document = presentationAnchor_.lock();
+  if (!document) {
+    document = primaryDocument_.lock();
+  }
   if (!document) {
     return std::nullopt;
   }
@@ -304,6 +386,21 @@ void Views::focusSpan(const std::size_t docIndex, const std::uint32_t charStart,
       });
 }
 
+void Views::focusContent(std::vector<PrimediaSpan> content) {
+  renderer->runWithState([this, content = std::move(content)](RenderState &) {
+    for (std::size_t docIdx = 0; docIdx < session.views().size(); ++docIdx) {
+      const auto found = xanadu::contentOccurrences(
+          session.views()[docIdx].pieces.pieces(), content);
+      if (!found.empty()) {
+        focusSpan(docIdx, found.front().start, found.front().end);
+        return;
+      }
+    }
+    GLEDITOR_LOG_DEBUG("xudu.links",
+                       "activated cell content is in no open document");
+  });
+}
+
 void Views::back() {
   renderer->runWithState([this](RenderState &) {
     if (session.views().empty()) {
@@ -372,11 +469,52 @@ void Views::scrubHistory(const bool backward) {
 
 void Views::deleteSelection() {
   withCaret([](RenderState &rState, const Where &where, Caret *caret) {
+    auto &doc  = *rState.docs[where.doc];
+    auto start = where.start;
     if (!where.hasRange) {
-      return;
+      start = gleditor::stepCharacter(doc.contents(), where.start, false);
     }
-    rState.docs[where.doc]->erase(rState, where.start, where.end - where.start,
-                                  caret);
+    if (start < where.end) {
+      doc.erase(rState, start, where.end - start, caret);
+    }
+  });
+}
+
+void Views::deleteForward() {
+  withCaret([](RenderState &rState, const Where &where, Caret *caret) {
+    auto &doc = *rState.docs[where.doc];
+    auto end  = where.end;
+    if (!where.hasRange) {
+      end = gleditor::stepCharacter(doc.contents(), where.end, true);
+    }
+    if (where.start < end) {
+      doc.erase(rState, where.start, end - where.start, caret);
+    }
+  });
+}
+
+void Views::moveCaret(const gleditor::CaretMotion motion, const bool extend) {
+  withCaret([this, motion, extend](RenderState &rState, const Where &where,
+                                   Caret *caret) {
+    const auto &doc = *rState.docs[where.doc];
+    std::uint32_t target{};
+    if (!extend && where.hasRange && gleditor::CaretMotion::Left == motion) {
+      target = where.start;
+    } else if (!extend && where.hasRange &&
+               gleditor::CaretMotion::Right == motion) {
+      target = where.end;
+    } else {
+      target = gleditor::caretTarget(doc, caret->byteOffset(), motion);
+    }
+    if (extend) {
+      if (!caret->hasSelection()) {
+        caret->anchorSelection();
+      }
+      caret->extendTo(target);
+    } else {
+      caret->placeAt(where.doc, target);
+    }
+    keepInView(doc, target);
   });
 }
 
@@ -442,6 +580,37 @@ void Views::cancelLink() {
               << pending->start << "," << pending->end << ")\n";
     pending.reset();
   });
+}
+
+void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content) {
+  if (!pending) {
+    std::cout << "xudu: select a document passage with Ctrl+L first\n";
+    return;
+  }
+  if (content.empty()) {
+    std::cout << "xudu: focused cell has no content to link\n";
+    return;
+  }
+  pending->right.insert(pending->right.end(), content.begin(), content.end());
+  ++pending->rightCells;
+  std::cout << "xudu: added cell " << pending->rightCells
+            << " to the pending link; choose another or finish the link\n";
+}
+
+void Views::finishCellLink() {
+  if (!pending || pending->right.empty()) {
+    std::cout << "xudu: select a passage and add at least one cell first\n";
+    return;
+  }
+  xudu::Link link;
+  link.type        = xudu::LinkType::Comment;
+  link.owner       = "you";
+  link.left        = std::move(pending->spans);
+  link.right       = std::move(pending->right);
+  const auto after = session.addLink(0, std::move(link));
+  std::cout << "xudu: linked document passage to " << pending->rightCells
+            << " cell(s) at " << after.str() << "\n";
+  pending.reset();
 }
 
 void Views::publishCurrent(const std::string &salt) {
@@ -705,24 +874,97 @@ void Views::closeActive() {
   });
 }
 
-void Views::newDocument() {
-  const auto storeIndex = session.createNewStore("");
-  showAlongside(MicroversionId{}, 0.0F, storeIndex);
+void Views::activateNewest() {
   renderer->runWithState([this](RenderState &rState) {
     if (!rState.docs.empty()) {
-      const auto newDocIndex =
-          static_cast<std::uint32_t>(rState.docs.size() - 1);
-      if (switcher) {
-        switcher->setActiveDocIndex(newDocIndex);
-      }
-      auto *const caret = renderer->editCaret();
-      if (caret) {
-        caret->placeAt(newDocIndex, 0);
+      activateDocument(rState,
+                       static_cast<std::uint32_t>(rState.docs.size() - 1));
+    }
+  });
+}
+
+void Views::activateDocument(RenderState &rState, const std::uint32_t index) {
+  if (index >= rState.docs.size() || !rState.docs[index]) {
+    return;
+  }
+  if (switcher) {
+    switcher->setActiveDocIndex(index);
+  }
+  if (auto *const caret = renderer->editCaret(); caret) {
+    caret->placeAt(index, 0);
+  }
+  frameTarget_ = rState.docs[index];
+}
+
+std::size_t Views::newDocument() {
+  const auto storeIndex = session.createNewStore("");
+  showAlongside(MicroversionId{}, 0.0F, storeIndex);
+  activateNewest();
+  std::cout << "xudu: created new sovereign document (store " << storeIndex
+            << ")\n";
+  return storeIndex;
+}
+
+xanadu::ReadingPlace Views::currentPlace() const {
+  xanadu::ReadingPlace place;
+  const auto *const caret = renderer->editCaret();
+  for (std::size_t i = 0; i < session.views().size(); ++i) {
+    const auto &view = session.views()[i];
+    xanadu::DocumentPlace document{.storePath = session.path(view.storeIndex),
+                                   .version   = view.version.str()};
+    if (nullptr != caret && caret->active() && caret->documentIndex() == i) {
+      document.caret  = caret->byteOffset();
+      document.anchor = !caret->hasSelection() ? caret->byteOffset()
+                        : caret->byteOffset() == caret->selectionStart()
+                            ? caret->selectionEnd()
+                            : caret->selectionStart();
+      place.active    = i;
+    }
+    place.documents.push_back(std::move(document));
+  }
+  std::scoped_lock locker(state->view);
+  place.camera = std::array<double, 4>{state->view.pos.x, state->view.pos.y,
+                                       state->view.pos.z, state->view.fov};
+  return place;
+}
+
+void Views::restorePlace(const xanadu::ReadingPlace &place,
+                         std::vector<std::optional<std::uint32_t>> opened,
+                         std::vector<std::uint32_t> lengths) {
+  renderer->runWithState([this, place, opened = std::move(opened),
+                          lengths = std::move(lengths)](RenderState &rState) {
+    if (place.camera) {
+      // The saved view, not a fresh reading framing of the first page.
+      readingFramed_ = true;
+      frameTarget_.reset();
+      std::scoped_lock locker(state->view);
+      const auto &[x, y, z, fov] = *place.camera;
+      state->view.pos = glm::vec3(static_cast<float>(x), static_cast<float>(y),
+                                  static_cast<float>(z));
+      state->view.fov = static_cast<float>(fov);
+    }
+    if (!place.active || *place.active >= opened.size() ||
+        !opened[*place.active]) {
+      return;
+    }
+    const auto index = *opened[*place.active];
+    if (index >= rState.docs.size()) {
+      return;
+    }
+    const auto &saved = place.documents[*place.active];
+    const auto length = *place.active < lengths.size() ? lengths[*place.active]
+                                                       : std::uint32_t{0};
+    if (switcher) {
+      switcher->setActiveDocIndex(index);
+    }
+    if (auto *const caret = renderer->editCaret(); caret) {
+      caret->placeAt(index, std::min(saved.anchor, length));
+      if (saved.anchor != saved.caret) {
+        caret->anchorSelection();
+        caret->extendTo(std::min(saved.caret, length));
       }
     }
   });
-  std::cout << "xudu: created new sovereign document (store " << storeIndex
-            << ")\n";
 }
 
 void Views::spawnTranscludedDocument(const TetherPayload &payload,
@@ -731,23 +973,15 @@ void Views::spawnTranscludedDocument(const TetherPayload &payload,
   if (payload.originCharEnd <= payload.originCharStart) {
     return;
   }
-  const auto len        = payload.originCharEnd - payload.originCharStart;
-  const auto spawnedVer = session.store(0).transclude(
+  const auto len  = payload.originCharEnd - payload.originCharStart;
+  const auto sIdx = PouchOriginKind::Document == payload.originKind &&
+                            payload.originDocIndex < session.views().size()
+                        ? session.storeIndexOf(payload.originDocIndex)
+                        : std::size_t{0};
+  const auto spawnedVer = session.store(sIdx).transclude(
       MicroversionId{}, 0, payload.originVersion, payload.originCharStart, len);
-  showAlongside(spawnedVer, 0.0F, 0);
-  renderer->runWithState([this](RenderState &rState) {
-    if (!rState.docs.empty()) {
-      const auto newDocIndex =
-          static_cast<std::uint32_t>(rState.docs.size() - 1);
-      if (switcher) {
-        switcher->setActiveDocIndex(newDocIndex);
-      }
-      auto *const caret = renderer->editCaret();
-      if (caret) {
-        caret->placeAt(newDocIndex, 0);
-      }
-    }
-  });
+  showAlongside(spawnedVer, 0.0F, sIdx);
+  activateNewest();
   std::cout << "xudu: spawned transcluded document version " << spawnedVer.str()
             << " from origin version " << payload.originVersion.str() << " ["
             << payload.originCharStart << ", " << payload.originCharEnd
@@ -787,21 +1021,44 @@ void Views::summonPublication(const PublicationEntry &entry) {
                                     16);
     wireframeOverlay_->updateProgress(newDocIndex, 12);
   }
-  renderer->runWithState([this](RenderState &rState) {
-    if (!rState.docs.empty()) {
-      const auto newDocIndex =
-          static_cast<std::uint32_t>(rState.docs.size() - 1);
-      if (switcher) {
-        switcher->setActiveDocIndex(newDocIndex);
-      }
-      auto *const caret = renderer->editCaret();
-      if (caret) {
-        caret->placeAt(newDocIndex, 0);
-      }
-    }
-  });
+  activateNewest();
   std::cout << "xudu: summoned publication '" << entry.title
             << "' into 3D space (store " << storeIndex << ")\n";
+}
+
+void Views::insertSpanAtCaret(const PrimediaSpan &span) {
+  withCaret([this, span](RenderState &rState, const Where &where, Caret *) {
+    insertSpanAt(rState, where.doc, where.start, span);
+  });
+}
+
+void Views::transcludeSpansAtCaret(std::vector<PrimediaSpan> spans) {
+  withCaret([this, spans = std::move(spans)](RenderState &rState,
+                                             const Where &where, Caret *) {
+    auto at = where.start;
+    for (const auto &span : spans) {
+      insertSpanAt(rState, where.doc, at, span);
+      at += static_cast<std::uint32_t>(span.length);
+    }
+  });
+}
+
+void Views::insertSpanAt(RenderState &rState, const std::uint32_t doc,
+                         const std::uint32_t at, const PrimediaSpan &span) {
+  if (doc >= rState.docs.size() || 0 == span.length) {
+    return;
+  }
+  session.flushUncommitted(doc);
+  const auto prod = session.insertSpan(doc, at, span);
+  if (const auto src = session.sourceFor(prod, session.storeIndexOf(doc))) {
+    rState.docs[doc]->load(*src);
+    syncMediaWidgets(rState);
+  }
+  if (auto *const caret = renderer->editCaret(); caret) {
+    caret->placeAt(doc, at + static_cast<std::uint32_t>(span.length));
+  }
+  std::cout << "xudu: transcluded " << span.length << " bytes into doc " << doc
+            << " at " << at << "\n";
 }
 
 void Views::insertPageBreak(const std::uint32_t docIndex,
@@ -1034,19 +1291,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
     auto &sysStore  = session.store(sIdx);
     const auto head = sysStore.primaryCurrentVersion();
     showAlongside(head, 0.0F, sIdx);
-    renderer->runWithState([this](RenderState &rState) {
-      if (!rState.docs.empty()) {
-        const auto newDocIndex =
-            static_cast<std::uint32_t>(rState.docs.size() - 1);
-        if (switcher) {
-          switcher->setActiveDocIndex(newDocIndex);
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(newDocIndex, 0);
-        }
-      }
-    });
+    activateNewest();
     std::cout << "xudu: opened system document " << chosen << " (store " << sIdx
               << ")\n";
     return;
@@ -1061,19 +1306,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
       auto &st        = session.store(sIdx);
       const auto head = st.primaryCurrentVersion();
       showAlongside(head, 0.0F, sIdx);
-      renderer->runWithState([this](RenderState &rState) {
-        if (!rState.docs.empty()) {
-          const auto newDocIndex =
-              static_cast<std::uint32_t>(rState.docs.size() - 1);
-          if (switcher) {
-            switcher->setActiveDocIndex(newDocIndex);
-          }
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(newDocIndex, 0);
-          }
-        }
-      });
+      activateNewest();
       std::cout << "xudu: opened store " << chosen << " (store " << sIdx
                 << ")\n";
     } catch (const std::exception &err) {
@@ -1084,19 +1317,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
     try {
       const auto [sIdx, imported] = session.importFileToTemporaryStore(chosen);
       showAlongside(imported, 0.0F, sIdx);
-      renderer->runWithState([this](RenderState &rState) {
-        if (!rState.docs.empty()) {
-          const auto newDocIndex =
-              static_cast<std::uint32_t>(rState.docs.size() - 1);
-          if (switcher) {
-            switcher->setActiveDocIndex(newDocIndex);
-          }
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(newDocIndex, 0);
-          }
-        }
-      });
+      activateNewest();
       std::cout << "xudu: imported file " << chosen << " to temporary store "
                 << sIdx << "\n";
     } catch (const std::exception &err) {
@@ -1112,15 +1333,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
 void Views::selectDoc(const std::uint32_t index) {
   renderer->runWithState([this, index](RenderState &rState) {
     session.flushUncommitted();
-    if (index < rState.docs.size() && rState.docs[index]) {
-      if (switcher) {
-        switcher->setActiveDocIndex(index);
-      }
-      auto *const caret = renderer->editCaret();
-      if (caret) {
-        caret->placeAt(index, 0);
-      }
-    }
+    activateDocument(rState, index);
   });
 }
 

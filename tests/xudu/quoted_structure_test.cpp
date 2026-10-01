@@ -292,11 +292,11 @@ TEST(QuotedStructureTest, aQuotationKeepsTheRestOfTheLocalRank) {
 // 5. twoQuotationsOfTheSameRankKeepBothOccurrences
 TEST(QuotedStructureTest, twoQuotationsOfTheSameRankKeepBothOccurrences) {
   TestStore alice("btpk:aaaa:alice");
-  auto atAlice    = alice.head;
-  const auto dimA = alice.makeDimAt(atAlice, "d.rank");
-  atAlice         = alice.store->makeCell(atAlice, "F1");
-  const auto f1   = alice.store->cellRefOf(atAlice);
-  alice.head      = atAlice;
+  auto atAlice                     = alice.head;
+  [[maybe_unused]] const auto dimA = alice.makeDimAt(atAlice, "d.rank");
+  atAlice                          = alice.store->makeCell(atAlice, "F1");
+  const auto f1                    = alice.store->cellRefOf(atAlice);
+  alice.head                       = atAlice;
 
   TestStore bob("btpk:bbbb:bob");
   bob.head = bob.store->registerScroll(bob.head, alice.scrollKey);

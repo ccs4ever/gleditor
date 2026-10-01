@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <set>
 #include <string>
 #include <tuple>
@@ -169,11 +170,115 @@ PpmImageInfo inspectPpm(const fs::path &path) {
   return info;
 }
 
+/**
+ * @brief Pixels of text on paper: dark, with white paper within three pixels
+ *        on both sides of it along the row.
+ *
+ * What a blank page lacks and a page edge against the dark background does
+ * not have, so a document that drew its paper but lost its glyphs reads as
+ * zero however much else of the frame is right. A whole-frame pixel
+ * comparison cannot see that: the glyphs of two small pages are well under
+ * one percent of an 800x600 frame.
+ */
+std::size_t countInkOnPaper(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width  = 0;
+  int height = 0;
+  int maxVal = 0;
+  in >> magic >> width >> height >> maxVal;
+  in.get();
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
+                                 static_cast<std::size_t>(height) * 3U);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if ("P6" != magic || !in) {
+    return 0;
+  }
+  constexpr int kInk   = 160;
+  constexpr int kPaper = 230;
+  constexpr int kReach = 3;
+  const auto luma      = [&](const int x, const int y) {
+    const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
+    return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
+  };
+  std::size_t ink = 0;
+  for (int y = 0; y < height; ++y) {
+    for (int x = kReach; x < width - kReach; ++x) {
+      if (luma(x, y) >= kInk) {
+        continue;
+      }
+      bool left  = false;
+      bool right = false;
+      for (int k = 1; k <= kReach; ++k) {
+        left  = left || luma(x - k, y) >= kPaper;
+        right = right || luma(x + k, y) >= kPaper;
+      }
+      ink += (left && right) ? 1U : 0U;
+    }
+  }
+  return ink;
+}
+
+/**
+ * @brief The typical distance, in screen rows, between the tops of lines of
+ *        text on paper: the median gap between rows where ink starts after a
+ *        row with none. Zero when fewer than two lines were found.
+ */
+int medianLinePitch(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width  = 0;
+  int height = 0;
+  int maxVal = 0;
+  in >> magic >> width >> height >> maxVal;
+  in.get();
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
+                                 static_cast<std::size_t>(height) * 3U);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if ("P6" != magic || !in) {
+    return 0;
+  }
+  const auto luma = [&](const int x, const int y) {
+    const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
+    return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
+  };
+  // A row carries ink when a dark pixel sits between paper on both sides,
+  // which is what countInkOnPaper() counts, row by row.
+  const auto inked = [&](const int y) {
+    for (int x = 3; x < width - 3; ++x) {
+      if (luma(x, y) < 160 && luma(x - 3, y) >= 230 && luma(x + 3, y) >= 230) {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::vector<int> starts;
+  bool previous = false;
+  for (int y = 0; y < height; ++y) {
+    const bool now = inked(y);
+    if (now && !previous) {
+      starts.push_back(y);
+    }
+    previous = now;
+  }
+  std::vector<int> gaps;
+  for (std::size_t i = 1; i < starts.size(); ++i) {
+    gaps.push_back(starts[i] - starts[i - 1]);
+  }
+  if (gaps.empty()) {
+    return 0;
+  }
+  std::ranges::nth_element(gaps, gaps.begin() + (gaps.size() / 2));
+  return gaps[gaps.size() / 2];
+}
+
 void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  static_cast<void>(std::system(py.c_str()));
+  std::ignore    = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -350,12 +455,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step1Ppm = screenshotDir / "step1_source_torrents.ppm";
   const auto step1Png = screenshotDir / "step1_source_torrents.png";
 
-  std::string cmd1 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --version-id " + v1.str() +
-                     " --alongside " + v2.str() + " --screenshot " +
-                     step1Ppm.string() + " " + storeStep1.string();
+  std::string cmd1 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + v1.str() + " --alongside " + v2.str() +
+      " --screenshot " + step1Ppm.string() + " " + storeStep1.string();
 
   const auto res1 = executeProcess(cmd1);
   EXPECT_EQ(res1.exitCode, 0) << "Step 1 process failed: " << res1.output;
@@ -402,12 +507,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step2Ppm    = screenshotDir / "step2_xanadocs_loaded.ppm";
   const auto step2Png    = screenshotDir / "step2_xanadocs_loaded.png";
 
-  std::string cmd2 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --read " + pubAPath.string() + " --read " +
-                     pubBPath.string() + " --screenshot " + step2Ppm.string() +
-                     " " + storeReader.string();
+  std::string cmd2 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --read " + pubAPath.string() + " --read " + pubBPath.string() +
+      " --screenshot " + step2Ppm.string() + " " + storeReader.string();
 
   const auto res2 = executeProcess(cmd2);
   EXPECT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
@@ -439,12 +544,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step3Ppm = screenshotDir / "step3_cross_linking.ppm";
   const auto step3Png = screenshotDir / "step3_cross_linking.png";
 
-  std::string cmd3 = xuduBin.string() +
-                     permascrollFlag(testRoot / "permascroll") + " --backend " +
-                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
-                     torrentArgs + " --version-id " + verLinked.str() +
-                     " --alongside " + verB.str() + " --screenshot " +
-                     step3Ppm.string() + " " + storeReader.string();
+  std::string cmd3 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + verLinked.str() + " --alongside " + verB.str() +
+      " --screenshot " + step3Ppm.string() + " " + storeReader.string();
 
   const auto res3 = executeProcess(cmd3);
   EXPECT_EQ(res3.exitCode, 0) << "Step 3 process failed: " << res3.output;
@@ -466,9 +571,10 @@ TEST(E2EBinaryOrchestrationTest,
   std::string cmd4 =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
-      " --profile --fov 7.5 --coarse-below 0" + torrentArgs + " --version-id " +
-      verLinked.str() + " --alongside " + verBTranscluded.str() +
-      " --screenshot " + step4Ppm.string() + " " + storeReader.string();
+      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
+      " --version-id " + verLinked.str() + " --alongside " +
+      verBTranscluded.str() + " --screenshot " + step4Ppm.string() + " " +
+      storeReader.string();
 
   const auto res4 = executeProcess(cmd4);
   EXPECT_EQ(res4.exitCode, 0) << "Step 4 process failed: " << res4.output;
@@ -540,10 +646,11 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd5 =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      torrentArgs + " --read " + pubAPath.string() + " --read " +
-      pubBPath.string() + " --read " + pubCPath.string() + " --screenshot " +
-      step5Ppm.string() + " " + storeReader.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + torrentArgs +
+      " --read " + pubAPath.string() + " --read " + pubBPath.string() +
+      " --read " + pubCPath.string() + " --screenshot " + step5Ppm.string() +
+      " " + storeReader.string();
 
   const auto res5 = executeProcess(cmd5);
   EXPECT_EQ(res5.exitCode, 0) << "Step 5 process failed: " << res5.output;
@@ -553,6 +660,282 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_TRUE(info5.valid) << "Step 5 PPM invalid: " << info5.errorMessage;
   EXPECT_GE(info5.distinctColors, 20U);
   exportToPng(step5Ppm, step5Png);
+}
+
+/**
+ * The many-to-many beam fixture's two documents framed whole, from far enough
+ * away that a page's glyphs and its paper fall within one step of a
+ * conventional float depth buffer: Vulkan -- whose depth attachment is a
+ * float -- drew both pages white there until it moved to reversed Z.
+ *
+ * That distance was every view's default before framing turned reading-first
+ * (LayoutConfig::readableTextPx), and is still where whole-page framing and a
+ * reader zooming out put the camera; the test asks for it with
+ * --whole-pages. Asserted per backend
+ * by what is on the paper rather than by comparison: a missing glyph layer is
+ * well under one percent of the frame, far inside compare-backends'
+ * tolerances.
+ */
+TEST(E2EBinaryOrchestrationTest, textSurvivesAtWholePageDistance) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_default_fov";
+  const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+  // Copied so that nothing a run writes lands in the committed fixture.
+  fs::copy(samples / "permascroll", testRoot / "permascroll",
+           fs::copy_options::recursive);
+  fs::copy(samples / "beams" / "02_many_to_many", testRoot / "store",
+           fs::copy_options::recursive);
+
+  const auto ppmPath = screenshotDir / "default_fov_text.ppm";
+  const auto pngPath = screenshotDir / "default_fov_text.png";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --coarse-below 0" +
+      " --version-id 1 --alongside a1 --screenshot " + ppmPath.string() + " " +
+      (testRoot / "store").string();
+
+  const auto res = executeProcess(cmd);
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+  ASSERT_TRUE(fs::exists(ppmPath));
+  // Measured at about 250-290 on a correct frame, and 0 on a blank one.
+  EXPECT_GE(countInkOnPaper(ppmPath), 100U)
+      << "the pages were drawn without their text on " << activeBackend();
+  exportToPng(ppmPath, pngPath);
+}
+
+/**
+ * The default view frames for reading: lines of document text land about
+ * readableTextPx (16 by default) apart on screen, where the old fixed camera
+ * put them about 7 apart. The fixture's lines are separated by blank ones, so
+ * a pitch is one or two lines; either way its size is the text's.
+ */
+TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_readable";
+  const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+  fs::copy(samples / "permascroll", testRoot / "permascroll",
+           fs::copy_options::recursive);
+  fs::copy(samples / "beams" / "02_many_to_many", testRoot / "store",
+           fs::copy_options::recursive);
+
+  const auto ppmPath = screenshotDir / "default_view_readable.ppm";
+  const auto res     = executeProcess(
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --version-id 1 --alongside a1 --screenshot " +
+      ppmPath.string() + " " + (testRoot / "store").string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  const auto pitch = medianLinePitch(ppmPath);
+  EXPECT_GE(pitch, 14) << "lines too close together to read";
+  EXPECT_LE(pitch, 40) << "more than two lines apart";
+  exportToPng(ppmPath, screenshotDir / "default_view_readable.png");
+}
+
+// A new xanadoc is where a person starts, so it has to settle -- an empty
+// document once counted as still loading, so nothing after Ctrl+N ever ran --
+// show a page, take the caret and the camera, and keep its first line clear
+// of the tab bar. One typed line is all the ink there is: if any of those
+// fails, none of it lands on visible paper.
+TEST(E2EBinaryOrchestrationTest, newDocumentTakesTypingInView) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_new_document";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto ppmPath = screenshotDir / "new_document_typed.ppm";
+  // Bounded: the failure this guards against is a run that never settles.
+  // Its own configuration, since the system xanadocs (the key bindings among
+  // them) are read through this run's permascroll.
+  const auto res = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --chord Ctrl+N --type 'Fresh words' --capture " +
+      ppmPath.string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_THAT(res.output,
+              ::testing::HasSubstr("created new sovereign document"));
+  EXPECT_GT(countInkOnPaper(ppmPath), 0U)
+      << "the typed line is not on visible paper";
+  exportToPng(ppmPath, screenshotDir / "new_document_typed.png");
+}
+
+// Typing is saved as it happens, so an untitled xanadoc that was written to
+// is work: it outlives the session in the xanadocs folder, where it used to be
+// deleted from a temporary directory on quit. One opened and never touched is
+// removed rather than left as clutter.
+TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_untitled";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
+  const auto run      = [&](const std::string &script) {
+    return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                          " timeout 120 " + xuduBin.string() + " --backend " +
+                          activeBackend() + " --profile " + script);
+  };
+  const auto untitled = [&] {
+    std::vector<fs::path> found;
+    if (fs::exists(xanadocs)) {
+      for (const auto &entry : fs::directory_iterator(xanadocs)) {
+        if (entry.path().filename().string().starts_with("untitled-")) {
+          found.push_back(entry.path());
+        }
+      }
+    }
+    return found;
+  };
+
+  const auto untouched = run("--chord Ctrl+N");
+  ASSERT_EQ(untouched.exitCode, 0) << untouched.output;
+  EXPECT_TRUE(untitled().empty()) << "an untouched untitled store was kept";
+
+  const auto written = run("--chord Ctrl+N --type 'Keep these words'");
+  ASSERT_EQ(written.exitCode, 0) << written.output;
+  const auto kept = untitled();
+  ASSERT_EQ(kept.size(), 1U) << written.output;
+  EXPECT_TRUE(fs::exists(kept.front() / "ops.nodes"));
+  EXPECT_THAT(written.output, ::testing::HasSubstr("kept untitled xanadoc"));
+}
+
+// Editing from the keyboard: the audit found no key moved the caret, Return
+// ran a ZigZag action, Backspace needed a selection and typing over one did
+// not replace it. Each step's operation shows where the caret was.
+TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+  const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
+  ASSERT_TRUE(fs::exists(dumpBin)) << "xudu-dump not found at " << dumpBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_caret_keys";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto res = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --chord Ctrl+N --type abc --chord Return --type def"
+      " --chord Up --type 1 --chord Ctrl+End --chord Backspace --chord Home"
+      " --type _ --chord Shift+End --type Z");
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  std::vector<fs::path> untitled;
+  for (const auto &entry :
+       fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+    if (entry.path().filename().string().starts_with("untitled-")) {
+      untitled.push_back(entry.path());
+    }
+  }
+  ASSERT_EQ(untitled.size(), 1U) << res.output;
+  const auto dump = executeProcess(
+      dumpBin.string() + " --section=ops --permascroll=" +
+      (testRoot / "permascroll").string() + " " + untitled.front().string());
+  ASSERT_EQ(dump.exitCode, 0) << dump.output;
+  // "abc\ndef": Up from the end of "def" is the end of "abc".
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=3 [^\n]*text=\"1\""));
+  // Ctrl+End then Backspace: the "f", with nothing selected.
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("kind=delete [^\n]* at=7 len=1"));
+  // Home: the start of the second line.
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=5 [^\n]*text=\"_\""));
+  // Shift+End selects "de" after the "_"; typing replaces it.
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("kind=delete [^\n]* at=6 len=2"));
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex(
+                               "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""));
+}
+
+// Pressing inside a selection picks it up: dropped on a page it is
+// transcluded where it lands -- the source's addresses, not a copy -- and
+// dropped in empty space it becomes a page of its own. The audit found a
+// press there only started a new selection.
+TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+  const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_selection_drag";
+  const auto dragTo = [&](const std::string &drop) {
+    fs::remove_all(testRoot);
+    fs::create_directories(testRoot);
+    return executeProcess(
+        "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+        " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+        " --backend " + activeBackend() +
+        " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
+        " --chord Ctrl+Left --chord Ctrl+Shift+Right --drag 140,145:" +
+        drop);
+  };
+  const auto untitledOps = [&] {
+    for (const auto &entry :
+         fs::directory_iterator(testRoot / "data" / "xudu" / "xanadocs")) {
+      if (entry.path().filename().string().starts_with("untitled-")) {
+        return executeProcess(dumpBin.string() +
+                              " --section=ops --permascroll=" +
+                              (testRoot / "permascroll").string() + " " +
+                              entry.path().string())
+            .output;
+      }
+    }
+    return std::string{};
+  };
+
+  // Onto the page, just past "gamma".
+  const auto onPage = dragTo("196,145");
+  ASSERT_EQ(onPage.exitCode, 0) << onPage.output;
+  EXPECT_THAT(onPage.output,
+              ::testing::HasSubstr("drag 140,145: doc 1 [6,11)"));
+  const auto ops = untitledOps();
+  // Spliced in at the end, and quoting the very bytes "beta " was typed as:
+  // six bytes into the first insert's span.
+  std::smatch typed;
+  std::smatch quoted;
+  ASSERT_TRUE(std::regex_search(
+      ops, typed, std::regex(R"(span=\[([0-9]+),[0-9]+\)[^\n]*"alpha beta)")))
+      << ops;
+  ASSERT_TRUE(std::regex_search(
+      ops, quoted,
+      std::regex(R"(at=16 [^\n]*span=\[([0-9]+),[0-9]+\)[^\n]*"beta ")")))
+      << ops;
+  EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
+
+  // Into the empty space right of the page.
+  const auto inSpace = dragTo("770,300");
+  ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
+  EXPECT_THAT(inSpace.output,
+              ::testing::HasSubstr("spawned transcluded document"));
 }
 
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
@@ -603,9 +986,10 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Hypermesh test failed: " << res.output;
@@ -670,9 +1054,10 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fan test failed: " << res.output;
@@ -730,9 +1115,10 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vCur.str() + " --alongside " + vB.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
+      vCur.str() + " --alongside " + vB.str() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Multi-type test failed: " << res.output;
@@ -899,10 +1285,11 @@ TEST(E2EBinaryOrchestrationTest,
 
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 18 --coarse-below 0" +
-      torrentArgs + " --read " + pub1Path.string() + " --read " +
-      pub2Path.string() + " --read " + pub3Path.string() + " --screenshot " +
-      ppmPath.string() + " " + storePath.string();
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 18 --coarse-below 0" + torrentArgs +
+      " --read " + pub1Path.string() + " --read " + pub2Path.string() +
+      " --read " + pub3Path.string() + " --screenshot " + ppmPath.string() +
+      " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;
@@ -979,9 +1366,9 @@ TEST(E2EBinaryOrchestrationTest,
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
-        " --profile --fov 15 --coarse-below 0" + " --version-id " +
-        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
-        ppmPath.string() + " " + storePath.string();
+        " --profile --whole-pages --fov 15 --coarse-below 0" +
+        " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+        " --screenshot " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0)
@@ -1055,9 +1442,9 @@ TEST(E2EBinaryOrchestrationTest,
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
-        " --profile --fov 15 --coarse-below 0" + " --version-id " +
-        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
-        ppmPath.string() + " " + storePath.string();
+        " --profile --whole-pages --fov 15 --coarse-below 0" +
+        " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+        " --screenshot " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     std::cout << "ASYMM (" << pagesA << "x" << pagesB << ") OUTPUT:\n"
@@ -1178,13 +1565,13 @@ TEST(E2EBinaryOrchestrationTest,
   // opened alongside it at the same depth, so each starts out part of the
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
-  std::string cmd = "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
-                    permascrollFlag(testRoot / "permascroll") + " --backend " +
-                    activeBackend() + " --profile --fov 15 --coarse-below 0" +
-                    " --version-id " + vLinked.str() + " --background " +
-                    vCorpus.str() + " --background " + vPageTop.str() +
-                    " --background " + vPageBottom.str() + " --screenshot " +
-                    ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
+      permascrollFlag(testRoot / "permascroll") + " --backend " +
+      activeBackend() + " --profile --whole-pages --fov 15 --coarse-below 0" +
+      " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
+      " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
@@ -1273,13 +1660,13 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   const auto ppmPath = screenshotDir / "type_decorated.ppm";
   // Select at offset 0 to position the caret deterministically regardless of
   // window dimensions or display scaling.
-  std::string cmd = xuduBin.string() +
-                    permascrollFlag(testRoot / "permascroll") + " --backend " +
-                    activeBackend() + " --profile --fov 15 --version-id " +
-                    whole.str() +
-                    " --select 0,0 --type '[bold,italic]MARKERWORD' "
-                    "--do save --screenshot " +
-                    ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 15 --version-id " + whole.str() +
+      " --select 0,0 --type '[bold,italic]MARKERWORD' "
+      "--do save --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;
@@ -1331,14 +1718,16 @@ TEST(E2EBinaryOrchestrationTest,
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  // Use user-model scripted commands: --select, --do pouch-drop-left, --select,
-  // --do pouch-drop-right, --do forge-clasp, --do save-document
+  // Use user-model scripted commands: --select, --do std:xudu/pouch_drop_left,
+  // --select,
+  // --do std:xudu/pouch_drop_right, --do std:xudu/forge_clasp, --do
+  // save-document
   std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --version-id " + v0.str() +
-      " --select 0,18 --do pouch-drop-left" +
-      " --select 36,54 --do pouch-drop-right" +
-      " --do forge-clasp --do save-document " + storePath.string();
+      " --select 0,18 --do std:xudu/pouch_drop_left" +
+      " --select 36,54 --do std:xudu/pouch_drop_right" +
+      " --do std:xudu/forge_clasp --do save-document " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "scripted clasp test failed: " << res.output;
@@ -1461,6 +1850,62 @@ TEST(E2EBinaryOrchestrationTest,
 // primedia spool -- instead of Store::insertMedia(). The one directly
 // observable consequence: exactly one image/png entry in the saved store's
 // local segment table, not two, despite the figure rendering on both pages.
+// The structure script's link and cell-quote verbs: a link built from ranges
+// of the document, and a cell that quotes one of those ranges -- sharing its
+// primedia, which is what makes the cell an occurrence of the link's member.
+TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_script_links";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto script = testRoot / "links.xuzz";
+  {
+    std::ofstream out(script);
+    out << "genesis\n"
+           "text Alpha beta gamma delta. one two three.\n"
+           "cell-quote three 32 5\n"
+           "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
+  }
+  const auto storePath = testRoot / "store";
+  const auto res = executeProcess(xuduBin.string() +
+                                  permascrollFlag(testRoot / "permascroll") +
+                                  " --headless --structure-script " +
+                                  script.string() + " " + storePath.string());
+  ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  Store store(permascrollAt(testRoot / "permascroll"));
+  store.load(storePath.string());
+  ASSERT_EQ(store.links().size(), 1U);
+  const auto &link = store.links().begin()->second;
+  EXPECT_EQ(link.type, LinkType::Comment);
+  ASSERT_EQ(link.left.size(), 2U);
+  ASSERT_EQ(link.right.size(), 3U);
+  EXPECT_EQ(link.right[2].length, 5U);
+
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  const auto quoting  = std::ranges::count_if(
+      manifold.cellsWithinRadius(zigzag::noCell, -1), [&](const auto cell) {
+        const auto content = manifold.contentOf(cell);
+        return 1 == content.size() && content.front() == link.right[2];
+      });
+  EXPECT_EQ(quoting, 1) << "exactly one cell should quote \"three\"";
+
+  // A range that is not one run of the text is refused, naming its line.
+  {
+    std::ofstream out(script);
+    out << "genesis\ntext short\nlink comment 0:99 | 0:1\n";
+  }
+  const auto refused = executeProcess(
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --headless --structure-script " + script.string() + " " +
+      (testRoot / "refused").string());
+  EXPECT_NE(refused.exitCode, 0);
+  EXPECT_NE(refused.output.find(":3:"), std::string::npos) << refused.output;
+}
+
 TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;

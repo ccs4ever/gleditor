@@ -124,9 +124,12 @@ inline constexpr std::string_view kDimDefault        = "d.default";
 
 namespace settings {
 // Layout
-inline constexpr std::string_view kColumns            = "columns";
-inline constexpr std::string_view kPageWidthPx        = "pageWidthPx";
-inline constexpr std::string_view kPageHeightPx       = "pageHeightPx";
+inline constexpr std::string_view kColumns      = "columns";
+inline constexpr std::string_view kPageWidthPx  = "pageWidthPx";
+inline constexpr std::string_view kPageHeightPx = "pageHeightPx";
+/// On-screen height, in screen pixels, of a line of document text at the
+/// camera's default zoom and wherever it frames a passage for reading.
+inline constexpr std::string_view kReadableTextPx     = "readableTextPx";
 inline constexpr std::string_view kTransclusionPrisms = "transclusionPrisms";
 inline constexpr std::string_view kTransclusionLoom   = "transclusionLoom";
 inline constexpr std::string_view kXanalinkRibbons    = "xanalinkRibbons";
@@ -183,6 +186,8 @@ inline constexpr std::string_view kZigzagHudVerticalPaddingPx =
     "zigzag.hudVerticalPaddingPx";
 inline constexpr std::string_view kZigzagHudColumnGapPx =
     "zigzag.hudColumnGapPx";
+inline constexpr std::string_view kZigzagMinReadableTextPx =
+    "zigzag.minReadableTextPx";
 inline constexpr std::string_view kZigzagConnectionBeamWidthPx =
     "zigzag.connectionBeamWidthPx";
 
@@ -234,6 +239,35 @@ inline constexpr std::string_view kNotificationDurationMs =
 inline constexpr std::string_view kRadialMenuRadius = "radialMenu.radius";
 inline constexpr std::string_view kRadialMenuInnerRadius =
     "radialMenu.innerRadius";
+// The overview panel. Colours are RGBA8, most significant byte red.
+inline constexpr std::string_view kOverviewVisible  = "overview.visible";
+inline constexpr std::string_view kOverviewWidthPx  = "overview.widthPx";
+inline constexpr std::string_view kOverviewHeightPx = "overview.heightPx";
+inline constexpr std::string_view kOverviewLeftPx   = "overview.leftPx";
+inline constexpr std::string_view kOverviewBottomPx = "overview.bottomPx";
+inline constexpr std::string_view kOverviewBackgroundColour =
+    "overview.backgroundColour";
+inline constexpr std::string_view kOverviewPageColour = "overview.pageColour";
+inline constexpr std::string_view kOverviewViewportColour =
+    "overview.viewportColour";
+inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
+// The selected-link panel. Colours are RGBA8, most significant byte red.
+inline constexpr std::string_view kLinkPanelFont      = "linkPanel.font";
+inline constexpr std::string_view kLinkPanelMarginPx  = "linkPanel.marginPx";
+inline constexpr std::string_view kLinkPanelTopPx     = "linkPanel.topPx";
+inline constexpr std::string_view kLinkPanelPaddingPx = "linkPanel.paddingPx";
+inline constexpr std::string_view kLinkPanelLineGapPx = "linkPanel.lineGapPx";
+inline constexpr std::string_view kLinkPanelBackgroundColour =
+    "linkPanel.backgroundColour";
+inline constexpr std::string_view kLinkPanelTextColour = "linkPanel.textColour";
+inline constexpr std::string_view kLinkPanelMutedColour =
+    "linkPanel.mutedColour";
+inline constexpr std::string_view kLinkPanelButtonColour =
+    "linkPanel.buttonColour";
+inline constexpr std::string_view kLinkPanelChosenHighlightColour =
+    "linkPanel.chosenHighlightColour";
+inline constexpr std::string_view kLinkPanelMemberHighlightColour =
+    "linkPanel.memberHighlightColour";
 
 // Keymap - Xudu Core Actions (Sovereign Vortex Function Calls)
 inline constexpr std::string_view kKeymapQuit        = "std:xudu/quit";
@@ -254,7 +288,6 @@ inline constexpr std::string_view kKeymapBack        = "std:xudu/back";
 inline constexpr std::string_view kKeymapNewDoc      = "std:xudu/new_doc";
 inline constexpr std::string_view kKeymapForward     = "std:xudu/forward";
 inline constexpr std::string_view kKeymapOpenDoc     = "std:xudu/open_doc";
-inline constexpr std::string_view kKeymapCloseDoc    = "std:xudu/close_doc";
 inline constexpr std::string_view kKeymapOnionSkin   = "std:xudu/onion_skin";
 inline constexpr std::string_view kKeymapPouchToggle = "std:xudu/pouch_toggle";
 inline constexpr std::string_view kKeymapPouchToggleF2 =
@@ -265,8 +298,6 @@ inline constexpr std::string_view kKeymapTelescopeToggleF3 =
     "std:xudu/telescope_toggle_f3";
 inline constexpr std::string_view kKeymapTensionPhysicsToggle =
     "std:xudu/tension_physics_toggle";
-inline constexpr std::string_view kKeymapUnlockTranscopyright =
-    "std:xudu/unlock_transcopyright";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
     "std:xudu/unlock_transcopyright_f5";
 inline constexpr std::string_view kKeymapUnlockTranscopyrightCtrlU =
@@ -286,8 +317,6 @@ inline constexpr std::string_view kKeymapDelete     = "std:xudu/delete";
 inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
-inline constexpr std::string_view kKeymapMap        = "std:xudu/map";
-inline constexpr std::string_view kKeymapScrubBack  = "std:xudu/scrub_back";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
 inline constexpr std::string_view kKeymapQuotationToggle =
     "std:xudu/quotation_toggle";
@@ -415,6 +444,95 @@ inline constexpr std::string_view kKeymapZigzagStepZPos =
     "std:nav/zigzag_step_z_pos";
 inline constexpr std::string_view kKeymapZigzagStepZNeg =
     "std:nav/zigzag_step_z_neg";
+
+// Keymap - Xuzz selected-link navigation. Activity Back is its own name,
+// apart from kKeymapBack/kKeymapForward, which walk document microversions.
+inline constexpr std::string_view kKeymapLinkNext = "std:xuzz/link_next";
+inline constexpr std::string_view kKeymapLinkPrevious =
+    "std:xuzz/link_previous";
+inline constexpr std::string_view kKeymapLinkMemberNext =
+    "std:xuzz/link_member_next";
+inline constexpr std::string_view kKeymapLinkMemberPrevious =
+    "std:xuzz/link_member_previous";
+inline constexpr std::string_view kKeymapLinkOccurrenceNext =
+    "std:xuzz/link_occurrence_next";
+inline constexpr std::string_view kKeymapLinkOccurrencePrevious =
+    "std:xuzz/link_occurrence_previous";
+inline constexpr std::string_view kKeymapLinkCross   = "std:xuzz/link_cross";
+inline constexpr std::string_view kKeymapLinkEnter   = "std:xuzz/link_enter";
+inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
+inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
+inline constexpr std::string_view kKeymapOverviewToggle =
+    "std:xudu/overview_toggle";
+inline constexpr std::string_view kKeymapActivityBack =
+    "std:xuzz/activity_back";
+inline constexpr std::string_view kKeymapActivityForward =
+    "std:xuzz/activity_forward";
+inline constexpr std::string_view kKeymapLinkAddCell = "std:xuzz/link_add_cell";
+inline constexpr std::string_view kKeymapLinkFinish  = "std:xuzz/link_finish";
+inline constexpr std::string_view kKeymapTranscludeCellToDoc =
+    "std:xuzz/transclude_cell_to_doc";
+inline constexpr std::string_view kKeymapTranscludeCellToCell =
+    "std:xuzz/transclude_cell_to_cell";
+inline constexpr std::string_view kKeymapInsertExternRef =
+    "std:xuzz/insert_extern_ref";
+inline constexpr std::string_view kKeymapFocusToggle = "std:xuzz/focus_toggle";
+inline constexpr std::string_view kKeymapViewXanadocs =
+    "std:xuzz/view_xanadocs";
+inline constexpr std::string_view kKeymapViewSlices = "std:xuzz/view_slices";
+inline constexpr std::string_view kKeymapViewBoth   = "std:xuzz/view_both";
+// Caret movement and editing: the document pane's own keys.
+inline constexpr std::string_view kKeymapCaretLeft  = "std:edit/caret_left";
+inline constexpr std::string_view kKeymapCaretRight = "std:edit/caret_right";
+inline constexpr std::string_view kKeymapCaretUp    = "std:edit/caret_up";
+inline constexpr std::string_view kKeymapCaretDown  = "std:edit/caret_down";
+inline constexpr std::string_view kKeymapCaretWordLeft =
+    "std:edit/caret_word_left";
+inline constexpr std::string_view kKeymapCaretWordRight =
+    "std:edit/caret_word_right";
+inline constexpr std::string_view kKeymapCaretLineStart =
+    "std:edit/caret_line_start";
+inline constexpr std::string_view kKeymapCaretLineEnd =
+    "std:edit/caret_line_end";
+inline constexpr std::string_view kKeymapCaretDocStart =
+    "std:edit/caret_doc_start";
+inline constexpr std::string_view kKeymapCaretDocEnd = "std:edit/caret_doc_end";
+inline constexpr std::string_view kKeymapSelectLeft  = "std:edit/select_left";
+inline constexpr std::string_view kKeymapSelectRight = "std:edit/select_right";
+inline constexpr std::string_view kKeymapSelectUp    = "std:edit/select_up";
+inline constexpr std::string_view kKeymapSelectDown  = "std:edit/select_down";
+inline constexpr std::string_view kKeymapSelectWordLeft =
+    "std:edit/select_word_left";
+inline constexpr std::string_view kKeymapSelectWordRight =
+    "std:edit/select_word_right";
+inline constexpr std::string_view kKeymapSelectLineStart =
+    "std:edit/select_line_start";
+inline constexpr std::string_view kKeymapSelectLineEnd =
+    "std:edit/select_line_end";
+inline constexpr std::string_view kKeymapNewline = "std:edit/newline";
+inline constexpr std::string_view kKeymapDeleteForward =
+    "std:edit/delete_forward";
+inline constexpr std::string_view kKeymapNewSlice  = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapPouchDrop = "std:xudu/pouch_drop";
+inline constexpr std::string_view kKeymapPouchDropToLinkLeft =
+    "std:xudu/pouch_drop_to_link_left";
+inline constexpr std::string_view kKeymapPouchDropToLinkRight =
+    "std:xudu/pouch_drop_to_link_right";
+inline constexpr std::string_view kKeymapPouchDropNotes =
+    "std:xudu/pouch_drop_notes";
+inline constexpr std::string_view kKeymapPouchDropScratch =
+    "std:xudu/pouch_drop_scratch";
+inline constexpr std::string_view kKeymapPouchDropLeft =
+    "std:xudu/pouch_drop_left";
+inline constexpr std::string_view kKeymapPouchDropRight =
+    "std:xudu/pouch_drop_right";
+inline constexpr std::string_view kKeymapForgeClasp = "std:xudu/forge_clasp";
+inline constexpr std::string_view kKeymapEditCell   = "std:zigzag/edit_cell";
+inline constexpr std::string_view kKeymapMarkCell   = "std:zigzag/mark_cell";
+inline constexpr std::string_view kKeymapLinkMarkedXPos =
+    "std:zigzag/link_marked_x_pos";
+inline constexpr std::string_view kKeymapLinkMarkedXNeg =
+    "std:zigzag/link_marked_x_neg";
 
 // Pouches
 inline constexpr std::string_view kPouchZoneToLinkLeft  = "zone.to_link_left";
@@ -680,6 +798,22 @@ void initializeSystemStore(Store &store, SystemDocKind kind);
 
 [[nodiscard]] std::vector<SettingSpec> defaultSettingSpecs(SystemDocKind kind);
 
+/// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
+/// the pane that has the keyboard.
+inline constexpr std::string_view kKeyScopeDocument = "document";
+inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
+
+/**
+ * @brief The scope @p action's binding is live in; empty for anywhere.
+ *
+ * ZigZag's bare-key set (std:nav/\*, std:ui/\*, std:zigzag/\*) steps, edits and
+ * cycles cells with the arrows, letters and Space a document needs for text,
+ * so in xuzz it only reaches the keyboard while ZigZag has it. Its
+ * Alt-prefixed zigzag_* twins are how a reader in a document reaches ZigZag,
+ * and are live anywhere. std:edit/\* is caret movement, a document's.
+ */
+[[nodiscard]] std::string_view keymapScope(std::string_view action);
+
 [[nodiscard]] std::string_view canonicalKeymapAction(std::string_view action);
 [[nodiscard]] std::string_view legacyKeymapAction(std::string_view action);
 
@@ -792,6 +926,10 @@ struct ZigzagPresentationConfig {
   float hudVerticalPaddingPx{8.0F};
   float hudColumnGapPx{8.0F};
   float connectionBeamWidthPx{4.0F};
+  /// Smallest on-screen height, in screen pixels, of a line of card text in
+  /// a presentation embedded beside a page. Below it the presentation is
+  /// scaled up; zero leaves it at the page's own scale.
+  float minReadableTextPx{14.0F};
 
   // A byte-wise memcmp is unsafe here: +0.0F and -0.0F compare equal but
   // have different bit patterns, so field-wise == is the correct notion of
@@ -806,7 +944,8 @@ struct ZigzagPresentationConfig {
            hudHorizontalPaddingPx == other.hudHorizontalPaddingPx &&
            hudVerticalPaddingPx == other.hudVerticalPaddingPx &&
            hudColumnGapPx == other.hudColumnGapPx &&
-           connectionBeamWidthPx == other.connectionBeamWidthPx;
+           connectionBeamWidthPx == other.connectionBeamWidthPx &&
+           minReadableTextPx == other.minReadableTextPx;
   }
 };
 
@@ -819,6 +958,8 @@ struct LayoutConfig {
   float toastOffsetY{48.0F};
   PouchDock pouchDock{PouchDock::Right};
   float documentSpacingX{70.0F};
+  /// See settings::kReadableTextPx. Zero keeps the old whole-page framing.
+  float readableTextPx{16.0F};
   bool transclusionPrisms{true};
   bool transclusionLoom{true};
   bool xanalinkRibbons{true};
@@ -830,6 +971,62 @@ struct LayoutConfig {
   [[nodiscard]] static LayoutConfig fromStore(const Store &store);
 };
 
+/**
+ * @brief The overview panel: the whole scene condensed into a corner, with
+ *        the camera's view outlined on it.
+ *
+ * The companion of reading-first framing (LayoutConfig::readableTextPx): the
+ * camera stays where text can be read, and this shows what lies around it.
+ * Defaults here are the ones defaultSettingSpecs() seeds system://ui with.
+ */
+struct OverviewConfig {
+  bool visible{true};
+  float widthPx{220.0F};
+  float heightPx{160.0F};
+  /// Gap from the window's left edge.
+  float leftPx{16.0F};
+  /// Gap from the window's bottom edge, clear of a status line.
+  float bottomPx{56.0F};
+  std::uint32_t backgroundColour{0x0F172AE0U};
+  std::uint32_t pageColour{0xCBD5E1FFU};
+  /// The outline of what the camera shows.
+  std::uint32_t viewportColour{0xFACC15FFU};
+  /// The selected link's chosen places and the focused ZigZag card.
+  std::uint32_t markColour{0xF472B6FFU};
+
+  bool operator==(const OverviewConfig &) const = default;
+};
+
+/**
+ * @brief How the selected-link panel looks
+ *        (design/ui/prototypes/link-context.md).
+ *
+ * The defaults here are the ones defaultSettingSpecs() seeds system://ui
+ * with, so the two cannot drift.
+ */
+struct LinkPanelConfig {
+  std::string font{"Sans 10"};
+  /// Gap between the panel and the window's right edge.
+  float marginPx{16.0F};
+  /// Gap between the panel and the window's top edge: clear of the document
+  /// tab bar, which the panel must not cover.
+  float topPx{44.0F};
+  float paddingPx{10.0F};
+  float lineGapPx{4.0F};
+  std::uint32_t backgroundColour{0x1E293BE6U};
+  std::uint32_t textColour{0xE2E8F0FFU};
+  /// Unset cursors, members not in view, and the origin line.
+  std::uint32_t mutedColour{0x94A3B8FFU};
+  /// Behind the panel's buttons.
+  std::uint32_t buttonColour{0x334155FFU};
+  /// Behind the chosen occurrence in the document text.
+  std::uint32_t chosenHighlightColour{0xFACC1570U};
+  /// Behind the chosen member's other occurrences.
+  std::uint32_t memberHighlightColour{0xFACC1530U};
+
+  bool operator==(const LinkPanelConfig &) const = default;
+};
+
 struct UIConfig {
   bool tabBarVisible{true};
   bool statusBarVisible{true};
@@ -837,6 +1034,8 @@ struct UIConfig {
   std::string notificationPosition{"top-right"};
   std::uint32_t notificationDurationMs{3000};
   gleditor::RadialConfig radialMenu;
+  LinkPanelConfig linkPanel;
+  OverviewConfig overview;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

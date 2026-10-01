@@ -8,7 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "common/xanadu/vortex/vortex.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
@@ -50,6 +51,15 @@ TEST(VortexCoreTest, SystemGenesisMintsAllDimensionsOffHome) {
   // Each dimension is linked along d.dims
   EXPECT_EQ(h.core.arena().linked(h.core.home(), d.dims, DimVector::POS),
             d.dims);
+}
+
+TEST(VortexCoreTest, TruthinessKeepsItsExplicitWordsAndProseFallback) {
+  EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"YeS"}}));
+  EXPECT_TRUE(VortexCore::evaluateTruthiness(CellValue{std::string{"ON"}}));
+  EXPECT_FALSE(VortexCore::evaluateTruthiness(CellValue{std::string{"Off"}}));
+  EXPECT_FALSE(VortexCore::evaluateTruthiness(CellValue{std::string{}}));
+  EXPECT_TRUE(
+      VortexCore::evaluateTruthiness(CellValue{std::string{"a report title"}}));
 }
 
 TEST(VortexCoreTest, LinkPrimitiveLifecycle) {

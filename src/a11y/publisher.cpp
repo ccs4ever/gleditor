@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 #include <gleditor/a11y/platform.hpp>
@@ -181,7 +182,7 @@ void Publisher::rebuild(const int width, const int height) {
   // its children are whatever the sources turn out to contribute. Held by
   // index rather than by reference, because adding nodes moves the vector.
   Builder rootBuilder(tree, Ids::window);
-  static_cast<void>(rootBuilder.add(0, Role::Window));
+  std::ignore          = rootBuilder.add(0, Role::Window);
   const auto rootIndex = tree.nodes.size() - 1;
   tree.focus           = tree.nodes[rootIndex].id;
 

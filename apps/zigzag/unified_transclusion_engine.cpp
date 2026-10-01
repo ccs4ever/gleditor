@@ -57,9 +57,14 @@ void UnifiedTransclusionEngine::syncIncremental() {
   // rank at write time" is the same point from the other side: the rank is
   // minted where the transclusion is recorded, not invented where it is
   // displayed.
-  const auto &ops  = store_.segmentedOps();
-  const auto total = static_cast<std::uint32_t>(ops.size());
+  const auto &ops   = store_.segmentedOps();
+  const auto total  = static_cast<std::uint32_t>(ops.size());
+  const auto target = head_.isZero() && total > 0 ? ops.idOf(total) : head_;
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
+    // Spool order interleaves branches; only the named ancestry belongs in
+    // this replay product. The index still advances past skipped siblings.
+    const auto version = ops.idOf(idx);
+    if (version != target && !version.isAncestorOf(target)) continue;
     if (const auto *const node = ops.get(idx); nullptr != node) {
       // A refused operation is counted by the manifold (refusedOps()) and
       // leaves it unchanged; the render sync has nothing more to do about it.
@@ -79,10 +84,8 @@ void UnifiedTransclusionEngine::syncIncremental() {
     }
   }
   lastSyncedOpIndex_ = total;
-  if (total > 0) {
-    head_ = ops.idOf(total);
-  }
-  lastStoreOpCount_ = total;
+  head_              = target;
+  lastStoreOpCount_  = total;
 
   const auto currentFormatLinks = countFormatLinks();
   if (currentFormatLinks != lastFormatLinkCount_) {
@@ -124,6 +127,22 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   head_ = store_.makeCell(head_, text);
   syncIncremental();
   return store_.cellRefOf(head_);
+}
+
+CellRef UnifiedTransclusionEngine::addCellFromSpans(
+    const std::span<const xanadu::PrimediaSpan> spans) {
+  if (spans.empty()) return noCell;
+  ensureSliceBegun();
+  head_ = store_.makeCell(head_, spans.front());
+  syncIncremental();
+  const auto cell  = store_.cellRefOf(head_);
+  std::uint64_t at = spans.front().length;
+  for (const auto &span : spans.subspan(1)) {
+    head_ = store_.spliceCellSpan(head_, cell, at, 0, span, &manifold_);
+    syncIncremental();
+    at += span.length;
+  }
+  return cell;
 }
 
 void UnifiedTransclusionEngine::updateCellText(const CellRef cell,

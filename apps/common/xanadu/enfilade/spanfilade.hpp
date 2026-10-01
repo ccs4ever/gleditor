@@ -32,10 +32,10 @@
 #include <utility>
 #include <vector>
 
-#include "common/xanadu/enfilade/crum_node.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/version.hpp"
+#include <gleditor/enfilade/crum_node.hpp>
 
 namespace zigzag {
 class Manifold;
@@ -122,9 +122,9 @@ inline SpanWid SpanDsp::act(const SpanWid &w) const noexcept {
   return SpanWid{.minStart = newMin, .maxEnd = newMax, .count = w.count};
 }
 
-static_assert(DisplacementMonoid<SpanDsp>);
-static_assert(WidthMonoid<SpanWid>);
-static_assert(EnfiladeAction<SpanDsp, SpanWid>);
+static_assert(gleditor::enfilade::DisplacementMonoid<SpanDsp>);
+static_assert(gleditor::enfilade::WidthMonoid<SpanWid>);
+static_assert(gleditor::enfilade::EnfiladeAction<SpanDsp, SpanWid>);
 
 /**
  * @struct SpanEntry
@@ -150,7 +150,7 @@ struct SpanEntry {
 static_assert(sizeof(SpanEntry) == 32);
 
 /// 64-byte aligned B-enfilade crum node with branching factor 8.
-using SpanCrum = CrumNode<SpanDsp, SpanWid, 8>;
+using SpanCrum = gleditor::enfilade::CrumNode<SpanDsp, SpanWid, 8>;
 
 /**
  * @class ScrollSpanfilade

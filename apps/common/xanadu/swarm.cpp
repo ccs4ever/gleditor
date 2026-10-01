@@ -16,6 +16,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <libtorrent/alert_types.hpp>
@@ -801,7 +802,7 @@ SwarmContentSource::resolveMutable(const MutableLink &link,
     const auto found = impl->names.find(target);
     return found != impl->names.end() && found->second.best.has_value();
   };
-  static_cast<void>(impl->waitUntil(answered, timeout));
+  std::ignore = impl->waitUntil(answered, timeout);
 
   std::optional<MutablePointer> result;
   if (const auto found = impl->names.find(target); found != impl->names.end()) {

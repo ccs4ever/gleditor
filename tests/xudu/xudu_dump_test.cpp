@@ -17,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/binary_ops.hpp"
@@ -89,8 +90,8 @@ Sample savedStore(const fs::path &root) {
   Store store(sample.scroll());
   const auto one = store.insert(MicroversionId{}, 0, "hello");
   const auto two = store.insert(one, 5, " world");
-  static_cast<void>(store.erase(two, 0, 1));
-  static_cast<void>(store.insert(one, 5, " there"));
+  std::ignore    = store.erase(two, 0, 1);
+  std::ignore    = store.insert(one, 5, " there");
   store.save(sample.store.string());
   return sample;
 }

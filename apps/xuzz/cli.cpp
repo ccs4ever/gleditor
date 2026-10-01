@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
+#include "xudu/session.hpp"
 #include <gleditor/app.hpp>
 
 namespace fs = std::filesystem;
@@ -32,8 +33,9 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
 
   parser.add_argument("store")
       .help("directory the primary spools live in or slice to load; created if "
-            "it is not there")
-      .default_value(std::string{"xanadoc"});
+            "it is not there. Defaults to \"default\" in the xanadocs folder, "
+            "$XDG_DATA_HOME/xudu/xanadocs")
+      .default_value((xudu::xanadocsDirectory() / "default").string());
 
   parser.add_argument("--view")
       .help("initial presentation mode: unified (default), xanadoc, or zigzag")
@@ -60,6 +62,12 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
 
   parser.add_argument("--no-sworph")
       .help("do not let a link coming into view bring its far document over")
+      .default_value(false)
+      .implicit_value(true);
+
+  parser.add_argument("--whole-pages")
+      .help("frame whole pages, and fit linked documents together, rather than "
+            "framing for reading")
       .default_value(false)
       .implicit_value(true);
 
@@ -299,7 +307,11 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
     }
   }
 
-  opts.storePath = parser.get<std::string>("store");
+  opts.hasExplicitStore = parser.is_used("store");
+  opts.storePath        = parser.get<std::string>("store");
+  if (opts.storePath.empty()) {
+    opts.storePath = (xudu::xanadocsDirectory() / "default").string();
+  }
   if (const auto xuduPath = parser.get<std::string>("--xudu");
       !xuduPath.empty()) {
     opts.storePath = xuduPath;
@@ -329,8 +341,9 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   opts.telescopeVisible = (parser["--telescope"] == true);
   opts.physicsEnabled =
       (parser["--physics"] == true || parser["--tension-layout"] == true);
-  opts.noBeams  = (parser["--no-beams"] == true);
-  opts.noSworph = (parser["--no-sworph"] == true);
+  opts.noBeams    = (parser["--no-beams"] == true);
+  opts.noSworph   = (parser["--no-sworph"] == true);
+  opts.wholePages = (parser["--whole-pages"] == true);
 
   if (parser.present<std::vector<std::string>>("--audio")) {
     opts.audioMrls = parser.get<std::vector<std::string>>("--audio");

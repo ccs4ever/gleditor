@@ -11,14 +11,12 @@
 
 #include "mocks/device.hpp"
 #include <gleditor/a11y/tree.hpp>
-#include <gleditor/audio_widget.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/media.hpp>
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 
-using gleditor::AudioWidget;
 using gleditor::MediaPlayer;
 using gleditor::MediaResource;
 using gleditor::MediaWidget;
@@ -206,12 +204,6 @@ TEST_F(MediaWidgetTest, EachCardOwnsItsPickingAndAccessibilityRange) {
   widget->describe(builder);
   second.describe(builder);
   EXPECT_NE(widget->tagBase(), second.tagBase());
-}
-
-TEST_F(MediaWidgetTest, AudioWidgetAliasCompatibility) {
-  auto audioWidget = std::make_unique<AudioWidget>("Sans 10", player);
-  EXPECT_TRUE(audioWidget->isVisible());
-  EXPECT_EQ(audioWidget->player(), player);
 }
 
 TEST_F(MediaWidgetTest, DeviceReadyAndDrawFrame) {

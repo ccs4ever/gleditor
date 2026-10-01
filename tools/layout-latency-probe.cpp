@@ -27,6 +27,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <fontconfig/fontconfig.h>
@@ -95,8 +96,8 @@ int main(const int argc, char **argv) {
     int lines{};
     std::uint32_t consumed{};
     for (int i = 0; i < 3; i++) {
-      static_cast<void>(
-          timeFirstPage(font, warm.c_str(), warm.size(), lines, consumed));
+      std::ignore =
+          timeFirstPage(font, warm.c_str(), warm.size(), lines, consumed);
     }
   }
 

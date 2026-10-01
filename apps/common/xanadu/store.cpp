@@ -13,6 +13,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -412,7 +413,7 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
       opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
         // A cold fold keeps going past a refusal: the manifold counts it in
         // refusedOps(), which is where a caller checking honesty looks.
-        static_cast<void>(folded.applyStructure(idx, node));
+        std::ignore = folded.applyStructure(idx, node);
       });
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
@@ -432,7 +433,7 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
       // As above: refusals are counted, not fatal to the fold.
-      static_cast<void>(folded.applyStructure(opsSpool.indexOf(step), *node));
+      std::ignore = folded.applyStructure(opsSpool.indexOf(step), *node);
     }
   }
   folded.compact();
@@ -605,10 +606,20 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
                                const PrimediaSpan &content,
                                const MicroversionId &context) {
   requireAddressable(content, "a cell's content");
+  InferredTextValue inferred;
+  if (content.length <= maxInferredScalarTextBytes) {
+    try {
+      inferred = inferTextValue(read(content));
+    } catch (const std::exception &) {
+      // A cell can quote an unavailable remote span; its address remains
+      // valid even when its typed reading is not yet known locally.
+    }
+  }
   Op op;
   op.kind    = OpKind::Structure;
-  op.flags   = structureFlags(StructureVerb::MakeCell);
+  op.flags   = structureFlags(StructureVerb::MakeCell, false, inferred.kind);
   op.span    = content;
+  op.value   = inferred.bits;
   op.context = context;
   if (op.context.isZero() && sliceBirth_ != 0) {
     op.context = opsSpool.idOf(sliceBirth_);
@@ -622,7 +633,17 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
   // Into the permascroll first, exactly as insert() does it: a cell's content
   // is ordinary spooled primedia, which is what makes it a link endpoint and a
   // transclusion source rather than a payload of its own kind. See R6.
-  return makeCell(parent, userPermascroll_->append(text), context);
+  const auto inferred = inferTextValue(text);
+  Op op;
+  op.kind    = OpKind::Structure;
+  op.flags   = structureFlags(StructureVerb::MakeCell, false, inferred.kind);
+  op.span    = userPermascroll_->append(text);
+  op.value   = inferred.bits;
+  op.context = context;
+  if (op.context.isZero() && sliceBirth_ != 0) {
+    op.context = opsSpool.idOf(sliceBirth_);
+  }
+  return apply(parent, op);
 }
 
 MicroversionId Store::applyScalar(const MicroversionId &parent,
@@ -737,15 +758,43 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
   requireCellOp(cell, "the cell being edited");
   requireAddressable(quoted, "the span being spliced in");
 
+  zigzag::Manifold folded;
+  const auto *const current = [&]() -> const zigzag::Manifold * {
+    if (known) return known;
+    folded = rebuildManifold(parent);
+    return &folded;
+  }();
+
+  const auto spans             = current->contentOf(cell);
+  std::uint64_t existingLength = 0;
+  for (const auto &piece : spans) existingLength += piece.length;
+  const auto insertionAt     = std::min(at, existingLength);
+  const auto removed         = std::min(removing, existingLength - insertionAt);
+  const auto remainingLength = existingLength - removed;
+  InferredTextValue inferred;
+  if (remainingLength <= maxInferredScalarTextBytes &&
+      quoted.length <= maxInferredScalarTextBytes - remainingLength) {
+    try {
+      auto text = current->textOf(cell, *this);
+      text.replace(static_cast<std::size_t>(insertionAt),
+                   static_cast<std::size_t>(removed), read(quoted));
+      inferred = inferTextValue(text);
+    } catch (const std::exception &) {
+      // A remote span may be unavailable. The edit still preserves its
+      // address; a value cannot be inferred from bytes we have not read.
+    }
+  }
+
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = structureFlags(StructureVerb::Splice);
+  op.flags = structureFlags(StructureVerb::Splice, false, inferred.kind);
   // The one Structure verb whose `at` is not zero: it is an offset inside the
   // cell's own content, which is the frame this operation edits within.
   op.at     = static_cast<std::uint32_t>(at);
   op.length = static_cast<std::uint32_t>(removing);
   op.span   = quoted;
-  if (const auto previous = lastOpOnCell(parent, cell, known);
+  op.value  = inferred.bits;
+  if (const auto previous = lastOpOnCell(parent, cell, current);
       zigzag::noCell != previous) {
     op.source = opsSpool.idOf(previous);
   }
@@ -777,8 +826,10 @@ MicroversionId Store::setCellText(const MicroversionId &parent,
                                   const std::string_view text,
                                   const zigzag::Manifold *const known,
                                   const MicroversionId &context) {
-  const auto span = userPermascroll_->append(text);
-  return setValue(parent, cell, span, ValueKind::None, 0, known, context);
+  const auto span     = userPermascroll_->append(text);
+  const auto inferred = inferTextValue(text);
+  return setValue(parent, cell, span, inferred.kind, inferred.bits, known,
+                  context);
 }
 
 MicroversionId
@@ -1116,6 +1167,42 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
     }
 
     result.versions.push_back(std::move(sv));
+  }
+
+  struct CellState {
+    std::string text;
+    std::uint8_t kind{};
+    std::uint64_t bits{};
+    std::vector<zigzag::DimLink> links;
+    bool operator==(const CellState &) const = default;
+  };
+  std::map<zigzag::CellRef, std::vector<std::optional<CellState>>> cells;
+  for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
+    const auto manifold = rebuildManifold(versions[vIdx]);
+    for (const auto &slot : manifold.cells()) {
+      auto &states = cells[slot.birthOp];
+      if (states.empty()) states.resize(versions.size());
+      const auto links = manifold.dimensionsOf(slot.birthOp);
+      states[vIdx]     = CellState{
+          .text  = manifold.textOf(slot.birthOp, *this),
+          .kind  = slot.valueKind,
+          .bits  = slot.valueBits,
+          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+    }
+  }
+  for (const auto &[ref, states] : cells) {
+    if (std::ranges::all_of(states, [&](const auto &state) {
+          return state == states.front();
+        })) {
+      continue;
+    }
+    for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
+      if (states[vIdx]) {
+        result.versions[vIdx].changedCells.push_back(ref);
+      } else {
+        result.versions[vIdx].absentChangedCells++;
+      }
+    }
   }
 
   return result;

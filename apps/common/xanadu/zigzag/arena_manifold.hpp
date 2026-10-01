@@ -409,6 +409,18 @@ public:
     return slots_;
   }
 
+  /**
+   * @brief linked(), minting the proxy for a neighbour in a foreign space
+   *        that has none yet.
+   *
+   * linked() is a read and answers noCell for a foreign neighbour nobody has
+   * proxied, so the first step from a store's cell into the rest of that
+   * store found nothing: a query walking a loaded store stopped at its home.
+   * A query evaluating in the arena is allowed to mint, and walks with this.
+   */
+  CellRef linkedMinting(CellRef from, DimRef dim,
+                        DimVector dir = DimVector::POS);
+
   /// The cell @p from's neighbour along @p dim, or noCell.
   [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
                                DimVector dir = DimVector::POS) const noexcept;

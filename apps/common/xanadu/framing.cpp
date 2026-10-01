@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <glm/trigonometric.hpp>
+
 #include <gleditor/spatial.hpp>
 
 namespace xanadu {
@@ -128,6 +130,35 @@ std::vector<glm::vec3> morphicRoute(const glm::vec3 &from, const glm::vec3 &to,
   }
 
   return route;
+}
+
+std::optional<float> readableCameraDistance(const float lineHeightWorld,
+                                            const float screenHeightPx,
+                                            const float fovDegrees,
+                                            const float readablePx) {
+  if (lineHeightWorld <= 0.0F || screenHeightPx <= 0.0F || readablePx <= 0.0F ||
+      fovDegrees <= 0.0F || fovDegrees >= 180.0F) {
+    return std::nullopt;
+  }
+  const float tanHalfFov = std::tan(glm::radians(fovDegrees) * 0.5F);
+  return lineHeightWorld * screenHeightPx / (2.0F * tanHalfFov * readablePx);
+}
+
+OverviewFit OverviewFit::fit(const glm::vec2 worldMin, const glm::vec2 worldMax,
+                             const glm::vec2 panelMin,
+                             const glm::vec2 panelSize) {
+  const glm::vec2 span = worldMax - worldMin;
+  float scale          = 1.0F;
+  if (span.x > 0.0F && span.y > 0.0F) {
+    scale = std::min(panelSize.x / span.x, panelSize.y / span.y);
+  } else if (span.x > 0.0F) {
+    scale = panelSize.x / span.x;
+  } else if (span.y > 0.0F) {
+    scale = panelSize.y / span.y;
+  }
+  return OverviewFit{.worldCentre = 0.5F * (worldMin + worldMax),
+                     .panelCentre = panelMin + (0.5F * panelSize),
+                     .scale       = scale};
 }
 
 } // namespace xanadu

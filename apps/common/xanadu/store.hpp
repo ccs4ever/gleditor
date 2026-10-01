@@ -101,6 +101,10 @@ struct SingleVersionDiff {
   std::size_t sharedChars{0};
   std::size_t uniqueChars{0};
   std::size_t deletedChars{0};
+  /// Cells whose membership, value, or rank links differ across the compared
+  /// versions. Refs retain their MakeCell identity across branches.
+  std::vector<zigzag::CellRef> changedCells;
+  std::size_t absentChangedCells{0};
 };
 
 /**

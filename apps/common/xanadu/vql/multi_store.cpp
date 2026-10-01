@@ -182,7 +182,10 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
   xanadu::MicroversionId v = version;
   if (v.isZero()) {
     v = store->primaryCurrentVersion();
-    if (v.isZero()) {
+    // The current version is a document's designation and lags edits made
+    // to a slice in the same store; the latest state descending from it is
+    // what the reader last saw, and what a query should read.
+    if (v.isZero() || v.isAncestorOf(store->latest())) {
       v = store->latest();
     }
   }

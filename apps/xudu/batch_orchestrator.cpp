@@ -423,6 +423,63 @@ BatchOrchestrator::execute(Session &session,
         const auto text =
             argument.substr(argument.find_first_not_of(" \t", nameEnd));
         version = store.setCellText(version, found->second, text);
+      } else if (command == "cell-quote" || command == "link") {
+        // Both name ranges of the document as it stands: START:LENGTH for a
+        // link member, START LENGTH for a quoted cell. A range must be one
+        // run of addresses, since a cell's content and a link member are each
+        // one span here.
+        const auto text   = store.rebuild(version);
+        const auto spanAt = [&](const std::uint32_t start,
+                                const std::uint32_t length) {
+          const auto spans = text.spansFor(start, length);
+          if (1 != spans.size() || spans.front().length != length) {
+            fail("range " + std::to_string(start) + "+" +
+                 std::to_string(length) +
+                 " is not one run of the document's text");
+          }
+          return spans.front();
+        };
+        std::istringstream words(argument);
+        if (command == "cell-quote") {
+          std::string name;
+          std::uint32_t start  = 0;
+          std::uint32_t length = 0;
+          if (!(words >> name >> start >> length)) {
+            fail("cell-quote requires a name, a start and a length");
+          }
+          version = store.makeCell(version, spanAt(start, length));
+          cells.emplace(name, store.cellRefOf(version));
+        } else {
+          std::string typeName;
+          words >> typeName;
+          xudu::Link link;
+          link.type  = xudu::linkTypeFromName(typeName);
+          link.owner = "structure-script";
+          auto *side = &link.left;
+          std::string word;
+          while (words >> word) {
+            if ("|" == word) {
+              side = &link.right;
+              continue;
+            }
+            std::istringstream ranges(word);
+            std::string range;
+            while (std::getline(ranges, range, ',')) {
+              const auto colon = range.find(':');
+              if (colon == std::string::npos) {
+                fail("link member " + range + " is not START:LENGTH");
+              }
+              side->push_back(spanAt(static_cast<std::uint32_t>(
+                                         std::stoul(range.substr(0, colon))),
+                                     static_cast<std::uint32_t>(
+                                         std::stoul(range.substr(colon + 1)))));
+            }
+          }
+          if (link.left.empty() || link.right.empty()) {
+            fail("link requires members on both sides of a |");
+          }
+          version = store.addLink(version, link);
+        }
       } else if (command == "text" || command == "text-append") {
         if (argument.empty()) {
           fail(command + " requires text");

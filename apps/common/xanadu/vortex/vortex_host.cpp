@@ -200,7 +200,10 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   }
   if (customIt != customActionRoutines_.end() && customIt->second != noCell) {
     CellRef cursor = vm_.spawnCursor(customIt->second, actionName);
-    static_cast<void>(vm_.run(cursor, 1000));
+    if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
+      GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", actionName,
+                        ran.errorMessage);
+    }
   }
 
   // Application action delegate hook (e.g. apps/xudu, apps/zigzag)
@@ -396,7 +399,10 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   });
   if (stdlibOp) {
     CellRef cursor = vm_.spawnCursor(*stdlibOp, canonical);
-    static_cast<void>(vm_.run(cursor, 1000));
+    if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
+      GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", canonical,
+                        ran.errorMessage);
+    }
     return true;
   }
 
@@ -539,7 +545,7 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
       return promoted;
     }
     const DimRef dimRef = *attach;
-    static_cast<void>(manifold.advance(store, promoted->version));
+    manifold.advanceOrRefold(store, promoted->version);
     const CellRef persistentEntryOp = promoted->cells.front();
     promoted->version =
         store.setLink(promoted->version, persistentTarget, dimRef, dir,
@@ -629,8 +635,13 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
       if (store && !res.affectedCells.empty()) {
         for (CellRef c : res.affectedCells) {
           if (zigzag::isEphemeral(c)) {
-            static_cast<void>(zigzag::promote(
-                *store, store->primaryCurrentVersion(), arena_, c));
+            if (!zigzag::promote(*store, store->primaryCurrentVersion(), arena_,
+                                 c)) {
+              // Past the promotion budget, or not a cell of this arena: the
+              // result stays in the arena, and the store does not have it.
+              GLEDITOR_LOG_WARN("vortex.edit",
+                                "cell {} was not written to the store", c);
+            }
           }
         }
       }
@@ -683,8 +694,13 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
     if (store && !cells.empty()) {
       for (CellRef c : cells) {
         if (zigzag::isEphemeral(c)) {
-          static_cast<void>(zigzag::promote(
-              *store, store->primaryCurrentVersion(), arena_, c));
+          if (!zigzag::promote(*store, store->primaryCurrentVersion(), arena_,
+                               c)) {
+            // Past the promotion budget, or not a cell of this arena: the
+            // result stays in the arena, and the store does not have it.
+            GLEDITOR_LOG_WARN("vortex.edit",
+                              "cell {} was not written to the store", c);
+          }
         }
       }
     }

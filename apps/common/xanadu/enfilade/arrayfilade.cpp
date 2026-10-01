@@ -39,6 +39,9 @@ ArrayCellEntry::fromCell(const zigzag::CellRef ref,
   case xanadu::ValueKind::Bool:
     entry.numericValue = (0 != bits) ? 1.0 : 0.0;
     break;
+  case xanadu::ValueKind::Timestamp:
+    entry.numericValue = static_cast<double>(std::bit_cast<std::int64_t>(bits));
+    break;
   case xanadu::ValueKind::OpHandle:
   case xanadu::ValueKind::ExternRef:
   case xanadu::ValueKind::None:
@@ -101,10 +104,10 @@ using Coords = std::array<std::int64_t, MaxValence>;
 template <zigzag::CellGraph M, typename TextOf>
 ArrayCellEntry entryOf(const M &m, const zigzag::CellRef cell,
                        const Coords &coords, const TextOf &textOf) {
-  const auto &slot = *m.slot(cell);
+  const auto &slot = m.slot(cell);
   return ArrayCellEntry::fromCell(
-      cell, coords, static_cast<xanadu::ValueKind>(slot.valueKind),
-      slot.valueBits, textOf(cell));
+      cell, coords, static_cast<xanadu::ValueKind>(slot->valueKind),
+      slot->valueBits, textOf(cell));
 }
 
 template <zigzag::CellGraph M> auto holdsSlot(const M &m) {

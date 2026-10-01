@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -98,7 +99,7 @@ struct Pipe {
 
   Pipe() {
     SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
-    static_cast<void>(CreatePipe(&readEnd, &writeEnd, &inheritable, 0));
+    std::ignore = CreatePipe(&readEnd, &writeEnd, &inheritable, 0);
   }
   ~Pipe() { close(); }
   Pipe(const Pipe &)            = delete;
@@ -147,12 +148,11 @@ Ran run(const std::vector<std::string> &argv,
   // The end each side keeps must not be inherited, or a pipe meant to signal
   // end-of-file by closing never does: the child's copy of the parent's own
   // end keeps it open.
-  static_cast<void>(
-      SetHandleInformation(outPipe.readEnd, HANDLE_FLAG_INHERIT, 0));
-  static_cast<void>(
-      SetHandleInformation(errPipe.readEnd, HANDLE_FLAG_INHERIT, 0));
-  static_cast<void>(
-      SetHandleInformation(inPipe.writeEnd, HANDLE_FLAG_INHERIT, 0));
+  if (!SetHandleInformation(outPipe.readEnd, HANDLE_FLAG_INHERIT, 0) ||
+      !SetHandleInformation(errPipe.readEnd, HANDLE_FLAG_INHERIT, 0) ||
+      !SetHandleInformation(inPipe.writeEnd, HANDLE_FLAG_INHERIT, 0)) {
+    return {};
+  }
 
   std::wstring commandLine;
   for (const auto &arg : argv) {
@@ -187,9 +187,8 @@ Ran run(const std::vector<std::string> &argv,
   // cannot block: it is far below what a pipe holds without a reader.
   if (!feed.empty()) {
     DWORD written = 0;
-    static_cast<void>(WriteFile(inPipe.writeEnd, feed.data(),
-                                static_cast<DWORD>(feed.size()), &written,
-                                nullptr));
+    std::ignore = WriteFile(inPipe.writeEnd, feed.data(),
+                            static_cast<DWORD>(feed.size()), &written, nullptr);
   }
   // Closed either way, so a program waiting on end of input is not left
   // waiting for a passphrase that is not coming.
@@ -279,7 +278,7 @@ Ran run(const std::vector<std::string> &argv,
   // What goes down the pipe is a passphrase and nothing longer, so one write
   // cannot block: it is far below what a pipe holds without a reader.
   if (!feed.empty()) {
-    static_cast<void>(write(inPipe[1], feed.data(), feed.size()));
+    std::ignore = write(inPipe[1], feed.data(), feed.size());
   }
   // Closed either way, so a program waiting on end of input is not left
   // waiting for a passphrase that is not coming.

@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -79,6 +80,54 @@ TEST(ExternRefTest, anExternPlaceholderSurvivesAReload) {
       reloaded.scrollRegistry().placeholderForExtern(*targetOpt);
   ASSERT_TRUE(indexedPlaceholder.has_value());
   EXPECT_EQ(*indexedPlaceholder, placeholderCell);
+}
+
+TEST(ExternRefTest, LocalSliceReferenceKeepsBirthAcrossLaterEditAndReload) {
+  const auto dir   = scratch("local_slice_birth");
+  const auto perma = std::make_shared<UserPermascroll>();
+  MicroversionId birth;
+  zigzag::CellRef placeholder = zigzag::noCell;
+  std::string foreignKey;
+  {
+    Store foreign(perma);
+    auto foreignHead       = foreign.sliceGenesis({});
+    foreignHead            = foreign.makeCell(foreignHead, "original");
+    birth                  = foreignHead;
+    const auto foreignCell = foreign.cellRefOf(birth);
+    foreignKey             = foreign.documentId().str();
+    foreignHead = foreign.setCellText(foreignHead, foreignCell, "later state");
+    foreign.save((dir / "foreign").string());
+
+    Store local(perma);
+    auto localHead    = local.sliceGenesis({});
+    localHead         = local.registerScroll(localHead, foreignKey);
+    const auto scroll = local.scrollRegistry().scrollIdForKey(foreignKey);
+    ASSERT_TRUE(scroll.has_value());
+    const ExternOpRef ref{.scroll = *scroll, .produces = birth};
+    localHead        = local.makeExternRef(localHead, ref);
+    const auto found = local.placeholderForExtern(ref);
+    ASSERT_TRUE(found.has_value());
+    placeholder = *found;
+    local.save((dir / "local").string());
+  }
+
+  Store local(perma);
+  Store foreign(perma);
+  local.load((dir / "local").string());
+  foreign.load((dir / "foreign").string());
+  const auto target = local.externTarget(placeholder);
+  ASSERT_TRUE(target.has_value());
+  EXPECT_EQ(target->produces, birth);
+  const auto *record = local.scrollRegistry().recordForId(target->scroll);
+  ASSERT_NE(record, nullptr);
+  EXPECT_EQ(record->globalKey, foreign.documentId().str());
+  EXPECT_EQ(record->globalKey, foreignKey);
+  const auto fold = foreign.rebuildManifold(foreign.latest());
+  const auto resolved =
+      resolveLocalExternCell(local, placeholder, foreign, &fold);
+  ASSERT_TRUE(resolved.isResolved());
+  EXPECT_EQ(foreign.segmentedOps().idOf(resolved.cell), birth);
+  EXPECT_EQ(fold.textOf(resolved.cell, foreign), "later state");
 }
 
 TEST(ExternRefTest, anUnresolvableExternIsNotCorruption) {
@@ -192,7 +241,7 @@ TEST(ExternRefTest, anExternRefSurvivesTheForeignStoreGainingABranch) {
 
   // Branch 1: add some ops
   const auto b1_1 = foreignStore.insert(baseVersion, 0, "branch 1 text");
-  static_cast<void>(foreignStore.insert(b1_1, 0, "more branch 1 text"));
+  std::ignore     = foreignStore.insert(b1_1, 0, "more branch 1 text");
 
   // Branch 2: make the cell on branch 2
   const auto b2_1 = foreignStore.makeCell(baseVersion, "Foreign Cell Content");

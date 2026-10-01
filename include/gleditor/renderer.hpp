@@ -205,6 +205,32 @@ public:
    * belongs to the render loop's own stack frame, so there is no way to hand
    * it over other than by going round the queue.
    */
+  /**
+   * @brief Run @p hook on the render thread once, as the render loop ends,
+   *        before the documents and the caret are released.
+   *
+   * For what a program wants to keep of the session -- where the reader was
+   * -- which is gone by the time the loop has returned.
+   */
+  /// Called with a pick's answer on the render thread; see pickThen().
+  using PickAnswer =
+      std::function<void(RenderState &, const render::PickingResult &)>;
+
+  /**
+   * @brief Ask what is drawn at window pixel @p x, @p y and call @p then with
+   *        the answer on the render thread, a frame or two from now.
+   *
+   * For a decision that needs what is under a point at that moment -- where
+   * a drag was dropped -- which the hover pick answers only when idle and a
+   * frame late. Pending work until answered, so a frame waiting to settle
+   * waits for it too. Callable from any thread.
+   */
+  virtual void pickThen(int x, int y, PickAnswer then) = 0;
+
+  void setShutdownHook(std::function<void(RenderState &)> hook) {
+    shutdownHook = std::move(hook);
+  }
+
   void runWithState(std::invocable<RenderState &> auto fun) {
     renderQueue.push(RenderItemRunState(std::move(fun)));
   }
@@ -285,6 +311,18 @@ public:
 protected:
   std::vector<gleditor::SpanDecorator *> spanDecorators;
   std::vector<gleditor::FrameContributor *> frameContributors;
+  /// What the last frame's contributors claimed; see
+  /// FrameContext::settledChrome.
+  gleditor::ScreenInsets lastChrome;
+  /// See setShutdownHook().
+  std::function<void(RenderState &)> shutdownHook;
+  /// pickThen() requests still waiting on their answer.
+  struct PendingPickAnswer {
+    int x{};
+    int y{};
+    PickAnswer then;
+  };
+  std::vector<PendingPickAnswer> pickAnswers;
   std::vector<gleditor::PickObserver *> pickObservers;
 };
 
@@ -379,6 +417,14 @@ private:
   /// Whether the step being carried out is waiting for work it scheduled --
   /// the reflow an edit causes -- rather than for a picking answer.
   bool awaitingSettle{};
+  /// A script Input step's syntheticHandled target, until it is reached.
+  std::optional<std::uint64_t> awaitingInput;
+  /// Whether the step waiting on awaitingInput has already seen one settled
+  /// frame after its event was handled; see update().
+  bool inputSettledOnce{false};
+  /// A press landed inside the selection and the program took it up as a
+  /// drag (AppState::pressOnSelection): drag picks leave the selection be.
+  bool draggingSelection{false};
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
   /// Wall time of each settled frame, of collecting its page draws, and of
@@ -408,6 +454,11 @@ private:
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
   void requestPick(RenderState &state, int x, int y);
+
+public:
+  void pickThen(int x, int y, PickAnswer then) override;
+
+private:
   /// Carry out the next automation step once the one before it has finished.
   void advanceScript(RenderState &state);
   /// Finish the step just carried out, or wait for the work it scheduled.
@@ -473,6 +524,9 @@ protected:
 
   /// Whether document pages are still being loaded or laid out.
   [[nodiscard]] bool docsLoading(const RenderState &state) const;
+  /// Insert @p text at the caret, replacing any selection; returns where it
+  /// went. The caret must be in an open document.
+  std::uint32_t typeAtCaret(RenderState &state, const std::string &text);
 
   /// Build the glyph pipeline from the portable shader sources, and the
   /// overlay pipeline that shares them.

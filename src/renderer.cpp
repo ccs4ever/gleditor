@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -104,7 +105,7 @@ namespace {
 void settleDocLoad(
     std::future<std::expected<void, gleditor::SourceError>> &load) {
   try {
-    static_cast<void>(load.get());
+    std::ignore = load.get();
   } catch (const std::exception &failure) {
     GLEDITOR_LOG_ERROR("render.scene", "background page build failed: {}",
                        failure.what());
@@ -126,12 +127,19 @@ void Renderer::reapFinishedDocLoads() {
   pendingDocLoads.erase(done.begin(), done.end());
 }
 
+void Renderer::pickThen(const int x, const int y, PickAnswer then) {
+  runWithState([this, x, y, then = std::move(then)](RenderState &state) {
+    requestPick(state, x, y);
+    pickAnswers.push_back({.x = x, .y = y, .then = then});
+  });
+}
+
 bool Renderer::hasPendingWork() const {
   // An animation counts as pending work, which is what keeps a screenshot
   // honest: the frame a capture wants is the finished one, and a document
   // halfway through fading in is not it.
   return !renderQueue.empty() || !pendingDocLoads.empty() ||
-         !timeline.empty() ||
+         !pickAnswers.empty() || !timeline.empty() ||
          (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now())) ||
          std::ranges::any_of(frameContributors,
                              [](const gleditor::FrameContributor *const one) {
@@ -140,11 +148,15 @@ bool Renderer::hasPendingWork() const {
 }
 
 bool Renderer::docsLoading(const RenderState &state) const {
+  // No documents, or a document with no pages, is finished rather than
+  // loading: a new or emptied store is exactly that, and counting it as
+  // loading left every scripted step (and a queued quit) waiting forever.
+  // An open still in flight is already pending work (the render queue, then
+  // pendingDocLoads), and isFullyLoaded() waits for shaping to complete, so
+  // neither case can report settled before the document is there.
   return this->state->usesDocPages &&
-         (state.docs.empty() ||
-          std::ranges::any_of(state.docs, [](const auto &doc) {
-            return !doc->isFullyLoaded() || 0 == doc->numPages();
-          }));
+         std::ranges::any_of(
+             state.docs, [](const auto &doc) { return !doc->isFullyLoaded(); });
 }
 
 double Renderer::stepAnimations() {
@@ -385,14 +397,18 @@ bool Renderer::update(RenderState &state, const bool settled) {
   std::ranges::stable_sort(sortedDocs, [](const auto &a, const auto &b) {
     return a->currentPosition().z < b->currentPosition().z;
   });
-  for (const std::shared_ptr<Doc> &doc : sortedDocs) {
-    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : sortedDocs) {
+      doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+    }
   }
   // Closed documents still draw while they fade. They are gone from the open
   // list, so this is the only thing that still refers to them, and dropping
   // one the moment it is invisible is what ends that.
-  for (const std::shared_ptr<Doc> &doc : fadingDocs) {
-    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : fadingDocs) {
+      doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+    }
   }
   std::erase_if(fadingDocs, [](const std::shared_ptr<Doc> &doc) {
     return doc->hasFadedOut();
@@ -404,8 +420,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
   device->drawGlyphBatches(state.pageBatches);
   const auto recordEnd = std::chrono::steady_clock::now();
 
-  for (const std::shared_ptr<Doc> &doc : state.docs) {
-    doc->drawCaret(state, viewProjection, *caret);
+  if (state.documentsVisible) {
+    for (const std::shared_ptr<Doc> &doc : state.docs) {
+      doc->drawCaret(state, viewProjection, *caret);
+    }
   }
 
   // Whatever the program draws for itself: after the documents, so it can sit
@@ -416,10 +434,12 @@ bool Renderer::update(RenderState &state, const bool settled) {
                                .viewProjection = viewProjection,
                                .screenWidth    = screenWidth,
                                .screenHeight   = screenHeight,
-                               .timeline       = timeline};
+                               .timeline       = timeline,
+                               .settledChrome  = lastChrome};
     for (auto *const contributor : frameContributors) {
       contributor->drawFrame(ctx);
     }
+    lastChrome = ctx.chrome;
   }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so
@@ -467,11 +487,47 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // scheduled a reflow, the script waits for the reflow to settle before
   // taking the next step.
   if (settled) {
-    if (awaitingSettle) {
+    const auto serviceClickOrDrag = [&]() {
+      if (this->state->clickPending.exchange(false)) {
+        const auto clickX   = this->state->clickX.load();
+        const auto clickY   = this->state->clickY.load();
+        awaitingClick       = std::pair{clickX, clickY};
+        awaitingClickButton = this->state->clickButton.load();
+        awaitingDrag        = false;
+        requestPick(state, clickX, clickY);
+        return true;
+      }
+      if (this->state->dragPending.exchange(false)) {
+        const auto dragX = this->state->dragX.load();
+        const auto dragY = this->state->dragY.load();
+        awaitingClick    = std::pair{dragX, dragY};
+        awaitingDrag     = true;
+        requestPick(state, dragX, dragY);
+        return true;
+      }
+      return false;
+    };
+    const bool inputHandled =
+        !awaitingInput ||
+        this->state->syntheticHandled.load() >= *awaitingInput;
+    if (awaitingSettle && awaitingInput && (!inputHandled || awaitingClick)) {
+      // Still with the event thread, or waiting on the pick it asked for.
+    } else if (awaitingSettle && awaitingInput && serviceClickOrDrag()) {
+      // The event asked where a press or drag landed; answered next frames.
+    } else if (awaitingSettle && awaitingInput && !inputSettledOnce) {
+      // Handled, but perhaps after this frame was judged settled: what the
+      // handler queued for this thread runs at the start of the next frame,
+      // and only a settled frame after that shows it done. Without this a
+      // step could finish with its own work still queued -- and a run that
+      // quit then lost it, which is how a scripted Shift+Left went missing.
+      inputSettledOnce = true;
+    } else if (awaitingSettle) {
+      inputSettledOnce = false;
       // The frame this step's work was scheduled on has been and gone, and
       // this one is settled, so the work is done and the script may go on.
       awaitingSettle = false;
       awaitingStep   = false;
+      awaitingInput.reset();
       nextStep++;
     } else if (!scriptFinished()) {
       advanceScript(state);
@@ -521,7 +577,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
-  if (settled && scriptFinished() && this->state->dumpAccessibility) {
+  if (settled && !hasPendingWork() && scriptFinished() &&
+      this->state->dumpAccessibility) {
     // Once, on the first settled frame, and after the rebuild above so that
     // what is printed is what would be sent rather than the frame before it.
     this->state->dumpAccessibility = false;
@@ -601,11 +658,16 @@ void Renderer::placeCaretFromPick(RenderState &state,
   // Whatever the program drew for itself gets first refusal, because a tag it
   // wrote is a tag only it can read. One that claims the click has dealt with
   // it, and the caret stays where it was: clicking on a program's own drawing
-  // is not clicking on the text behind it.
+  // is not clicking on the text behind it. Only a press is offered: a drag
+  // sweeping across a button is not a click on it, and one that was inserted
+  // a page break whenever a selection was dragged over "+ Split".
   for (auto *const observer : pickObservers) {
-    if (observer->picked(pick, state)) {
+    if (!awaitingDrag && observer->picked(pick, state)) {
       return;
     }
+  }
+  if (!state.documentsVisible) {
+    return;
   }
 
   if (pick.tag.empty()) {
@@ -637,10 +699,30 @@ void Renderer::placeCaretFromPick(RenderState &state,
     return;
   }
   if (awaitingDrag) {
+    if (draggingSelection) {
+      // The press picked the selection up: the drag carries it, and the
+      // selection it is carrying stays as it is.
+      return;
+    }
     // Dragging keeps the anchor where the press landed and moves the caret,
     // which is what grows the selection.
     caret->extendTo(*offset);
     std::cout << std::format("select {},{}: doc {} [{},{})\n", pick.x, pick.y,
+                             pick.tag.docIndex, caret->selectionStart(),
+                             caret->selectionEnd());
+    return;
+  }
+  // A left press inside the selection picks it up rather than starting a new
+  // one, when the program has somewhere to carry it.
+  draggingSelection = false;
+  if (1 == pick.button && caret->active() && caret->hasSelection() &&
+      caret->documentIndex() == pick.tag.docIndex &&
+      *offset >= caret->selectionStart() && *offset < caret->selectionEnd() &&
+      this->state->pressOnSelection &&
+      this->state->pressOnSelection(pick.tag.docIndex, *offset, pick.x,
+                                    pick.y)) {
+    draggingSelection = true;
+    std::cout << std::format("drag {},{}: doc {} [{},{})\n", pick.x, pick.y,
                              pick.tag.docIndex, caret->selectionStart(),
                              caret->selectionEnd());
     return;
@@ -672,13 +754,25 @@ void Renderer::collectPickingResults(RenderState &state) {
           scene.mapped().documents[resolvedPick.tag.docIndex];
     }
     lastPick = resolvedPick;
+    if (const auto asked = std::ranges::find_if(pickAnswers,
+                                                [&](const auto &one) {
+                                                  return one.x == pick->x &&
+                                                         one.y == pick->y;
+                                                });
+        asked != pickAnswers.end()) {
+      auto then = std::move(asked->then);
+      pickAnswers.erase(asked);
+      then(state, resolvedPick);
+    }
     if (awaitingClick && awaitingClick->first == pick->x &&
         awaitingClick->second == pick->y) {
       awaitingClick.reset();
       auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
       placeCaretFromPick(state, pickWithButton);
-      if (awaitingStep) {
+      // An Input step finishes through the settle check instead, once the
+      // frame after this answer is settled.
+      if (awaitingStep && !awaitingInput) {
         // The step that asked for this answer is done; the next one may go.
         awaitingStep = false;
         nextStep++;
@@ -740,6 +834,13 @@ void Renderer::advanceScript(RenderState &state) {
   case Kind::Capture:
     pendingScriptCapture = step.text;
     return;
+  case Kind::Input:
+    // Handled on the event thread, like the platform's own input; the step
+    // finishes once that has happened and whatever it asked of this thread
+    // -- a click's or a drag's pick -- has been answered.
+    awaitingInput = this->state->queueSynthetic(step.input);
+    finishStepWhenSettled();
+    return;
   case Kind::Pick:
     // Answered on a later frame; collectPickingResults() reports it and moves
     // the script on.
@@ -765,7 +866,7 @@ void Renderer::advanceScript(RenderState &state) {
     if (nullptr == this->state->modal || !this->state->modal->grabbing()) {
       std::cerr << "--key with nothing to press it in; use --do first\n";
     } else {
-      static_cast<void>(this->state->modal->keyPressed(step.key, step.mods));
+      std::ignore = this->state->modal->keyPressed(step.key, step.mods);
     }
     finishStepWhenSettled();
     return;
@@ -777,13 +878,15 @@ void Renderer::advanceScript(RenderState &state) {
       finishStepWhenSettled();
       return;
     }
-    if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
+    if (this->state->documentTakesText && !this->state->documentTakesText()) {
+      // The same gate a typed key meets: another pane has the keyboard.
+      std::cerr << "--type while the documents do not have the keyboard\n";
+    } else if (!caret->active() ||
+               caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
-      // Read before insert() moves the caret past what it is about to place.
-      const auto at  = caret->byteOffset();
       auto &document = *state.docs[caret->documentIndex()];
-      document.insert(state, at, step.text, caret.get());
+      const auto at  = typeAtCaret(state, step.text);
       if (0 != step.decorations && this->state->onDecoratedInsert) {
         this->state->onDecoratedInsert(
             document, at, static_cast<std::uint32_t>(step.text.size()),
@@ -867,6 +970,10 @@ void Renderer::updateHighlights(RenderState &state) {
   // frame anyway, and the table is a handful of entries -- one per page the
   // selection touches.
   highlights.clear();
+  if (!state.documentsVisible) {
+    device->setHighlights(highlights);
+    return;
+  }
 
   // The selection goes in first, and both reasons are properties of what
   // consumes this table. The fragment stage returns on the first span that
@@ -899,7 +1006,7 @@ void Renderer::updateHighlights(RenderState &state) {
 }
 
 void Renderer::applyTypedText(RenderState &state) {
-  if (!caret->active()) {
+  if (!state.documentsVisible || !caret->active()) {
     return;
   }
   std::string typed;
@@ -913,8 +1020,24 @@ void Renderer::applyTypedText(RenderState &state) {
   if (caret->documentIndex() >= state.docs.size()) {
     return;
   }
-  state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(), typed,
-                                             caret.get());
+  std::ignore = typeAtCaret(state, typed);
+}
+
+std::uint32_t Renderer::typeAtCaret(RenderState &state,
+                                    const std::string &text) {
+  auto &document = *state.docs[caret->documentIndex()];
+  // Typing over a selection replaces it, as it does everywhere else: the
+  // selection goes first and the text lands where it began.
+  if (caret->hasSelection()) {
+    const auto start = caret->selectionStart();
+    std::ignore = document.erase(state, start, caret->selectionEnd() - start,
+                                 caret.get());
+    caret->placeAt(caret->documentIndex(), start);
+  }
+  // Read before insert() moves the caret past what it is about to place.
+  const auto at = caret->byteOffset();
+  document.insert(state, at, text, caret.get());
+  return at;
 }
 
 void Renderer::collectDiagnostics(RenderState &state) {
@@ -1097,7 +1220,8 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // Every step carried out and answered: the script is what this run was
     // for, so quitting before it finished would report on a document the
     // command line did not ask for.
-    if (settled && this->state->profiling && scriptFinished()) {
+    if (settled && !hasPendingWork() && this->state->profiling &&
+        scriptFinished()) {
       if (this->state->recordFrames > 0 &&
           this->state->recordedFrames < this->state->recordFrames) {
         continue;
@@ -1126,6 +1250,13 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
   }
 
+  // Work asked for before the loop ended is still carried out -- an edit a
+  // key queued just ahead of quitting is the reader's -- so that the
+  // shutdown hook below sees it.
+  while (auto item = renderQueue.pop()) {
+    dispatch(state, *item);
+  }
+
   // The background loaders capture the render state, which lives on this stack
   // frame, so none of them may outlive this function.
   for (auto &fut : pendingDocLoads) {
@@ -1134,6 +1265,12 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
   }
   pendingDocLoads.clear();
+
+  // Last look at the scene while all of it is still there -- documents,
+  // caret, camera -- before any of it is torn down below.
+  if (shutdownHook) {
+    shutdownHook(state);
+  }
 
   // Documents own device buffers; they must be released while the device is
   // still alive, and after any in-flight frame has finished reading them.

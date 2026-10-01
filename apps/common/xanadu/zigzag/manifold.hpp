@@ -678,6 +678,17 @@ public:
   AdvanceResult advance(const xanadu::Store &store,
                         const xanadu::MicroversionId &version);
 
+  /**
+   * @brief advance(), or a full fold at @p version when the step is refused.
+   *
+   * For a caller that needs this manifold at @p version whatever happened --
+   * one about to hand it to Store::setLink() as the fold `known` at its
+   * parent, where a manifold left behind is a programming error nothing can
+   * detect. A refusal is logged, not swallowed.
+   */
+  void advanceOrRefold(const xanadu::Store &store,
+                       const xanadu::MicroversionId &version);
+
   /// Discard the arena's dead runs, leaving every cell's links contiguous in
   /// dense order. A full fold ends with one of these, so a freshly rebuilt
   /// manifold has a tight arena and the per-cell cost R12 quotes.

@@ -210,8 +210,7 @@ DimensionResult DimensionRegistry::getOrCreate(xanadu::Store &store,
   }
   const auto minted = store.makeDimension(head, dimName.name(), &manifold);
   head              = minted.version;
-  store.repointCurrentVersion(head);
-  auto newManifold = store.rebuildManifold(head);
+  auto newManifold  = store.rebuildManifold(head);
   newManifold.setStore(&store);
   for (const auto &c : manifold.cells()) {
     if (c.formatFlags != 0) {
