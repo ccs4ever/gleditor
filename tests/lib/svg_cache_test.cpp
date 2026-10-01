@@ -102,13 +102,22 @@ Rgba pixelAt(const std::vector<std::byte> &rgba, const int width, const int x,
 
 } // namespace
 
+// Without ThorVG every answer is NoCodec: the build, not the bytes, is why.
+#ifdef GLEDITOR_HAVE_SVG_THORVG
+constexpr auto emptyReason   = DecodeError::Empty;
+constexpr auto garbageReason = DecodeError::Undecodable;
+#else
+constexpr auto emptyReason   = DecodeError::NoCodec;
+constexpr auto garbageReason = DecodeError::NoCodec;
+#endif
+
 TEST(SvgCacheTest, PeekSizeFailsOnEmptyBytes) {
-  EXPECT_FALSE(SvgCache::peekSize({}).has_value());
+  EXPECT_EQ(SvgCache::peekSize({}).error(), emptyReason);
 }
 
 TEST(SvgCacheTest, PeekSizeFailsOnGarbageBytes) {
   const std::vector<std::uint8_t> notSvg{'n', 'o', 't', ' ', 's', 'v', 'g'};
-  EXPECT_FALSE(SvgCache::peekSize(notSvg).has_value());
+  EXPECT_EQ(SvgCache::peekSize(notSvg).error(), garbageReason);
 }
 
 #ifdef GLEDITOR_HAVE_SVG_THORVG

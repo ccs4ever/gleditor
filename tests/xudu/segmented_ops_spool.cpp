@@ -13,18 +13,18 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/compact_op.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/segmented_ops_spool.hpp>
-#include <xudu/core/virtual_memory_arena.hpp>
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/virtual_memory_arena.hpp"
 
 namespace {
 
-using xudu::CompactOpNode;
-using xudu::MicroversionId;
-using xudu::OpKind;
-using xudu::PrimediaSpan;
-using xudu::SegmentedOpsSpool;
+using xanadu::CompactOpNode;
+using xanadu::MicroversionId;
+using xanadu::OpKind;
+using xanadu::PrimediaSpan;
+using xanadu::SegmentedOpsSpool;
 
 TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   SegmentedOpsSpool spool;
@@ -33,7 +33,7 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   CompactOpNode n1;
   n1.kind = OpKind::Insert;
   n1.at   = 0;
-  n1.setSpan(PrimediaSpan{xudu::localScroll, 0, 5});
+  n1.setSpan(PrimediaSpan{xanadu::localScroll, 0, 5});
   const auto id1  = MicroversionId::parse("1");
   const auto idx1 = spool.append(n1, id1);
   EXPECT_EQ(idx1, 1U);
@@ -43,7 +43,7 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   n2.kind        = OpKind::Insert;
   n2.parentIndex = idx1;
   n2.at          = 5;
-  n2.setSpan(PrimediaSpan{xudu::localScroll, 5, 6});
+  n2.setSpan(PrimediaSpan{xanadu::localScroll, 5, 6});
   const auto id2  = MicroversionId::parse("2");
   const auto idx2 = spool.append(n2, id2);
   EXPECT_EQ(idx2, 2U);
@@ -155,7 +155,7 @@ TEST(SegmentedOpsSpoolTest, aSpoolCountsDownToItsCeilingAndThenRefuses) {
   try {
     spool.append(refused, name);
     FAIL() << "an operation past the reservation must not be recorded";
-  } catch (const xudu::SpoolExhausted &e) {
+  } catch (const xanadu::SpoolExhausted &e) {
     // The numbers a caller needs to say something useful about it, rather
     // than the bare std::bad_alloc the arena would otherwise have raised.
     EXPECT_EQ(e.held(), capacity);
@@ -180,7 +180,7 @@ std::size_t residentBytes() {
   std::size_t totalPages    = 0;
   std::size_t residentPages = 0;
   statm >> totalPages >> residentPages;
-  return residentPages * xudu::VirtualMemoryArena::pageSize();
+  return residentPages * xanadu::VirtualMemoryArena::pageSize();
 }
 #endif
 
@@ -208,7 +208,7 @@ TEST(SegmentedOpsSpoolTest, theDefaultReservationIsAddressSpaceNotMemory) {
     // Whatever the reservation ladder settled on, a spool never opens with
     // less room than the 512 MiB ceiling it used to have.
     EXPECT_GE(spool.opCapacity(),
-              xudu::minOpsReservation / sizeof(CompactOpNode) - 1U);
+              xanadu::minOpsReservation / sizeof(CompactOpNode) - 1U);
   }
   if constexpr (sizeof(void *) >= 8) {
     // The ruling in design step 5, stated as the thing it is for: a document
@@ -235,14 +235,14 @@ namespace {
 void writeSegmentFileByHand(
     const std::filesystem::path &path, const std::vector<CompactOpNode> &nodes,
     const std::uint32_t firstOpIndex,
-    const std::optional<xudu::OpsSegmentHeader> &deliberatelyWrong = {}) {
-  xudu::OpsSegmentHeader header;
+    const std::optional<xanadu::OpsSegmentHeader> &deliberatelyWrong = {}) {
+  xanadu::OpsSegmentHeader header;
   if (deliberatelyWrong.has_value()) {
     header = *deliberatelyWrong;
   } else {
-    header.signature     = xudu::opsSegmentSignature;
-    header.formatVersion = xudu::opsSegmentFormatVersion;
-    header.headerBytes   = xudu::opsSegmentHeaderBytes;
+    header.signature     = xanadu::opsSegmentSignature;
+    header.formatVersion = xanadu::opsSegmentFormatVersion;
+    header.headerBytes   = xanadu::opsSegmentHeaderBytes;
     header.nodeSize      = sizeof(CompactOpNode);
     header.firstOpIndex  = firstOpIndex;
     header.nodeCount     = nodes.size();
@@ -251,20 +251,20 @@ void writeSegmentFileByHand(
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char *>(&header), sizeof(header));
     // Never written, so the rest of the header block is a hole.
-    out.seekp(xudu::opsSegmentHeaderBytes);
+    out.seekp(xanadu::opsSegmentHeaderBytes);
     if (!nodes.empty()) {
       out.write(
           reinterpret_cast<const char *>(nodes.data()),
           static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
     }
   }
-  std::filesystem::resize_file(path, xudu::opsSegmentHeaderBytes +
+  std::filesystem::resize_file(path, xanadu::opsSegmentHeaderBytes +
                                          nodes.size() * sizeof(CompactOpNode));
 }
 
 /// What a segment file holding @p nodeCount operations is on disk.
 std::uintmax_t segmentFileSize(const std::uintmax_t nodeCount) {
-  return xudu::opsSegmentHeaderBytes + nodeCount * sizeof(CompactOpNode);
+  return xanadu::opsSegmentHeaderBytes + nodeCount * sizeof(CompactOpNode);
 }
 
 std::filesystem::path scratchDir(const std::string &name) {
@@ -469,7 +469,7 @@ TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
   // four or five nodes, which never lands on a page boundary and so never gets
   // mapped -- which is why this went unnoticed. See design R10.
   const auto perPage = static_cast<std::uint32_t>(
-      xudu::VirtualMemoryArena::pageSize() / sizeof(CompactOpNode));
+      xanadu::VirtualMemoryArena::pageSize() / sizeof(CompactOpNode));
   ASSERT_GT(perPage, 8U) << "a page must hold enough nodes to branch inside";
 
   const auto dir = scratchDir("sealed_readonly");
@@ -604,7 +604,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWrittenBeforeHeadersExistedIsRefused) {
   try {
     static_cast<void>(spool.addSealedSegment(path));
     FAIL() << "a file written before headers existed must not be read as one";
-  } catch (const xudu::OpsSegmentUnreadable &e) {
+  } catch (const xanadu::OpsSegmentUnreadable &e) {
     // Naming the signature is the point: the message has to say what kind of
     // file this is not, or the next person reads it as an I/O error.
     EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("signature"));
@@ -617,7 +617,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWrittenBeforeHeadersExistedIsRefused) {
   // Store::load() actually takes.
   SegmentedOpsSpool opening;
   EXPECT_THROW(static_cast<void>(opening.openActiveSegment(path)),
-               xudu::OpsSegmentUnreadable);
+               xanadu::OpsSegmentUnreadable);
 }
 
 TEST(SegmentedOpsSpoolTest, aSegmentWhoseNodesAreADifferentSizeIsRefused) {
@@ -629,10 +629,10 @@ TEST(SegmentedOpsSpoolTest, aSegmentWhoseNodesAreADifferentSizeIsRefused) {
   std::vector<CompactOpNode> nodes(2);
   nodes[1].parentIndex = 1;
 
-  xudu::OpsSegmentHeader wrongSize;
-  wrongSize.signature     = xudu::opsSegmentSignature;
-  wrongSize.formatVersion = xudu::opsSegmentFormatVersion;
-  wrongSize.headerBytes   = xudu::opsSegmentHeaderBytes;
+  xanadu::OpsSegmentHeader wrongSize;
+  wrongSize.signature     = xanadu::opsSegmentSignature;
+  wrongSize.formatVersion = xanadu::opsSegmentFormatVersion;
+  wrongSize.headerBytes   = xanadu::opsSegmentHeaderBytes;
   wrongSize.nodeSize      = sizeof(CompactOpNode) + 8;
   wrongSize.firstOpIndex  = 1;
   wrongSize.nodeCount     = nodes.size();
@@ -642,7 +642,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWhoseNodesAreADifferentSizeIsRefused) {
   try {
     static_cast<void>(spool.addSealedSegment(dir / "wide.ops"));
     FAIL() << "operations of another size must not be read as these ones";
-  } catch (const xudu::OpsSegmentUnreadable &e) {
+  } catch (const xanadu::OpsSegmentUnreadable &e) {
     // Both numbers, because "this file says 72 and mine are 64" is what makes
     // it obvious what happened, where "cannot read" does not.
     EXPECT_THAT(std::string{e.what()},
@@ -658,10 +658,10 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
   std::vector<CompactOpNode> nodes(1);
 
   // A version from the future. Reading it would be guessing.
-  xudu::OpsSegmentHeader later;
-  later.signature     = xudu::opsSegmentSignature;
-  later.formatVersion = xudu::opsSegmentFormatVersion + 1;
-  later.headerBytes   = xudu::opsSegmentHeaderBytes;
+  xanadu::OpsSegmentHeader later;
+  later.signature     = xanadu::opsSegmentSignature;
+  later.formatVersion = xanadu::opsSegmentFormatVersion + 1;
+  later.headerBytes   = xanadu::opsSegmentHeaderBytes;
   later.nodeSize      = sizeof(CompactOpNode);
   later.firstOpIndex  = 1;
   later.nodeCount     = nodes.size();
@@ -669,7 +669,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
 
   SegmentedOpsSpool spool;
   EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "future.ops")),
-               xudu::OpsSegmentUnreadable);
+               xanadu::OpsSegmentUnreadable);
 
   // A file cut short mid-operation. The nodes that are left cannot be trusted
   // to be the ones that were written.
@@ -677,22 +677,22 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
   std::filesystem::resize_file(
       dir / "ragged.ops", std::filesystem::file_size(dir / "ragged.ops") - 7);
   EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "ragged.ops")),
-               xudu::OpsSegmentUnreadable);
+               xanadu::OpsSegmentUnreadable);
 
   // A file whose header promises more operations than are in it: bytes went
   // missing, rather than a flush that had not caught up.
   std::vector<CompactOpNode> two(2);
   two[1].parentIndex = 1;
-  xudu::OpsSegmentHeader overclaiming;
-  overclaiming.signature     = xudu::opsSegmentSignature;
-  overclaiming.formatVersion = xudu::opsSegmentFormatVersion;
-  overclaiming.headerBytes   = xudu::opsSegmentHeaderBytes;
+  xanadu::OpsSegmentHeader overclaiming;
+  overclaiming.signature     = xanadu::opsSegmentSignature;
+  overclaiming.formatVersion = xanadu::opsSegmentFormatVersion;
+  overclaiming.headerBytes   = xanadu::opsSegmentHeaderBytes;
   overclaiming.nodeSize      = sizeof(CompactOpNode);
   overclaiming.firstOpIndex  = 1;
   overclaiming.nodeCount     = 9;
   writeSegmentFileByHand(dir / "short.ops", two, 1, overclaiming);
   EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "short.ops")),
-               xudu::OpsSegmentUnreadable);
+               xanadu::OpsSegmentUnreadable);
 
   // Too short to hold a header at all, which is what an empty file that
   // somebody touched into existence looks like to a sealed-segment reader.
@@ -701,7 +701,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
     out << "no";
   }
   EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "stub.ops")),
-               xudu::OpsSegmentUnreadable);
+               xanadu::OpsSegmentUnreadable);
 
   EXPECT_EQ(spool.size(), 0U) << "nothing was read out of any of them";
 }

@@ -30,6 +30,8 @@
 #include <string_view>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 namespace xanadu::bencode {
 
 class Value;
@@ -71,7 +73,10 @@ public:
 
   /// The entry under @p key, or nullptr when this is not a dictionary or has
   /// no such key.
-  [[nodiscard]] const Value *find(std::string_view key) const;
+  /// The value under @p key in a dictionary, or nothing -- for a missing
+  /// key and for a value that is not a dictionary at all.
+  [[nodiscard]] gleditor::cpp26::optional<const Value &>
+  find(std::string_view key) const;
 
   /**
    * @brief Where this value's encoding sat in the input it was decoded from.

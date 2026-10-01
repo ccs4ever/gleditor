@@ -8,7 +8,8 @@
  * the count has to agree with what the caret does, or a screen reader reports
  * the cursor somewhere other than where it is drawn.
  */
-#include <gleditor/a11y/tree.hpp> // IWYU pragma: associated
+#include <gleditor/a11y/tree.hpp>
+#include <gleditor/ranges.hpp> // IWYU pragma: associated
 
 #include <algorithm>
 #include <cstddef>
@@ -49,9 +50,8 @@ bool separates(const std::string_view text, const std::size_t at,
 
 } // namespace
 
-const Node *Tree::find(const std::uint64_t id) const {
-  const auto found = std::ranges::find(nodes, id, &Node::id);
-  return nodes.end() == found ? nullptr : &*found;
+cpp26::optional<const Node &> Tree::find(const std::uint64_t id) const {
+  return findRef(nodes, [id](const Node &node) { return node.id == id; });
 }
 
 Node &Builder::add(const std::uint64_t local, const Role role) {

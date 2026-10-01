@@ -18,24 +18,24 @@ using namespace gleditor;
 TEST(RadialMenuTest, SectorResolutionDynamicCount) {
   // Test 8-way sector resolution
   // North (0, +1) should resolve to sector 0
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 8), 0);
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 8), 0U);
   // East (+1, 0) should resolve to sector 2
-  EXPECT_EQ(RadialMenu::resolveSector(10.0F, 0.0F, 8), 2);
+  EXPECT_EQ(RadialMenu::resolveSector(10.0F, 0.0F, 8), 2U);
   // South (0, -1) should resolve to sector 4
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -10.0F, 8), 4);
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -10.0F, 8), 4U);
   // West (-1, 0) should resolve to sector 6
-  EXPECT_EQ(RadialMenu::resolveSector(-10.0F, 0.0F, 8), 6);
+  EXPECT_EQ(RadialMenu::resolveSector(-10.0F, 0.0F, 8), 6U);
 
   // Test 4-way sector resolution (quadrants)
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 4), 0);  // North
-  EXPECT_EQ(RadialMenu::resolveSector(10.0F, 0.0F, 4), 1);  // East
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -10.0F, 4), 2); // South
-  EXPECT_EQ(RadialMenu::resolveSector(-10.0F, 0.0F, 4), 3); // West
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 4), 0U);  // North
+  EXPECT_EQ(RadialMenu::resolveSector(10.0F, 0.0F, 4), 1U);  // East
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -10.0F, 4), 2U); // South
+  EXPECT_EQ(RadialMenu::resolveSector(-10.0F, 0.0F, 4), 3U); // West
 
   // Test 6-way sector resolution
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 6), 0);
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 10.0F, 6), 0U);
   // 60 deg clockwise: cos(30 deg), sin(30 deg)
-  EXPECT_EQ(RadialMenu::resolveSector(8.66F, 5.0F, 6), 1);
+  EXPECT_EQ(RadialMenu::resolveSector(8.66F, 5.0F, 6), 1U);
 }
 
 TEST(RadialMenuTest, OpenCloseToggleState) {
@@ -167,12 +167,14 @@ TEST(RadialMenuTest, WedgeGeometryAndSectorResolution) {
   // Test 10-way default menu sector resolution
   // 10 sectors, sector width = 36 degrees = 2*pi/10
   // Sector 0 is North: angle = pi/2
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 50.0F, 10), 0);
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 50.0F, 10), 0U);
   // Sector 1: 36 deg clockwise from North -> (cos(54 deg), sin(54 deg))
   EXPECT_EQ(RadialMenu::resolveSector(
                 50.0F * std::cos(0.3F * std::numbers::pi_v<float>),
                 50.0F * std::sin(0.3F * std::numbers::pi_v<float>), 10),
-            1);
+            1U);
   // South (0, -50) should be Sector 5 (180 deg from North)
-  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -50.0F, 10), 5);
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -50.0F, 10), 5U);
+  // A menu with no sectors has no sector to point into.
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 50.0F, 0), std::nullopt);
 }

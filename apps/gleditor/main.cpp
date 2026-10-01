@@ -222,7 +222,7 @@ int main(const int argc, char **argv) {
   argparse::ArgumentParser parser("gleditor", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
   parser.add_argument("--config")
-      .help("path to configuration YAML file")
+      .help("path to configuration TSV file")
       .default_value(std::string{});
   parser.add_argument("files").help("input files").remaining();
 

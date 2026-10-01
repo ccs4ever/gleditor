@@ -1,173 +1,82 @@
 /**
  * @file editor_config.cpp
- * @brief Plain YAML configuration reader and schema for apps/gleditor.
+ * @brief Plain TSV configuration reader and schema for apps/gleditor.
  */
 #include "editor_config.hpp"
 
-#include <charconv>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
-#include <stdexcept>
+#include <vector>
 
-#include <ryml.hpp>
-#include <ryml_std.hpp>
-
-#include "common/yaml_helpers.hpp"
+#include "common/tsv.hpp"
 
 namespace gleditor {
 
-std::string defaultEditorConfigYaml() {
-  return "# Gleditor Application Configuration\n"
-         "settings:\n"
-         "  fontSize: 16\n"
-         "  fontFamily: \"Monospace\"\n"
-         "  lineHeight: 1.4\n"
-         "  autoSaveSeconds: 5\n"
-         "  theme: \"system\"\n\n"
-         "spatial:\n"
-         "  documentSpacingX: 70.0\n"
-         "  depthZ: -45.0\n"
-         "  docArrivalSeconds: 0.22\n"
-         "  backgroundOpacity: 0.35\n\n"
-         "keymap:\n"
-         "  new: \"Ctrl+N\"\n"
-         "  close: \"Ctrl+W\"\n"
-         "  save: \"Ctrl+S\"\n"
-         "  bold: \"Ctrl+B\"\n"
-         "  italic: \"Ctrl+I\"\n"
-         "  underline: \"Ctrl+U\"\n"
-         "  3d-overview: \"F10\"\n"
-         "  next-doc: \"Ctrl+Tab\"\n"
-         "  prev-doc: \"Ctrl+Shift+Tab\"\n\n"
-         "schema:\n"
-         "  purpose: \"Configuration file for gleditor plain GPU text "
-         "editor.\"\n"
-         "  fields:\n"
-         "    fontSize: \"Base font size in points.\"\n"
-         "    fontFamily: \"Font family name resolved via fontconfig.\"\n"
-         "    lineHeight: \"Line height multiplier.\"\n"
-         "    autoSaveSeconds: \"Auto-save interval in seconds.\"\n"
-         "    documentSpacingX: \"Horizontal spacing between document columns "
-         "in 3D space.\"\n"
-         "    depthZ: \"Depth offset in Z units per background document "
-         "layer.\"\n"
-         "    docArrivalSeconds: \"Arrival animation duration in seconds.\"\n"
-         "    backgroundOpacity: \"Resting opacity for inactive background "
-         "documents.\"\n\n"
-         "user_notes:\n"
-         "  notes: \"User notes and customization preferences for "
-         "gleditor.\"\n";
+std::string defaultEditorConfigTsv() {
+  return "settings.fontSize\t16\n"
+         "settings.fontFamily\tMonospace\n"
+         "settings.lineHeight\t1.4\n"
+         "settings.autoSaveSeconds\t5\n"
+         "settings.theme\tsystem\n"
+         "spatial.documentSpacingX\t70.0\n"
+         "spatial.depthZ\t-45.0\n"
+         "spatial.docArrivalSeconds\t0.22\n"
+         "spatial.backgroundOpacity\t0.35\n"
+         "keymap.new\tCtrl+N\n"
+         "keymap.close\tCtrl+W\n"
+         "keymap.save\tCtrl+S\n"
+         "keymap.bold\tCtrl+B\n"
+         "keymap.italic\tCtrl+I\n"
+         "keymap.underline\tCtrl+U\n"
+         "keymap.3d-overview\tF10\n"
+         "keymap.next-doc\tCtrl+Tab\n"
+         "keymap.prev-doc\tCtrl+Shift+Tab\n"
+         "user_notes.notes\tUser notes and customization preferences for "
+         "gleditor.\n";
 }
 
-namespace {
-
-using common::yaml::parseFloat;
-using common::yaml::parseUint;
-using common::yaml::ScopedCallbacks;
-using common::yaml::stripQuotes;
-
-} // namespace
-
-EditorConfig parseEditorConfig(const std::string_view yamlText) {
-  EditorConfig cfg;
-  if (yamlText.empty()) {
-    return cfg;
+EditorConfig parseEditorConfig(const std::string_view tsv) {
+  EditorConfig config;
+  const auto entries = common::tsv::read(tsv);
+  if (!entries) {
+    return config;
   }
-
-  const ScopedCallbacks scoped;
-  try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
-    if (tree.empty()) {
-      return cfg;
+  constexpr std::string_view keymapPrefix = "keymap.";
+  for (const auto &[key, value] : *entries) {
+    if ("settings.fontSize" == key) {
+      config.settings.fontSize =
+          common::tsv::parseFloat(value, config.settings.fontSize);
+    } else if ("settings.fontFamily" == key) {
+      config.settings.fontFamily = value;
+    } else if ("settings.lineHeight" == key) {
+      config.settings.lineHeight =
+          common::tsv::parseFloat(value, config.settings.lineHeight);
+    } else if ("settings.autoSaveSeconds" == key) {
+      config.settings.autoSaveSeconds =
+          common::tsv::parseUint(value, config.settings.autoSaveSeconds);
+    } else if ("settings.theme" == key) {
+      config.settings.theme = value;
+    } else if ("spatial.documentSpacingX" == key) {
+      config.spatial.documentSpacingX =
+          common::tsv::parseFloat(value, config.spatial.documentSpacingX);
+    } else if ("spatial.depthZ" == key) {
+      config.spatial.depthZ =
+          common::tsv::parseFloat(value, config.spatial.depthZ);
+    } else if ("spatial.docArrivalSeconds" == key) {
+      config.spatial.docArrivalSeconds =
+          common::tsv::parseFloat(value, config.spatial.docArrivalSeconds);
+    } else if ("spatial.backgroundOpacity" == key) {
+      config.spatial.backgroundOpacity =
+          common::tsv::parseFloat(value, config.spatial.backgroundOpacity);
+    } else if (key.starts_with(keymapPrefix)) {
+      config.keymap.emplace_back(key.substr(keymapPrefix.size()), value);
+    } else if ("user_notes.notes" == key) {
+      config.userNotes = value;
     }
-    const auto root = tree.rootref();
-    if (!root.is_map()) {
-      return cfg;
-    }
-
-    if (root.has_child("settings") && root["settings"].is_map()) {
-      const auto s = root["settings"];
-      if (s.has_child("fontSize") && s["fontSize"].has_val()) {
-        const auto v          = s["fontSize"].val();
-        cfg.settings.fontSize = parseFloat(std::string_view{v.data(), v.size()},
-                                           cfg.settings.fontSize);
-      }
-      if (s.has_child("fontFamily") && s["fontFamily"].has_val()) {
-        const auto v = s["fontFamily"].val();
-        cfg.settings.fontFamily =
-            stripQuotes(std::string_view{v.data(), v.size()});
-      }
-      if (s.has_child("lineHeight") && s["lineHeight"].has_val()) {
-        const auto v            = s["lineHeight"].val();
-        cfg.settings.lineHeight = parseFloat(
-            std::string_view{v.data(), v.size()}, cfg.settings.lineHeight);
-      }
-      if (s.has_child("theme") && s["theme"].has_val()) {
-        const auto v       = s["theme"].val();
-        cfg.settings.theme = stripQuotes(std::string_view{v.data(), v.size()});
-      }
-      if (s.has_child("autoSaveSeconds") && s["autoSaveSeconds"].has_val()) {
-        const auto v                 = s["autoSaveSeconds"].val();
-        cfg.settings.autoSaveSeconds = parseUint(
-            std::string_view{v.data(), v.size()}, cfg.settings.autoSaveSeconds);
-      }
-    }
-
-    if (root.has_child("spatial") && root["spatial"].is_map()) {
-      const auto sp = root["spatial"];
-      if (sp.has_child("documentSpacingX") &&
-          sp["documentSpacingX"].has_val()) {
-        const auto v                 = sp["documentSpacingX"].val();
-        cfg.spatial.documentSpacingX = parseFloat(
-            std::string_view{v.data(), v.size()}, cfg.spatial.documentSpacingX);
-      }
-      if (sp.has_child("depthZ") && sp["depthZ"].has_val()) {
-        const auto v       = sp["depthZ"].val();
-        cfg.spatial.depthZ = parseFloat(std::string_view{v.data(), v.size()},
-                                        cfg.spatial.depthZ);
-      }
-      if (sp.has_child("docArrivalSeconds") &&
-          sp["docArrivalSeconds"].has_val()) {
-        const auto v = sp["docArrivalSeconds"].val();
-        cfg.spatial.docArrivalSeconds =
-            parseFloat(std::string_view{v.data(), v.size()},
-                       cfg.spatial.docArrivalSeconds);
-      }
-      if (sp.has_child("backgroundOpacity") &&
-          sp["backgroundOpacity"].has_val()) {
-        const auto v = sp["backgroundOpacity"].val();
-        cfg.spatial.backgroundOpacity =
-            parseFloat(std::string_view{v.data(), v.size()},
-                       cfg.spatial.backgroundOpacity);
-      }
-    }
-
-    if (root.has_child("keymap") && root["keymap"].is_map()) {
-      for (const auto child : root["keymap"].children()) {
-        if (child.has_key() && child.has_val()) {
-          std::string k{child.key().data(), child.key().size()};
-          std::string v = stripQuotes(
-              std::string_view{child.val().data(), child.val().size()});
-          cfg.keymap.emplace_back(std::move(k), std::move(v));
-        }
-      }
-    }
-
-    if (root.has_child("user_notes") && root["user_notes"].is_map()) {
-      const auto un = root["user_notes"];
-      if (un.has_child("notes") && un["notes"].has_val()) {
-        const auto v  = un["notes"].val();
-        cfg.userNotes = stripQuotes(std::string_view{v.data(), v.size()});
-      }
-    }
-  } catch (const std::exception &) { // NOLINT(bugprone-empty-catch)
-    // Return fallback cfg on error
   }
-
-  return cfg;
+  return config;
 }
 
 EditorConfig loadEditorConfig(const std::string &path) {
@@ -175,30 +84,27 @@ EditorConfig loadEditorConfig(const std::string &path) {
   if (!path.empty()) {
     candidates.emplace_back(path);
   }
-
   if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
     candidates.emplace_back(std::filesystem::path(xdg) / "gleditor" /
-                            "config.yaml");
+                            "config.tsv");
   } else if (const char *home = std::getenv("HOME"); home && *home) {
     candidates.emplace_back(std::filesystem::path(home) / ".config" /
-                            "gleditor" / "config.yaml");
+                            "gleditor" / "config.tsv");
   }
-
-  candidates.emplace_back("assets/gleditor/config.yaml");
-  candidates.emplace_back("assets/config.yaml");
+  candidates.emplace_back("assets/gleditor/config.tsv");
+  candidates.emplace_back("assets/config.tsv");
 
   for (const auto &candidate : candidates) {
     if (std::filesystem::exists(candidate)) {
       std::ifstream in(candidate, std::ios::binary);
       if (in.is_open()) {
-        std::stringstream ss;
-        ss << in.rdbuf();
-        return parseEditorConfig(ss.str());
+        std::stringstream text;
+        text << in.rdbuf();
+        return parseEditorConfig(text.str());
       }
     }
   }
-
-  return parseEditorConfig(defaultEditorConfigYaml());
+  return parseEditorConfig(defaultEditorConfigTsv());
 }
 
 } // namespace gleditor

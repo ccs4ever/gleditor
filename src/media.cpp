@@ -3,6 +3,7 @@
  * @brief Implementation of generic media resources, streams, and player via
  *        LibVLC.
  */
+#include <gleditor/logging.hpp>
 #include <gleditor/media.hpp>
 
 #include <algorithm>
@@ -274,12 +275,12 @@ struct MediaPlayer::Impl {
 
   static void videoFormatCleanup([[maybe_unused]] void *opaque) {}
 
-  bool load(const MediaResourcePtr &res) {
+  MediaLoad load(const MediaResourcePtr &res) {
     releaseMedia();
     currentResource = res;
     if (!res || !res->isValid()) {
       simulatedState = PlaybackState::Error;
-      return false;
+      return std::unexpected{MediaError::InvalidResource};
     }
 
     if (res->stream() && res->stream()->size() > 0) {
@@ -292,7 +293,12 @@ struct MediaPlayer::Impl {
 
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
       if (isAnimatedGif(span)) {
-        gifDecoder = GifDecoder::decode(span);
+        auto decoded = GifDecoder::decode(span);
+        if (!decoded) {
+          GLEDITOR_LOG_DEBUG("media.image", "animated GIF did not decode: {}",
+                             toString(decoded.error()));
+        }
+        gifDecoder = std::move(decoded).value_or(nullptr);
         if (gifDecoder) {
           backend      = Backend::Gif;
           frameWidth   = gifDecoder->width();
@@ -301,14 +307,19 @@ struct MediaPlayer::Impl {
           animDuration = gifDecoder->duration();
           animState    = PlaybackState::Stopped;
           updateAnimFrame();
-          return true;
+          return {};
         }
       }
 #endif
 
 #ifdef GLEDITOR_HAVE_SVG_THORVG
       if (SvgAnimator::isAnimated(span)) {
-        svgAnimator = SvgAnimator::load(span);
+        auto loaded = SvgAnimator::load(span);
+        if (!loaded) {
+          GLEDITOR_LOG_DEBUG("media.image", "animated SVG did not load: {}",
+                             toString(loaded.error()));
+        }
+        svgAnimator = std::move(loaded).value_or(nullptr);
         if (svgAnimator) {
           backend      = Backend::Thorvg;
           frameWidth   = svgAnimator->width();
@@ -317,7 +328,7 @@ struct MediaPlayer::Impl {
           animDuration = svgAnimator->duration();
           animState    = PlaybackState::Stopped;
           updateAnimFrame();
-          return true;
+          return {};
         }
       }
 #endif
@@ -335,7 +346,7 @@ struct MediaPlayer::Impl {
       } else {
         simulatedDuration = 60.0F;
       }
-      return true;
+      return {};
     }
 
     if (res->type() == MediaResource::Type::Stream) {
@@ -352,13 +363,13 @@ struct MediaPlayer::Impl {
 
     if (nullptr == vlcMedia) {
       simulatedState = PlaybackState::Error;
-      return false;
+      return std::unexpected{MediaError::OpenFailed};
     }
 
     mediaPlayer = libvlc_media_player_new_from_media(vlcMedia);
     if (nullptr == mediaPlayer) {
       simulatedState = PlaybackState::Error;
-      return false;
+      return std::unexpected{MediaError::PlayerFailed};
     }
 
     backend = Backend::LibVlc;
@@ -372,7 +383,7 @@ struct MediaPlayer::Impl {
     if (currentPlaybackRate != 1.0F) {
       libvlc_media_player_set_rate(mediaPlayer, currentPlaybackRate);
     }
-    return true;
+    return {};
   }
 
   bool play() {
@@ -636,7 +647,7 @@ MediaPlayer::MediaPlayer(const bool dummyAudio)
 
 MediaPlayer::~MediaPlayer() = default;
 
-bool MediaPlayer::load(const MediaResourcePtr &resource) {
+MediaLoad MediaPlayer::load(const MediaResourcePtr &resource) {
   return impl->load(resource);
 }
 

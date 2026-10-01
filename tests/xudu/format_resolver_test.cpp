@@ -6,12 +6,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
-#include <xudu/core/format.hpp>
-#include <xudu/core/format_resolver.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
 
 namespace {
 
@@ -36,14 +36,14 @@ TEST(FormatResolverTest, FormatResolverInitializationAndFiltering) {
   Link commentLink;
   commentLink.type = LinkType::Comment;
   commentLink.left = span;
-  store.addLink(v1, commentLink);
+  auto at          = store.addLink(v1, commentLink);
 
   // 2) Add valid format link (Bold)
   Link boldLink;
   boldLink.type = LinkType::Format;
   boldLink.left = span;
   boldLink.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
-  store.addLink(v1, boldLink);
+  at = store.addLink(at, boldLink);
 
   FormatResolver resolver(store);
   const auto res = resolver.resolveSpans(span);
@@ -70,21 +70,21 @@ TEST(FormatResolverTest, OverlappingDecorationsAndAlignment) {
   boldLink.type = LinkType::Format;
   boldLink.left = spanBold;
   boldLink.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
-  store.addLink(v1, boldLink);
+  auto at = store.addLink(v1, boldLink);
 
   // Italic on "media architecture" [5..22)
   Link italicLink;
   italicLink.type = LinkType::Format;
   italicLink.left = spanItalic;
   italicLink.right.push_back(vocabularySpanFor(FormatAttribute::Italic));
-  store.addLink(v1, italicLink);
+  at = store.addLink(at, italicLink);
 
   // AlignCentre on whole phrase
   Link alignLink;
   alignLink.type = LinkType::Format;
   alignLink.left = spanAlign;
   alignLink.right.push_back(vocabularySpanFor(FormatAttribute::AlignCentre));
-  store.addLink(v1, alignLink);
+  at = store.addLink(at, alignLink);
 
   FormatResolver resolver(store);
   const auto res = resolver.resolveVersion(versionObj);
@@ -128,10 +128,10 @@ TEST(FormatResolverTest, CellResolutionAndFormatFlagsCaching) {
   FormatResolver resolver(store);
   resolver.updateManifoldFormatFlags(manifold);
 
-  const auto *slot1 = manifold.slot(c1);
-  const auto *slot2 = manifold.slot(c2);
-  ASSERT_NE(slot1, nullptr);
-  ASSERT_NE(slot2, nullptr);
+  const auto slot1 = manifold.slot(c1);
+  const auto slot2 = manifold.slot(c2);
+  ASSERT_TRUE(slot1.has_value());
+  ASSERT_TRUE(slot2.has_value());
 
   // Cell 1: Fast-path zero flags
   EXPECT_EQ(slot1->formatFlags, 0U);
@@ -160,10 +160,9 @@ TEST(FormatResolverTest, CrossDomainFormatInheritanceDocToCell) {
   italicLink.type = LinkType::Format;
   italicLink.left = docSpans;
   italicLink.right.push_back(vocabularySpanFor(FormatAttribute::Italic));
-  store.addLink(docVer, italicLink);
+  auto at = store.addLink(docVer, italicLink);
 
   // 3) Create cell and transclude the formatted span into the cell
-  auto at            = store.sliceGenesis(docVer);
   at                 = store.makeCell(at, "");
   const auto cellRef = store.cellRefOf(at);
   at = store.spliceCellSpan(at, cellRef, 0, 0, docSpans.front());
@@ -173,8 +172,8 @@ TEST(FormatResolverTest, CrossDomainFormatInheritanceDocToCell) {
   FormatResolver resolver(store);
   resolver.updateManifoldFormatFlags(manifold);
 
-  const auto *slot = manifold.slot(cellRef);
-  ASSERT_NE(slot, nullptr);
+  const auto slot = manifold.slot(cellRef);
+  ASSERT_TRUE(slot.has_value());
 
   const auto italicBit = 1U
                          << static_cast<std::uint8_t>(FormatAttribute::Italic);

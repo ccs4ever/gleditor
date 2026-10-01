@@ -9,7 +9,9 @@
 #include <charconv>
 #include <cstdint>
 #include <limits>
+#include <ranges>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +36,31 @@ Cell makeCell(const CellID id, std::string type = {},
 }
 
 } // namespace
+
+TEST(ZzCoreTest, CellLookupBorrowsAndFormsZeroOrOneElementRange) {
+  std::unordered_map<CellID, Cell> cells;
+  cells.emplace(7, makeCell(7));
+
+  const auto found = findCell(cells, 7);
+  static_assert(std::ranges::view<std::remove_cvref_t<decltype(found)>>);
+  ASSERT_TRUE(found);
+  EXPECT_EQ(&*found, &cells.at(7));
+
+  std::size_t seen = 0;
+  for (const Cell &cell : found) {
+    EXPECT_EQ(cell.id, 7U);
+    ++seen;
+  }
+  EXPECT_EQ(seen, 1U);
+
+  const auto missing = findCell(cells, 8);
+  EXPECT_FALSE(missing);
+  seen = 0;
+  for ([[maybe_unused]] const Cell &cell : missing) {
+    ++seen;
+  }
+  EXPECT_EQ(seen, 0U);
+}
 
 TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
   std::unordered_map<CellID, Cell> cells;

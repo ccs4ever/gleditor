@@ -16,16 +16,16 @@
 #include <tuple>
 #include <vector>
 
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
 
-using xudu::MicroversionId;
-using xudu::Store;
+using xanadu::MicroversionId;
+using xanadu::Store;
 
 struct ExecutionResult {
   int exitCode{-1};
@@ -42,10 +42,10 @@ struct ExecutionResult {
 /// store here and rendering it there worked by accident of duplication.
 /// Per-test rather than the default under $XDG_DATA_HOME, so that one test's
 /// prose cannot show up in another's screenshot.
-std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
-  xudu::UserPermascroll::Config config;
+std::shared_ptr<xanadu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xanadu::UserPermascroll::Config config;
   config.storageDir = dir;
-  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  return std::make_shared<xanadu::UserPermascroll>(std::move(config));
 }
 
 /// The flag naming that permascroll to the xudu subprocess.

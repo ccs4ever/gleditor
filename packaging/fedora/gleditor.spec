@@ -15,6 +15,7 @@ BuildRequires:  pkgconfig(harfbuzz)
 BuildRequires:  pkgconfig(fribidi)
 BuildRequires:  pkgconfig(libunibreak)
 BuildRequires:  pkgconfig(fontconfig)
+BuildRequires:  pkgconfig(spdlog)
 BuildRequires:  pkgconfig(poppler-cpp)
 BuildRequires:  file-devel
 BuildRequires:  SDL3-devel
@@ -58,6 +59,7 @@ and grows on demand rather than being sized for the worst case.
 %package devel
 Summary:        Headers for building on the gleditor library
 Requires:       %{name}%{?_isa} = %{version}-%{release}
+Requires:       pkgconfig(spdlog)
 
 %description devel
 The headers, the linker name and the pkg-config file needed to build a program

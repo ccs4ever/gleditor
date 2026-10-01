@@ -20,13 +20,15 @@
 #include <memory>
 #include <string>
 
-#include "xudu/core/store.hpp"
-#include "xudu/core/uncommitted_op_log.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/uncommitted_op_log.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace fs = std::filesystem;
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 // The regression guard. If automatic deduplication is ever reintroduced, this

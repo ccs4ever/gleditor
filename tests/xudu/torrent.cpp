@@ -16,14 +16,14 @@
 #include <string>
 #include <string_view>
 
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/torrent.hpp"
 
 #include "torrent_data.hpp"
 
 namespace {
 
-using xudu::InfoHash;
-using xudu::Metainfo;
+using xanadu::InfoHash;
+using xanadu::Metainfo;
 
 using xudu_test::multiFileHash;
 using xudu_test::multiFileTorrent;
@@ -56,9 +56,9 @@ TEST(InfoHashTest, theEmptyHashIsRecognisable) {
 TEST(Sha1Test, matchesAKnownVector) {
   // The canonical one, so a broken hash is caught here rather than showing up
   // as every torrent having the wrong name.
-  EXPECT_EQ(InfoHash{xudu::sha1("abc")}.hex(),
+  EXPECT_EQ(InfoHash{xanadu::sha1("abc")}.hex(),
             "a9993e364706816aba3e25717850c26c9cd0d89d");
-  EXPECT_EQ(InfoHash{xudu::sha1("")}.hex(),
+  EXPECT_EQ(InfoHash{xanadu::sha1("")}.hex(),
             "da39a3ee5e6b4b0d3255bfef95601890afd80709");
 }
 
@@ -147,7 +147,7 @@ TEST(MetainfoTest, aMagnetLinkNamesTheContent) {
 // -- magnet links -------------------------------------------------------------
 
 TEST(MagnetTest, theHashIsRead) {
-  const auto link = xudu::MagnetLink::parse(
+  const auto link = xanadu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash);
   EXPECT_EQ(link.hash.hex(), singleFileHash);
 }
@@ -156,7 +156,7 @@ TEST(MagnetTest, whatATorrentEmitsIsWhatThisReads) {
   // The round trip that matters: a reference written down by one copy of this
   // program is read back by another as the same content.
   const auto meta = Metainfo::parse(singleFileTorrent);
-  const auto link = xudu::MagnetLink::parse(meta.magnet());
+  const auto link = xanadu::MagnetLink::parse(meta.magnet());
   EXPECT_EQ(link.hash, meta.hash());
   EXPECT_EQ(link.displayName, meta.name());
 }
@@ -165,13 +165,13 @@ TEST(MagnetTest, theBase32FormIsAccepted) {
   // Older links spell the same twenty bytes in thirty-two base-32 characters.
   // This one was produced by Python's base64.b32encode, so the decoder is
   // checked against something other than itself.
-  const auto link = xudu::MagnetLink::parse(
+  const auto link = xanadu::MagnetLink::parse(
       "magnet:?xt=urn:btih:6OGSRVBDQD6SAWKKH7U3PRVACK6IDBSQ");
   EXPECT_EQ(link.hash.hex(), singleFileHash);
 }
 
 TEST(MagnetTest, theDisplayNameAndTrackersAreRead) {
-  const auto link = xudu::MagnetLink::parse(
+  const auto link = xanadu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash +
       "&dn=The%20Fox&tr=http%3A%2F%2Fa.invalid%2Fannounce&tr=udp%3A%2F%2Fb."
       "invalid");
@@ -182,13 +182,13 @@ TEST(MagnetTest, theDisplayNameAndTrackersAreRead) {
 
 TEST(MagnetTest, selectedFileRangesAreExpanded) {
   // BEP 53: "0-2,4" names files 0, 1, 2 and 4.
-  const auto link = xudu::MagnetLink::parse(
+  const auto link = xanadu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash + "&so=0-2,4");
   EXPECT_THAT(link.selectedFiles, testing::ElementsAre(0U, 1U, 2U, 4U));
 }
 
 TEST(MagnetTest, aLinkThatNarrowsToNothingSelectsEverything) {
-  const auto link = xudu::MagnetLink::parse(
+  const auto link = xanadu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash);
   EXPECT_THAT(link.selectedFiles, testing::IsEmpty());
 }
@@ -196,7 +196,7 @@ TEST(MagnetTest, aLinkThatNarrowsToNothingSelectsEverything) {
 TEST(MagnetTest, aVersionTwoHashAloneIsRefused) {
   // btmh names content by a SHA-256 merkle root. Accepting it would mean
   // claiming to identify content this cannot verify a single byte of.
-  EXPECT_THROW((void)xudu::MagnetLink::parse(
+  EXPECT_THROW((void)xanadu::MagnetLink::parse(
                    "magnet:?xt=urn:btmh:1220caf1e1f2" + std::string(52, 'a')),
                std::runtime_error);
 }
@@ -204,22 +204,22 @@ TEST(MagnetTest, aVersionTwoHashAloneIsRefused) {
 TEST(MagnetTest, aVersionTwoHashBesideAVersionOneOneIsFine) {
   // A hybrid torrent's link carries both; the v1 hash is the one usable here.
   const auto link =
-      xudu::MagnetLink::parse("magnet:?xt=urn:btmh:1220ffff&xt=urn:btih:" +
-                              std::string(singleFileHash));
+      xanadu::MagnetLink::parse("magnet:?xt=urn:btmh:1220ffff&xt=urn:btih:" +
+                                std::string(singleFileHash));
   EXPECT_EQ(link.hash.hex(), singleFileHash);
 }
 
 TEST(MagnetTest, somethingThatIsNotAMagnetIsRefused) {
-  EXPECT_FALSE(xudu::MagnetLink::looksLikeMagnet("fox.torrent"));
-  EXPECT_TRUE(xudu::MagnetLink::looksLikeMagnet("magnet:?xt=urn:btih:x"));
-  EXPECT_THROW((void)xudu::MagnetLink::parse("fox.torrent"),
+  EXPECT_FALSE(xanadu::MagnetLink::looksLikeMagnet("fox.torrent"));
+  EXPECT_TRUE(xanadu::MagnetLink::looksLikeMagnet("magnet:?xt=urn:btih:x"));
+  EXPECT_THROW((void)xanadu::MagnetLink::parse("fox.torrent"),
                std::runtime_error);
-  EXPECT_THROW((void)xudu::MagnetLink::parse("magnet:?dn=nothing"),
+  EXPECT_THROW((void)xanadu::MagnetLink::parse("magnet:?dn=nothing"),
                std::runtime_error);
 }
 
 TEST(MagnetTest, aMalformedHashIsRefused) {
-  EXPECT_THROW((void)xudu::MagnetLink::parse("magnet:?xt=urn:btih:nonsense"),
+  EXPECT_THROW((void)xanadu::MagnetLink::parse("magnet:?xt=urn:btih:nonsense"),
                std::runtime_error);
 }
 

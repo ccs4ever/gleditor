@@ -55,23 +55,27 @@ int gifMemoryRead(GifFileType *gif, GifByteType *buf, int len) {
 
 } // namespace
 
-std::unique_ptr<GifDecoder>
+std::expected<std::unique_ptr<GifDecoder>, DecodeError>
 GifDecoder::decode(const std::span<const std::uint8_t> bytes) {
+  if (bytes.empty()) {
+    return std::unexpected{DecodeError::Empty};
+  }
+  // The header and logical screen descriptor alone are 13 bytes.
   if (bytes.size() < 13) {
-    return nullptr;
+    return std::unexpected{DecodeError::Truncated};
   }
 
   MemoryReader reader{.data = bytes.data(), .size = bytes.size(), .offset = 0};
   int err                = 0;
   GifFileType *const gif = DGifOpen(&reader, gifMemoryRead, &err);
   if (nullptr == gif) {
-    return nullptr;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   if (DGifSlurp(gif) != GIF_OK || gif->ImageCount <= 0 || gif->SWidth <= 0 ||
       gif->SHeight <= 0) {
     DGifCloseFile(gif, &err);
-    return nullptr;
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   auto decoder          = std::unique_ptr<GifDecoder>(new GifDecoder());
@@ -156,9 +160,9 @@ GifDecoder::decode(const std::span<const std::uint8_t> bytes) {
 
 #else // !GLEDITOR_HAVE_DECODE_INDEX_GIF
 
-std::unique_ptr<GifDecoder>
+std::expected<std::unique_ptr<GifDecoder>, DecodeError>
 GifDecoder::decode(std::span<const std::uint8_t> /*bytes*/) {
-  return nullptr;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_GIF
@@ -174,13 +178,11 @@ const GifFrame &GifDecoder::frameAt(const float seconds) const noexcept {
     return frames_.back();
   }
 
-  // Linear scan or binary search through frame timestamps
-  for (const auto &frame : frames_) {
-    if (seconds < frame.timestampSeconds + frame.durationSeconds) {
-      return frame;
-    }
-  }
-  return frames_.back();
+  // The first frame still showing at @p seconds.
+  const auto showing = std::ranges::find_if(frames_, [seconds](const auto &f) {
+    return seconds < f.timestampSeconds + f.durationSeconds;
+  });
+  return showing == frames_.end() ? frames_.back() : *showing;
 }
 
 const GifFrame &GifDecoder::frame(const std::size_t index) const noexcept {

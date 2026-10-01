@@ -80,7 +80,7 @@ TEST(GifDecoderTest, DecodeMultiFrameGif) {
   const auto bytes = makeTestGif(32, 24, 3);
 
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
-  auto decoder = GifDecoder::decode(bytes);
+  auto decoder = GifDecoder::decode(bytes).value_or(nullptr);
   ASSERT_NE(nullptr, decoder);
 
   EXPECT_EQ(32, decoder->width());
@@ -104,15 +104,13 @@ TEST(GifDecoderTest, DecodeMultiFrameGif) {
   const auto &fEnd = decoder->frameAt(1.0F);
   EXPECT_NEAR(0.40F, fEnd.timestampSeconds, 0.001F);
 #else
-  auto decoder = GifDecoder::decode(bytes);
-  EXPECT_EQ(nullptr, decoder);
+  EXPECT_EQ(GifDecoder::decode(bytes).error(), DecodeError::NoCodec);
 #endif
 }
 
 TEST(GifDecoderTest, DecodeInvalidBytesReturnsNull) {
   std::vector<std::uint8_t> invalid = {0x00, 0x01, 0x02};
-  auto decoder                      = GifDecoder::decode(invalid);
-  EXPECT_EQ(nullptr, decoder);
+  EXPECT_FALSE(GifDecoder::decode(invalid).has_value());
 }
 
 } // namespace

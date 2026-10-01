@@ -53,7 +53,7 @@ TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
   auto &reg = DimensionRegistry::instance();
 
   // Create dimension on demand in empty store
-  const auto dimX = reg.getOrCreate(store, manifold, "d.coord_x");
+  const auto dimX = reg.getOrCreate(store, manifold, "d.coord_x").value();
   EXPECT_NE(dimX, noCell);
   EXPECT_TRUE(manifold.contains(dimX));
   EXPECT_EQ(manifold.textOf(dimX, store), "d.coord_x");
@@ -62,7 +62,7 @@ TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
   const auto headBefore  = store.primaryCurrentVersion();
   const auto countBefore = manifold.cellCount();
 
-  const auto dimX2 = reg.getOrCreate(store, manifold, "d.coord_x");
+  const auto dimX2 = reg.getOrCreate(store, manifold, "d.coord_x").value();
   EXPECT_EQ(dimX, dimX2);
   EXPECT_EQ(store.primaryCurrentVersion(), headBefore);
   EXPECT_EQ(manifold.cellCount(), countBefore);
@@ -72,7 +72,7 @@ TEST(DimensionRegistryTest, GetOrCreateWithStoreAndManifold) {
   EXPECT_EQ(reg.get(manifold, "d.coord_x"), dimX);
 
   // Lookup unknown dimension returns noCell
-  EXPECT_EQ(reg.get(store, "d.does_not_exist"), noCell);
+  EXPECT_EQ(reg.get(store, "d.does_not_exist"), std::nullopt);
 }
 
 TEST(DimensionRegistryTest, GetOrCreateGivenOnlyManifold) {
@@ -83,13 +83,13 @@ TEST(DimensionRegistryTest, GetOrCreateGivenOnlyManifold) {
   auto &reg = DimensionRegistry::instance();
 
   // Given only manifold and string name, creates dimension cell in store
-  const auto dimY = reg.getOrCreate(manifold, "d.coord_y");
+  const auto dimY = reg.getOrCreate(manifold, "d.coord_y").value();
   EXPECT_NE(dimY, noCell);
   EXPECT_TRUE(manifold.contains(dimY));
   EXPECT_EQ(manifold.textOf(dimY, store), "d.coord_y");
 
   // Subsequent getOrCreate on manifold returns the same cell
-  const auto dimY2 = reg.getOrCreate(manifold, "d.coord_y");
+  const auto dimY2 = reg.getOrCreate(manifold, "d.coord_y").value();
   EXPECT_EQ(dimY, dimY2);
 }
 
@@ -102,8 +102,8 @@ TEST(DimensionRegistryTest, MultiStoreIsolation) {
 
   auto &reg = DimensionRegistry::instance();
 
-  const auto dimA = reg.getOrCreate(storeA, manifoldA, "d.shared_name");
-  const auto dimB = reg.getOrCreate(storeB, manifoldB, "d.shared_name");
+  const auto dimA = reg.getOrCreate(storeA, manifoldA, "d.shared_name").value();
+  const auto dimB = reg.getOrCreate(storeB, manifoldB, "d.shared_name").value();
 
   EXPECT_NE(dimA, noCell);
   EXPECT_NE(dimB, noCell);
@@ -121,7 +121,7 @@ TEST(DimensionRegistryTest, ExplicitHeadOverload) {
   auto &reg = DimensionRegistry::instance();
 
   const auto verBefore = ver;
-  const auto dimZ      = reg.getOrCreate(store, ver, manifold, "d.coord_z");
+  const auto dimZ = reg.getOrCreate(store, ver, manifold, "d.coord_z").value();
   EXPECT_NE(dimZ, noCell);
   EXPECT_NE(ver, verBefore); // Head advanced
   EXPECT_TRUE(manifold.contains(dimZ));
@@ -129,7 +129,7 @@ TEST(DimensionRegistryTest, ExplicitHeadOverload) {
 
   // Subsequent call does not advance head
   const auto verAfter = ver;
-  const auto dimZ2    = reg.getOrCreate(store, ver, manifold, "d.coord_z");
+  const auto dimZ2 = reg.getOrCreate(store, ver, manifold, "d.coord_z").value();
   EXPECT_EQ(dimZ, dimZ2);
   EXPECT_EQ(ver, verAfter);
 }
@@ -140,13 +140,31 @@ TEST(DimensionRegistryTest, StoreDestructionUnregisters) {
 
   {
     Store scopedStore;
-    storePtr       = &scopedStore;
-    auto manifold  = scopedStore.rebuildManifold(scopedStore.latest());
-    const auto dim = reg.getOrCreate(scopedStore, manifold, "d.temp_dim");
+    storePtr      = &scopedStore;
+    auto manifold = scopedStore.rebuildManifold(scopedStore.latest());
+    const auto dim =
+        reg.getOrCreate(scopedStore, manifold, "d.temp_dim").value();
     EXPECT_NE(dim, noCell);
     EXPECT_EQ(reg.get(scopedStore, "d.temp_dim"), dim);
   }
 
   // After scopedStore is destructed, storeDims_ entry must be removed
-  EXPECT_EQ(reg.get(*storePtr, "d.temp_dim"), noCell);
+  EXPECT_EQ(reg.get(*storePtr, "d.temp_dim"), std::nullopt);
+}
+
+TEST(DimensionRegistryTest, GetOrCreateNamesWhyItMadeNothing) {
+  auto &reg = DimensionRegistry::instance();
+  Store store;
+  auto ver      = store.sliceGenesis(MicroversionId{});
+  auto manifold = store.rebuildManifold(ver);
+  manifold.setStore(&store);
+
+  EXPECT_EQ(reg.getOrCreate(store, ver, manifold, "").error(),
+            DimensionError::EmptyName);
+
+  // A manifold with no store to record a new dimension in -- which used to be
+  // an invalid_argument thrown out of an ordinary lookup.
+  Manifold unattached;
+  EXPECT_EQ(reg.getOrCreate(unattached, "d.never_minted").error(),
+            DimensionError::NoStore);
 }

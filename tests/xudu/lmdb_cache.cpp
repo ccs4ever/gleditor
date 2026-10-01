@@ -1,9 +1,10 @@
-#include "../../apps/xudu/core/lmdb_cache.hpp"
+#include "common/xanadu/lmdb_cache.hpp"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
 
 namespace xudu {
+using namespace ::xanadu;
 
 class LMDBContentCacheTest : public ::testing::Test {
 protected:

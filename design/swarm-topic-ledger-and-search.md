@@ -101,7 +101,7 @@ Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we defin
   a publication exists in a trusted ledger checkpoint without downloading the entire database.
 
 - **Sealing into Swarms**: Periodically sealed by community Oracles into `.torrent` archives
-  (`PUBLICATION_LEDGER.yaml`, `ROOT.hex`) and broadcast over BEP 46 mutable links.
+  (`PUBLICATION_LEDGER.tsv`, `ROOT.hex`) and broadcast over BEP 46 mutable links.
 
 ______________________________________________________________________
 

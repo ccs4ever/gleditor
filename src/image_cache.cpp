@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <gleditor/logging.hpp>
 #include <iostream>
 #include <utility>
 
@@ -25,15 +26,15 @@ namespace gleditor {
 
 namespace {
 
-DecodedImage surfaceToDecodedImage(SDL_Surface *surface) {
+DecodeResult surfaceToDecodedImage(SDL_Surface *surface) {
   if (nullptr == surface) {
-    return {};
+    return std::unexpected{DecodeError::Undecodable};
   }
 
   SDL_Surface *rgbaSurface = sdl::convertSurfaceToRgba32(surface);
   if (nullptr == rgbaSurface) {
     SDL_DestroySurface(surface);
-    return {};
+    return std::unexpected{DecodeError::Unconvertible};
   }
 
   DecodedImage result;
@@ -63,10 +64,10 @@ DecodedImage surfaceToDecodedImage(SDL_Surface *surface) {
 
 } // namespace
 
-DecodedImage decodeImageBuffer(const std::span<const std::uint8_t> bytes,
+DecodeResult decodeImageBuffer(const std::span<const std::uint8_t> bytes,
                                const MimeType & /*mime*/) {
   if (bytes.empty()) {
-    return {};
+    return std::unexpected{DecodeError::Empty};
   }
 
   SDL_Surface *surface = nullptr;
@@ -95,7 +96,7 @@ DecodedImage decodeImageBuffer(const std::span<const std::uint8_t> bytes,
   return surfaceToDecodedImage(surface);
 }
 
-DecodedImage decodeImageBuffer(const std::string_view bytes,
+DecodeResult decodeImageBuffer(const std::string_view bytes,
                                const MimeType &mime) {
   return decodeImageBuffer(
       std::span<const std::uint8_t>(
@@ -103,7 +104,7 @@ DecodedImage decodeImageBuffer(const std::string_view bytes,
       mime);
 }
 
-DecodedImage decodeImageFile(const std::string &filePath) {
+DecodeResult decodeImageFile(const std::string &filePath) {
   SDL_Surface *surface = nullptr;
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
   surface = IMG_Load(filePath.c_str());
@@ -250,6 +251,17 @@ ImageResource ImageCache::put(const std::string &id,
   return res;
 }
 
+std::optional<ImageResource> ImageCache::uploaded(const std::string &id,
+                                                  const DecodeResult &decoded) {
+  if (!decoded) {
+    // A cache load answers "resource or not"; the reason is for the log.
+    GLEDITOR_LOG_DEBUG("media.image", "cannot load {}: {}", id,
+                       toString(decoded.error()));
+    return std::nullopt;
+  }
+  return put(id, *decoded);
+}
+
 std::optional<ImageResource> ImageCache::loadFile(const std::string &filePath) {
   {
     std::scoped_lock lock(mutex_);
@@ -258,12 +270,7 @@ std::optional<ImageResource> ImageCache::loadFile(const std::string &filePath) {
     }
   }
 
-  const DecodedImage decoded = decodeImageFile(filePath);
-  if (!decoded.valid()) {
-    return std::nullopt;
-  }
-
-  return put(filePath, decoded);
+  return uploaded(filePath, decodeImageFile(filePath));
 }
 
 std::optional<ImageResource>
@@ -277,12 +284,7 @@ ImageCache::loadBuffer(const std::string &id,
     }
   }
 
-  const DecodedImage decoded = decodeImageBuffer(bytes, mime);
-  if (!decoded.valid()) {
-    return std::nullopt;
-  }
-
-  return put(id, decoded);
+  return uploaded(id, decodeImageBuffer(bytes, mime));
 }
 
 std::optional<ImageResource> ImageCache::find(const std::string &id) const {

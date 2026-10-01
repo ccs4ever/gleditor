@@ -18,7 +18,9 @@
 #define ZIGZAG_MANIFOLD_HPP
 
 #include <cstdint>
+#include <expected>
 #include <limits>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -29,16 +31,104 @@
 #include <utility>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/extern_ref.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 
 namespace xanadu {
 class Store;
+struct VersionAnnotation;
 } // namespace xanadu
 
 namespace zigzag {
+
+class UnrootedRegistryDependency : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+struct ScrollRecord {
+  xanadu::ScrollId id{0};
+  CellRef cell{noCell};
+  std::string globalKey;
+  bool operator==(const ScrollRecord &) const = default;
+};
+
+struct ScrollRegistry {
+  std::vector<ScrollRecord> scrolls;
+  std::unordered_map<std::string, xanadu::ScrollId> byKey;
+  std::unordered_map<CellRef, xanadu::ScrollId> byCell;
+  std::map<xanadu::ExternOpRef, CellRef> byExtern;
+  std::unordered_map<CellRef, xanadu::ExternOpRef> externByCell;
+
+  [[nodiscard]] bool empty() const noexcept { return scrolls.empty(); }
+  [[nodiscard]] std::size_t size() const noexcept { return scrolls.size(); }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForCell(const CellRef cell) const noexcept {
+    const auto it = byCell.find(cell);
+    if (it != byCell.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] std::optional<xanadu::ScrollId>
+  scrollIdForKey(const std::string_view key) const noexcept {
+    const auto it = byKey.find(std::string(key));
+    if (it != byKey.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] const ScrollRecord *
+  recordForId(const xanadu::ScrollId id) const noexcept {
+    if (id == 0 || id > scrolls.size()) {
+      return nullptr;
+    }
+    return &scrolls[id - 1];
+  }
+
+  [[nodiscard]] gleditor::cpp26::optional<const ScrollRecord &>
+  findRecord(const xanadu::ScrollId id) const noexcept {
+    if (id == 0 || id > scrolls.size()) {
+      return gleditor::cpp26::nullopt;
+    }
+    return scrolls[id - 1];
+  }
+
+  [[nodiscard]] std::optional<CellRef>
+  placeholderForExtern(const xanadu::ExternOpRef &ref) const noexcept {
+    const auto it = byExtern.find(ref);
+    if (it != byExtern.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] std::optional<xanadu::ExternOpRef>
+  externForPlaceholder(const CellRef cell) const noexcept {
+    const auto it = externByCell.find(cell);
+    if (it != externByCell.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] gleditor::cpp26::optional<const xanadu::ExternOpRef &>
+  findExternForPlaceholder(const CellRef cell) const noexcept {
+    const auto it = externByCell.find(cell);
+    if (it != externByCell.end()) {
+      return it->second;
+    }
+    return gleditor::cpp26::nullopt;
+  }
+};
 
 // CellRef, DimRef, and noCell are defined in dim_vector.hpp
 
@@ -73,6 +163,80 @@ inline constexpr CellRef ephemeralBit = 0x8000'0000U;
 }
 
 /**
+ * @brief Why Manifold::applyStructure() refused an operation.
+ *
+ * A fold cannot throw -- it runs over a spool someone else wrote -- but it
+ * must not silently mean something else either. refusedOps() was the only
+ * trace; this says which rule the operation broke, so a caller that has just
+ * minted one can tell its own mistake from a stale fold.
+ */
+struct StructureBirthInfo {
+  std::uint32_t opIndex{0};
+  xanadu::StructureKind kind{xanadu::StructureKind::Cell};
+  std::uint32_t containerOp{0};
+  xanadu::PrimediaSpan nameSpan{};
+
+  bool operator==(const StructureBirthInfo &) const = default;
+};
+
+enum class FoldRefusal : std::uint8_t {
+  ScratchAddress,   ///< content names scratchScroll (R8, address side)
+  DuplicateCell,    ///< a second Make at one operation index
+  UnknownSubject,   ///< the R7 chain reaches no cell this fold holds
+  UnknownDimension, ///< a SetLink along a dimension this fold does not hold
+  EphemeralTarget,  ///< a SetLink into a derived cell (R8, ref side)
+  UnknownTarget,    ///< a SetLink to a cell this fold does not hold
+  UnknownVerb,      ///< a StructureVerb this build does not know
+  InvalidMakeKind,  ///< Reserved StructureKind, or invalid fields/value on
+                    ///< Slice/Xanadoc Make
+  WrongContextKind, ///< Operation applied to an incompatible context kind (e.g.
+                    ///< PageBreak on Cell)
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const FoldRefusal refusal) noexcept {
+  switch (refusal) {
+  case FoldRefusal::ScratchAddress:
+    return "scratch address";
+  case FoldRefusal::DuplicateCell:
+    return "duplicate cell";
+  case FoldRefusal::UnknownSubject:
+    return "unknown subject";
+  case FoldRefusal::UnknownDimension:
+    return "unknown dimension";
+  case FoldRefusal::EphemeralTarget:
+    return "ephemeral target";
+  case FoldRefusal::UnknownTarget:
+    return "unknown target";
+  case FoldRefusal::UnknownVerb:
+    return "unknown verb";
+  case FoldRefusal::InvalidMakeKind:
+    return "invalid make kind";
+  case FoldRefusal::WrongContextKind:
+    return "wrong context kind";
+  }
+  return "unknown refusal";
+}
+
+/// Why Manifold::advance() could not step. A refused fold is carried through
+/// as the FoldRefusal that caused it rather than flattened to "false".
+struct AdvanceError {
+  enum class Kind : std::uint8_t {
+    UnknownVersion, ///< the version names no operation in the spool
+    MissingNode,    ///< the spool indexes it but holds no compact node
+    Refused,        ///< the node was there and the fold refused it
+  };
+  Kind kind{Kind::UnknownVersion};
+  FoldRefusal refusal{FoldRefusal::UnknownVerb}; ///< meaningful for Refused
+
+  bool operator==(const AdvanceError &) const = default;
+};
+
+/// The outcome of folding or stepping: nothing on success, the reason if not.
+using FoldResult    = std::expected<void, FoldRefusal>;
+using AdvanceResult = std::expected<void, AdvanceError>;
+
+/**
  * @brief A cell's two neighbours along one dimension.
  *
  * No dimension is privileged: `dim` is an ordinary CellRef, so a dimension VQL
@@ -98,70 +262,6 @@ struct DimLink {
   bool operator==(const DimLink &) const = default;
 };
 static_assert(sizeof(DimLink) == 12);
-
-/**
- * @brief Traverse a rank of cells along @p dim starting from @p start.
- *
- * Invokes @p fn for each cell in the rank until:
- * - A dead end is reached (linked cell is noCell or links back to itself),
- * - A cycle is detected (linked cell equals start or step exceeds @p maxSteps /
- * cellCount),
- * - Or @p fn returns false (if @p fn returns a bool).
- *
- * Supports callbacks with signature:
- * - `void(CellRef)` or `bool(CellRef)`
- * - `void(CellRef, std::size_t step)` or `bool(CellRef, std::size_t step)`
- */
-// fn is invoked once per cell in the rank (potentially many times), so
-// std::forward-ing it here would move from it on the first call and leave
-// later calls operating on a moved-from callable.
-template <typename ManifoldT, typename Fn>
-void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
-              const DimVector dir,
-              Fn &&fn, // NOLINT(cppcoreguidelines-missing-std-forward)
-              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
-  if (start == noCell || dim == noCell) {
-    return;
-  }
-  CellRef cur = start;
-  // maxSteps is already std::size_t; the comparison below is unsigned on
-  // both sides. std::cmp_equal(maxSteps, -1) -- this check's own -fix --
-  // would compare against a *signed* -1 instead and can never be true for
-  // an unsigned maxSteps, silently turning "unlimited" into "zero steps".
-  // NOLINTNEXTLINE(modernize-use-integer-sign-comparison)
-  const std::size_t limit = (maxSteps == static_cast<std::size_t>(-1))
-                                ? (m.cellCount() + 1)
-                                : maxSteps;
-
-  for (std::size_t step = 0; step < limit && cur != noCell; ++step) {
-    if constexpr (std::is_invocable_r_v<bool, Fn, CellRef, std::size_t>) {
-      if (!fn(cur, step)) {
-        break;
-      }
-    } else if constexpr (std::is_invocable_r_v<bool, Fn, CellRef>) {
-      if (!fn(cur)) {
-        break;
-      }
-    } else if constexpr (std::is_invocable_v<Fn, CellRef, std::size_t>) {
-      fn(cur, step);
-    } else {
-      fn(cur);
-    }
-
-    const auto next = m.linked(cur, dim, dir);
-    if (next == cur || next == noCell || next == start) {
-      break;
-    }
-    cur = next;
-  }
-}
-
-template <typename ManifoldT, typename Fn>
-void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
-              Fn &&fn,
-              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
-  walkRank(m, start, dim, DimVector::POS, std::forward<Fn>(fn), maxSteps);
-}
 
 /**
  * @brief What is known about one cell, without its links.
@@ -208,6 +308,10 @@ struct CellSlot {
 // being impossible.
 static_assert(sizeof(CellSlot) == 32);
 
+/// A borrowed cell slot, or nothing: what slot() answers. A reference into the
+/// manifold's slot array, so valid until the next fold or write grows it.
+using SlotRef = gleditor::cpp26::optional<const CellSlot &>;
+
 /**
  * @class Manifold
  * @brief A zzstructure over one store's cells: an explicitly materialised view.
@@ -246,15 +350,21 @@ public:
    * operation on the same cell (R7), so resolving a chain index to the cell it
    * belongs to is something this class has to be able to do anyway.
    */
-  [[nodiscard]] const CellSlot *slot(CellRef ref) const noexcept;
+  [[nodiscard]] SlotRef slot(CellRef ref) const noexcept;
 
   /// Whether @p ref names a cell this manifold holds.
   [[nodiscard]] bool contains(CellRef ref) const noexcept {
-    return nullptr != slot(ref);
+    return slot(ref).has_value();
   }
 
   /// How many cells there are.
   [[nodiscard]] std::size_t cellCount() const noexcept { return slots.size(); }
+
+  /// How many cells a walk through this manifold could visit: RankView's
+  /// cycle bound. The same as cellCount() here; ArenaManifold's differs.
+  [[nodiscard]] std::size_t traversalBound() const noexcept {
+    return slots.size();
+  }
 
   /// Every cell, in the order the fold minted them.
   [[nodiscard]] std::span<const CellSlot> cells() const noexcept {
@@ -288,6 +398,10 @@ public:
   [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
   [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
 
+  /// The target operation index of @p ref, when it is an OpHandle cell -- and
+  /// nothing when it is not.
+  [[nodiscard]] std::optional<CellRef> handleTarget(CellRef ref) const noexcept;
+
   /// Which of the above would answer, or ValueKind::None for a cell whose
   /// content is just content.
   [[nodiscard]] xanadu::ValueKind valueKindOf(CellRef ref) const noexcept;
@@ -300,10 +414,11 @@ public:
    * dimensionNamed() is how a caller finds it by name.
    *
    * A rank that loops answers the cell it started from rather than spinning,
-   * the same way zzcore's findCloneMaster() does.
+   * the same way zzcore's findCloneMaster() does. nullopt when this manifold
+   * does not hold @p ref -- a cell it has never heard of has no master.
    */
-  [[nodiscard]] CellRef cloneMaster(CellRef ref,
-                                    DimRef cloneDim) const noexcept;
+  [[nodiscard]] std::optional<CellRef>
+  cloneMaster(CellRef ref, DimRef cloneDim) const noexcept;
 
   /**
    * @brief The dimensions @p ref links on -- d.meta-dims, read off the run.
@@ -319,18 +434,102 @@ public:
   /// Every dimension in the slice: the d.dims rank, walked posward from home.
   [[nodiscard]] std::span<const DimRef> dimensions() const;
 
-  /// The dimension whose content reads as @p name, or noCell. A linear walk of
-  /// the d.dims rank, which is a dozen cells in a slice rather than a lookup
+  /// The dimension whose content reads as @p name, or nullopt. A linear walk
+  /// of the d.dims rank, which is a dozen cells in a slice rather than a lookup
   /// worth indexing.
-  [[nodiscard]] DimRef dimensionNamed(std::string_view name,
-                                      const xanadu::SpanReader &reader) const;
+  [[nodiscard]] std::optional<DimRef>
+  dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
 
-  /// Find a dimension by name using the associated Store as the reader.
-  [[nodiscard]] DimRef dimensionNamed(std::string_view name) const;
+  /// Find a dimension by name using the associated Store as the reader;
+  /// nullopt too when no Store is attached.
+  [[nodiscard]] std::optional<DimRef>
+  dimensionNamed(std::string_view name) const;
 
   /// The backing Store for this manifold view, or nullptr if unattached.
   [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
   void setStore(xanadu::Store *s) noexcept { store_ = s; }
+
+  // -- store-backed queries: need the associated Store -----------------------
+
+  /**
+   * @brief Every operation that shaped @p cell in this folded state,
+   *        chronological (oldest first).
+   *
+   * Empty for an unattached manifold, an absent cell, or a malformed chain.
+   */
+  [[nodiscard]] std::vector<std::uint32_t> historyOf(CellRef cell) const;
+
+  /**
+   * @brief Content of @p cell as of @p op, which must be in its chain.
+   *
+   * Empty if @p op is not in @p cell's history.
+   */
+  [[nodiscard]] std::vector<xanadu::PrimediaSpan>
+  contentAsOf(CellRef cell, std::uint32_t op) const;
+
+  struct Edition {
+    CellRef cell{noCell};
+    std::string name;
+    CellRef handle{noCell};
+    std::uint32_t targetOp{0};
+  };
+
+  /**
+   * @brief All editions designated in this folded state on d.editions,
+   *        in rank order.
+   *
+   * Empty for an unattached manifold, or when d.editions has no cells.
+   */
+  [[nodiscard]] std::vector<Edition> editions() const;
+
+  /**
+   * @brief Lookup an edition by name in this folded state.
+   */
+  [[nodiscard]] std::optional<Edition>
+  editionNamed(std::string_view name) const;
+
+  /// The CellRef of an OpHandle targeting @p targetOp, if any.
+  [[nodiscard]] std::optional<CellRef>
+  findOpHandle(std::uint32_t targetOp) const noexcept;
+
+  /// Look up the VersionAnnotation associated with @p targetOp in this folded
+  /// state.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotation(std::uint32_t targetOp, const xanadu::Store &store) const;
+
+  /// Look up the VersionAnnotation associated with handle cell @p handle.
+  [[nodiscard]] std::optional<xanadu::VersionAnnotation>
+  versionAnnotationForHandle(CellRef handle, const xanadu::Store &store) const;
+
+  /// All aliases recorded in this folded state (both on d.editions and
+  /// d.alias), paired with their target operation index.
+  [[nodiscard]] std::vector<std::pair<std::string, CellRef>>
+  aliases(const xanadu::Store &store) const;
+
+  /**
+   * @brief Replay product index of the scroll registry (§5.4).
+   *
+   * Walks d.scrolls and d.scroll-refs to map scroll cells and placeholders
+   * to derived local ScrollIds and global keys.
+   */
+  [[nodiscard]] ScrollRegistry
+  scrollRegistry(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] ScrollRegistry scrollRegistry() const;
+
+  [[nodiscard]] std::vector<ScrollRecord> scrolls() const;
+
+  /**
+   * @brief Replay product index of links (§5.4).
+   *
+   * Walks d.links off home, decoding endpoints on d.from and d.to,
+   * link type on d.linktype, tier on d.linktier, owner on d.owner,
+   * and curator on d.curator.
+   */
+  [[nodiscard]] std::map<CellRef, xanadu::Link>
+  links(const xanadu::SpanReader &reader) const;
+
+  [[nodiscard]] std::map<CellRef, xanadu::Link> links() const;
 
   /**
    * @brief Collect all cells within @p radius hops from @p start along any
@@ -348,21 +547,6 @@ public:
   /// Set presentation formatting flags on @p ref.
   void setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
 
-  template <typename Fn>
-  void
-  walkRank(const CellRef start, const DimRef dim, const DimVector dir, Fn &&fn,
-           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
-    zigzag::walkRank(*this, start, dim, dir, std::forward<Fn>(fn), maxSteps);
-  }
-
-  template <typename Fn>
-  void
-  walkRank(const CellRef start, const DimRef dim, Fn &&fn,
-           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
-    zigzag::walkRank(*this, start, dim, DimVector::POS, std::forward<Fn>(fn),
-                     maxSteps);
-  }
-
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never
   /// called it. See R5 and R12.
@@ -375,13 +559,91 @@ public:
     return foldedThrough_;
   }
 
-  /// Operations applyStructure() refused. Nonzero means the spool holds a
-  /// Structure operation this manifold could not make sense of -- an unknown
-  /// subject, an ephemeral target -- and the count is the only trace, since
-  /// folding cannot throw.
+  /// How many operations applyStructure() refused. Nonzero means the spool
+  /// holds a Structure operation this manifold could not make sense of -- an
+  /// unknown subject, an ephemeral target -- and the count is the only trace,
+  /// since folding cannot throw.
   [[nodiscard]] std::uint32_t refusedOps() const noexcept {
     return refusedOps_;
   }
+
+  /// All external reference placeholder cells folded in this manifold.
+  [[nodiscard]] std::span<const CellRef> externalCells() const noexcept {
+    return externalCells_;
+  }
+
+  /// How many unresolved external cell references exist in this folded state.
+  [[nodiscard]] std::uint32_t unresolvedExternals() const noexcept {
+    return unresolvedExternals_;
+  }
+
+  /// Whether @p op is a live Cell in this manifold.
+  [[nodiscard]] bool isCell(const CellRef op) const noexcept {
+    return contains(op);
+  }
+
+  /// Whether @p op is a recognized structure birth (Cell, Slice, or Xanadoc).
+  [[nodiscard]] bool isStructureBirth(const std::uint32_t op) const noexcept {
+    return structureBirths_.contains(op);
+  }
+
+  /// The StructureKind of birth @p op, or nullopt if not a structure birth.
+  [[nodiscard]] std::optional<xanadu::StructureKind>
+  structureKind(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.kind;
+    }
+    return std::nullopt;
+  }
+
+  /// The immediate container birth of @p op (0 for top-level), or nullopt if
+  /// not a birth.
+  [[nodiscard]] std::optional<std::uint32_t>
+  containerOf(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.containerOp;
+    }
+    return std::nullopt;
+  }
+
+  /// The birth name span of @p op, or nullopt if not a birth.
+  [[nodiscard]] std::optional<xanadu::PrimediaSpan>
+  structureNameSpan(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second.nameSpan;
+    }
+    return std::nullopt;
+  }
+
+  /// The structure birth info for @p op, or nullopt.
+  [[nodiscard]] std::optional<StructureBirthInfo>
+  structureBirth(const std::uint32_t op) const noexcept {
+    const auto it = structureBirths_.find(op);
+    if (it != structureBirths_.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  /// All structure birth operations folded in this manifold.
+  [[nodiscard]] std::vector<std::uint32_t> structureBirths() const;
+
+  /// All structure birth operations of a specific kind.
+  [[nodiscard]] std::vector<std::uint32_t>
+  structureBirths(xanadu::StructureKind kind) const;
+
+  /// Walk containment edges up from birth @p birthOp to top-level, returning
+  /// the sequence from top-level root down to @p birthOp, or empty if
+  /// invalid/broken.
+  [[nodiscard]] std::vector<std::uint32_t>
+  containmentPath(std::uint32_t birthOp) const;
+
+  /// Whether birth @p birthOp has a valid, unbroken, non-cyclic containment
+  /// path to a recognized top-level root.
+  [[nodiscard]] bool validateContainment(std::uint32_t birthOp) const;
 
   // -- fold path: driven only by Store ---------------------------------------
 
@@ -394,11 +656,12 @@ public:
    * R8's boundary as a bit rather than a convention -- a link whose target or
    * dimension isEphemeral(). Each refusal bumps refusedOps().
    *
-   * Anything that is not OpKind::Structure is ignored, so a caller may hand
-   * over every node on a path without filtering first.
+   * Anything that is not OpKind::Structure is ignored -- and answers success,
+   * since there was nothing to refuse -- so a caller may hand over every node
+   * on a path without filtering first.
    */
-  void applyStructure(std::uint32_t opIndex,
-                      const xanadu::CompactOpNode &node) noexcept;
+  FoldResult applyStructure(std::uint32_t opIndex,
+                            const xanadu::CompactOpNode &node) noexcept;
 
   /**
    * @brief Fold in the one operation that reaches @p version from the state
@@ -408,11 +671,12 @@ public:
    * whole reason R9 tolerates a materialised view, and this is what a caller
    * that has just recorded a Structure operation calls instead of re-folding.
    *
-   * @return false when @p version names no operation, which is the caller's
-   *         cue to rebuild. The manifold is left untouched.
+   * @return an AdvanceError when @p version names no operation (the caller's
+   *         cue to rebuild, the manifold untouched) or when the fold refused
+   *         the operation it names.
    */
-  bool advance(const xanadu::Store &store,
-               const xanadu::MicroversionId &version);
+  AdvanceResult advance(const xanadu::Store &store,
+                        const xanadu::MicroversionId &version);
 
   /// Discard the arena's dead runs, leaving every cell's links contiguous in
   /// dense order. A full fold ends with one of these, so a freshly rebuilt
@@ -439,6 +703,12 @@ public:
   [[nodiscard]] bool equivalentTo(const Manifold &other) const;
 
 private:
+  /// Count @p why and hand it back as the fold's answer.
+  FoldResult refuse(const FoldRefusal why) noexcept {
+    refusedOps_++;
+    return std::unexpected{why};
+  }
+
   /// The dense id for @p ref, or npos. Resolves chain indices as slot() does.
   [[nodiscard]] std::uint32_t denseOf(CellRef ref) const noexcept;
 
@@ -470,7 +740,7 @@ private:
   /// assertion, and spending four of them on a capacity would have made the
   /// run design cost exactly what the fixed array it replaced cost (R12's
   /// 108 bytes per cell against 112), which is most of why the run won.
-  std::vector<DimLink> links;
+  std::vector<DimLink> links_;
   /// The content arena, run per cell, grown and compacted exactly as @ref links
   /// is. Separate from the links because the two grow independently: a cell
   /// gains dimensions and gains text at different times, and interleaving them
@@ -488,6 +758,9 @@ private:
   DimRef dimsDim_{noCell};
   std::uint32_t foldedThrough_{0};
   std::uint32_t refusedOps_{0};
+  std::vector<CellRef> externalCells_;
+  std::uint32_t unresolvedExternals_{0};
+  std::unordered_map<std::uint32_t, StructureBirthInfo> structureBirths_;
 
   /// dimensions() is a rank walk, and a span has to point at something.
   mutable std::vector<DimRef> dimsCache;

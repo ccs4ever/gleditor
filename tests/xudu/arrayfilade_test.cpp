@@ -270,14 +270,14 @@ TEST(ArrayfiladeTest, ManifoldRankAndMatrixIndexing) {
 
   for (int i = 1; i <= 20; ++i) {
     const auto cell = arena.makeCell();
-    arena.setValueBits(
+    EXPECT_TRUE(arena.setValueBits(
         cell, ValueKind::Int64,
-        std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(i * 10)));
+        std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(i * 10))));
     if (zigzag::noCell == head) {
       head = cell;
     }
     if (zigzag::noCell != prev) {
-      arena.link(prev, dim1, DimVector::POS, cell);
+      EXPECT_TRUE(arena.link(prev, dim1, DimVector::POS, cell));
     }
     prev = cell;
   }

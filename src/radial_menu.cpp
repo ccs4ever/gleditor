@@ -235,10 +235,11 @@ void RadialMenu::exitSubRadial() {
   }
 }
 
-int RadialMenu::resolveSector(const float dx, const float dy,
-                              const std::size_t count) noexcept {
+std::optional<std::size_t>
+RadialMenu::resolveSector(const float dx, const float dy,
+                          const std::size_t count) noexcept {
   if (count == 0) {
-    return -1;
+    return std::nullopt;
   }
   // dy > 0 is Up in canvas coords, dx > 0 is Right
   const float phi        = std::atan2(dy, dx); // [-pi, pi]
@@ -255,9 +256,9 @@ int RadialMenu::resolveSector(const float dx, const float dy,
   }
 
   const float sectorWidth = twoPi / static_cast<float>(count);
-  const auto idx =
-      static_cast<int>(std::floor((alpha + sectorWidth * 0.5F) / sectorWidth));
-  return idx % static_cast<int>(count);
+  const auto idx          = static_cast<std::size_t>(
+      std::floor((alpha + sectorWidth * 0.5F) / sectorWidth));
+  return idx % count;
 }
 
 void RadialMenu::deviceReady(render::RenderDevice &device,
@@ -689,9 +690,8 @@ bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
   const float dist = std::hypot(dx, dy);
 
   if (dist >= config_.innerRadius && dist <= config_.radius * 1.35F) {
-    const int sector = resolveSector(dx, dy, currentPods_.size());
-    if (sector >= 0 && static_cast<std::size_t>(sector) < currentPods_.size()) {
-      const auto &pod = currentPods_[static_cast<std::size_t>(sector)];
+    if (const auto sector = resolveSector(dx, dy, currentPods_.size())) {
+      const auto &pod = currentPods_[*sector];
       const auto &actionList =
           inSubRadial() ? config_.actions[activeParentAction_].subActions
                         : config_.actions;

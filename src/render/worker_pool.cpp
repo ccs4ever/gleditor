@@ -31,8 +31,7 @@ WorkerPool::~WorkerPool() {
   }
 }
 
-void WorkerPool::runOne(const std::function<void(std::uint32_t)> &work,
-                        const std::uint32_t index) {
+void WorkerPool::runOne(const Work work, const std::uint32_t index) {
   try {
     work(index);
   } catch (...) {
@@ -70,8 +69,7 @@ void WorkerPool::workerLoop() {
   }
 }
 
-void WorkerPool::run(const std::uint32_t count,
-                     const std::function<void(std::uint32_t)> &work) {
+void WorkerPool::run(const std::uint32_t count, const Work work) {
   if (0 == count) {
     return;
   }

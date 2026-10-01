@@ -99,8 +99,9 @@ const char *opKindName(OpKind kind);
 inline constexpr std::uint8_t structureVerbMask = 0x07;
 
 enum class StructureVerb : std::uint8_t {
-  /// Mint a cell. The span is its content; `to` and `linkId` are unused.
-  MakeCell = 0,
+  /// Mint a cell, slice, or xanadoc birth.
+  Make     = 0,
+  MakeCell = Make,
   /// (this cell, dimension = linkId, direction) -> `to`. `to == 0` clears it.
   SetLink = 1,
   /// Retarget this cell's content span, its typed value, or both.
@@ -123,10 +124,22 @@ enum class StructureVerb : std::uint8_t {
    */
   Splice = 3,
   // No MakeDim: a dimension is a cell on the d.dims rank, so minting one is
-  // MakeCell plus SetLink and needs no verb of its own. See design R12.
+  // Make plus SetLink and needs no verb of its own. See design R12.
 };
 
-/// bit 3: which way along the dimension a SetLink points.
+/// StructureKind encoded in bits 3 and 7 when verb == Make.
+enum class StructureKind : std::uint8_t {
+  Cell     = 0, ///< bit 7 = 0, bit 3 = 0, base flags 0x00
+  Slice    = 1, ///< bit 7 = 0, bit 3 = 1, base flags 0x08
+  Xanadoc  = 2, ///< bit 7 = 1, bit 3 = 0, base flags 0x80
+  Reserved = 3, ///< bit 7 = 1, bit 3 = 1, base flags 0x88 (refused)
+};
+
+inline constexpr std::uint8_t structureKindLowBit  = 0x08; ///< bit 3
+inline constexpr std::uint8_t structureKindHighBit = 0x80; ///< bit 7
+
+/// bit 3: which way along the dimension a SetLink points. Meaningful only for
+/// SetLink.
 inline constexpr std::uint8_t structureNegward = 0x08;
 
 /// bits 4-6: what CompactOpNode::value holds.
@@ -138,38 +151,66 @@ inline constexpr std::uint8_t valueKindShift = 4;
 /// endpoint and a formattable, transcludable Xanadu object while a query
 /// never has to parse its text. See design R6.
 enum class ValueKind : std::uint8_t {
-  None   = 0,
-  Double = 1,
-  Bool   = 2,
-  Int64  = 3,
+  None      = 0,
+  Double    = 1,
+  Bool      = 2,
+  Int64     = 3,
+  OpHandle  = 4,
+  ExternRef = 5,
+  Timestamp = 6,
 };
-
-// bit 7 is unclaimed.
 
 /// For a dump or a diagnostic. An unrecognised verb or value kind is named
 /// "unknown" rather than as one of the real ones, since a build reading a newer
 /// spool is exactly when that matters.
 const char *structureVerbName(StructureVerb verb);
+const char *structureKindName(StructureKind kind);
 const char *valueKindName(ValueKind kind);
 
 [[nodiscard]] constexpr StructureVerb
-structureVerbOf(const std::uint8_t flags) {
+structureVerbOf(const std::uint8_t flags) noexcept {
   return static_cast<StructureVerb>(flags & structureVerbMask);
 }
+
+[[nodiscard]] constexpr StructureKind
+structureKindOf(const std::uint8_t flags) noexcept {
+  const std::uint8_t bit3 = (flags & structureKindLowBit) >> 3;
+  const std::uint8_t bit7 = (flags & structureKindHighBit) >> 6;
+  return static_cast<StructureKind>(bit7 | bit3);
+}
+
+[[nodiscard]] constexpr std::uint8_t
+makeStructureFlags(const StructureKind kind,
+                   const ValueKind valueKind = ValueKind::None) noexcept {
+  const auto k            = static_cast<std::uint8_t>(kind);
+  const std::uint8_t bit3 = (k & 0x01U) << 3;
+  const std::uint8_t bit7 = (k & 0x02U) << 6;
+  const std::uint8_t v =
+      (static_cast<std::uint8_t>(valueKind) << valueKindShift) & valueKindMask;
+  return static_cast<std::uint8_t>(
+      static_cast<std::uint8_t>(StructureVerb::Make) | bit3 | bit7 | v);
+}
+
+/// Meaningful ONLY for SetLink: which way along the dimension a SetLink points.
 [[nodiscard]] constexpr zigzag::DimVector
-structureDirectionOf(const std::uint8_t flags) {
+structureDirectionOf(const std::uint8_t flags) noexcept {
   return (flags & structureNegward) != 0 ? zigzag::DimVector::NEG
                                          : zigzag::DimVector::POS;
 }
-[[nodiscard]] constexpr bool structureIsNegward(const std::uint8_t flags) {
+[[nodiscard]] constexpr bool
+structureIsNegward(const std::uint8_t flags) noexcept {
   return (flags & structureNegward) != 0;
 }
-[[nodiscard]] constexpr ValueKind valueKindOf(const std::uint8_t flags) {
+[[nodiscard]] constexpr ValueKind
+valueKindOf(const std::uint8_t flags) noexcept {
   return static_cast<ValueKind>((flags & valueKindMask) >> valueKindShift);
 }
 [[nodiscard]] constexpr std::uint8_t
 structureFlags(const StructureVerb verb, const zigzag::DimVector dir,
-               const ValueKind value = ValueKind::None) {
+               const ValueKind value = ValueKind::None) noexcept {
+  if (verb == StructureVerb::Make) {
+    return makeStructureFlags(StructureKind::Cell, value);
+  }
   return static_cast<std::uint8_t>(
       static_cast<std::uint8_t>(verb) |
       (dir == zigzag::DimVector::NEG ? structureNegward : 0U) |
@@ -177,7 +218,7 @@ structureFlags(const StructureVerb verb, const zigzag::DimVector dir,
 }
 [[nodiscard]] constexpr std::uint8_t
 structureFlags(const StructureVerb verb, const bool negward = false,
-               const ValueKind value = ValueKind::None) {
+               const ValueKind value = ValueKind::None) noexcept {
   return structureFlags(
       verb, negward ? zigzag::DimVector::NEG : zigzag::DimVector::POS, value);
 }
@@ -247,7 +288,7 @@ ProminenceTier prominenceTierFromName(const std::string &name);
  * read by nothing here that decides what may be done.
  */
 struct Link {
-  std::uint64_t id{};
+  zigzag::CellRef id{zigzag::noCell};
   LinkType type{LinkType::Comment};
   ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.
@@ -259,6 +300,8 @@ struct Link {
 
   /// Whether either end covers any of @p span.
   [[nodiscard]] bool touches(const PrimediaSpan &span) const;
+
+  bool operator==(const Link &) const = default;
 };
 
 /**
@@ -304,6 +347,10 @@ struct Op {
   /// Structure: the canonical scalar bits, when `flags` says there are any.
   /// Zero for every other kind.
   std::uint64_t value{};
+  /// Context predecessor (or container Make birth for Make ops).
+  MicroversionId context;
+
+  bool operator==(const Op &) const = default;
 };
 
 } // namespace xanadu

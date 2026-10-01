@@ -12,6 +12,7 @@
  * undefined, so a build without thorvg-1 still links and simply cannot show
  * SVG spans.
  */
+#include <gleditor/logging.hpp>
 #include <gleditor/svg_cache.hpp>
 
 #include <algorithm>
@@ -197,10 +198,10 @@ SvgCache::~SvgCache() {
   thorvgUnref();
 }
 
-std::optional<std::pair<float, float>>
+std::expected<std::pair<float, float>, DecodeError>
 SvgCache::peekSize(const std::span<const std::uint8_t> bytes) {
   if (bytes.empty()) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::Empty};
   }
   auto *const picture = tvg::Picture::gen();
   const auto loadRes  = picture->load(
@@ -208,14 +209,14 @@ SvgCache::peekSize(const std::span<const std::uint8_t> bytes) {
       static_cast<std::uint32_t>(bytes.size()), "svg+xml", nullptr, true);
   if (tvg::Result::Success != loadRes) {
     picture->unref();
-    return std::nullopt;
+    return std::unexpected{DecodeError::Undecodable};
   }
   float width  = 0.0F;
   float height = 0.0F;
   picture->size(&width, &height);
   picture->unref();
   if (width <= 0.0F || height <= 0.0F) {
-    return std::nullopt;
+    return std::unexpected{DecodeError::UnsupportedShape};
   }
   return std::make_pair(width, height);
 }
@@ -275,6 +276,9 @@ SvgCache::loadBuffer(const std::string &id,
 
   const auto size = peekSize(bytes);
   if (!size) {
+    // A cache load answers "resource or not"; the reason is for the log.
+    GLEDITOR_LOG_DEBUG("media.image", "cannot load SVG {}: {}", id,
+                       toString(size.error()));
     return std::nullopt;
   }
   auto resource = rasterize(bytes, size->first, size->second);
@@ -308,9 +312,9 @@ std::optional<ImageResource> SvgCache::find(const std::string &id) const {
 SvgCache::SvgCache(render::RenderDevice *const device) : device_(device) {}
 SvgCache::~SvgCache() = default;
 
-std::optional<std::pair<float, float>>
+std::expected<std::pair<float, float>, DecodeError>
 SvgCache::peekSize(std::span<const std::uint8_t> /*bytes*/) {
-  return std::nullopt;
+  return std::unexpected{DecodeError::NoCodec};
 }
 
 std::optional<ImageResource>

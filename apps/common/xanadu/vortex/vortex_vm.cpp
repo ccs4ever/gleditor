@@ -6,9 +6,11 @@
 
 #include <cmath>
 #include <iostream>
+#include <ranges>
 #include <string>
 #include <unordered_set>
 
+#include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
@@ -67,8 +69,8 @@ CellRef VortexVM::mintOpcode(OpcodeKind op, std::string_view label) {
   opcodeMap_[opCell] = op;
   if (!label.empty()) {
     auto span = core_.arena().intern(label);
-    core_.arena().setContent(opCell,
-                             std::span<const xanadu::PrimediaSpan>{&span, 1});
+    zigzag::expectWritten(core_.arena().setContent(
+        opCell, std::span<const xanadu::PrimediaSpan>{&span, 1}));
   }
   return opCell;
 }
@@ -79,7 +81,8 @@ CellRef VortexVM::assembleSequence(std::span<const OpcodeKind> ops) {
   CellRef cur  = head;
   for (std::size_t i = 1; i < ops.size(); ++i) {
     CellRef next = mintOpcode(ops[i]);
-    core_.arena().link(cur, core_.dims().spin, false, next);
+    zigzag::expectWritten(
+        core_.arena().link(cur, core_.dims().spin, false, next));
     cur = next;
   }
   return head;
@@ -116,8 +119,8 @@ CellRef VortexVM::getCursorOpcode(CellRef cursor) const {
 void VortexVM::setCursorOpcode(CellRef cursor, CellRef op) {
   cursorPC_[cursor] = op;
   if (core_.arena().contains(cursor)) {
-    core_.arena().setValueBits(cursor, xanadu::ValueKind::Int64,
-                               static_cast<std::uint64_t>(op));
+    zigzag::expectWritten(core_.arena().setValueBits(
+        cursor, xanadu::ValueKind::Int64, static_cast<std::uint64_t>(op)));
   }
 }
 
@@ -126,38 +129,20 @@ CellRef VortexVM::spawnCursor(CellRef entryOpcode, std::string_view name) {
   setCursorOpcode(cursor, entryOpcode);
   if (!name.empty()) {
     CellRef nameCell = core_.arena().makeCell(name);
-    core_.arena().link(cursor, core_.dims().name, false, nameCell);
+    zigzag::expectWritten(
+        core_.arena().link(cursor, core_.dims().name, false, nameCell));
   }
 
-  // Link into home_ +d.cursors rank
-  CellRef first =
-      core_.arena().linked(core_.home(), core_.dims().cursors, false);
-  if (first == noCell) {
-    core_.arena().link(core_.home(), core_.dims().cursors, false, cursor);
-  } else {
-    CellRef cur       = first;
-    std::size_t limit = core_.arena().cellCount() + 1;
-    while (limit-- > 0) {
-      CellRef next = core_.arena().linked(cur, core_.dims().cursors, false);
-      if (next == noCell) {
-        core_.arena().link(cur, core_.dims().cursors, false, cursor);
-        break;
-      }
-      cur = next;
-    }
-  }
+  // Onto the tail of home's +d.cursors rank.
+  zigzag::expectWritten(core_.arena().link(
+      zigzag::rankTail(core_.arena(), core_.home(), core_.dims().cursors),
+      core_.dims().cursors, false, cursor));
   return cursor;
 }
 
 std::vector<CellRef> VortexVM::activeCursors() const {
-  std::vector<CellRef> result;
-  CellRef cur = core_.arena().linked(core_.home(), core_.dims().cursors, false);
-  std::size_t limit = core_.arena().cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
-    result.push_back(cur);
-    cur = core_.arena().linked(cur, core_.dims().cursors, false);
-  }
-  return result;
+  return zigzag::rankAfter(core_.arena(), core_.home(), core_.dims().cursors) |
+         std::ranges::to<std::vector>();
 }
 
 void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {
@@ -199,7 +184,8 @@ bool VortexVM::backtrack(CellRef cursor) {
       if (cursor != noCell) {
         setCursorOpcode(cursor, cp.altOp);
         if (cp.stackFrame != noCell && core_.arena().contains(cursor)) {
-          core_.arena().link(cursor, core_.dims().stack, false, cp.stackFrame);
+          zigzag::expectWritten(core_.arena().link(cursor, core_.dims().stack,
+                                                   false, cp.stackFrame));
         }
       }
       return true;
@@ -268,8 +254,9 @@ void VortexVM::runPipeline(CellRef paramCell) {
 bool VortexVM::evaluateCondition(CellRef clause,
                                  const std::vector<CellValue> &oldInputs,
                                  const std::vector<CellValue> &outputs) {
-  CellRef actualClause = core_.arena().cloneMaster(clause, core_.dims().clone);
-  auto kindOpt         = getOpcodeKind(actualClause);
+  const CellRef actualClause =
+      core_.arena().cloneMaster(clause, core_.dims().clone).value_or(clause);
+  auto kindOpt = getOpcodeKind(actualClause);
   if (!kindOpt) {
     return core_.isTruthy(actualClause);
   }
@@ -576,7 +563,8 @@ ExecutionResult VortexVM::executeOpcodeBody(
           CellRef next =
               core_.arena().linked(cloneTail, core_.dims().clone, false);
           if (next == noCell) {
-            core_.arena().link(cloneTail, core_.dims().clone, false, cloneCell);
+            zigzag::expectWritten(core_.arena().link(
+                cloneTail, core_.dims().clone, false, cloneCell));
             break;
           }
           if (next == cloneCell) {
@@ -614,13 +602,16 @@ ExecutionResult VortexVM::executeOpcodeBody(
       CellRef nextOp   = core_.arena().linked(opcode, core_.dims().spin, false);
       if (nextOp != noCell) {
         CellRef frame = core_.arena().makeCell();
-        core_.arena().setValueBits(frame, xanadu::ValueKind::Int64,
-                                   static_cast<std::uint64_t>(nextOp));
+        zigzag::expectWritten(
+            core_.arena().setValueBits(frame, xanadu::ValueKind::Int64,
+                                       static_cast<std::uint64_t>(nextOp)));
         CellRef oldStack =
             core_.arena().linked(cursor, core_.dims().stack, false);
-        core_.arena().link(cursor, core_.dims().stack, false, frame);
+        zigzag::expectWritten(
+            core_.arena().link(cursor, core_.dims().stack, false, frame));
         if (oldStack != noCell) {
-          core_.arena().link(frame, core_.dims().stack, false, oldStack);
+          zigzag::expectWritten(
+              core_.arena().link(frame, core_.dims().stack, false, oldStack));
         }
       }
       setCursorOpcode(cursor, targetOp);
@@ -637,7 +628,8 @@ ExecutionResult VortexVM::executeOpcodeBody(
             returnOpVal ? static_cast<CellRef>(*returnOpVal) : noCell;
         CellRef nextStack =
             core_.arena().linked(frame, core_.dims().stack, false);
-        core_.arena().link(cursor, core_.dims().stack, false, nextStack);
+        zigzag::expectWritten(
+            core_.arena().link(cursor, core_.dims().stack, false, nextStack));
         setCursorOpcode(cursor, returnOp);
         jumped = true;
       }
@@ -653,14 +645,18 @@ ExecutionResult VortexVM::executeOpcodeBody(
       CellRef varCell     = core_.arena().makeCell(varName);
       CellRef valCell     = core_.arena().makeCell();
       core_.value(valCell, 0, -1, inputs[1]);
-      core_.arena().link(varCell, core_.dims().values, false, valCell);
+      zigzag::expectWritten(
+          core_.arena().link(varCell, core_.dims().values, false, valCell));
 
       CellRef firstVar = core_.arena().linked(cursor, core_.dims().vars, false);
       if (firstVar == noCell) {
-        core_.arena().link(cursor, core_.dims().vars, false, varCell);
+        zigzag::expectWritten(
+            core_.arena().link(cursor, core_.dims().vars, false, varCell));
       } else {
-        core_.arena().link(varCell, core_.dims().vars, false, firstVar);
-        core_.arena().link(cursor, core_.dims().vars, false, varCell);
+        zigzag::expectWritten(
+            core_.arena().link(varCell, core_.dims().vars, false, firstVar));
+        zigzag::expectWritten(
+            core_.arena().link(cursor, core_.dims().vars, false, varCell));
       }
       outputs.emplace_back(valCell);
     }
@@ -672,24 +668,20 @@ ExecutionResult VortexVM::executeOpcodeBody(
       std::string varName = std::holds_alternative<std::string>(inputs[0])
                                 ? std::get<std::string>(inputs[0])
                                 : std::to_string(toInt(inputs[0]));
-      CellRef curVar = core_.arena().linked(cursor, core_.dims().vars, false);
-      std::size_t limit = core_.arena().cellCount() + 1;
-      bool found        = false;
-      while (curVar != noCell && limit-- > 0) {
-        if (core_.arena().textOf(curVar) == varName) {
-          CellRef valCell =
-              core_.arena().linked(curVar, core_.dims().values, false);
-          if (valCell != noCell) {
-            outputs.push_back(core_.render(valCell));
-            found = true;
-            break;
-          }
-        }
-        curVar = core_.arena().linked(curVar, core_.dims().vars, false);
-      }
-      if (!found) {
-        outputs.emplace_back(false);
-      }
+      // The first variable in scope with this name and a value; a name
+      // declared but never bound is passed over.
+      const auto &arena = core_.arena();
+      const auto bound  = [&](const CellRef var) {
+        return arena.textOf(var) == varName &&
+               zigzag::step(arena, var, core_.dims().values).has_value();
+      };
+      outputs.push_back(
+          zigzag::firstOf(zigzag::rankAfter(arena, cursor, core_.dims().vars) |
+                          std::views::filter(bound))
+              .and_then(zigzag::hop(arena, core_.dims().values))
+              .transform(
+                  [this](const CellRef value) { return core_.render(value); })
+              .value_or(CellValue{false}));
     }
     break;
   }
@@ -804,7 +796,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
                         .grab  = core_.dims().grab,
                         .step  = core_.dims().step,
                         .vars  = core_.dims().vars};
-      outputs.emplace_back(vlog.unify(a, b));
+      outputs.emplace_back(vlog.unify(a, b).has_value());
     } else {
       outputs.emplace_back(false);
     }
@@ -857,9 +849,11 @@ ExecutionResult VortexVM::executeOpcodeBody(
     CellRef prev = noCell;
     for (CellRef arg : args) {
       if (prev == noCell) {
-        core_.arena().link(term, core_.dims().grab, false, arg);
+        zigzag::expectWritten(
+            core_.arena().link(term, core_.dims().grab, false, arg));
       } else {
-        core_.arena().link(prev, core_.dims().step, false, arg);
+        zigzag::expectWritten(
+            core_.arena().link(prev, core_.dims().step, false, arg));
       }
       prev = arg;
     }

@@ -4,6 +4,8 @@
  */
 #include "identity_serialization.hpp"
 
+#include "common/xanadu/lt_compat.hpp"
+
 #include <cstring>
 #include <iterator>
 
@@ -14,7 +16,7 @@ namespace {
 [[nodiscard]] std::expected<Fingerprint, SerializationError>
 extractFingerprint(const libtorrent::bdecode_node &dict,
                    std::string_view key) noexcept {
-  const auto node = dict.dict_find_string(key);
+  const auto node = dict.dict_find_string(lt_compat::ltsv(key));
   if (!node) {
     return std::unexpected(SerializationError::MissingField);
   }
@@ -22,7 +24,7 @@ extractFingerprint(const libtorrent::bdecode_node &dict,
   if (str.size() != 40) {
     return std::unexpected(SerializationError::InvalidFieldLength);
   }
-  const auto fpOpt = Fingerprint::fromString(str);
+  const auto fpOpt = Fingerprint::fromString(lt_compat::sv(str));
   if (!fpOpt) {
     return std::unexpected(SerializationError::InvalidHexFormat);
   }
@@ -32,7 +34,7 @@ extractFingerprint(const libtorrent::bdecode_node &dict,
 [[nodiscard]] std::expected<Hash32, SerializationError>
 extractHash32(const libtorrent::bdecode_node &dict,
               std::string_view key) noexcept {
-  const auto node = dict.dict_find_string(key);
+  const auto node = dict.dict_find_string(lt_compat::ltsv(key));
   if (!node) {
     return std::unexpected(SerializationError::MissingField);
   }
@@ -43,7 +45,7 @@ extractHash32(const libtorrent::bdecode_node &dict,
     return h;
   }
   if (str.size() == 64) {
-    const auto hOpt = Hash32::fromHex(str);
+    const auto hOpt = Hash32::fromHex(lt_compat::sv(str));
     if (!hOpt) {
       return std::unexpected(SerializationError::InvalidHexFormat);
     }
@@ -55,7 +57,7 @@ extractHash32(const libtorrent::bdecode_node &dict,
 [[nodiscard]] std::expected<Signature64, SerializationError>
 extractSignature64(const libtorrent::bdecode_node &dict,
                    std::string_view key) noexcept {
-  const auto node = dict.dict_find_string(key);
+  const auto node = dict.dict_find_string(lt_compat::ltsv(key));
   if (!node) {
     return std::unexpected(SerializationError::MissingField);
   }
@@ -71,7 +73,7 @@ extractSignature64(const libtorrent::bdecode_node &dict,
 [[nodiscard]] std::expected<PubKey32, SerializationError>
 extractPubKey32(const libtorrent::bdecode_node &dict,
                 std::string_view key) noexcept {
-  const auto node = dict.dict_find_string(key);
+  const auto node = dict.dict_find_string(lt_compat::ltsv(key));
   if (!node) {
     return std::unexpected(SerializationError::MissingField);
   }

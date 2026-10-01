@@ -20,10 +20,11 @@
 #include <gleditor/renderer.hpp>
 
 #include "clasp_link_forge.hpp"
-#include "core/pouch_zone.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class PouchDrawer
@@ -79,13 +80,16 @@ public:
     return pouchManager_.addZone(std::move(config));
   }
   bool removeZone(std::string_view id) { return pouchManager_.removeZone(id); }
-  [[nodiscard]] DropZone *zoneById(std::string_view id) noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneById(std::string_view id) noexcept {
     return pouchManager_.zoneById(id);
   }
-  [[nodiscard]] const DropZone *zoneById(std::string_view id) const noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<const DropZone &>
+  zoneById(std::string_view id) const noexcept {
     return pouchManager_.zoneById(id);
   }
-  [[nodiscard]] DropZone *zoneAt(float screenX, float screenY) noexcept {
+  [[nodiscard]] gleditor::cpp26::optional<DropZone &>
+  zoneAt(float screenX, float screenY) noexcept {
     return pouchManager_.zoneAt(screenX, screenY);
   }
   [[nodiscard]] const std::vector<std::unique_ptr<DropZone>> &
@@ -109,10 +113,11 @@ public:
                        float screenY, std::uint32_t docIndex = 0,
                        std::uint32_t charStart = 0, std::uint32_t charEnd = 0);
 
-  bool handleCellDrop(const PrimediaSpan &span, const std::string &preview,
-                      std::uint32_t cellRef, std::string_view rankCoord,
-                      float screenX, float screenY,
-                      std::uint32_t sliceIndex = 0);
+  bool
+  handleCellDrop(const PrimediaSpan &span, const std::string &preview,
+                 std::uint32_t cellRef, std::string_view rankCoord,
+                 float screenX, float screenY, std::uint32_t sliceIndex = 0,
+                 const std::optional<GlobalOpRef> &originOpRef = std::nullopt);
 
   [[nodiscard]] float currentWidth() const noexcept {
     return currentSlideWidth_;

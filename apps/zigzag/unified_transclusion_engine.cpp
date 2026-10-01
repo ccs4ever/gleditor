@@ -8,6 +8,8 @@
 #include <cstring>
 #include <format>
 #include <optional>
+
+#include <gleditor/logging.hpp>
 #include <queue>
 #include <set>
 #include <utility>
@@ -59,7 +61,12 @@ void UnifiedTransclusionEngine::syncIncremental() {
   const auto total = static_cast<std::uint32_t>(ops.size());
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
     if (const auto *const node = ops.get(idx); nullptr != node) {
-      manifold_.applyStructure(idx, *node);
+      // A refused operation is counted by the manifold (refusedOps()) and
+      // leaves it unchanged; the render sync has nothing more to do about it.
+      if (const auto folded = manifold_.applyStructure(idx, *node); !folded) {
+        GLEDITOR_LOG_DEBUG("zigzag.sync", "fold refused op {}: {}", idx,
+                           zigzag::toString(folded.error()));
+      }
       if (node->kind == xanadu::OpKind::Structure) {
         dirtyFormatCells_.insert(idx);
         if (node->sourceOpIndex != zigzag::noCell && node->sourceOpIndex != 0) {
@@ -101,8 +108,11 @@ void UnifiedTransclusionEngine::ensureSliceBegun() {
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
-  const auto dim =
-      DimensionRegistry::instance().getOrCreate(store_, head_, manifold_, name);
+  // dimensionFor() answers the engine's own sentinel for "no dimension",
+  // which is what an empty name gets.
+  const auto dim = DimensionRegistry::instance()
+                       .getOrCreate(store_, head_, manifold_, name)
+                       .value_or(noCell);
   syncIncremental();
   return dim;
 }
@@ -130,15 +140,18 @@ void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
   cold_[cell] = std::move(cold);
 }
 
-const UnifiedTransclusionEngine::ColdCell *
+gleditor::cpp26::optional<const UnifiedTransclusionEngine::ColdCell &>
 UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
   const auto found = cold_.find(cell);
-  return found == cold_.end() ? nullptr : &found->second;
+  if (found == cold_.end()) {
+    return gleditor::cpp26::nullopt;
+  }
+  return found->second;
 }
 
 bool UnifiedTransclusionEngine::isCellLocked(
     const CellRef cell) const noexcept {
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->resolutionStatus ==
         xanadu::ResolutionStatus::TranscopyrightLocked) {
       return true;
@@ -156,7 +169,7 @@ bool UnifiedTransclusionEngine::isCellLocked(
 
 std::optional<xanadu::TranscopyrightDescriptor>
 UnifiedTransclusionEngine::cellRoyalty(const CellRef cell) const noexcept {
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->transcopyrightInfo.has_value()) {
       return cold->transcopyrightInfo;
     }
@@ -176,9 +189,9 @@ bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
   if (spans.empty()) {
     return false;
   }
-  const auto &span       = spans.front();
-  const auto res         = store_.resolve(span);
-  const auto *const cold = coldOf(cell);
+  const auto &span = spans.front();
+  const auto res   = store_.resolve(span);
+  const auto cold  = coldOf(cell);
   if (res.status != xanadu::ResolutionStatus::TranscopyrightLocked ||
       !res.lockInfo.has_value()) {
     if (!cold || !cold->transcopyrightInfo.has_value() ||
@@ -233,18 +246,23 @@ void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
   linkCells(a, zigzag::noCell, dim, DimVector::POS);
 }
 
-const CellSlot *
+zigzag::SlotRef
 UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
   if (isEphemeral(cell)) {
+    // An ephemeral d.meta-dims cell reads as its dimension's slot under its
+    // own name; the copy lives in one mutable scratch slot, so the reference
+    // answered here is valid until the next findCell() of an ephemeral cell.
     const auto it = ephemeralSlots_.find(cell);
-    if (it != ephemeralSlots_.end()) {
-      if (const auto *masterSlot = manifold_.slot(it->second.dimension)) {
-        ephemeralCellSlotDummy_         = *masterSlot;
-        ephemeralCellSlotDummy_.birthOp = cell;
-        return &ephemeralCellSlotDummy_;
-      }
+    if (it == ephemeralSlots_.end()) {
+      return {};
     }
-    return nullptr;
+    return manifold_.slot(it->second.dimension)
+        .transform(
+            [&](const zigzag::CellSlot &master) -> const zigzag::CellSlot & {
+              ephemeralCellSlotDummy_         = master;
+              ephemeralCellSlotDummy_.birthOp = cell;
+              return ephemeralCellSlotDummy_;
+            });
   }
   return manifold_.slot(cell);
 }
@@ -295,8 +313,9 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
     return noCell;
   }
 
-  const auto metaDim  = metaDimension();
-  const auto cloneDim = DimensionRegistry::instance().get(manifold_, "d.clone");
+  const auto metaDim = metaDimension();
+  const auto cloneDim =
+      DimensionRegistry::instance().get(manifold_, "d.clone").value_or(noCell);
 
   if (isEphemeral(from)) {
     const auto it = ephemeralSlots_.find(from);
@@ -351,14 +370,16 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
   return manifold_.linked(from, dim, dir);
 }
 
-CellRef UnifiedTransclusionEngine::cloneMaster(const CellRef cell,
-                                               const DimRef cloneDim) const {
+std::optional<CellRef>
+UnifiedTransclusionEngine::cloneMaster(const CellRef cell,
+                                       const DimRef cloneDim) const {
+  // An ephemeral d.meta-dims cell is a clone of the dimension it stands for.
   if (isEphemeral(cell)) {
     const auto it = ephemeralSlots_.find(cell);
     if (it != ephemeralSlots_.end()) {
       return it->second.dimension;
     }
-    return noCell;
+    return std::nullopt;
   }
   return manifold_.cloneMaster(cell, cloneDim);
 }
@@ -429,7 +450,7 @@ UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
     }
     return "";
   }
-  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+  if (const auto cold = coldOf(cell)) {
     if (cold->resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted) {
       return "[Redacted - Withheld]";
     }
@@ -565,9 +586,12 @@ UnifiedTransclusionEngine::stageVisibleCells(
   // The axes are named in the request and are cells here, so each is resolved
   // once per pass rather than per hop: a dimension is found by walking the
   // d.dims rank, which is cheap but not free.
-  const auto axisX = DimensionRegistry::instance().get(manifold_, req.axisX);
-  const auto axisY = DimensionRegistry::instance().get(manifold_, req.axisY);
-  const auto axisZ = DimensionRegistry::instance().get(manifold_, req.axisZ);
+  const auto axis = [this](const std::string_view name) {
+    return DimensionRegistry::instance().get(manifold_, name);
+  };
+  const auto axisX = axis(req.axisX);
+  const auto axisY = axis(req.axisY);
+  const auto axisZ = axis(req.axisZ);
 
   const CellRef startId = manifold_.contains(req.focusCellId)
                               ? req.focusCellId
@@ -593,7 +617,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    const auto *cell = findCell(currId);
+    const auto cell = findCell(currId);
     if (!cell) {
       continue;
     }
@@ -607,12 +631,11 @@ UnifiedTransclusionEngine::stageVisibleCells(
       }
     };
 
-    for (const auto axis : {axisX, axisY, axisZ}) {
-      if (zigzag::noCell == axis) {
-        continue;
+    for (const auto &dim : {axisX, axisY, axisZ}) {
+      if (dim) {
+        checkNeighbor(linked(currId, *dim, DimVector::POS));
+        checkNeighbor(linked(currId, *dim, DimVector::NEG));
       }
-      checkNeighbor(linked(currId, axis, DimVector::POS));
-      checkNeighbor(linked(currId, axis, DimVector::NEG));
     }
   }
 
@@ -627,7 +650,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    const auto *cell = findCell(static_cast<CellRef>(cid));
+    const auto cell = findCell(static_cast<CellRef>(cid));
 
     gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
                                        .maxHeightPx     = 240.0F,
@@ -659,7 +682,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
     // the cold table, not in the slot: a withheld span and a paid-for one are
     // the same address until the reader's keys say otherwise.
     std::uint32_t paperCol = Doc::VBORow::color(25);
-    if (const auto *const cold = coldOf(cid); nullptr != cold) {
+    if (const auto cold = coldOf(cid); cold.has_value()) {
       if (cold->resolutionStatus ==
           xanadu::ResolutionStatus::WithheldRedacted) {
         paperCol = Doc::VBORow::color3(17, 24, 39);
@@ -672,8 +695,16 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
 
     for (const auto &glyph : shaping.glyphs) {
-      const auto sizes = glyphCache.put(
+      const auto sizesPlaced = glyphCache.put(
           glyph.chr, font, gleditor::decorationSetFor(glyph.decorations));
+      if (!sizesPlaced) {
+        // One glyph the atlas cannot take is one glyph not drawn; the rest of
+        // the cell still is.
+        GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
+                           toString(sizesPlaced.error()));
+        continue;
+      }
+      const auto &sizes = *sizesPlaced;
       Doc::VBORow row{};
       row.pos = {glyph.clusterLeft, glyph.clusterTop};
       row.foreground =
@@ -728,13 +759,8 @@ void UnifiedTransclusionEngine::clearShapingCache() noexcept {
 }
 
 std::size_t UnifiedTransclusionEngine::countFormatLinks() const noexcept {
-  std::size_t count = 0;
-  for (const auto &[_, link] : store_.links()) {
-    if (link.type == xanadu::LinkType::Format) {
-      ++count;
-    }
-  }
-  return count;
+  return static_cast<std::size_t>(std::ranges::count_if(
+      store_.linkView(), xanadu::links::ofType(xanadu::LinkType::Format)));
 }
 
 void UnifiedTransclusionEngine::updateFormatFlags() {

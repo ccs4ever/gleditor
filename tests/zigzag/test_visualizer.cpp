@@ -7,8 +7,8 @@
 
 #include <gleditor/doc.hpp>
 
+#include "common/xanadu/format.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
-#include "xudu/core/format.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
 
 using namespace zigzag;
@@ -527,12 +527,13 @@ TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
   ASSERT_FALSE(spans.empty());
 
   // Attach an Italic format link to root's spans
-  xudu::Link italicLink;
-  italicLink.type = xudu::LinkType::Format;
-  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  xanadu::Link italicLink;
+  italicLink.type = xanadu::LinkType::Format;
+  italicLink.left =
+      std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
   italicLink.right.push_back(
-      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
-  viz.store()->addLink(xudu::MicroversionId{}, italicLink);
+      xanadu::vocabularySpanFor(xanadu::FormatAttribute::Italic));
+  viz.store()->addLink(xanadu::MicroversionId{}, italicLink);
 
   viz.engine()->updateFormatFlags();
   viz.cycleDimensions(true);
@@ -837,6 +838,13 @@ TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
   EXPECT_TRUE(viz.dispatchAction("duplicate-focus-cell"));
   const auto dupFocus = viz.focusCellId();
   EXPECT_NE(dupFocus, initialFocus);
+  EXPECT_TRUE(
+      viz.engine()->findCell(static_cast<CellRef>(dupFocus)).has_value());
+  EXPECT_FALSE(isEphemeral(static_cast<CellRef>(dupFocus)));
+  const auto cloneDim = viz.engine()->dimensionFor("d.clone");
+  EXPECT_EQ(viz.engine()->linked(static_cast<CellRef>(initialFocus), cloneDim,
+                                 DimVector::POS),
+            static_cast<CellRef>(dupFocus));
 
   // jump-home
   EXPECT_TRUE(viz.dispatchAction("jump-home"));
@@ -1025,4 +1033,128 @@ TEST(ZigzagVisualizerTest, ZigzagVisualizerTranscopyrightSettlement) {
   EXPECT_GT(viz.bridgeRevision(), revBefore);
   EXPECT_EQ(invalidatedRev, viz.bridgeRevision());
   EXPECT_FALSE(viz.isCellLocked(static_cast<CellRef>(focus)));
+}
+
+TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
+  xanadu::Store foreignStore;
+  const auto fGenesis = foreignStore.sliceGenesis(xanadu::MicroversionId{});
+  const auto fCellVer = foreignStore.makeCell(fGenesis, "Foreign content");
+  const auto froot    = foreignStore.cellRefOf(fCellVer);
+  ASSERT_NE(froot, zigzag::noCell);
+  const auto fop = foreignStore.segmentedOps().idOf(froot);
+
+  xanadu::Store localStore;
+  const auto lGenesis = localStore.sliceGenesis(xanadu::MicroversionId{});
+  const auto lDimVer  = localStore.makeDimension(lGenesis, "d.1");
+  const auto dimRef   = lDimVer.dim;
+  const auto lCellVer = localStore.makeCell(lDimVer.version, "Local root text");
+  const auto lroot    = localStore.cellRefOf(lCellVer);
+  ASSERT_NE(lroot, zigzag::noCell);
+
+  const auto regVer = localStore.registerScroll(lCellVer, "foreign_scroll_123");
+  const auto foreignScrollId =
+      *localStore.scrollRegistry().scrollIdForKey("foreign_scroll_123");
+
+  const xanadu::GlobalDocumentState pin{
+      .scroll  = "foreign_scroll_123",
+      .version = fCellVer,
+  };
+  xanadu::SelectorSpec spec;
+  spec.kind    = xanadu::Selector::Kind::Closure;
+  spec.rootRef = xanadu::ExternOpRef{
+      .scroll   = foreignScrollId,
+      .produces = fop,
+  };
+  spec.orderPolicy = "identity";
+
+  const auto q =
+      localStore.quote(regVer, lroot, dimRef, "Alice's Keymap", pin, spec);
+
+  ZigzagVisualizer viz("Sans 12");
+  viz.bindXuduStore(localStore, q.version);
+  viz.focusCell(q.quotationCell);
+
+  const auto qInfo = viz.inspectCell(q.quotationCell);
+  EXPECT_TRUE(qInfo.is_quote);
+  EXPECT_EQ(qInfo.role, "quote");
+  EXPECT_EQ(qInfo.quote_label, "Alice's Keymap");
+  EXPECT_EQ(qInfo.quote_target, "foreign_scroll_123");
+
+  const auto &visible = viz.visibleCells();
+  const auto it       = visible.find(q.quotationCell);
+  ASSERT_NE(it, visible.end());
+  EXPECT_TRUE(it->second.is_quote);
+  EXPECT_EQ(it->second.quote_label, "Alice's Keymap");
+  EXPECT_FLOAT_EQ(it->second.base_color.r, 0.22F);
+  EXPECT_FLOAT_EQ(it->second.base_color.g, 0.74F);
+  EXPECT_FLOAT_EQ(it->second.base_color.b, 0.97F);
+
+  const auto &layout = viz.cellLayout(q.quotationCell, it->second, true);
+  EXPECT_NE(layout.badgeText.find("[QUOTE: Alice's Keymap]"),
+            std::string::npos);
+}
+
+TEST(ZigzagVisualizerTest, QuotationCommandBarExecution) {
+  ZigzagVisualizer viz("Sans 12");
+  ASSERT_NE(viz.store(), nullptr);
+
+  // Set command bar for :quote
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":quote foreign_scroll_test 1 1 d.1 BobDoc");
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+  EXPECT_NE(viz.commandBarFeedback().find("Quoted structure 'BobDoc' minted"),
+            std::string::npos);
+
+  const auto focus = viz.focusCellId();
+  ASSERT_NE(focus, 0U);
+  const auto cellInfo = viz.inspectCell(static_cast<CellRef>(focus));
+  EXPECT_TRUE(cellInfo.is_quote);
+  EXPECT_EQ(cellInfo.quote_label, "BobDoc");
+  EXPECT_EQ(cellInfo.quote_target, "foreign_scroll_test");
+
+  // Now test :quote-query
+  viz.setCommandBarText(
+      ":quote-query foreign_scroll_test 1 1 \"/d.vars -> /d.values\" d.1 "
+      "QueryQuote");
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+  EXPECT_NE(viz.commandBarFeedback().find("Quoted query 'QueryQuote' minted"),
+            std::string::npos);
+
+  const auto queryFocus = viz.focusCellId();
+  ASSERT_NE(queryFocus, 0U);
+  const auto queryInfo = viz.inspectCell(static_cast<CellRef>(queryFocus));
+  EXPECT_TRUE(queryInfo.is_quote);
+  EXPECT_EQ(queryInfo.quote_label, "QueryQuote");
+}
+
+TEST(ZigzagVisualizerTest, QuoteBuilderOmnibarAndReloadStoreVersion) {
+  ZigzagVisualizer viz("Sans 10");
+  bool builderOpened = false;
+  viz.setOnOpenQuoteBuilder([&builderOpened] { builderOpened = true; });
+
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":quote-builder");
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_TRUE(builderOpened);
+  EXPECT_FALSE(viz.isCommandBarVisible());
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+  EXPECT_NE(viz.commandBarFeedback().find("Opened Quotation Builder dialog"),
+            std::string::npos);
+
+  // Test bare :quote triggers dialog when onOpenQuoteBuilder is set
+  builderOpened = false;
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":quote");
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_TRUE(builderOpened);
+
+  // Test reloadStoreVersion
+  ASSERT_NE(viz.store(), nullptr);
+  const auto curVer = viz.store()->primaryCurrentVersion();
+  viz.reloadStoreVersion(curVer);
+  EXPECT_NE(viz.focusCellId(), 0U);
 }

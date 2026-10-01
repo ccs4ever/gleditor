@@ -16,6 +16,10 @@
   tension physics, and intertwingle layout
 - [`ui_workflow_zigzag_multiview.md`](ui_workflow_zigzag_multiview.md) — Multidimensional cell
   projections, Cell Content View, and Topology View
+- [`ui_workflow_xuzz_navigation.md`](ui_workflow_xuzz_navigation.md) — Link selection, independent
+  endset browsing, and document/cell navigation
+- [`xuzz-unified-link-traversal-vision.md`](xuzz-unified-link-traversal-vision.md) — Reader journey,
+  UI concepts, and roadmap for one document/cell link experience
 - [`system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
   — Dynamic runtime configuration and system doc schemas
 
@@ -151,7 +155,7 @@ static_assert(sizeof(UniversalLinkEnd) == 16);
 static_assert(alignof(UniversalLinkEnd) == 4);
 ```
 
-#### Aggregate Initialization & Field Access Safety:
+#### Aggregate Initialization & Field Access Safety
 
 Legacy code across [`link_layout.cpp`](../apps/common/xanadu/link_layout.cpp) and
 [`beams.cpp`](../apps/xudu/beams.cpp) initializes and accesses `LinkEnd` as:
@@ -170,7 +174,7 @@ By placing `end` as the third member field, `UniversalLinkEnd` preserves:
    call sites into function calls.
 1. **Register Calling Convention**: Exactly 16 bytes of integer types, passed in `%rsi, %rdx`.
 
-#### Cache-Aligned Transclusion Pairs (`UniversalTransclusionPair`):
+#### Cache-Aligned Transclusion Pairs (`UniversalTransclusionPair`)
 
 A naive 24-byte struct straddles 64-byte cache line boundaries (every other pair requires two cache
 line loads) and drops the essential `span.start` primedia scroll coordinate.
@@ -221,7 +225,7 @@ struct UniversalViewContext {
 };
 ```
 
-#### The Universal Stabbing Algorithm:
+#### The Universal Stabbing Algorithm
 
 1. `Spanfilade::indexManifold()` indexes cell spans into the `ScrollSpanfilade` interval B-tree with
    `.flags = 1U` (`isCell()`) and stores `(cellDense, spanIndex)`.
@@ -266,7 +270,7 @@ public:
 };
 ```
 
-#### Fast-Path Cell Layout Integration:
+#### Fast-Path Cell Layout Integration
 
 `CellSlot` in [`manifold.hpp`](../apps/common/xanadu/zigzag/manifold.hpp) has the following 32-byte
 memory layout:

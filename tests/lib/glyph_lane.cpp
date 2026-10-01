@@ -1,11 +1,10 @@
 #include <gleditor/glyphcache/lane.hpp>  // for GlyphLane
 #include <gleditor/glyphcache/types.hpp> // for Rect, Point
 #include <gtest/gtest.h>                 // for Test, TestInfo (ptr only)
-// #include <spdlog/spdlog-inl.h>
-#include <stdexcept> // for invalid_argument
-#include <tuple>     // for tuple
-#include <utility>   // for to_underlying
-#include <vector>    // for vector
+#include <stdexcept>                     // for invalid_argument
+#include <tuple>                         // for tuple
+#include <utility>                       // for to_underlying
+#include <vector>                        // for vector
 
 #include <gmock/gmock.h> // for ElementsAreMatcher, Element...
 #include <gtest/gtest.h> // for Message, AssertionResult
@@ -14,8 +13,6 @@ using namespace gleditor;
 
 using testing::ElementsAre;
 using testing::WhenSorted;
-
-// std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
 
 TEST(GlyphLane, equality) {
   GlyphLane alice(Offset{1}, Rect{Length{0}, Length{1}});

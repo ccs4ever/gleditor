@@ -179,8 +179,9 @@ private:
   void moveCaret(int by);
   /// The field the caret is in, under the lock.
   [[nodiscard]] Field &field();
-  /// Whether every required field has something in it, and which does not.
-  [[nodiscard]] bool complete(std::string &missing) const;
+  /// The label of the first required field with nothing in it, or nullopt
+  /// when the form is complete.
+  [[nodiscard]] std::optional<std::string> firstMissing() const;
   /// Move the highlight within an open drop-down, or the focus between fields.
   void step(int by);
 

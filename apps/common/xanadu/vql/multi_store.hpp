@@ -23,6 +23,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -43,10 +45,12 @@ struct StoreInfo {
   std::string role;
   std::string path;
   std::shared_ptr<xanadu::Store> store{nullptr};
+  std::shared_ptr<zigzag::Manifold> manifold{nullptr};
   CellRef homeCell{
       noCell}; ///< Slice's home cell (clone master carrying metadata)
   CellRef storeCell{
       noCell}; ///< Representative cell on coordinator's d.stores rank
+  std::uint32_t spaceId{0};
 };
 
 /**
@@ -96,7 +100,8 @@ public:
   /// Resolves the '##NAME' shorthand: ##/d.stores>[d.name = "NAME"].
   /// Returns the named slice's home cell (the clone master), or noCell if not
   /// found.
-  [[nodiscard]] CellRef resolveNamedStore(std::string_view name) const;
+  [[nodiscard]] std::optional<CellRef>
+  resolveNamedStore(std::string_view name) const;
 
   /// Multi-store coordinator genesis origin cell.
   [[nodiscard]] CellRef coordinatorHome() const noexcept {
@@ -113,10 +118,12 @@ public:
     return stores_;
   }
 
-  [[nodiscard]] const StoreInfo *
+  [[nodiscard]] gleditor::cpp26::optional<const StoreInfo &>
   findStore(std::string_view label) const noexcept;
 
-  [[nodiscard]] const StoreInfo *primaryStore() const noexcept;
+  /// The store registered with role "primary", else the first registered.
+  [[nodiscard]] gleditor::cpp26::optional<const StoreInfo &>
+  primaryStore() const noexcept;
 
   // -- Runtime Accessors -----------------------------------------------------
 

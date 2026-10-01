@@ -2,6 +2,7 @@
  * @file toast.cpp
  * @brief Implementation of the transient notification overlay.
  */
+#include <gleditor/logging.hpp>
 #include <gleditor/toast.hpp> // IWYU pragma: associated
 
 #include <choreograph/Choreograph.h> // for easeInOutQuad
@@ -127,7 +128,15 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
 
   rows.reserve(shaping.glyphs.size() + 1);
   for (const auto &g : shaping.glyphs) {
-    const auto glyph  = state.glyphCache.put(g.chr, font);
+    const auto glyphPlaced = state.glyphCache.put(g.chr, font);
+    if (!glyphPlaced) {
+      // One glyph the atlas cannot take is one glyph not drawn; the rest of
+      // the toast still is.
+      GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
+                         toString(glyphPlaced.error()));
+      continue;
+    }
+    const auto &glyph = *glyphPlaced;
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
     const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
     if (0.0F == width || 0.0F == height) {

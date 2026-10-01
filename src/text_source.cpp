@@ -27,6 +27,7 @@
 #include <PDFDoc.h>
 #include <Stream.h>
 #include <goo/GooString.h>
+#include <poppler-version.h>
 
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
 #if GLEDITOR_SDL_MAJOR == 3
@@ -39,6 +40,49 @@
 #include <gleditor/text_source.hpp>
 
 namespace {
+
+/// The three places the core-poppler interface moved under us between the
+/// 24.02 distributions still ship and the 25.02+ this file was written
+/// against. Spelled out here rather than in the call sites so the churn the
+/// include block above warns about stays in one block: each is a rename or a
+/// change of ownership, not a behaviour difference.
+namespace poppler_compat {
+
+/// 25.02 renamed `ImageStream::reset()` to `rewind()` and gave it a bool
+/// result; the older one cannot report failure, so treat it as success.
+bool rewind([[maybe_unused]] ImageStream &stream) {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return stream.rewind();
+#else
+  stream.reset();
+  return true;
+#endif
+}
+
+/// `Object::null()` is 25.02's spelling of the null-object constructor.
+Object nullObject() {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return Object::null();
+#else
+  return Object(objNull);
+#endif
+}
+
+/// 25.02 moved PDFDoc's stream parameter to `unique_ptr`; before that it took
+/// a raw `BaseStream *` and took ownership of it all the same, so releasing
+/// into it hands over the same stream with the same lifetime.
+std::unique_ptr<PDFDoc> openDoc(std::unique_ptr<BaseStream> stream) {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return std::make_unique<PDFDoc>(std::move(stream));
+#else
+  return std::make_unique<PDFDoc>(stream.release());
+#endif
+}
+
+} // namespace poppler_compat
 
 /// Byte at @p index widened through unsigned char. `char` is signed on most
 /// targets, so comparing a raw one against 0xEF or 0xFF is never true and
@@ -321,7 +365,7 @@ private:
                                              GfxImageColorMap *colorMap) {
     ImageStream imgStr(str, width, colorMap->getNumPixelComps(),
                        colorMap->getBits());
-    if (!imgStr.rewind()) {
+    if (!poppler_compat::rewind(imgStr)) {
       return {};
     }
     std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
@@ -437,7 +481,7 @@ void extractPdfDocument(const poppler::document &doc, PDFDoc *coreDoc,
 
 namespace gleditor {
 
-std::string stripByteOrderMark(std::string bytes) {
+std::expected<std::string, SourceError> stripByteOrderMark(std::string bytes) {
   if (startsWith(bytes, {0xEF, 0xBB, 0xBF})) {
     return bytes.substr(3);
   }
@@ -446,10 +490,10 @@ std::string stripByteOrderMark(std::string bytes) {
   // report every UTF-32LE file as UTF-16LE.
   if (startsWith(bytes, {0x00, 0x00, 0xFE, 0xFF}) ||
       startsWith(bytes, {0xFF, 0xFE, 0x00, 0x00})) {
-    throw std::logic_error("utf32 not supported yet");
+    return std::unexpected{SourceError::Utf32Unsupported};
   }
   if (startsWith(bytes, {0xFE, 0xFF}) || startsWith(bytes, {0xFF, 0xFE})) {
-    throw std::logic_error("utf16 not supported yet");
+    return std::unexpected{SourceError::Utf16Unsupported};
   }
   return bytes;
 }
@@ -457,24 +501,40 @@ std::string stripByteOrderMark(std::string bytes) {
 FileTextSource::FileTextSource(std::string path) : filePath(std::move(path)) {}
 
 void FileTextSource::ensureLoaded() const {
+  if (const auto read = load(); !read) {
+    throw SourceLoadError(read.error(), filePath);
+  }
+}
+
+std::expected<void, SourceError> FileTextSource::load() const {
   if (loaded) {
-    return;
+    return {};
   }
   std::ifstream file(filePath, std::ios::binary);
   if (!file.is_open()) {
-    throw std::runtime_error("failed to open file: " + filePath);
+    return std::unexpected{SourceError::NotFound};
   }
   std::ostringstream ss;
   ss << file.rdbuf();
   const std::string raw = ss.str();
 
   if (isPdfFile(filePath, raw)) {
-    PdfTextSource pdf(filePath);
-    content     = pdf.text();
-    breaks      = pdf.forcedBreaks();
-    piecesCache = pdf.pieces();
+    // PdfTextSource answers through its constructor, so its refusal arrives as
+    // the SourceLoadError it throws and leaves here as a value again.
+    try {
+      PdfTextSource pdf(filePath);
+      content     = pdf.text();
+      breaks      = pdf.forcedBreaks();
+      piecesCache = pdf.pieces();
+    } catch (const SourceLoadError &refused) {
+      return std::unexpected{refused.error()};
+    }
   } else {
-    content = stripByteOrderMark(raw);
+    auto stripped = stripByteOrderMark(raw);
+    if (!stripped) {
+      return std::unexpected{stripped.error()};
+    }
+    content = *std::move(stripped);
     breaks.clear();
     // A whole file that is itself media (an image, audio, or video import,
     // as opposed to a PDF's embedded figure, tagged above) gets the same
@@ -494,6 +554,7 @@ void FileTextSource::ensureLoaded() const {
         .pageBreakAfter = false}};
   }
   loaded = true;
+  return {};
 }
 
 std::string FileTextSource::text() const {
@@ -525,10 +586,10 @@ void PdfTextSource::loadPdfFile(const std::string &path) {
   std::unique_ptr<poppler::document> doc(
       poppler::document::load_from_file(path));
   if (!doc) {
-    throw std::runtime_error("failed to open PDF file: " + path);
+    throw SourceLoadError(SourceError::PdfUnreadable, path);
   }
   if (doc->is_locked()) {
-    throw std::runtime_error("PDF is password-protected: " + path);
+    throw SourceLoadError(SourceError::PdfLocked, path);
   }
   numPages = static_cast<std::size_t>(doc->pages());
 
@@ -549,16 +610,16 @@ void PdfTextSource::loadPdfData(const char *data, const std::size_t size) {
   std::unique_ptr<poppler::document> doc(
       poppler::document::load_from_raw_data(data, static_cast<int>(size)));
   if (!doc) {
-    throw std::runtime_error("failed to open PDF data: " + label);
+    throw SourceLoadError(SourceError::PdfUnreadable, label);
   }
   if (doc->is_locked()) {
-    throw std::runtime_error("PDF is password-protected: " + label);
+    throw SourceLoadError(SourceError::PdfLocked, label);
   }
   numPages = static_cast<std::size_t>(doc->pages());
 
   auto memStream = std::make_unique<MemStream>(
-      data, 0, static_cast<Goffset>(size), Object::null());
-  auto coreDoc = std::make_unique<PDFDoc>(std::move(memStream));
+      data, 0, static_cast<Goffset>(size), poppler_compat::nullObject());
+  auto coreDoc = poppler_compat::openDoc(std::move(memStream));
   extractPdfDocument(*doc, coreDoc->isOk() ? coreDoc.get() : nullptr, buffer,
                      breaks, piecesOf);
 }

@@ -211,7 +211,34 @@ TEST(DecodeIndexTest, PngReportsSeekableButNoDurableIndex) {
 TEST(PngCheckpointsTest, BuildFailsOnNonPngBytes) {
   const std::vector<std::uint8_t> notPng{'n', 'o', 't', ' ', 'a',
                                          ' ', 'p', 'n', 'g'};
-  EXPECT_FALSE(PngCheckpoints::build(notPng).has_value());
+  const auto built = PngCheckpoints::build(notPng);
+  ASSERT_FALSE(built.has_value());
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_ZLIB
+  EXPECT_EQ(built.error(), DecodeError::Undecodable);
+#else
+  EXPECT_EQ(built.error(), DecodeError::NoCodec);
+#endif
+}
+
+// A palette PNG is a real PNG, just not the one shape checkpoints handle --
+// which a caller deciding whether to fall back to a full decode needs to
+// know, and a bare nullopt could not say.
+TEST(PngCheckpointsTest, BuildNamesAnUnsupportedShape) {
+  std::vector<std::uint8_t> palettePng{0x89, 'P',  'N',  'G',
+                                       0x0D, 0x0A, 0x1A, 0x0A};
+  const std::vector<std::uint8_t> ihdr{
+      0, 0, 0, 13, 'I', 'H', 'D', 'R', // length, type
+      0, 0, 0, 4,  0,   0,   0,   4,   // 4x4
+      8, 3, 0, 0,  0,                  // 8-bit, colour type 3 (palette)
+      0, 0, 0, 0};                     // CRC, not checked
+  palettePng.insert(palettePng.end(), ihdr.begin(), ihdr.end());
+  const auto built = PngCheckpoints::build(palettePng);
+  ASSERT_FALSE(built.has_value());
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_ZLIB
+  EXPECT_EQ(built.error(), DecodeError::UnsupportedShape);
+#else
+  EXPECT_EQ(built.error(), DecodeError::NoCodec);
+#endif
 }
 
 TEST(PngCheckpointsTest, CheckpointsExistAndResumeMatchesLinearDecode) {
@@ -368,7 +395,13 @@ TEST(DecodeIndexTest, SeekableZstdReportsDurableIndexWithSeekPoints) {
 TEST(DecodeIndexTest, ReencodeZstdSeekableFailsOnNonZstdBytes) {
   const std::vector<std::uint8_t> notZstd{'n', 'o', 't', ' ',
                                           'z', 's', 't', 'd'};
-  EXPECT_FALSE(reencodeZstdSeekable(notZstd).has_value());
+  const auto reencoded = reencodeZstdSeekable(notZstd);
+  ASSERT_FALSE(reencoded.has_value());
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_ZSTD
+  EXPECT_EQ(reencoded.error(), DecodeError::Undecodable);
+#else
+  EXPECT_EQ(reencoded.error(), DecodeError::NoCodec);
+#endif
 }
 
 TEST(DecodeIndexTest, ReencodeZstdSeekableRoundTripsContentAndBecomesDurable) {
@@ -445,7 +478,13 @@ TEST(DecodeIndexTest, SeekableFlacReportsDurableIndexWithSeekPoints) {
 TEST(DecodeIndexTest, ReencodeFlacSeekableFailsOnNonFlacBytes) {
   const std::vector<std::uint8_t> notFlac{'n', 'o', 't', ' ',
                                           'f', 'l', 'a', 'c'};
-  EXPECT_FALSE(reencodeFlacSeekable(notFlac).has_value());
+  const auto reencoded = reencodeFlacSeekable(notFlac);
+  ASSERT_FALSE(reencoded.has_value());
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_FLAC
+  EXPECT_EQ(reencoded.error(), DecodeError::Undecodable);
+#else
+  EXPECT_EQ(reencoded.error(), DecodeError::NoCodec);
+#endif
 }
 
 TEST(DecodeIndexTest, ReencodeFlacSeekableRoundTripsContentAndBecomesDurable) {
@@ -520,7 +559,13 @@ TEST(DecodeIndexTest, SeekableTiffReportsManyStripsWithSeekPoints) {
 TEST(DecodeIndexTest, ReencodeTiffSeekableFailsOnNonTiffBytes) {
   const std::vector<std::uint8_t> notTiff{'n', 'o', 't', ' ',
                                           't', 'i', 'f', 'f'};
-  EXPECT_FALSE(reencodeTiffSeekable(notTiff).has_value());
+  const auto reencoded = reencodeTiffSeekable(notTiff);
+  ASSERT_FALSE(reencoded.has_value());
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_TIFF
+  EXPECT_EQ(reencoded.error(), DecodeError::Undecodable);
+#else
+  EXPECT_EQ(reencoded.error(), DecodeError::NoCodec);
+#endif
 }
 
 TEST(DecodeIndexTest, ReencodeTiffSeekableRoundTripsContentAndBecomesDurable) {

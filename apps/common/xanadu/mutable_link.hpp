@@ -38,6 +38,7 @@
 
 #include <array>
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -59,6 +60,10 @@ struct PublicKey {
 
   [[nodiscard]] std::string hex() const;
   /// Parse sixty-four hex digits, which is how BEP 46 writes one.
+  /// 64 hex digits, or why not -- for text from a peer or a file.
+  [[nodiscard]] static std::expected<PublicKey, gleditor::color::HexError>
+  parseHex(std::string_view text);
+  /// parseHex() for text this program wrote; throws naming the HexError.
   [[nodiscard]] static PublicKey fromHex(std::string_view text);
   [[nodiscard]] bool isZero() const;
 
@@ -88,6 +93,10 @@ struct SecretKey {
    * so it belongs somewhere only its owner can read.
    */
   [[nodiscard]] std::string hex() const;
+  /// 128 hex digits, or why not -- for text from a peer or a file.
+  [[nodiscard]] static std::expected<SecretKey, gleditor::color::HexError>
+  parseHex(std::string_view text);
+  /// parseHex() for text this program wrote; throws naming the HexError.
   [[nodiscard]] static SecretKey fromHex(std::string_view text);
 };
 
@@ -96,6 +105,10 @@ struct Signature {
   std::array<std::uint8_t, 64> bytes{};
 
   [[nodiscard]] std::string hex() const;
+  /// 128 hex digits, or why not -- for text from a peer or a file.
+  [[nodiscard]] static std::expected<Signature, gleditor::color::HexError>
+  parseHex(std::string_view text);
+  /// parseHex() for text this program wrote; throws naming the HexError.
   [[nodiscard]] static Signature fromHex(std::string_view text);
 
   bool operator==(const Signature &) const = default;

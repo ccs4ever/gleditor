@@ -49,6 +49,7 @@
 #include "xudu/session.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 class TenuousTetherOverlay;
 class SatelloidOverlay;

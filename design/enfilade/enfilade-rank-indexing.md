@@ -27,11 +27,11 @@ ______________________________________________________________________
 
 - [1. What U1 is actually being asked for, twice](#1-what-u1-is-actually-being-asked-for-twice)
 - [2. An enfilade, in this codebase's vocabulary](#2-an-enfilade-in-this-codebases-vocabulary)
-- [3. The ruling this needs: an enfilade is a replay product, not cells](#3-the-ruling-this-needs-an-enfilade-is-a-replay-product-not-cells)
+- [3. The ruling this needs: an enfilade is a replay product, not cells][toc-01]
 - [4. One tree, three Wids](#4-one-tree-three-wids)
-- [5. Why Vlog cannot sort its rank, and what that forces](#5-why-vlog-cannot-sort-its-rank-and-what-that-forces)
+- [5. Why Vlog cannot sort its rank, and what that forces][toc-02]
 - [6. The cost, owned](#6-the-cost-owned)
-- [7. The arena variant, and what a Mark does to a tree](#7-the-arena-variant-and-what-a-mark-does-to-a-tree)
+- [7. The arena variant, and what a Mark does to a tree][toc-03]
 - [8. What this does not solve](#8-what-this-does-not-solve)
 - [9. Reconciliation with the rulings](#9-reconciliation-with-the-rulings)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
@@ -108,7 +108,10 @@ mutation. Crums-as-cells would mint a `SetLink` per rotation, so *reading* the 5
 could append operations to the author's spool, and scrubbing to an earlier microversion would show
 the rebalance as an edit to the document. R8 exists to forbid exactly that:
 
-> **Only a user-generated update persists. Navigation never does.**
+> **Only a user-generated update to the visited structure persists there.**
+
+The proposed reader activity store records completed visits separately; rank-index maintenance
+remains a derived replay product and never writes to either store.
 
 So the proposal is the other shape the convergence already has a name for:
 
@@ -313,3 +316,7 @@ The rule is [VQL](../vql-query-language.md)'s and [Vortex](../vortex-hyperstruct
 | version | commit    | date       | change                                                                  |
 | ------- | --------- | ---------- | ----------------------------------------------------------------------- |
 | 1.0     | `ec9633e` | 2026-09-11 | Initial proposal: one tree, three Wids, and a replay product not cells. |
+
+[toc-01]: #3-the-ruling-this-needs-an-enfilade-is-a-replay-product-not-cells
+[toc-02]: #5-why-vlog-cannot-sort-its-rank-and-what-that-forces
+[toc-03]: #7-the-arena-variant-and-what-a-mark-does-to-a-tree

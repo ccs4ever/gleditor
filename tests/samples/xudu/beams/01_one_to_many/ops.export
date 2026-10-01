@@ -1,3 +1,43 @@
-1 insert 0 0 0 6390 373 0 0 0 0 0 0 0
-2 link 0 0 0 0 0 0 0 0 1 0 0 0
-a1 insert 0 0 0 6763 420 0 0 0 0 0 0 0
+# osmic 1
+1 insert 0 0 0 8234 373 0 0 0 0 0 0 0 0
+2 structure 0 0 0 9027 4 0 0 0 0 0 8 0 0
+3 structure 0 0 0 9031 4 0 0 0 0 0 0 0 2
+4 structure 0 0 0 9035 6 0 0 0 0 0 0 0 2
+5 structure 0 0 5 0 0 3 0 0 5 0 1 0 2
+6 structure 0 0 0 9041 7 0 0 0 0 0 0 0 2
+7 structure 0 0 7 0 0 4 0 0 5 0 1 0 2
+8 structure 0 0 0 9048 6 0 0 0 0 0 0 0 2
+9 structure 0 0 9 0 0 6 0 0 5 0 1 0 2
+10 structure 0 0 0 9054 4 0 0 0 0 0 0 0 2
+11 structure 0 0 11 0 0 8 0 0 5 0 1 0 2
+12 structure 0 0 0 9058 10 0 0 0 0 0 0 0 2
+13 structure 0 0 13 0 0 10 0 0 5 0 1 0 2
+14 structure 0 0 0 9068 10 0 0 0 0 0 0 0 2
+15 structure 0 0 15 0 0 12 0 0 5 0 1 0 2
+16 structure 0 0 0 9078 7 0 0 0 0 0 0 0 2
+17 structure 0 0 17 0 0 14 0 0 5 0 1 0 2
+18 structure 0 0 0 9085 9 0 0 0 0 0 0 0 2
+19 structure 0 0 19 0 0 16 0 0 5 0 1 0 2
+20 structure 0 0 0 0 0 0 0 0 0 0 0 0 2
+21 structure 0 0 21 0 0 5 0 0 7 0 1 0 5
+22 structure 0 0 0 8318 50 0 0 0 0 0 0 0 2
+23 structure 0 0 23 0 0 20 0 0 9 0 1 0 20
+24 structure 0 0 0 8657 40 0 0 0 0 0 0 0 2
+25 structure 40 0 0 8781 40 24 0 0 0 0 3 0 24
+26 structure 80 0 0 8902 40 25 0 0 0 0 3 0 25
+27 structure 0 0 25 0 0 23 0 0 11 0 1 0 23
+28 structure 0 0 0 9094 9 0 0 0 0 0 0 0 2
+29 structure 0 0 29 0 0 27 0 0 13 0 1 0 27
+30 structure 0 0 0 9103 6 0 0 0 0 0 0 0 2
+31 structure 0 0 31 0 0 29 0 0 15 0 1 0 29
+32 structure 0 0 0 9109 11 0 0 0 0 0 0 0 2
+33 structure 0 0 33 0 0 31 0 0 17 0 1 0 31
+34 structure 0 0 0 9120 10 0 0 0 0 0 0 0 2
+35 structure 0 0 35 0 0 18 0 0 5 0 1 0 2
+36 structure 0 0 0 9130 12 0 0 0 0 0 0 0 2
+37 structure 0 0 37 0 0 34 0 0 5 0 1 0 2
+38 structure 0 0 0 0 0 0 0 0 0 0 64 2 2
+39 structure 0 0 0 9142 7 0 0 0 0 0 0 0 2
+40 structure 0 0 40 0 0 21 0 0 35 0 1 0 21
+41 structure 0 0 39 0 0 39 0 0 37 0 1 0 39
+a1 insert 0 0 0 8607 420 0 0 0 0 0 0 0 0

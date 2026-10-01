@@ -39,6 +39,8 @@
 #include "cli.hpp"
 #include "view_coordinator.hpp"
 
+#include "common/ui/quotation_builder_overlay.hpp"
+#include "common/ui/store_object_manager.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/provenance.hpp"
@@ -321,6 +323,97 @@ int XuzzApp::run(const int argc, char **argv) {
     swarmTelescope.setVisible(true);
   }
 
+  xanadu::QuotationBuilderOverlay quotationOverlay(
+      session->store(),
+      session->views().empty() ? xanadu::MicroversionId{}
+                               : session->versionOf(0),
+      renderer, &swarmCatalog, "Sans 10",
+      [&session] {
+        std::vector<xanadu::Store *> openStores;
+        for (std::size_t i = 0; i < session->storeCount(); ++i) {
+          openStores.push_back(&session->store(i));
+        }
+        return openStores;
+      },
+      [&session](const xanadu::MicroversionId newVersion,
+                 const zigzag::CellRef /*quotationCell*/) {
+        if (!session->views().empty()) {
+          auto &view   = session->views()[0];
+          view.version = newVersion;
+          view.pieces  = session->store().rebuild(newVersion);
+        }
+      });
+
+  xanadu::StoreObjectManager storeObjectManager(
+      session->store(), "Sans 10",
+      [&views, &session](const std::uint32_t birthOp,
+                         const xanadu::StructureKind /*kind*/,
+                         const bool shouldBeOpen) {
+        if (!shouldBeOpen) {
+          for (std::size_t i = 0; i < session->views().size(); ++i) {
+            if (session->views()[i].focusedBirth == birthOp) {
+              views.closeDocument(static_cast<std::uint32_t>(i));
+              break;
+            }
+          }
+        } else {
+          const auto ver = session->store().latest();
+          views.showAlongside(ver, 0.0F, 0, birthOp);
+        }
+      },
+      [&views, &session](const xanadu::StructureKind kind) {
+        auto &st          = session->store();
+        const auto parent = st.latest();
+        xanadu::MicroversionId newVer;
+        std::uint32_t newBirth = 0;
+        if (kind == xanadu::StructureKind::Slice) {
+          const auto name = "Slice " + std::to_string(st.opCount() + 1);
+          if (st.homeCell() == zigzag::noCell) {
+            newVer = st.sliceGenesis(parent, name);
+          } else {
+            newVer = st.makeSlice(parent, name);
+          }
+          newBirth = static_cast<std::uint32_t>(st.opCount());
+        } else {
+          const auto name = "Document " + std::to_string(st.opCount() + 1);
+          newVer          = st.makeXanadoc(parent, name);
+          newBirth        = static_cast<std::uint32_t>(st.opCount());
+        }
+        views.showAlongside(newVer, 0.0F, 0, newBirth);
+      },
+      [&views, &session](const std::uint32_t birthOp) {
+        for (std::size_t i = 0; i < session->views().size(); ++i) {
+          if (session->views()[i].focusedBirth == birthOp) {
+            views.closeDocument(static_cast<std::uint32_t>(i));
+            break;
+          }
+        }
+      },
+      [&session](const std::uint32_t birthOp) -> bool {
+        for (const auto &v : session->views()) {
+          if (v.focusedBirth == birthOp) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+  docSwitcher->setCloseHandler(
+      [&views](const std::uint32_t docIndex) { views.closeDocument(docIndex); });
+  docSwitcher->setNewDocHandler([&views]() { views.newDocument(); });
+  docSwitcher->setManagerHandler(
+      [&storeObjectManager]() { storeObjectManager.toggle(); });
+  docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
+    renderer->runWithState([&renderer, docIndex](RenderState &rState) {
+      if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(docIndex, 0);
+        }
+      }
+    });
+  });
+
   state->wheelHandler = [&views](float /*wx*/, float wy,
                                  std::uint16_t /*mods*/) -> bool {
     if (!views.onionSkinMode()) {
@@ -349,7 +442,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>("Sans 11");
   radialMenu->setActionHandler(
-      [&session, &views](
+      [&session, &views, &quotationOverlay](
           const std::string &id, [[maybe_unused]] const std::string &action,
           const std::uint32_t docIndex, const std::uint32_t charOffset,
           const std::uint32_t charLength) {
@@ -389,6 +482,8 @@ int XuzzApp::run(const int argc, char **argv) {
           session->insertBreak(docIndex, charOffset);
         } else if (id == "op:transclude") {
           views.transcludeSelection();
+        } else if (id == "op:quote") {
+          quotationOverlay.toggle();
         } else if (id == "info:author") {
           std::string authorStr = "Local Sovereign Author";
           if (const auto *ps = session->userPermascroll()) {
@@ -477,6 +572,8 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&publishForm);
   renderer->addFrameContributor(&pouchDrawer);
   renderer->addFrameContributor(&swarmTelescope);
+  renderer->addFrameContributor(&quotationOverlay);
+  renderer->addFrameContributor(&storeObjectManager);
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
@@ -484,6 +581,8 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(&publishForm);
   state->accessibility->addSource(radialMenu.get());
   state->accessibility->addSource(&pouchDrawer);
+  state->accessibility->addSource(&quotationOverlay);
+  state->accessibility->addSource(&storeObjectManager);
   state->accessibility->setToolkit("xuzz", TOSTRING(GLEDITOR_VERSION));
 
   map.setGoer(
@@ -529,7 +628,7 @@ int XuzzApp::run(const int argc, char **argv) {
   });
 
   gleditor::CompositeModalInput compositeModal(
-      {&publishForm, zigzagPresentation.get()});
+      {&publishForm, zigzagPresentation.get(), &quotationOverlay});
   state->modal = &compositeModal;
 
   renderer->addPickObserver(docSwitcher.get());
@@ -538,6 +637,8 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addPickObserver(&map);
   renderer->addPickObserver(&pouchDrawer);
   renderer->addPickObserver(&swarmTelescope);
+  renderer->addPickObserver(&quotationOverlay);
+  renderer->addPickObserver(&storeObjectManager);
 
   state->mouseDownHandler =
       [&kineticTetherEngine, &session, renderer, state, zigzagPresentation](
@@ -908,6 +1009,16 @@ int XuzzApp::run(const int argc, char **argv) {
       std::string(xanadu::settings::kKeymapTelescopeToggleF3),
       "toggle swarm telescope (F3)", toggleTelescopeAction);
 
+  const auto toggleQuotationAction = [&quotationOverlay] {
+    quotationOverlay.toggle();
+  };
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggle),
+      "toggle quoted structure builder overlay", toggleQuotationAction);
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggleF9),
+      "toggle quoted structure builder overlay (F9)", toggleQuotationAction);
+
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTensionPhysicsToggle),
       "toggle 3-way tension spring layout physics",
@@ -1045,6 +1156,12 @@ int XuzzApp::run(const int argc, char **argv) {
                                 togglePouchAction);
   app.commands().registerAction("telescope-toggle", "toggle swarm telescope",
                                 toggleTelescopeAction);
+  app.commands().registerAction("quotation-toggle",
+                                "toggle quoted structure builder overlay",
+                                toggleQuotationAction);
+  app.commands().registerAction(
+      "store-manager-toggle", "toggle store object manager drawer",
+      [&storeObjectManager] { storeObjectManager.toggle(); });
   app.commands().registerAction("physics-toggle",
                                 "toggle 3-way tension spring layout physics",
                                 [&links] { links.togglePhysics(); });

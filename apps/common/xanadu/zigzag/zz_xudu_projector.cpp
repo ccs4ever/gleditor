@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <variant>
 
+#include <gleditor/ranges.hpp>
+
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
@@ -395,10 +397,7 @@ projectStoreWithProvenance(const xanadu::Store &store,
     });
   }
 
-  std::vector<xanadu::Link> allLinks;
-  for (const auto &[linkId, link] : store.links()) {
-    allLinks.push_back(link);
-  }
+  const auto allLinks = store.linkView() | std::ranges::to<std::vector>();
 
   ProjectedXuduStore result;
   result.document = projectXuduToZigzag(docInputs, allLinks, opts,
@@ -601,9 +600,11 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
 
   auto manifold = store.rebuildManifold(out.version);
   for (const auto &name : dimensionNames) {
-    const auto dim = DimensionRegistry::instance().getOrCreate(
-        store, out.version, manifold, name);
-    out.dimensions.emplace(name, dim);
+    // A slice naming an empty dimension has nothing to mint for it.
+    if (const auto dim = DimensionRegistry::instance().getOrCreate(
+            store, out.version, manifold, name)) {
+      out.dimensions.emplace(name, *dim);
+    }
   }
 
   // One cell per YAML cell, in id order. A number or a flag becomes a scalar
@@ -826,7 +827,8 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
   const auto localScroll = store.userPermascroll().currentScroll();
   const auto scrollFor   = [&store,
                             &localScroll](const xanadu::PrimediaSpan &span) {
-    return span.isLocal() ? &localScroll : store.scroll(span.scroll);
+    return span.isLocal() ? gleditor::refOf(&localScroll)
+                          : store.scroll(span.scroll);
   };
 
   std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
@@ -845,7 +847,7 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
     if (const auto global =
             xanadu::globalise(store, contentRun.front(), &localScroll)) {
       cellSpans.emplace(slot.birthOp, *global);
-      if (const auto *const s = scrollFor(contentRun.front())) {
+      if (const auto s = scrollFor(contentRun.front())) {
         scrolls.insert_or_assign(global->scroll, *s);
       }
     }

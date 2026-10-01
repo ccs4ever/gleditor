@@ -245,9 +245,10 @@ public:
 
   /**
    * @brief Update metrics for an existing entry and bubble changes to root in
-   * O(log N).
+   * O(log N). False, changing nothing, for an index past the end.
    */
-  bool updateEntry(std::size_t entryIndex, const LayoutEntry &newEntry);
+  [[nodiscard]] bool updateEntry(std::size_t entryIndex,
+                                 const LayoutEntry &newEntry);
 
   /**
    * @brief Verifies enfilade queries exactly match linear scans.

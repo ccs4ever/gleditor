@@ -7,29 +7,29 @@
 #include <filesystem>
 #include <string>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/system_docs.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::formatAttributeFromDecoration;
-using xudu::formatAttributeFromTextAlign;
-using xudu::formatAttributeName;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::Store;
-using xudu::textAlignFromFormatAttribute;
-using xudu::UIConfig;
-using xudu::vocabularySpanFor;
+using xanadu::FormatAttribute;
+using xanadu::formatAttributeFromDecoration;
+using xanadu::formatAttributeFromTextAlign;
+using xanadu::formatAttributeName;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::Store;
+using xanadu::textAlignFromFormatAttribute;
+using xanadu::UIConfig;
+using xanadu::vocabularySpanFor;
 
 TEST(RadialFormattingTest, LoadRadialConfigFromStore) {
   Store store;
-  xudu::initializeSystemStore(store, xudu::SystemDocKind::UI);
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
 
   const auto cfg = UIConfig::fromStore(store);
   EXPECT_FLOAT_EQ(cfg.radialMenu.radius, 130.0F);

@@ -7,9 +7,9 @@
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
 
+#include "common/tsv.hpp"
 #include "provenance.hpp"
 #include "torrent.hpp"
-#include "yaml.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -154,49 +154,43 @@ bool MerkleProof::verify(
   return current == expectedRoot;
 }
 
-std::string MerkleProof::toYaml() const {
-  std::string y;
-  yaml::write(y, "leaf_index", std::to_string(leafIndex));
-  yaml::write(y, "max_index", std::to_string(maxIndex));
-  yaml::write(y, "leaf_hash", toHex32(leafHash));
-  yaml::write(y, "root_hash", toHex32(rootHash));
-  if (!path.empty()) {
-    std::vector<std::string> pathItems;
-    pathItems.reserve(path.size());
-    for (const auto &el : path) {
-      pathItems.push_back(std::string(el.isLeft ? "L:" : "R:") +
-                          toHex32(el.hash));
-    }
-    yaml::writeList(y, "path", pathItems);
+std::string MerkleProof::toTsv() const {
+  std::string out;
+  common::tsv::write(out, "leaf_index", std::to_string(leafIndex));
+  common::tsv::write(out, "max_index", std::to_string(maxIndex));
+  common::tsv::write(out, "leaf_hash", toHex32(leafHash));
+  common::tsv::write(out, "root_hash", toHex32(rootHash));
+  for (const auto &element : path) {
+    common::tsv::write(out, "path",
+                       std::string(element.isLeft ? "L:" : "R:") +
+                           toHex32(element.hash));
   }
-  return y;
+  return out;
 }
 
-std::optional<MerkleProof> MerkleProof::fromYaml(std::string_view y) {
-  const auto entries = yaml::read(y);
+std::optional<MerkleProof> MerkleProof::fromTsv(const std::string_view tsv) {
+  const auto entries = common::tsv::read(tsv);
   if (!entries) {
     return std::nullopt;
   }
   MerkleProof proof;
   for (const auto &e : *entries) {
-    if (!e.listItem) {
-      if (e.key == "leaf_index") {
-        proof.leafIndex = static_cast<std::size_t>(std::stoull(e.value));
-      } else if (e.key == "max_index") {
-        proof.maxIndex = static_cast<std::size_t>(std::stoull(e.value));
-      } else if (e.key == "leaf_hash") {
-        if (const auto h = fromHex32(e.value)) {
-          proof.leafHash = *h;
-        }
-      } else if (e.key == "root_hash") {
-        if (const auto h = fromHex32(e.value)) {
-          proof.rootHash = *h;
-        }
+    if (e.key == "leaf_index") {
+      proof.leafIndex = static_cast<std::size_t>(std::stoull(e.value));
+    } else if (e.key == "max_index") {
+      proof.maxIndex = static_cast<std::size_t>(std::stoull(e.value));
+    } else if (e.key == "leaf_hash") {
+      if (const auto hash = fromHex32(e.value)) {
+        proof.leafHash = *hash;
+      }
+    } else if (e.key == "root_hash") {
+      if (const auto hash = fromHex32(e.value)) {
+        proof.rootHash = *hash;
       }
     } else if (e.key == "path" && e.value.size() >= 66) {
       const bool isLeft = (e.value[0] == 'L');
-      if (const auto h = fromHex32(std::string_view(e.value).substr(2))) {
-        proof.path.push_back(Element{.hash = *h, .isLeft = isLeft});
+      if (const auto hash = fromHex32(std::string_view(e.value).substr(2))) {
+        proof.path.push_back(Element{.hash = *hash, .isLeft = isLeft});
       }
     }
   }
@@ -335,83 +329,66 @@ MerkleLedger::findByEmail(std::string_view email) const {
   return result;
 }
 
-std::string MerkleLedger::toYaml() const {
-  std::string y;
-  yaml::write(y, "version", "1");
-  yaml::write(y, "root", rootHex());
-  yaml::write(y, "count", std::to_string(size()));
+std::string MerkleLedger::toTsv() const {
+  std::string out;
+  common::tsv::write(out, "version", "1");
+  common::tsv::write(out, "root", rootHex());
+  common::tsv::write(out, "count", std::to_string(size()));
 
   for (const auto &e : impl_->entries) {
-    y += "\n---\n";
-    yaml::write(y, "sequence", std::to_string(e.sequence));
-    yaml::write(y, "fingerprint", e.fingerprint);
-    yaml::write(y, "email", e.email);
-    yaml::write(y, "identity", e.identity);
-    if (!e.gpgKeyId.empty()) {
-      yaml::write(y, "key_id", e.gpgKeyId);
-    }
-    yaml::write(y, "timestamp", std::to_string(e.timestamp));
-    yaml::write(y, "revoked", e.revoked ? "true" : "false");
-    if (!e.publicKeyArmored.empty()) {
-      yaml::write(y, "public_key", e.publicKeyArmored);
-    }
-    if (!e.signature.empty()) {
-      yaml::write(y, "signature", e.signature);
-    }
+    common::tsv::write(out, "entry", std::to_string(e.sequence));
+    common::tsv::write(out, "fingerprint", e.fingerprint);
+    common::tsv::write(out, "email", e.email);
+    common::tsv::write(out, "identity", e.identity);
+    common::tsv::write(out, "key_id", e.gpgKeyId);
+    common::tsv::write(out, "timestamp", std::to_string(e.timestamp));
+    common::tsv::write(out, "revoked", e.revoked ? "true" : "false");
+    common::tsv::write(out, "public_key", e.publicKeyArmored);
+    common::tsv::write(out, "signature", e.signature);
   }
-  return y;
+  return out;
 }
 
-MerkleLedger MerkleLedger::fromYaml(std::string_view yamlText) {
+MerkleLedger MerkleLedger::fromTsv(const std::string_view tsv) {
   MerkleLedger ledger;
-  // Split on document boundary "\n---\n" or "\n---"
-  std::size_t pos = 0;
-  while (pos < yamlText.size()) {
-    std::size_t next = yamlText.find("\n---", pos);
-    if (next == std::string_view::npos) {
-      next = yamlText.size();
-    }
-    std::string_view chunk = yamlText.substr(pos, next - pos);
-    pos                    = (next < yamlText.size()) ? next + 4 : next;
-    if (pos < yamlText.size() && yamlText[pos] == '\n') {
-      pos++;
-    }
-
-    const auto parsed = yaml::read(chunk);
-    if (!parsed) {
-      continue;
-    }
-
-    GpgKeyLink link;
-    bool hasEntry = false;
-    for (const auto &e : *parsed) {
-      if (e.listItem) {
-        continue;
-      }
-      if (e.key == "fingerprint") {
-        link.fingerprint = e.value;
-        hasEntry         = true;
-      } else if (e.key == "email") {
-        link.email = e.value;
-        hasEntry   = true;
-      } else if (e.key == "identity") {
-        link.identity = e.value;
-      } else if (e.key == "key_id") {
-        link.gpgKeyId = e.value;
-      } else if (e.key == "timestamp") {
-        link.timestamp = std::stoull(e.value);
-      } else if (e.key == "revoked") {
-        link.revoked = (e.value == "true" || e.value == "1");
-      } else if (e.key == "public_key") {
-        link.publicKeyArmored = e.value;
-      } else if (e.key == "signature") {
-        link.signature = e.value;
-      }
-    }
+  const auto entries = common::tsv::read(tsv);
+  if (!entries) {
+    return ledger;
+  }
+  GpgKeyLink link;
+  bool hasEntry     = false;
+  const auto append = [&] {
     if (hasEntry) {
       ledger.appendKey(std::move(link));
+      link     = GpgKeyLink{};
+      hasEntry = false;
+    }
+  };
+  for (const auto &entry : *entries) {
+    if ("entry" == entry.key) {
+      append();
+      hasEntry = true;
+    } else if (!hasEntry) {
+      continue;
+    } else if ("fingerprint" == entry.key) {
+      link.fingerprint = entry.value;
+    } else if ("email" == entry.key) {
+      link.email = entry.value;
+    } else if ("identity" == entry.key) {
+      link.identity = entry.value;
+    } else if ("key_id" == entry.key) {
+      link.gpgKeyId = entry.value;
+    } else if ("timestamp" == entry.key) {
+      link.timestamp = std::stoull(entry.value);
+    } else if ("revoked" == entry.key) {
+      link.revoked = "true" == entry.value;
+    } else if ("public_key" == entry.key) {
+      link.publicKeyArmored = entry.value;
+    } else if ("signature" == entry.key) {
+      link.signature = entry.value;
     }
   }
+  append();
   return ledger;
 }
 
@@ -420,8 +397,8 @@ bool MerkleLedger::saveToFile(const std::string &path) const {
   if (!out.is_open()) {
     return false;
   }
-  const std::string y = toYaml();
-  out.write(y.data(), static_cast<std::streamsize>(y.size()));
+  const std::string tsv = toTsv();
+  out.write(tsv.data(), static_cast<std::streamsize>(tsv.size()));
   return out.good();
 }
 
@@ -433,13 +410,13 @@ MerkleLedger::loadFromFile(const std::string &path) {
   }
   std::ostringstream ss;
   ss << in.rdbuf();
-  return fromYaml(ss.str());
+  return fromTsv(ss.str());
 }
 
 MadeTorrent MerkleLedger::sealToTorrent(std::string_view name,
                                         std::uint64_t pieceLength) const {
   std::vector<TorrentContent> files;
-  const std::string ledgerYaml = toYaml();
+  const std::string ledgerTsv  = toTsv();
   const std::string rootHexStr = rootHex() + "\n";
 
   std::string keysConcat;
@@ -449,7 +426,7 @@ MadeTorrent MerkleLedger::sealToTorrent(std::string_view name,
     }
   }
 
-  files.push_back(TorrentContent{.path = "LEDGER.yaml", .data = ledgerYaml});
+  files.push_back(TorrentContent{.path = "LEDGER.tsv", .data = ledgerTsv});
   files.push_back(TorrentContent{.path = "ROOT.hex", .data = rootHexStr});
   if (!keysConcat.empty()) {
     files.push_back(TorrentContent{.path = "KEYS.pub", .data = keysConcat});

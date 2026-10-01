@@ -115,12 +115,16 @@ const Dict &Value::asDict() const {
   return entries;
 }
 
-const Value *Value::find(const std::string_view key) const {
+gleditor::cpp26::optional<const Value &>
+Value::find(const std::string_view key) const {
   if (!isDict()) {
-    return nullptr;
+    return gleditor::cpp26::nullopt;
   }
   const auto found = entries.find(std::string{key});
-  return found == entries.end() ? nullptr : &found->second;
+  if (found == entries.end()) {
+    return gleditor::cpp26::nullopt;
+  }
+  return found->second;
 }
 
 std::string Value::encode() const {

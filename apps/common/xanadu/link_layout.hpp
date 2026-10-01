@@ -126,7 +126,7 @@ void placeTransclusions(const std::vector<const Version *> &views,
  * @brief Sort @p links into the ones that run between open views in @p ctx
  *        and the ones that run off them.
  */
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const UniversalViewContext &ctx,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving);
@@ -147,7 +147,7 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
  * @param views One version per open document, in document order. A null entry
  *        is a document that has nothing to say yet.
  */
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const std::vector<const Version *> &views,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving);

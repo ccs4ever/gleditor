@@ -26,6 +26,7 @@
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/animation.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/shader_source.hpp>
@@ -96,10 +97,31 @@ void Renderer::newDoc(RenderState &state) {
   state.pickTargets.push_back({});
 }
 
+namespace {
+/// Read a finished (or finishing) background load. A SourceError was already
+/// logged by the load itself; anything else it threw is logged here rather
+/// than left in a future nobody reads, which is where it used to go.
+void settleDocLoad(
+    std::future<std::expected<void, gleditor::SourceError>> &load) {
+  try {
+    static_cast<void>(load.get());
+  } catch (const std::exception &failure) {
+    GLEDITOR_LOG_ERROR("render.scene", "background page build failed: {}",
+                       failure.what());
+  }
+}
+} // namespace
+
 void Renderer::reapFinishedDocLoads() {
   const auto done = std::ranges::remove_if(pendingDocLoads, [](auto &fut) {
-    return !fut.valid() ||
-           std::future_status::ready == fut.wait_for(std::chrono::seconds{0});
+    if (!fut.valid()) {
+      return true;
+    }
+    if (std::future_status::ready != fut.wait_for(std::chrono::seconds{0})) {
+      return false;
+    }
+    settleDocLoad(fut);
+    return true;
   });
   pendingDocLoads.erase(done.begin(), done.end());
 }
@@ -246,7 +268,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
       if (state.docs[i] && state.docs[i]->getModel()[3].z >= 0.0F) {
         const float centerX = state.docs[i]->getModel()[3].x;
         float halfW         = Doc::defaultPageWidthWorld() / 2.0F;
-        if (const auto *p = state.docs[i]->page(0)) {
+        if (const auto p = state.docs[i]->page(0)) {
           halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
         }
         lastRight       = centerX + halfW;
@@ -261,8 +283,8 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   }
   slot.z                    = depthZ;
   const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
-  std::cout << "doc pos: " << state.docs.size() << " "
-            << glm::to_string(newDocPosition) << "\n";
+  GLEDITOR_LOG_DEBUG("render.scene", "doc pos: {} {}", state.docs.size(),
+                     glm::to_string(newDocPosition));
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   // A document opened behind the row settles dimmer than one in it. It is
@@ -274,8 +296,19 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   }
   docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
-  pendingDocLoads.push_back(
-      std::async(std::launch::async, [docPtr] { docPtr->makePages(); }));
+  pendingDocLoads.push_back(std::async(
+      std::launch::async,
+      [docPtr,
+       name = source.name()]() -> std::expected<void, gleditor::SourceError> {
+        try {
+          docPtr->makePages();
+          return {};
+        } catch (const gleditor::SourceLoadError &refused) {
+          GLEDITOR_LOG_ERROR("render.scene", "cannot open {}: {}", name,
+                             toString(refused.error()));
+          return std::unexpected{refused.error()};
+        }
+      }));
   state.docs.push_back(docPtr->getPtr());
   state.pickTargets.push_back(source.pickSemanticTarget());
 }
@@ -1097,7 +1130,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   // frame, so none of them may outlive this function.
   for (auto &fut : pendingDocLoads) {
     if (fut.valid()) {
-      fut.wait();
+      settleDocLoad(fut);
     }
   }
   pendingDocLoads.clear();

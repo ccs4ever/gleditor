@@ -139,11 +139,11 @@ public:
   bool rebind(std::string_view name, int scancode, Mod mods);
 
   /**
-   * @brief Rebind commands from keymap text (e.g. YAML key-value lines).
+   * @brief Rebind commands from tab-separated keymap rows.
    *
    * @return True if at least one command was successfully rebound.
    */
-  bool rebindFromText(std::string_view yamlText);
+  bool rebindFromText(std::string_view tsv);
 
   /**
    * @brief Look up the current scancode and modifiers bound to @p name.

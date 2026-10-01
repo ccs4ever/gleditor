@@ -24,6 +24,7 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/decode_index.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
@@ -136,6 +137,10 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
                                     const std::string &mimeType,
                                     std::string filePath) {
   if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto focus = focusTargetForView(docIndex);
+  if (!focus.has_value() || !focus->isValid()) {
     return MicroversionId{};
   }
   const auto sIdx = open[docIndex].storeIndex;
@@ -310,7 +315,7 @@ void Session::connectPeer(const InfoHash &hash, const std::string &host,
 
 bool Session::awaitMetadata(const InfoHash &hash,
                             const std::chrono::milliseconds timeout) {
-  if (nullptr != content().metainfo(hash)) {
+  if (content().metainfo(hash).has_value()) {
     return true;
   }
   return nullptr != swarmSource && swarmSource->waitForMetadata(hash, timeout);
@@ -372,7 +377,7 @@ InfoHash Session::addMagnet(const std::string &uri) {
   if (nullptr != swarmSource) {
     return swarmSource->addMagnet(uri, path(0) + "-content");
   }
-  if (nullptr == contentSource.metainfo(link.hash)) {
+  if (!contentSource.metainfo(link.hash)) {
     throw std::runtime_error(
         "magnet " + link.hash.hex() +
         " names content whose metadata is not available here. A magnet link "
@@ -388,8 +393,8 @@ MicroversionId
 Session::quoteTorrent(const MicroversionId &parent, const std::uint32_t at,
                       const InfoHash &hash, const std::uint32_t fileIndex,
                       const std::uint64_t offset, const std::uint64_t length) {
-  const auto *const meta = content().metainfo(hash);
-  if (nullptr == meta) {
+  const auto meta = content().metainfo(hash);
+  if (!meta) {
     throw std::runtime_error("no torrent " + hash.hex() +
                              " has been made available");
   }
@@ -414,7 +419,7 @@ std::string Session::publishedDir(const std::size_t storeIndex) const {
 namespace {
 
 std::string authorPath(const std::string &storePath) {
-  return (std::filesystem::path(storePath) / "author.yaml").string();
+  return (std::filesystem::path(storePath) / "author.tsv").string();
 }
 
 /// Where a store's SealState lives -- what makes the next publishDocument()
@@ -452,7 +457,7 @@ void Session::setAuthor(Author aWho) {
   record.author = *who;
   std::filesystem::create_directories(path(0));
   std::ofstream out(authorPath(path(0)), std::ios::trunc);
-  out << record.toYaml();
+  out << record.toTsv();
 }
 
 const Config &Session::settings() {
@@ -468,7 +473,7 @@ Author Session::author() {
     if (std::ifstream in(authorPath(path(0))); in) {
       const std::string text{std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>()};
-      if (const auto record = Config::fromYaml(text); record) {
+      if (const auto record = Config::fromTsv(text); record) {
         who = record->author;
       }
     }
@@ -547,17 +552,20 @@ std::string Session::publishDocument(const MicroversionId &version,
         "what they published, so say who once, in " +
         configPath() +
         ":\n"
-        "  author: \"Your Name\"\n"
-        "  email: \"you@example.org\"\n"
+        "  author\\tYour Name\n"
+        "  email\\tyou@example.org\n"
         "or for this store alone with --author-name and --author-email.");
   }
 
   Provenance record;
-  record.author        = who;
-  record.salt          = request.salt;
-  record.title         = request.title;
-  record.extra         = request.extra;
-  record.publisher     = mine.publicKey.hex();
+  record.author    = who;
+  record.salt      = request.salt;
+  record.title     = request.title;
+  record.extra     = request.extra;
+  record.publisher = mine.publicKey.hex();
+  if (st.userPermascrollPtr()) {
+    record.permascroll = st.userPermascroll().globalScrollKey();
+  }
   record.version       = version.str();
   record.published     = now;
   record.contentLength = st.primedia().bytes().size();
@@ -576,7 +584,7 @@ std::string Session::publishDocument(const MicroversionId &version,
     if (piece.isLocal()) {
       continue;
     }
-    if (const auto *const scroll = st.scroll(piece.scroll); nullptr != scroll) {
+    if (const auto scroll = st.scroll(piece.scroll); scroll.has_value()) {
       const auto key = scrollKey(*scroll);
       if (!key.empty() &&
           std::ranges::find(record.quotes, key) == record.quotes.end()) {
@@ -735,12 +743,9 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
-  // Piece by piece rather than one whole-file insert(), the same way and for
-  // the same reason as the very first --import (see main.cpp): a plain file
-  // is one plain-text piece and this changes nothing for it, but a PDF's
-  // embedded figures only reach the store as classifiable primedia spans
-  // through insertMedia(), which pieces() is what makes reachable here.
-  MicroversionId imported;
+  const auto docName      = std::filesystem::path(filePath).stem().string();
+  MicroversionId imported = newStore->makeXanadoc(
+      MicroversionId{}, docName.empty() ? "document" : docName);
   std::uint32_t at = 0;
   // Indexed by piece position, parallel to source.pieces(): the span each
   // piece landed at, so a later piece naming an earlier one via
@@ -833,6 +838,7 @@ std::size_t Session::createNewStore(const std::string &aPath) {
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
+  newStore->makeXanadoc(MicroversionId{}, "document");
   newStore->save(targetDir);
   return addStore(std::move(newStore), targetDir, isTemporary);
 }
@@ -841,7 +847,6 @@ void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
-    syncCurrentVersions(index);
     stores[index].store->save(stores[index].path);
   }
 }
@@ -916,14 +921,23 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 }
 
 void Session::viewOpened(const MicroversionId &version,
-                         const std::size_t storeIndex) {
+                         const std::size_t storeIndex,
+                         const std::uint32_t focusedBirth) {
   const auto &st = store(storeIndex);
-  open.push_back(OpenView{.version        = version,
-                          .storeIndex     = storeIndex,
-                          .pieces         = st.rebuild(version),
-                          .decorations    = {},
-                          .decoratedAt    = 0,
-                          .uncommittedLog = {}});
+  const auto targetBirth =
+      (focusedBirth != 0) ? focusedBirth : st.activeXanadocOnBranch(version);
+  std::vector<std::uint32_t> path;
+  if (targetBirth != 0) {
+    path = st.containmentPath(targetBirth);
+  }
+  open.push_back(OpenView{.version         = version,
+                          .storeIndex      = storeIndex,
+                          .focusedBirth    = targetBirth,
+                          .containmentPath = std::move(path),
+                          .pieces          = st.rebuild(version, targetBirth),
+                          .decorations     = {},
+                          .decoratedAt     = 0,
+                          .uncommittedLog  = {}});
   invalidate();
 }
 
@@ -934,6 +948,57 @@ void Session::viewClosed(const std::uint32_t docIndex) {
   flushUncommitted(docIndex);
   open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
   invalidate();
+}
+
+std::optional<FocusTarget>
+Session::focusTargetForView(const std::size_t docIndex) const {
+  if (docIndex >= open.size()) {
+    return std::nullopt;
+  }
+  const auto &view = open[docIndex];
+  const auto &st   = store(view.storeIndex);
+  if (view.focusedBirth != 0) {
+    if (!st.validateContainment(view.focusedBirth)) {
+      return std::nullopt;
+    }
+    const auto kind = st.structureKindOfOp(view.focusedBirth);
+    return FocusTarget{
+        .kind            = kind,
+        .birthOp         = view.focusedBirth,
+        .containmentPath = view.containmentPath,
+    };
+  }
+  const auto activeXanadoc = st.activeXanadocOnBranch(view.version);
+  if (activeXanadoc != 0 && st.validateContainment(activeXanadoc)) {
+    return FocusTarget{
+        .kind            = StructureKind::Xanadoc,
+        .birthOp         = activeXanadoc,
+        .containmentPath = st.containmentPath(activeXanadoc),
+    };
+  }
+  return FocusTarget{
+      .kind            = StructureKind::Xanadoc,
+      .birthOp         = 0,
+      .containmentPath = {},
+  };
+}
+
+void Session::setFocusTarget(const std::size_t docIndex,
+                             const std::uint32_t birthOp) {
+  if (docIndex >= open.size()) {
+    return;
+  }
+  auto &view     = open[docIndex];
+  const auto &st = store(view.storeIndex);
+  if (birthOp == 0) {
+    view.focusedBirth = 0;
+    view.containmentPath.clear();
+    return;
+  }
+  if (st.validateContainment(birthOp)) {
+    view.focusedBirth    = birthOp;
+    view.containmentPath = st.containmentPath(birthOp);
+  }
 }
 
 std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
@@ -1152,8 +1217,10 @@ void Session::refresh(const std::uint32_t docIndex,
   // most of the answer. Only a move that is not one step on -- travelling in
   // hypertime, or several edits recorded before anything asked to see them --
   // has to replay the history from the null document.
-  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version)) {
-    open[docIndex].pieces = st.rebuild(version);
+  const auto birth = open[docIndex].focusedBirth;
+  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version,
+                  birth)) {
+    open[docIndex].pieces = st.rebuild(version, birth);
   }
   open[docIndex].version = version;
   invalidate();
@@ -1279,13 +1346,15 @@ ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
     return videoFitSize(natW, natH);
   }
   if (gleditor::MagicMimeDetector::isImageMime(mime)) {
-    const auto decoded =
-        gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime});
-    const float natW =
-        decoded.valid() ? static_cast<float>(decoded.width) : 1.0F;
-    const float natH =
-        decoded.valid() ? static_cast<float>(decoded.height) : 1.0F;
-    return imageFitSize(natW, natH);
+    // An image that will not decode still gets a placeholder, square.
+    const auto natural =
+        gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime})
+            .transform([](const gleditor::DecodedImage &decoded) {
+              return std::pair{static_cast<float>(decoded.width),
+                               static_cast<float>(decoded.height)};
+            })
+            .value_or(std::pair{1.0F, 1.0F});
+    return imageFitSize(natural.first, natural.second);
   }
   if (gleditor::MagicMimeDetector::isVideoMime(mime)) {
     const auto [natW, natH] = videoNaturalSizeFor(bytes);
@@ -1409,10 +1478,10 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
 } // namespace
 
 std::shared_ptr<VersionTextSource>
-Session::sourceFor(const MicroversionId &version,
-                   const std::size_t storeIndex) const {
+Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
+                   const std::uint32_t scopedBirth) const {
   const auto &st     = store(storeIndex);
-  const auto rebuilt = st.rebuild(version);
+  const auto rebuilt = st.rebuild(version, scopedBirth);
   gleditor::MagicMimeDetector magic;
 
   std::string concatext;
@@ -1509,7 +1578,10 @@ Session::sourceFor(const MicroversionId &version,
       std::make_move_iterator(formattingResult.blockStyles.end()));
 
   std::string title;
-  if (st.isSystem()) {
+  if (scopedBirth != 0) {
+    title = st.resolveStructureName(version, scopedBirth);
+  }
+  if (title.empty() && st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
       title = std::string(systemDocUri(*kind));
     }
@@ -1519,6 +1591,12 @@ Session::sourceFor(const MicroversionId &version,
         ann && !ann->alias.empty()) {
       title = ann->alias;
     }
+  }
+  if (title.empty() && scopedBirth != 0) {
+    title =
+        (st.structureKindOfOp(scopedBirth) == StructureKind::Slice ? "Slice "
+                                                                   : "Doc ") +
+        std::to_string(scopedBirth);
   }
 
   auto target =
@@ -1773,9 +1851,22 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       return;
     }
 
-    const auto sIdx = view.storeIndex;
-    auto &st        = store(sIdx);
-    auto curVersion = view.version;
+    const auto focus = focusTargetForView(which);
+    if (!focus.has_value() || !focus->isValid()) {
+      view.uncommittedLog.clear();
+      return;
+    }
+
+    const auto sIdx        = view.storeIndex;
+    auto &st               = store(sIdx);
+    auto curVersion        = view.version;
+    const auto targetBirth = focus->birthOp;
+    MicroversionId ctxId{};
+    if (targetBirth != 0) {
+      const auto lastOp = st.lastOpOnStructure(curVersion, targetBirth);
+      ctxId             = (lastOp != 0) ? st.segmentedOps().idOf(lastOp)
+                                        : st.segmentedOps().idOf(targetBirth);
+    }
 
     for (const auto &op : compacted) {
       if (op.kind == OpKind::Insert) {
@@ -1789,9 +1880,9 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           // and under transcopyright it would have routed royalties to
           // whoever typed the line first. Storage economy is a real goal, but
           // it belongs below the address layer, not at it.
-          curVersion = st.insert(curVersion, op.at, op.text);
-          std::cout << "xudu: " << curVersion.str() << " insert "
-                    << op.text.size() << " bytes at " << op.at << "\n";
+          curVersion = st.insert(curVersion, op.at, op.text, ctxId);
+          GLEDITOR_LOG_DEBUG("xudu.edit", "{} insert {} bytes at {}",
+                             curVersion.str(), op.text.size(), op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
               broadcastLiveOp(
@@ -1803,9 +1894,9 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
         }
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
-          curVersion = st.erase(curVersion, op.at, op.length);
-          std::cout << "xudu: " << curVersion.str() << " delete " << op.length
-                    << " bytes at " << op.at << "\n";
+          curVersion = st.erase(curVersion, op.at, op.length, ctxId);
+          GLEDITOR_LOG_DEBUG("xudu.edit", "{} delete {} bytes at {}",
+                             curVersion.str(), op.length, op.at);
           if (swarmSource && !st.isSystem()) {
             if (auto appliedOp = st.getOp(curVersion)) {
               broadcastLiveOp(static_cast<std::uint32_t>(which), *appliedOp,
@@ -1859,6 +1950,10 @@ void Session::textInserted(Doc &doc, const std::uint32_t at,
   if (which >= open.size()) {
     return;
   }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
+    return;
+  }
   open[which].uncommittedLog.recordInsert(at, utf8);
   if (swarmSource) {
     flushUncommitted(static_cast<std::uint32_t>(which));
@@ -1869,6 +1964,10 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
                          const std::string &removed) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
+    return;
+  }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
     return;
   }
   open[which].uncommittedLog.recordErase(at, removed);
@@ -1935,9 +2034,9 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     link.left  = content;
     link.right.push_back(xudu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
-    std::cout << "xudu: " << version.str() << " format "
-              << xudu::formatAttributeName(*attribute) << " [" << start << ", "
-              << (start + effLen) << ")\n";
+    GLEDITOR_LOG_DEBUG("xudu.edit", "{} format {} [{}, {})", version.str(),
+                       xudu::formatAttributeName(*attribute), start,
+                       start + effLen);
   }
   save(sIdx);
   refresh(docIndex, version);
@@ -1993,9 +2092,9 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   link.left  = content;
   link.right.push_back(xudu::vocabularySpanFor(*attribute));
   auto version = st.addLink(open[docIndex].version, link);
-  std::cout << "xudu: " << version.str() << " align "
-            << xudu::formatAttributeName(*attribute) << " [" << start << ", "
-            << (start + effLen) << ")\n";
+  GLEDITOR_LOG_DEBUG("xudu.edit", "{} align {} [{}, {})", version.str(),
+                     xudu::formatAttributeName(*attribute), start,
+                     start + effLen);
   save(sIdx);
   refresh(docIndex, version);
 }
@@ -2355,11 +2454,11 @@ void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const float anchorX = corner->x;
     const float anchorY = corner->y;
 
-    const auto *const pageObj = p.doc->page(pageIdx);
+    const auto pageObj = p.doc->page(pageIdx);
     // World-Y of this page's own origin, which callers use to convert a
     // page-pixel-space Y (already the same up-positive, centre-relative
     // convention as anchor->y) into world space: pageCenterY + Y*pixelsToWorld.
-    const float pageCenterY = (nullptr != pageObj)
+    const float pageCenterY = (pageObj.has_value())
                                   ? pageObj->getModel()[3][1]
                                   : (-100.0F * static_cast<float>(pageIdx));
 

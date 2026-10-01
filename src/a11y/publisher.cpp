@@ -95,8 +95,8 @@ void describeNode(std::ostringstream &out, const Node &node,
 
 void describeFrom(std::ostringstream &out, const Tree &tree,
                   const std::uint64_t id, const std::size_t depth) {
-  const auto *const node = tree.find(id);
-  if (nullptr == node) {
+  const auto node = tree.find(id);
+  if (!node) {
     return;
   }
   describeNode(out, *node, depth);
@@ -269,9 +269,9 @@ std::string Publisher::describe(const Tree &tree) {
     return "(nothing)\n";
   }
   describeFrom(out, tree, tree.root(), 0);
-  const auto *const focused = tree.find(tree.focus);
-  std::string focusLabel    = "(none)";
-  if (nullptr != focused) {
+  const auto focused     = tree.find(tree.focus);
+  std::string focusLabel = "(none)";
+  if (focused.has_value()) {
     focusLabel =
         focused->label.empty() ? roleName(focused->role) : focused->label;
   }

@@ -24,15 +24,15 @@
 #include <tuple>
 #include <vector>
 
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/store_tables.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <xudu/core/version.hpp>
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/version.hpp"
 
 #include "torrent_data.hpp"
 
@@ -40,31 +40,32 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using xudu::adopt;
-using xudu::adoptLinkPackage;
-using xudu::createMutableKeys;
-using xudu::decodePublication;
-using xudu::encodeLinkPackage;
-using xudu::encodePublication;
-using xudu::GlobalLink;
-using xudu::GlobalSpan;
-using xudu::InfoHash;
-using xudu::Link;
-using xudu::LinkPackage;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::MutableKeys;
-using xudu::PrimediaSpan;
-using xudu::ProminenceTier;
-using xudu::Publication;
-using xudu::publicationSigningBuffer;
-using xudu::publish;
-using xudu::publishLinkPackage;
-using xudu::Scroll;
-using xudu::scrollKey;
-using xudu::ScrollSegment;
-using xudu::signMutableItem;
-using xudu::Store;
+using xanadu::adopt;
+using xanadu::adoptLinkPackage;
+using xanadu::createMutableKeys;
+using xanadu::decodePublication;
+using xanadu::encodeLinkPackage;
+using xanadu::encodePublication;
+using xanadu::GlobalLink;
+using xanadu::GlobalSpan;
+using xanadu::InfoHash;
+using xanadu::Link;
+using xanadu::LinkPackage;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::MutableKeys;
+using xanadu::PrimediaSpan;
+using xanadu::ProminenceTier;
+using xanadu::Publication;
+using xanadu::publicationSigningBuffer;
+using xanadu::publish;
+using xanadu::publishLinkPackage;
+using xanadu::Scroll;
+using xanadu::scrollKey;
+using xanadu::ScrollSegment;
+using xanadu::signMutableItem;
+using xanadu::Store;
+using xanadu::ValueKind;
 
 // Source 3 vector: 84 bytes "Epilogue..."
 inline const std::string source3Torrent = xudu_test::fromHex(
@@ -95,10 +96,10 @@ struct ExecutionResult {
 /// store here and rendering it there worked by accident of duplication.
 /// Per-test rather than the default under $XDG_DATA_HOME, so that one test's
 /// prose cannot show up in another's screenshot.
-std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
-  xudu::UserPermascroll::Config config;
+std::shared_ptr<xanadu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xanadu::UserPermascroll::Config config;
   config.storageDir = dir;
-  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  return std::make_shared<xanadu::UserPermascroll>(std::move(config));
 }
 
 /// The flag naming that permascroll to the xudu subprocess.
@@ -1177,19 +1178,20 @@ TEST(E2EBinaryOrchestrationTest,
   // opened alongside it at the same depth, so each starts out part of the
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
-  std::string cmd =
-      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
-      " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
-      " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  std::string cmd = "SPDLOG_LEVEL='off,xudu.links=debug' " + xuduBin.string() +
+                    permascrollFlag(testRoot / "permascroll") + " --backend " +
+                    activeBackend() + " --profile --fov 15 --coarse-below 0" +
+                    " --version-id " + vLinked.str() + " --background " +
+                    vCorpus.str() + " --background " + vPageTop.str() +
+                    " --background " + vPageBottom.str() + " --screenshot " +
+                    ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath)) << "Fly-in screenshot missing";
-  // LinkBeams::align()'s trace: proof the two pages actually flew forward
-  // rather than merely being linked.
-  EXPECT_NE(res.output.find("aligns centroid"), std::string::npos)
+  // LinkBeams::align()'s opt-in diagnostic records the actual move. A stored
+  // link alone would not prove that a background page flew forward.
+  EXPECT_NE(res.output.find("aligns doc"), std::string::npos)
       << "background flyin never brought a linked page forward:\n"
       << res.output;
 
@@ -1297,17 +1299,17 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
       reloaded.rebuild(finalVersion).spansFor(insertedAt, marker.size());
   ASSERT_FALSE(typedSpans.empty());
 
-  std::set<xudu::FormatAttribute> found;
+  std::set<xanadu::FormatAttribute> found;
   for (const auto &span : typedSpans) {
-    for (const auto *const link : reloaded.linksTouching(span)) {
-      if (const auto attribute = reloaded.formatAttributeOf(*link)) {
+    for (const auto &link : reloaded.linksTouching(span)) {
+      if (const auto attribute = reloaded.formatAttributeOf(link)) {
         found.insert(*attribute);
       }
     }
   }
   EXPECT_THAT(found,
-              testing::UnorderedElementsAre(xudu::FormatAttribute::Bold,
-                                            xudu::FormatAttribute::Italic))
+              testing::UnorderedElementsAre(xanadu::FormatAttribute::Bold,
+                                            xanadu::FormatAttribute::Italic))
       << "--type '[bold,italic]...' should have recorded both as Format "
          "links over the typed text";
 }
@@ -1352,15 +1354,15 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_FALSE(leftSpans.empty());
   ASSERT_FALSE(rightSpans.empty());
 
-  const auto touchingLeft = reloaded.linksTouching(leftSpans.front());
+  auto touchingLeft = reloaded.linksTouching(leftSpans.front());
   ASSERT_FALSE(touchingLeft.empty())
       << "forge-clasp should have forged a link touching the homestead span";
-  EXPECT_EQ(touchingLeft.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingLeft.front().type, LinkType::Comment);
 
-  const auto touchingRight = reloaded.linksTouching(rightSpans.front());
+  auto touchingRight = reloaded.linksTouching(rightSpans.front());
   ASSERT_FALSE(touchingRight.empty())
       << "forge-clasp should have forged a link touching the toward span";
-  EXPECT_EQ(touchingRight.front()->type, LinkType::Comment);
+  EXPECT_EQ(touchingRight.front().type, LinkType::Comment);
 }
 
 // Gap E, named in the multimedia pipeline plan: a media fragment transcluded
@@ -1434,8 +1436,8 @@ TEST(E2EBinaryOrchestrationTest,
   reloaded.load(storePath.string());
   bool foundImageContainer = false;
   for (const auto &piece : reloaded.rebuild(withFragment).pieces()) {
-    if (const auto *segment = reloaded.containerFor(piece);
-        nullptr != segment && "image/png" == segment->mimeType) {
+    if (const auto segment = reloaded.containerFor(piece);
+        segment.has_value() && "image/png" == segment->mimeType) {
       foundImageContainer = true;
       EXPECT_EQ(segment->length, pngBytes.size())
           << "the container segment should span the whole original PNG "
@@ -1480,19 +1482,12 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto tablesPath = storePath / "store.tables";
   ASSERT_TRUE(fs::exists(tablesPath))
       << "no side tables written for " << storePath.string();
-  const auto tables = xudu::readStoreTables(tablesPath);
+  const auto tables = xanadu::readStoreTables(tablesPath);
 
   std::size_t imageSegments = 0;
   for (const auto &segment : tables.localSegments) {
     if (segment.mimeType.starts_with("image/png")) {
       ++imageSegments;
-    }
-  }
-  for (const auto &scroll : tables.scrolls) {
-    for (const auto &segment : scroll.segments) {
-      if (segment.mimeType.starts_with("image/png")) {
-        ++imageSegments;
-      }
     }
   }
   EXPECT_EQ(imageSegments, 1U)
@@ -1567,10 +1562,10 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
   ASSERT_FALSE(commentPieces.empty());
   const auto commentSpan = commentPieces.front();
 
-  store.addLink(commentVer, xudu::Link{.type  = LinkType::Comment,
-                                       .owner = "author",
-                                       .left  = {commentSpan},
-                                       .right = {imageSpan}});
+  store.addLink(commentVer, xanadu::Link{.type  = LinkType::Comment,
+                                         .owner = "author",
+                                         .left  = {commentSpan},
+                                         .right = {imageSpan}});
 
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
@@ -1677,6 +1672,99 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
       << "expected two differently-coloured images plus surrounding text "
          "to produce a reasonably varied image, not a blank or single-"
          "image page";
+}
+
+TEST(E2EBinaryOrchestrationTest, savingADocumentDoesNotRedesignateItsEditions) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot = fs::current_path() / "build" / "editions_save_test";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto storePath = testRoot / "document.xanadoc";
+  const auto perma     = permascrollAt(testRoot / "permascroll");
+  Store store(perma);
+  const auto v1 = store.insert(MicroversionId{}, 0, "English version text.\n");
+  const auto v2 = store.insert(v1, 0, "Texte en français.\n");
+  const auto v3 = store.insert(v2, 0, "Scratch draft for comparison.\n");
+  const auto vEd1 = store.designateEdition(v3, "English", v1);
+  const auto vEd2 = store.designateEdition(vEd1, "French", v2);
+  store.save(storePath.string());
+
+  const auto expected = std::vector<MicroversionId>{v1, v2};
+  EXPECT_EQ(store.currentVersions(), expected);
+
+  // Run xudu opening 3 views: v1 (English), alongside v2 (French), and
+  // alongside v3 (scratch draft). Prior to decoupling Session::save from the
+  // viewport, saving on exit would overwrite currentVersions with all three
+  // visible views {v1, v2, v3}.
+  const auto ppmPath = screenshotDir / "editions_save_views.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --strict-diagnostics" +
+      " --version-id " + v1.str() + " --alongside " + v2.str() +
+      " --background " + v3.str() + " --screenshot " + ppmPath.string() + " " +
+      storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "xudu run failed: " << res.output;
+
+  // Reload store from disk and assert designations were NOT overwritten by
+  // viewport
+  Store reloaded(perma);
+  reloaded.load(storePath.string());
+  EXPECT_EQ(reloaded.currentVersions(), expected);
+  const auto eds = reloaded.editions(reloaded.latest());
+  ASSERT_EQ(eds.size(), 2U);
+  EXPECT_EQ(eds[0].name, "English");
+  EXPECT_EQ(eds[0].targetVersion, v1);
+  EXPECT_EQ(eds[1].name, "French");
+  EXPECT_EQ(eds[1].targetVersion, v2);
+}
+
+TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot      = fs::current_path() / "build" / "cli_alias_test";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto storePath = testRoot / "doc_alias.xanadoc";
+  const auto perma     = permascrollAt(testRoot / "permascroll");
+  Store store(perma);
+  const auto v1 = store.insert(MicroversionId{}, 0, "Base initial text.\n");
+  store.save(storePath.string());
+
+  // Invoke xudu with --alias 1:original-release
+  const auto ppmPath = screenshotDir / "cli_alias.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --strict-diagnostics" +
+      " --alias " + v1.str() + ":original-release" + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "xudu --alias run failed: " << res.output;
+
+  // Reload store and assert that original-release is an edition cell linked on
+  // d.editions
+  Store reloaded(permascrollAt(testRoot / "permascroll"));
+  reloaded.load(storePath.string());
+  const auto manifold = reloaded.rebuildManifold(reloaded.latest());
+  const auto ed       = manifold.editionNamed("original-release");
+  ASSERT_TRUE(ed.has_value());
+  EXPECT_NE(ed->handle, zigzag::noCell);
+  EXPECT_EQ(manifold.valueKindOf(ed->handle), ValueKind::OpHandle);
+  EXPECT_EQ(
+      manifold.handleTarget(ed->handle),
+      std::optional<zigzag::CellRef>{reloaded.segmentedOps().indexOf(v1)});
+  EXPECT_EQ(reloaded.resolveAlias("original-release"), v1);
 }
 
 } // namespace

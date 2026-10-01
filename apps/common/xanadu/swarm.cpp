@@ -1,5 +1,7 @@
 #include "swarm.hpp"
 
+#include "lt_compat.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -863,10 +865,16 @@ std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &hash) const {
   return found->second.handle.status().all_time_download;
 }
 
-const Metainfo *SwarmContentSource::metainfo(const InfoHash &hash) const {
+gleditor::cpp26::optional<const Metainfo &>
+SwarmContentSource::metainfo(const InfoHash &hash) const {
   impl->pump();
   const auto found = impl->swarms.find(hash);
-  return found == impl->swarms.end() ? nullptr : found->second.meta.get();
+  // A swarm is registered before its metadata arrives, so a found entry can
+  // still have none.
+  if (found == impl->swarms.end() || !found->second.meta) {
+    return gleditor::cpp26::nullopt;
+  }
+  return *found->second.meta;
 }
 
 std::string SwarmContentSource::readStream(const InfoHash &hash,
@@ -980,16 +988,25 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
   }
 
   LiveOpBroadcast b;
-  const auto hStr = node.dict_find_string_value("h");
+  // A peer's bytes: a hash that is not hex makes the message malformed, which
+  // this decoder answers with nullopt rather than an exception it never
+  // promised to throw. Every one of bdecode's strings goes through
+  // lt_compat::sv() because before libtorrent 2.1 they are boost's
+  // string_view, which this tree's own parsers do not take.
+  const auto hStr = lt_compat::sv(node.dict_find_string_value("h"));
   if (!hStr.empty()) {
-    b.swarmHash = InfoHash::fromHex(hStr);
+    const auto hash = InfoHash::parseHex(hStr);
+    if (!hash) {
+      return std::nullopt;
+    }
+    b.swarmHash = *hash;
   }
-  const auto vStr = node.dict_find_string_value("v");
+  const auto vStr = lt_compat::sv(node.dict_find_string_value("v"));
   if (!vStr.empty()) {
     b.version = MicroversionId::parse(vStr);
   }
   b.op.kind       = static_cast<OpKind>(node.dict_find_int_value("k", 0));
-  const auto pStr = node.dict_find_string_value("p");
+  const auto pStr = lt_compat::sv(node.dict_find_string_value("p"));
   if (!pStr.empty()) {
     b.op.parent = MicroversionId::parse(pStr);
   }
@@ -1001,7 +1018,7 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
       static_cast<std::uint64_t>(node.dict_find_int_value("so", 0));
   b.op.span.length =
       static_cast<std::uint64_t>(node.dict_find_int_value("sl", 0));
-  const auto srcStr = node.dict_find_string_value("src");
+  const auto srcStr = lt_compat::sv(node.dict_find_string_value("src"));
   if (!srcStr.empty()) {
     b.op.source = MicroversionId::parse(srcStr);
   }
@@ -1106,15 +1123,24 @@ SwarmContentSource::decodeScrollSealed(const std::string_view body) {
   }
 
   ScrollSealedBroadcast b;
-  const auto hStr = node.dict_find_string_value("h");
+  // A peer's bytes: see decodeLiveOp().
+  const auto hStr = lt_compat::sv(node.dict_find_string_value("h"));
   if (!hStr.empty()) {
-    b.swarmHash = InfoHash::fromHex(hStr);
+    const auto hash = InfoHash::parseHex(hStr);
+    if (!hash) {
+      return std::nullopt;
+    }
+    b.swarmHash = *hash;
   }
   b.authorScrollKey = std::string(node.dict_find_string_value("sk"));
   b.sealedUpTo = static_cast<std::uint64_t>(node.dict_find_int_value("up", 0));
-  const auto phStr = node.dict_find_string_value("ph");
+  const auto phStr = lt_compat::sv(node.dict_find_string_value("ph"));
   if (!phStr.empty()) {
-    b.pieceInfoHash = InfoHash::fromHex(phStr);
+    const auto pieceHash = InfoHash::parseHex(phStr);
+    if (!pieceHash) {
+      return std::nullopt;
+    }
+    b.pieceInfoHash = *pieceHash;
   }
   b.timestamp = node.dict_find_int_value("ts", 0);
   return b;

@@ -147,6 +147,10 @@ TEST(DecodeIndexGifTest, PeekGifSizeInvalidBuffers) {
   const std::vector<std::uint8_t> tooShort = {'G', 'I', 'F', '8', '9', 'a'};
   EXPECT_FALSE(peekGifSize(tooShort).has_value());
 
+  auto truncatedHeader = makeMinimalGif(128, 64);
+  truncatedHeader.resize(9);
+  EXPECT_FALSE(peekGifSize(truncatedHeader).has_value());
+
   std::vector<std::uint8_t> badMagic = {'B', 'A',  'D',  'M',  'A',
                                         'G', 0x10, 0x00, 0x20, 0x00};
   EXPECT_FALSE(peekGifSize(badMagic).has_value());
@@ -158,6 +162,10 @@ TEST(DecodeIndexGifTest, IsAnimatedGifDistinguishesSingleFromMultiFrame) {
 
   const auto multi = makeMinimalGif(32, 32, /*animated=*/true);
   EXPECT_TRUE(isAnimatedGif(multi));
+
+  auto truncatedHeader = multi;
+  truncatedHeader.resize(12);
+  EXPECT_FALSE(isAnimatedGif(truncatedHeader));
 }
 
 TEST(DecodeIndexGifTest, BuildDecodeIndexGif) {

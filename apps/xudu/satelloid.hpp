@@ -28,9 +28,12 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 #include "common/xanadu/universal_link_endpoint.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @struct CellSatelloid
@@ -112,9 +115,10 @@ public:
   }
 
   /// Lookup satelloid by cell reference.
-  [[nodiscard]] const CellSatelloid *
+  [[nodiscard]] gleditor::cpp26::optional<const CellSatelloid &>
   findSatelloid(zigzag::CellRef cellRef) const;
-  [[nodiscard]] CellSatelloid *findSatelloid(zigzag::CellRef cellRef);
+  [[nodiscard]] gleditor::cpp26::optional<CellSatelloid &>
+  findSatelloid(zigzag::CellRef cellRef);
 
   /// Trigger an outward dimensional ring pulse animation.
   void triggerPulse(zigzag::CellRef cellRef);

@@ -7,6 +7,7 @@
 #define ZIGZAG_ZZCORE_HPP
 
 #include "common/xanadu/zigzag/zzstructure.hpp"
+#include <gleditor/cpp26.hpp>
 
 #include <cstdint>
 #include <string>
@@ -51,10 +52,11 @@ private:
 
 inline constexpr std::string_view cloneDimension = "d.clone";
 
-[[nodiscard]] const Cell *
+[[nodiscard]] gleditor::cpp26::optional<const Cell &>
 findCell(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
-[[nodiscard]] LinkPairs linksOn(const Cell *cell, std::string_view dimension);
+[[nodiscard]] LinkPairs linksOn(gleditor::cpp26::optional<const Cell &> cell,
+                                std::string_view dimension);
 
 /**
  * @brief Find the master cell at the head of a cell's d.clone rank.

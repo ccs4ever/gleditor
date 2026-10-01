@@ -8,22 +8,22 @@
 #include <filesystem>
 #include <string>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::formatAttributeName;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::readVocabulary;
-using xudu::Store;
-using xudu::vocabularySpanFor;
+using xanadu::FormatAttribute;
+using xanadu::formatAttributeName;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::readVocabulary;
+using xanadu::Store;
+using xanadu::vocabularySpanFor;
 
 TEST(FormatAttributeTest, everyAttributeHasAName) {
   EXPECT_STREQ(formatAttributeName(FormatAttribute::Italic), "italic");
@@ -70,7 +70,7 @@ TEST(FormatAttributeTest, readingAVocabularySpanReturnsItsWord) {
 }
 
 TEST(FormatAttributeTest, readVocabularyIgnoresSpansIntoOtherScrolls) {
-  EXPECT_FALSE(readVocabulary(PrimediaSpan{xudu::localScroll, 0, 6}));
+  EXPECT_FALSE(readVocabulary(PrimediaSpan{xanadu::localScroll, 0, 6}));
 }
 
 TEST(StoreFormatTest, vocabularyTextIsNotVisibleInAnyDocument) {
@@ -146,9 +146,9 @@ TEST(StoreFormatTest, aFormatLinkIsFoundByTouchingTheFormattedContent) {
   link.right.push_back(vocabularySpanFor(FormatAttribute::Bold));
   store.addLink(version, link);
 
-  const auto touching = store.linksTouching(content.front());
-  ASSERT_EQ(touching.size(), 1U);
-  EXPECT_EQ(store.formatAttributeOf(*touching.front()), FormatAttribute::Bold);
+  auto touching = store.linksTouching(content.front());
+  ASSERT_EQ(std::ranges::distance(touching), 1);
+  EXPECT_EQ(store.formatAttributeOf(touching.front()), FormatAttribute::Bold);
 }
 
 TEST(StoreFormatTest, aFormatLinkSurvivesQuotingItsContentElsewhere) {
@@ -172,10 +172,9 @@ TEST(StoreFormatTest, aFormatLinkSurvivesQuotingItsContentElsewhere) {
   // following the "see: " prefix typed ahead of it.
   const auto quotedSpans = store.rebuild(quoted).spansFor(5, 5);
   ASSERT_FALSE(quotedSpans.empty());
-  const auto touching = store.linksTouching(quotedSpans.front());
-  ASSERT_EQ(touching.size(), 1U);
-  EXPECT_EQ(store.formatAttributeOf(*touching.front()),
-            FormatAttribute::Italic);
+  auto touching = store.linksTouching(quotedSpans.front());
+  ASSERT_EQ(std::ranges::distance(touching), 1);
+  EXPECT_EQ(store.formatAttributeOf(touching.front()), FormatAttribute::Italic);
 }
 
 TEST(StoreFormatTest, aFormatLinkMadeInOneStoreIsRecognisedInAnother) {
@@ -195,8 +194,10 @@ TEST(StoreFormatTest, aFormatLinkMadeInOneStoreIsRecognisedInAnother) {
 
 struct StoreFormatRoundTripTest : testing::Test {
   std::filesystem::path dir;
+  std::shared_ptr<xanadu::UserPermascroll> perma;
 
   void SetUp() override {
+    perma = std::make_shared<xanadu::UserPermascroll>();
     dir =
         std::filesystem::temp_directory_path() /
         ("xudu-format-test-" +
@@ -211,7 +212,7 @@ TEST_F(StoreFormatRoundTripTest,
        aFormatLinkIsStillRecognisedAfterSaveAndReload) {
   MicroversionId version;
   {
-    Store store;
+    Store store(perma);
     version            = store.insert(MicroversionId{}, 0, "hello world");
     const auto content = store.rebuild(version).spansFor(0, 5);
 
@@ -223,7 +224,7 @@ TEST_F(StoreFormatRoundTripTest,
     store.save(dir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   ASSERT_EQ(reloaded.links().size(), 1U);
   const auto &stored = reloaded.links().begin()->second;

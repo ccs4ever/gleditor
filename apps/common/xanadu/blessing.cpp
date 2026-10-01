@@ -83,17 +83,16 @@ std::optional<Blessing> decodeBlessing(const std::string_view encoded) {
     return std::nullopt;
   }
 
-  const auto *author    = root.find(keyAuthor);
-  const auto *targetDoc = root.find(keyTargetDoc);
-  const auto *endorsed  = root.find(keyEndorsedPackage);
-  const auto *time      = root.find(keyTime);
-  const auto *note      = root.find(keyNote);
-  const auto *sig       = root.find(keySignature);
+  const auto author    = root.find(keyAuthor);
+  const auto targetDoc = root.find(keyTargetDoc);
+  const auto endorsed  = root.find(keyEndorsedPackage);
+  const auto time      = root.find(keyTime);
+  const auto note      = root.find(keyNote);
+  const auto sig       = root.find(keySignature);
 
-  if (nullptr == author || !author->isString() ||
-      author->asString().size() != 32 || nullptr == targetDoc ||
-      !targetDoc->isString() || nullptr == endorsed || !endorsed->isString() ||
-      nullptr == time || !time->isInteger() || nullptr == sig ||
+  if (!author || !author->isString() || author->asString().size() != 32 ||
+      !targetDoc || !targetDoc->isString() || !endorsed ||
+      !endorsed->isString() || !time || !time->isInteger() || !sig ||
       !sig->isString() || sig->asString().size() != 64) {
     return std::nullopt;
   }
@@ -106,7 +105,7 @@ std::optional<Blessing> decodeBlessing(const std::string_view encoded) {
   blessing.timestamp       = static_cast<std::uint64_t>(time->asInteger());
   std::copy(sig->asString().begin(), sig->asString().end(),
             blessing.signature.bytes.begin());
-  if (nullptr != note && note->isString()) {
+  if (note.has_value() && note->isString()) {
     blessing.note = note->asString();
   }
 

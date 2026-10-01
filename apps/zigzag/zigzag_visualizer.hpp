@@ -6,6 +6,7 @@
 #define ZIGZAG_VISUALIZER_HPP
 
 #include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/quoted_structure.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
@@ -51,6 +52,11 @@ struct RenderStateCell {
   bool is_image{false};
   bool is_clone{false};
   CellID clone_master_id{0};
+  bool is_quote{false};
+  std::string quote_label;
+  std::string quote_target;
+  bool is_vocab{false};
+  std::string vocab_target;
 
   glm::vec3 current_pos{0.0F, 0.0F, 0.0F};
   glm::vec3 target_pos{0.0F, 0.0F, 0.0F};
@@ -143,6 +149,11 @@ public:
                       const std::vector<xanadu::MicroversionId> &versions);
   void bindXuduStore(xanadu::Store &store,
                      const xanadu::MicroversionId &version);
+  void reloadStoreVersion(const xanadu::MicroversionId &version,
+                          zigzag::CellRef newFocus = zigzag::noCell);
+  void setOnOpenQuoteBuilder(std::function<void()> cb) {
+    onOpenQuoteBuilder_ = std::move(cb);
+  }
   void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
                      const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
@@ -344,7 +355,6 @@ public:
   bool deleteFocusCell();
   void updateFocusCellText(const std::string &text);
   bool saveStore(const std::string &filePath = {}) const;
-  bool saveStructureYaml(const std::string &filePath) const;
 
   [[nodiscard]] bool isProtected(CellRef id) const;
 
@@ -355,7 +365,7 @@ public:
   /// operation: "only a user-generated update persists; navigation never does"
   /// (design R8), and drawing a frame is less than navigation. Minting belongs
   /// to the verbs a person invokes -- inserting a cell, making a link.
-  [[nodiscard]] DimRef dimensionRef(const DimID &name) const;
+  [[nodiscard]] std::optional<DimRef> dimensionRef(const DimID &name) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(CellRef cell) const override;
@@ -432,7 +442,6 @@ public:
     return visible_cells_;
   }
 
-private:
   struct CellInfo {
     CellRef id{0};
     std::string text;
@@ -442,8 +451,21 @@ private:
     bool is_image{false};
     bool is_clone{false};
     CellRef clone_master_id{0};
+    bool is_quote{false};
+    std::string quote_label;
+    std::string quote_target;
+    bool is_vocab{false};
+    std::string vocab_target;
   };
 
+  [[nodiscard]] CellInfo inspectCell(CellRef id) const;
+  [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
+  [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
+                                                    bool isFocus) const;
+  [[nodiscard]] const CellLayoutMetrics &
+  cellLayout(CellID id, const RenderStateCell &cell, bool isFocus) const;
+
+private:
   void rebuildActiveViewTopology();
   void updateCellPositions(float deltaTime);
   void invalidateAccessibility() {
@@ -453,12 +475,6 @@ private:
     }
   }
 
-  [[nodiscard]] CellInfo inspectCell(CellRef id) const;
-  [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
-  [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
-                                                    bool isFocus) const;
-  [[nodiscard]] const CellLayoutMetrics &
-  cellLayout(CellID id, const RenderStateCell &cell, bool isFocus) const;
   void refreshCellLayouts();
 
   std::string fontName_;
@@ -515,6 +531,7 @@ private:
   std::string commandBarText_;
   std::string commandBarFeedback_;
   bool commandBarFeedbackIsError_{false};
+  std::function<void()> onOpenQuoteBuilder_;
 };
 
 } // namespace zigzag

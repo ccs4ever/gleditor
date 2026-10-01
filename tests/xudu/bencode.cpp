@@ -8,12 +8,12 @@
 #include <stdexcept>
 #include <string>
 
-#include <xudu/core/bencode.hpp>
+#include "common/xanadu/bencode.hpp"
 
 namespace {
 
-using xudu::bencode::decode;
-using xudu::bencode::Value;
+using xanadu::bencode::decode;
+using xanadu::bencode::Value;
 
 TEST(BencodeTest, integers) {
   EXPECT_EQ(decode("i3e").asInteger(), 3);
@@ -40,7 +40,7 @@ TEST(BencodeTest, dictionaries) {
   const auto value = decode("d3:cow3:moo4:spam4:eggse");
   EXPECT_EQ(value.find("cow")->asString(), "moo");
   EXPECT_EQ(value.find("spam")->asString(), "eggs");
-  EXPECT_EQ(value.find("absent"), nullptr);
+  EXPECT_FALSE((value.find("absent")).has_value());
 }
 
 TEST(BencodeTest, nesting) {

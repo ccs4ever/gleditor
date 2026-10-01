@@ -17,13 +17,13 @@
 #include <fstream>
 #include <string>
 
-#include <xudu/core/config.hpp>
-#include <xudu/core/provenance.hpp>
+#include "common/xanadu/config.hpp"
+#include "common/xanadu/provenance.hpp"
 
 namespace {
 
-using xudu::Author;
-using xudu::Config;
+using xanadu::Author;
+using xanadu::Config;
 
 /// Environment variables put back the way they were found, since the test
 /// binary runs every case in one process.
@@ -77,18 +77,17 @@ TEST(ConfigTest, everythingSetComesBackOut) {
   config.author.gpgKey = "0xDEADBEEF";
   config.gpgHome       = "/home/ada/.gnupg-publishing";
 
-  const auto read = Config::fromYaml(config.toYaml());
+  const auto read = Config::fromTsv(config.toTsv());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author, config.author);
   EXPECT_EQ(read->gpgHome, config.gpgHome);
   EXPECT_TRUE(read->complete());
 }
 
-TEST(ConfigTest, aFileSaysWhatItIsForBeforeItSaysAnything) {
-  // The audience is somebody opening it in an editor to change their name.
-  const auto text = Config{}.toYaml();
-  EXPECT_TRUE(text.starts_with("#"));
-  EXPECT_TRUE(text.contains("publishes"));
+TEST(ConfigTest, aFileNamesItsFieldsEvenWhenTheyAreEmpty) {
+  const auto text = Config{}.toTsv();
+  EXPECT_TRUE(text.starts_with("author\t"));
+  EXPECT_TRUE(text.contains("gpg_key\t"));
 }
 
 TEST(ConfigTest, halfAnIdentityIsNotEnoughToSignWith) {
@@ -103,9 +102,9 @@ TEST(ConfigTest, halfAnIdentityIsNotEnoughToSignWith) {
 // Settings a later version knows about are left alone rather than complained
 // at: an old binary reading a new file should still find the author in it.
 TEST(ConfigTest, unknownSettingsAreIgnoredAndTheRestIsRead) {
-  const auto read = Config::fromYaml("author: \"Ada Lovelace\"\n"
-                                     "email: \"ada@example.org\"\n"
-                                     "future_setting: \"whatever\"\n");
+  const auto read = Config::fromTsv("author\tAda Lovelace\n"
+                                    "email\tada@example.org\n"
+                                    "future_setting\twhatever\n");
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author.name, "Ada Lovelace");
   EXPECT_EQ(read->author.email, "ada@example.org");
@@ -115,7 +114,7 @@ TEST(ConfigTest, somethingThatIsNotAConfigurationIsRefused) {
   // Not read as an empty configuration: the file was written by somebody who
   // meant something by it, and quietly publishing as nobody is the failure
   // this is trying to avoid.
-  EXPECT_FALSE(Config::fromYaml("this is not a configuration").has_value());
+  EXPECT_FALSE(Config::fromTsv("this is not a configuration").has_value());
 }
 
 TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
@@ -123,30 +122,30 @@ TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
   Environment::clear("XUDU_CONFIG");
 
   Environment::set("XDG_CONFIG_HOME", "/somewhere/config");
-  EXPECT_EQ(xudu::configPath(), "/somewhere/config/xudu/config.yaml");
+  EXPECT_EQ(xanadu::configPath(), "/somewhere/config/xudu/config.tsv");
 
   // Without it, the fallback the specification names.
   Environment::clear("XDG_CONFIG_HOME");
   Environment::set("HOME", "/home/ada");
-  EXPECT_EQ(xudu::configPath(), "/home/ada/.config/xudu/config.yaml");
+  EXPECT_EQ(xanadu::configPath(), "/home/ada/.config/xudu/config.tsv");
 
   // And a file named outright wins over both, which is what lets somebody with
   // two identities keep two.
-  Environment::set("XUDU_CONFIG", "/tmp/other.yaml");
-  EXPECT_EQ(xudu::configPath(), "/tmp/other.yaml");
+  Environment::set("XUDU_CONFIG", "/tmp/other.tsv");
+  EXPECT_EQ(xanadu::configPath(), "/tmp/other.tsv");
 }
 
 TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
   const Environment environment;
   const auto path = std::filesystem::temp_directory_path() /
-                    ("xudu-config-" + std::to_string(getpid())) / "config.yaml";
+                    ("xudu-config-" + std::to_string(getpid())) / "config.tsv";
   std::filesystem::remove_all(path.parent_path());
 
   Config config;
   config.author.name  = "Ada Lovelace";
   config.author.email = "ada@example.org";
   config.gpgHome      = "/media/key/.gnupg";
-  xudu::saveConfig(config, path.string());
+  xanadu::saveConfig(config, path.string());
 
   // It says who somebody is and where their signing key lives.
   const auto mode = std::filesystem::status(path).permissions();
@@ -155,7 +154,7 @@ TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
   EXPECT_EQ(mode & std::filesystem::perms::others_all,
             std::filesystem::perms::none);
 
-  const auto back = xudu::loadConfig(path.string());
+  const auto back = xanadu::loadConfig(path.string());
   EXPECT_EQ(back.author, config.author);
   EXPECT_EQ(back.gpgHome, config.gpgHome);
   EXPECT_TRUE(read(path).contains("Ada Lovelace"));
@@ -165,21 +164,21 @@ TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
 
 TEST(ConfigTest, noFileIsAnEmptyConfigurationRatherThanAnError) {
   const auto missing = std::filesystem::temp_directory_path() /
-                       "xudu-config-that-is-not-there.yaml";
+                       "xudu-config-that-is-not-there.tsv";
   std::filesystem::remove(missing);
-  const auto config = xudu::loadConfig(missing.string());
+  const auto config = xanadu::loadConfig(missing.string());
   EXPECT_FALSE(config.complete());
   EXPECT_TRUE(config.author.name.empty());
 }
 
 TEST(ConfigTest, aFileThatCannotBeUnderstoodIsAnError) {
   const auto path = std::filesystem::temp_directory_path() /
-                    ("xudu-bad-config-" + std::to_string(getpid()) + ".yaml");
+                    ("xudu-bad-config-" + std::to_string(getpid()) + ".tsv");
   {
     std::ofstream out(path);
     out << "not a configuration at all\n";
   }
-  EXPECT_THROW(static_cast<void>(xudu::loadConfig(path.string())),
+  EXPECT_THROW(static_cast<void>(xanadu::loadConfig(path.string())),
                std::runtime_error);
   std::filesystem::remove(path);
 }
@@ -201,9 +200,9 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
     std::ofstream(dir / "gpg.conf") << "pinentry-mode loopback\n";
   }
 
-  xudu::SigningOptions where;
+  xanadu::SigningOptions where;
   where.gpgHome = dir.string();
-  EXPECT_TRUE(xudu::signingKeys(where).empty())
+  EXPECT_TRUE(xanadu::signingKeys(where).empty())
       << "an empty keyring has nothing to offer";
 
   const auto make = [&dir](const std::string &who) {
@@ -221,7 +220,7 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
     GTEST_SKIP() << "no gpg keyring could be made here";
   }
 
-  const auto keys = xudu::signingKeys(where);
+  const auto keys = xanadu::signingKeys(where);
   ASSERT_EQ(keys.size(), 2U);
   for (const auto &key : keys) {
     // A fingerprint, not a short id: a short id is a prefix, and prefixes
@@ -236,7 +235,7 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
   }
   EXPECT_EQ(
       std::ranges::count_if(
-          keys, [](const xudu::SigningKey &key) { return key.preferred; }),
+          keys, [](const xanadu::SigningKey &key) { return key.preferred; }),
       1)
       << "exactly one key is the one gpg would use";
 
@@ -279,14 +278,15 @@ TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
   config.author.gpgKey = "locked@example.org";
   config.gpgHome       = dir.string();
 
-  xudu::Provenance record;
+  xanadu::Provenance record;
   record.author = config.author;
   record.title  = "Signed with a passphrase";
 
   const auto signed_ =
-      xudu::signProvenance(record, config.signing("correct horse"));
+      xanadu::signProvenance(record, config.signing("correct horse"));
   EXPECT_TRUE(signed_.signature.starts_with("-----BEGIN PGP SIGNATURE-----"));
-  EXPECT_TRUE(xudu::verifyProvenance(signed_, config.signing()).signatureValid);
+  EXPECT_TRUE(
+      xanadu::verifyProvenance(signed_, config.signing()).signatureValid);
 
   static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
                                  " --kill gpg-agent >/dev/null 2>&1")

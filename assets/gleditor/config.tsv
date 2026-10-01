@@ -1,0 +1,19 @@
+settings.fontSize	16
+settings.fontFamily	Monospace
+settings.lineHeight	1.4
+settings.autoSaveSeconds	5
+settings.theme	system
+spatial.documentSpacingX	70.0
+spatial.depthZ	-45.0
+spatial.docArrivalSeconds	0.22
+spatial.backgroundOpacity	0.35
+keymap.new	Ctrl+N
+keymap.close	Ctrl+W
+keymap.save	Ctrl+S
+keymap.bold	Ctrl+B
+keymap.italic	Ctrl+I
+keymap.underline	Ctrl+U
+keymap.3d-overview	F10
+keymap.next-doc	Ctrl+Tab
+keymap.prev-doc	Ctrl+Shift+Tab
+user_notes.notes	User notes and customization preferences for gleditor.

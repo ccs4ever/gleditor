@@ -134,6 +134,10 @@ TEST(MediaAnimationTest, AnimatedGifPlaybackAndSpeed) {
   EXPECT_FLOAT_EQ(player.positionSeconds(), 0.0F);
 }
 
+// Animated SVG playback is ThorVG's; a build without thorvg-1 has no SVG
+// video to drive, so there is nothing here to assert about.
+#ifdef GLEDITOR_HAVE_SVG_THORVG
+
 TEST(MediaAnimationTest, AnimatedSvgPlaybackAndClamping) {
   const std::string_view animatedSvg =
       R"(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
@@ -183,6 +187,8 @@ TEST(MediaAnimationTest, AnimatedSvgPlaybackAndClamping) {
   player.update(0.4F); // 1.4 + 0.2 = 1.6 >= 1.5 -> loops to 0.5s
   EXPECT_NEAR(player.positionSeconds(), 0.5F, 0.001F);
 }
+
+#endif // GLEDITOR_HAVE_SVG_THORVG
 
 } // namespace
 } // namespace gleditor

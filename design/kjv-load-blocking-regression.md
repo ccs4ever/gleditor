@@ -134,7 +134,7 @@ render thread, and right that `ae924c0` made it run in strict document order (se
 None of this is cheap enough to do 1200+ times in a single call without blocking for a long time; it
 was never designed to be — it was designed to be done a few pages at a time, once per frame.
 
-## Doesn't frustum culling, or the Layoutfilade, already prevent this?
+## Doesn't frustum culling, or the Layoutfilade, already prevent this
 
 Both exist in this codebase and both are relevant prior art, but neither reaches the code path
 responsible for the burst.

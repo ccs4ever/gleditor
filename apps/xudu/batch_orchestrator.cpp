@@ -195,8 +195,13 @@ BatchOrchestrator::execute(Session &session,
 
   // If in headless/batch mode, register existing versions for span resolution
   if (headless && session.views().empty() && session.store(0).opCount() > 0) {
-    for (const auto &v : session.store(0).allVersions()) {
-      session.viewOpened(v, 0);
+    const auto &curVers = session.store(0).currentVersions();
+    if (!curVers.empty()) {
+      for (const auto &v : curVers) {
+        session.viewOpened(v, 0);
+      }
+    } else {
+      session.viewOpened(session.store(0).latest(), 0);
     }
   }
 

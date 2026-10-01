@@ -4,6 +4,7 @@
 #include <choreograph/Choreograph.h>
 #include <chrono>
 #include <concepts>
+#include <expected>
 #include <functional>
 #include <future>
 #include <gleditor/tqueue.hpp>
@@ -330,7 +331,12 @@ private:
   /// In-flight background document loads. These capture the render thread's
   /// RenderState by reference, so the render loop waits on them before
   /// returning.
-  std::vector<std::future<void>> pendingDocLoads;
+  /// Background page builds. Each answers whether its source could be read;
+  /// a refusal is logged where it happens and the answer is settled -- read,
+  /// not just waited on -- when the load is reaped, so nothing it throws is
+  /// silently discarded with an unread future.
+  std::vector<std::future<std::expected<void, gleditor::SourceError>>>
+      pendingDocLoads;
 
   /**
    * @brief Every animation in flight, stepped once per frame.

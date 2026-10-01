@@ -8,11 +8,11 @@
 #include <memory>
 #include <string>
 
-#include "xudu/core/kinetic_tether.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/kinetic_tether.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
-using namespace xudu;
+using namespace xanadu;
 
 class KineticTetherTest : public ::testing::Test {};
 

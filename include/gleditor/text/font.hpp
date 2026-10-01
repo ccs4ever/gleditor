@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <expected>
 #include <ft2build.h>
 #include <memory>
 #include <string>
@@ -58,6 +60,31 @@ private:
 
 using FontFacePtr = std::shared_ptr<FontFace>;
 
+/// Why a font could not be had.
+enum class FontError : std::uint8_t {
+  BadSpec,    ///< Fontconfig could not parse the description
+  NoMatch,    ///< Fontconfig matched nothing, or nothing with a file
+  LoadFailed, ///< FreeType or HarfBuzz could not open the matched file
+  NoPrimary,  ///< a fallback was asked for with no primary font to follow
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const FontError error) noexcept {
+  switch (error) {
+  case FontError::BadSpec:
+    return "unparseable font description";
+  case FontError::NoMatch:
+    return "no matching font";
+  case FontError::LoadFailed:
+    return "font file could not be loaded";
+  case FontError::NoPrimary:
+    return "no primary font";
+  }
+  return "font unavailable";
+}
+
+using FontResult = std::expected<FontFacePtr, FontError>;
+
 /**
  * @brief Resolves font descriptions (e.g. "Monospace 16", "Serif 14") via
  * Fontconfig and caches loaded FontFace objects per thread.
@@ -66,17 +93,25 @@ class FontManager {
 public:
   static FontManager &instance();
 
+  /// The font @p fontSpec describes, or why there is none. Cached per
+  /// thread, including the refusals.
+  [[nodiscard]] FontResult findFont(const std::string &fontSpec);
+  /// findFont() for callers with no fallback of their own.
+  /// @throws std::runtime_error naming the FontError.
   FontFacePtr getFont(const std::string &fontSpec);
-  FontFacePtr getFallbackFont(const FontFacePtr &primaryFont,
-                              uint32_t codepoint);
+  /// A font covering @p codepoint that looks as much like @p primaryFont as
+  /// Fontconfig can manage. A miss is cached too, so a codepoint no installed
+  /// font covers costs one Fontconfig query rather than one per glyph.
+  [[nodiscard]] FontResult getFallbackFont(const FontFacePtr &primaryFont,
+                                           uint32_t codepoint);
 
 private:
   FontManager();
   ~FontManager();
 
   FT_Library ftLib_{};
-  std::unordered_map<std::string, FontFacePtr> cache_;
-  std::unordered_map<std::string, FontFacePtr> fallbackCache_;
+  std::unordered_map<std::string, FontResult> cache_;
+  std::unordered_map<std::string, FontResult> fallbackCache_;
 };
 
 } // namespace gleditor::text

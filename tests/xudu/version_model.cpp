@@ -24,21 +24,21 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/spool.hpp>
-#include <xudu/core/version.hpp>
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/version.hpp"
 
 namespace {
 
-using xudu::PrimediaSpan;
-using xudu::Version;
+using xanadu::PrimediaSpan;
+using xanadu::Version;
 
 /// A spool that hands back the bytes at an address, so a version can be
 /// materialised without a store.
-class Bytes : public xudu::SpanReader {
+class Bytes : public xanadu::SpanReader {
 public:
   /// Append, as the primedia spool does, and say where it landed.
   PrimediaSpan put(const std::string &text) {
-    const PrimediaSpan span{xudu::localScroll, contents.size(), text.size()};
+    const PrimediaSpan span{xanadu::localScroll, contents.size(), text.size()};
     contents += text;
     return span;
   }
@@ -116,7 +116,7 @@ TEST(VersionModelTest, joiningDoesNotJoinUnrelatedContent) {
 
   // Nor across scrolls, however the numbers line up.
   Version across;
-  across.insert(0, PrimediaSpan{xudu::localScroll, 0, 10});
+  across.insert(0, PrimediaSpan{xanadu::localScroll, 0, 10});
   across.insert(10, PrimediaSpan{7, 10, 10});
   EXPECT_EQ(across.pieces().size(), 2U);
 }
@@ -208,7 +208,7 @@ TEST(VersionModelTest, joiningDoesNotChangeWhatIsFoundSharedWithAnother) {
   Version quoting;
   quoting.insertSpans(0, whole.spansFor(from, whole.length() / 3));
 
-  std::vector<xudu::Extent> found;
+  std::vector<xanadu::Extent> found;
   for (const auto &piece : quoting.pieces()) {
     for (const auto &extent : whole.occurrencesOf(piece)) {
       found.push_back(extent);

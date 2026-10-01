@@ -151,14 +151,15 @@ public:
   void updateCellText(CellRef cell, std::string_view text);
 
   void setCold(CellRef cell, ColdCell cold);
-  [[nodiscard]] const ColdCell *coldOf(CellRef cell) const noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<const ColdCell &>
+  coldOf(CellRef cell) const noexcept;
 
   [[nodiscard]] bool isCellLocked(CellRef cell) const noexcept;
   [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>
   cellRoyalty(CellRef cell) const noexcept;
   bool unlockTranscopyright(CellRef cell);
 
-  [[nodiscard]] const CellSlot *findCell(CellRef cell) const noexcept;
+  [[nodiscard]] zigzag::SlotRef findCell(CellRef cell) const noexcept;
   [[nodiscard]] std::size_t cellCount() const noexcept {
     return manifold_.cellCount();
   }
@@ -212,7 +213,8 @@ public:
    * @brief The clone master of @p cell along @p cloneDim. Resolves ephemeral
    *        d.meta-dims clone cells to their real dimension cells on d.dims.
    */
-  [[nodiscard]] CellRef cloneMaster(CellRef cell, DimRef cloneDim) const;
+  [[nodiscard]] std::optional<CellRef> cloneMaster(CellRef cell,
+                                                   DimRef cloneDim) const;
 
   /**
    * @brief Whether @p cell is protected from deletion (e.g. home, d.dims,

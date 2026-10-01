@@ -18,15 +18,63 @@
 #define GLEDITOR_TEXT_SOURCE_H
 
 #include <cstdint>
+#include <expected>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/layout_box.hpp>
 #include <gleditor/render/types.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace gleditor {
+
+/// Why a text source could not be read.
+enum class SourceError : std::uint8_t {
+  NotFound,         ///< the file could not be opened
+  Utf16Unsupported, ///< a UTF-16 byte order mark; not decoded yet
+  Utf32Unsupported, ///< a UTF-32 byte order mark; not decoded yet
+  PdfUnreadable,    ///< poppler could not open it as a PDF
+  PdfLocked,        ///< a password-protected PDF
+};
+
+[[nodiscard]] constexpr std::string_view
+toString(const SourceError error) noexcept {
+  switch (error) {
+  case SourceError::NotFound:
+    return "not found";
+  case SourceError::Utf16Unsupported:
+    return "utf16 not supported yet";
+  case SourceError::Utf32Unsupported:
+    return "utf32 not supported yet";
+  case SourceError::PdfUnreadable:
+    return "not a readable PDF";
+  case SourceError::PdfLocked:
+    return "PDF is password-protected";
+  }
+  return "unreadable";
+}
+
+/**
+ * @brief A SourceError thrown across an interface that cannot answer one.
+ *
+ * TextSource::text() returns the text, so a source that fails lazily inside it
+ * has only an exception to say so with. It carries the SourceError rather than
+ * only a message, so whoever catches it -- the renderer's background loader
+ * is the one that matters -- can turn it back into a value.
+ */
+class SourceLoadError : public std::runtime_error {
+public:
+  SourceLoadError(const SourceError error, const std::string &subject)
+      : std::runtime_error(std::string{toString(error)} + ": " + subject),
+        error_(error) {}
+  [[nodiscard]] SourceError error() const noexcept { return error_; }
+
+private:
+  SourceError error_;
+};
 
 /**
  * @class MagicMimeDetector
@@ -227,7 +275,8 @@ public:
  * available -- there is no way to tell a Latin-1 file from a UTF-8 one that
  * happens to be ASCII.
  */
-[[nodiscard]] std::string stripByteOrderMark(std::string bytes);
+[[nodiscard]] std::expected<std::string, SourceError>
+stripByteOrderMark(std::string bytes);
 
 /// Reads the whole of a file. What a plain editor opens from its command line.
 /// Automatically detects PDF files and paginates them per page.
@@ -235,8 +284,12 @@ class FileTextSource : public TextSource {
 public:
   explicit FileTextSource(std::string path);
 
-  /// @throws std::runtime_error if the file cannot be read or PDF is locked,
-  ///         and std::logic_error for a UTF-16 or UTF-32 byte order mark.
+  /// Read the file now, if it has not been, and say why not if it cannot be.
+  /// The accessors below call this lazily and throw its error as a
+  /// SourceLoadError; a caller that wants the answer as a value asks first.
+  [[nodiscard]] std::expected<void, SourceError> load() const;
+
+  /// @throws SourceLoadError when load() would answer an error.
   [[nodiscard]] std::string text() const override;
   [[nodiscard]] std::string name() const override { return filePath; }
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override;

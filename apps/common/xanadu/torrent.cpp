@@ -9,32 +9,20 @@
 
 #include <openssl/sha.h>
 
+#include <gleditor/color.hpp>
+
 #include "bencode.hpp"
 
 namespace xanadu {
 
 namespace {
 
-/// Hex digit value, or -1.
-int hexValue(const char chr) {
-  if (chr >= '0' && chr <= '9') {
-    return chr - '0';
-  }
-  if (chr >= 'a' && chr <= 'f') {
-    return (chr - 'a') + 10;
-  }
-  if (chr >= 'A' && chr <= 'F') {
-    return (chr - 'A') + 10;
-  }
-  return -1;
-}
-
 /// A required entry of a dictionary, complained about by name when missing.
 const bencode::Value &require(const bencode::Value &dict,
                               const std::string_view key,
                               const std::string_view what) {
-  const auto *const found = dict.find(key);
-  if (nullptr == found) {
+  const auto found = dict.find(key);
+  if (!found) {
     throw std::runtime_error("torrent: " + std::string{what} + " has no \"" +
                              std::string{key} + "\"");
   }
@@ -147,43 +135,36 @@ std::string toHex(const std::string_view bytes) {
 }
 
 std::string fromHex(const std::string_view text) {
-  if (0 != text.size() % 2) {
-    throw std::runtime_error("hex: \"" + std::string{text} +
-                             "\" has an odd number of digits");
+  auto decoded = gleditor::color::decodeHex(text);
+  if (!decoded) {
+    throw std::runtime_error(
+        "hex: \"" + std::string{text} +
+        "\": " + std::string{gleditor::color::toString(decoded.error())});
   }
-  std::string out;
-  out.reserve(text.size() / 2);
-  for (std::size_t i = 0; i < text.size(); i += 2) {
-    const int high = hexValue(text[i]);
-    const int low  = hexValue(text[i + 1]);
-    if (high < 0 || low < 0) {
-      throw std::runtime_error("hex: \"" + std::string{text} + "\" is not hex");
-    }
-    out.push_back(static_cast<char>((high << 4) | low));
-  }
-  return out;
+  return *std::move(decoded);
 }
 
 std::string InfoHash::hex() const {
   return toHex({reinterpret_cast<const char *>(bytes.data()), bytes.size()});
 }
 
+std::expected<InfoHash, gleditor::color::HexError>
+InfoHash::parseHex(const std::string_view text) {
+  return gleditor::color::decodeHexArray<20>(text).transform(
+      [](const std::array<std::uint8_t, 20> &bytes) {
+        return InfoHash{bytes};
+      });
+}
+
 InfoHash InfoHash::fromHex(const std::string_view text) {
-  if (text.size() != 40) {
-    throw std::runtime_error("info hash: expected 40 hex digits, got " +
-                             std::to_string(text.size()));
+  auto parsed = parseHex(text);
+  if (!parsed) {
+    throw std::runtime_error(
+        "info hash: \"" + std::string{text} +
+        "\": " + std::string{gleditor::color::toString(parsed.error())} +
+        " (expected 40)");
   }
-  InfoHash hash;
-  for (std::size_t i = 0; i < hash.bytes.size(); i++) {
-    const int high = hexValue(text[i * 2]);
-    const int low  = hexValue(text[(i * 2) + 1]);
-    if (high < 0 || low < 0) {
-      throw std::runtime_error("info hash: \"" + std::string{text} +
-                               "\" is not hex");
-    }
-    hash.bytes[i] = static_cast<std::uint8_t>((high << 4) | low);
-  }
-  return hash;
+  return *parsed;
 }
 
 bool InfoHash::isZero() const {
@@ -233,7 +214,7 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
   // the order they appear in the files list", so the offsets accumulate and a
   // piece can straddle a boundary.
   std::uint64_t offset = 0;
-  if (const auto *const single = info.find("length"); nullptr != single) {
+  if (const auto single = info.find("length"); single.has_value()) {
     const auto length = single->asInteger();
     if (length < 0) {
       throw std::runtime_error("torrent: \"length\" is negative");
@@ -349,11 +330,15 @@ std::string percentDecode(const std::string_view text) {
   for (std::size_t i = 0; i < text.size(); i++) {
     if ('+' == text[i]) {
       out.push_back(' ');
-    } else if ('%' == text[i] && i + 2 < text.size() &&
-               hexValue(text[i + 1]) >= 0 && hexValue(text[i + 2]) >= 0) {
-      out.push_back(static_cast<char>((hexValue(text[i + 1]) << 4) |
-                                      hexValue(text[i + 2])));
-      i += 2;
+    } else if ('%' == text[i] && i + 2 < text.size()) {
+      // A malformed escape is kept as written rather than dropped.
+      if (const auto escaped =
+              gleditor::color::decodeHex(text.substr(i + 1, 2))) {
+        out += *escaped;
+        i += 2;
+      } else {
+        out.push_back(text[i]);
+      }
     } else {
       out.push_back(text[i]);
     }

@@ -37,6 +37,8 @@
 
 #include <gleditor/paths.hpp>
 
+#include <gleditor/cpp26.hpp>
+
 #include "lmdb_cache.hpp"
 #include "scroll.hpp"
 #include "spool.hpp"
@@ -89,9 +91,9 @@ public:
   ContentSource(ContentSource &&)                 = delete;
   ContentSource &operator=(ContentSource &&)      = delete;
 
-  /// The torrent's metadata, or nullptr when this source has never heard of
+  /// The torrent's metadata, or nothing when this source has never heard of
   /// it. Without it nothing can be verified, so nothing is returned.
-  [[nodiscard]] virtual const Metainfo *
+  [[nodiscard]] virtual gleditor::cpp26::optional<const Metainfo &>
   metainfo(const InfoHash &hash) const = 0;
 
   /**
@@ -128,7 +130,8 @@ public:
    */
   InfoHash add(std::string_view torrentFile, std::string dataRoot);
 
-  [[nodiscard]] const Metainfo *metainfo(const InfoHash &hash) const override;
+  [[nodiscard]] gleditor::cpp26::optional<const Metainfo &>
+  metainfo(const InfoHash &hash) const override;
   [[nodiscard]] std::string readStream(const InfoHash &hash,
                                        std::uint64_t offset,
                                        std::uint64_t length) const override;

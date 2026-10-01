@@ -14,6 +14,9 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <ranges>
+
+#include <gleditor/ranges.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -490,39 +493,30 @@ public:
     return controls_;
   }
 
-  [[nodiscard]] std::vector<const ClickableControl *>
-  controlsForKind(const std::uint32_t kind) const {
-    std::vector<const ClickableControl *> out;
-    for (const auto &ctrl : controls_) {
-      if (ctrl.tagKind == kind) {
-        out.push_back(&ctrl);
-      }
-    }
-    return out;
+  /// The controls of tag kind @p kind, lazily: a view over the registry, so
+  /// valid until the next add() or clear().
+  [[nodiscard]] auto controlsForKind(const std::uint32_t kind) const {
+    return controls_ | std::views::filter([kind](const ClickableControl &c) {
+             return c.tagKind == kind;
+           });
   }
 
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const std::uint32_t tagOffset) const noexcept {
-    for (const auto &ctrl : controls_) {
-      if (ctrl.tagKind == render::tagKindOverlay &&
-          tagOffset >= ctrl.tagOffset && tagOffset < ctrl.tagEndOffset) {
-        return &ctrl;
-      }
-    }
-    return nullptr;
+    return findRef(controls_, [tagOffset](const ClickableControl &ctrl) {
+      return ctrl.tagKind == render::tagKindOverlay &&
+             tagOffset >= ctrl.tagOffset && tagOffset < ctrl.tagEndOffset;
+    });
   }
 
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const render::PickingTag &tag) const noexcept {
-    for (const auto &ctrl : controls_) {
-      if (ctrl.matches(tag, tagBase_)) {
-        return &ctrl;
-      }
-    }
-    return nullptr;
+    return findRef(controls_, [&tag, this](const ClickableControl &ctrl) {
+      return ctrl.matches(tag, tagBase_);
+    });
   }
 
-  [[nodiscard]] const ClickableControl *
+  [[nodiscard]] cpp26::optional<const ClickableControl &>
   find(const std::uint32_t tagKind,
        const std::uint32_t tagOffset) const noexcept {
     render::PickingTag tag;
@@ -532,16 +526,16 @@ public:
   }
 
   [[nodiscard]] bool has(const std::uint32_t tagOffset) const noexcept {
-    return find(tagOffset) != nullptr;
+    return find(tagOffset).has_value();
   }
 
   [[nodiscard]] bool has(const render::PickingTag &tag) const noexcept {
-    return find(tag) != nullptr;
+    return find(tag).has_value();
   }
 
   [[nodiscard]] bool has(const std::uint32_t tagKind,
                          const std::uint32_t tagOffset) const noexcept {
-    return find(tagKind, tagOffset) != nullptr;
+    return find(tagKind, tagOffset).has_value();
   }
 
   void clear() noexcept { controls_.clear(); }

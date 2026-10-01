@@ -20,6 +20,7 @@
 #include <gleditor/animation.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
@@ -349,8 +350,8 @@ std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
                                               const bool towardsRight,
                                               const bool atTextBorder,
                                               const float yOffsetPixels) {
-  const auto *const page = doc.page(anchor.pageIndex);
-  if (nullptr == page) {
+  const auto page = doc.page(anchor.pageIndex);
+  if (!page) {
     return std::nullopt;
   }
   // Margin on the side the other document is on, asked of the page rather
@@ -770,11 +771,11 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   const glm::vec3 nearPos(near->getModel()[3]);
   const glm::vec3 farPos(far->getModel()[3]);
 
-  const auto *const nearPage = near->page(fromAnchor.pageIndex);
-  const auto *const farPage  = far->page(toAnchor.pageIndex);
-  float nearHalfWidth        = fallbackDocHalfWidth;
-  float farHalfWidth         = fallbackDocHalfWidth;
-  if (nullptr != nearPage && nullptr != farPage) {
+  const auto nearPage = near->page(fromAnchor.pageIndex);
+  const auto farPage  = far->page(toAnchor.pageIndex);
+  float nearHalfWidth = fallbackDocHalfWidth;
+  float farHalfWidth  = fallbackDocHalfWidth;
+  if (nearPage.has_value() && farPage.has_value()) {
     nearHalfWidth = (nearPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
     farHalfWidth  = (farPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
   }
@@ -853,7 +854,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
       continue;
     }
     float halfW = fallbackDocHalfWidth;
-    if (const auto *p = state.docs[d]->page(0)) {
+    if (const auto p = state.docs[d]->page(0)) {
       halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
     }
     if (anyForegroundYet) {
@@ -862,7 +863,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
         if (isBackground(prev)) {
           continue;
         }
-        if (const auto *pPrev = state.docs[prev]->page(0)) {
+        if (const auto pPrev = state.docs[prev]->page(0)) {
           prevHalfW = (pPrev->widthPixels() * 0.5F) * Doc::pixelsToWorld;
         }
         break;
@@ -886,7 +887,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     body.restingPosition = cur;
     float halfW          = fallbackDocHalfWidth;
     float heightW        = fallbackDocHeight;
-    if (const auto *p = state.docs[d]->page(0)) {
+    if (const auto p = state.docs[d]->page(0)) {
       halfW   = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
       heightW = p->heightPixels() * Doc::pixelsToWorld;
     }
@@ -914,7 +915,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
       tensionEngine_.step(dt);
     }
     for (std::size_t d = 0; d < state.docs.size(); ++d) {
-      if (const auto *b = tensionEngine_.findBody(d)) {
+      if (const auto b = tensionEngine_.findBody(d)) {
         if (!isBackground(d)) {
           docSlots[d] = b->position.x;
         }
@@ -940,11 +941,11 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
 
   if (glm::distance(target, farPos) >= alreadyAligned) {
     if (linkId) {
-      std::cout << "xudu: link " << *linkId << " aligns centroid of doc "
-                << toDocIdx << " with doc " << fromDocIdx << "\n";
+      GLEDITOR_LOG_DEBUG("xudu.links", "link {} aligns doc {} with doc {}",
+                         *linkId, toDocIdx, fromDocIdx);
     } else {
-      std::cout << "xudu: transclusion aligns centroid of doc " << toDocIdx
-                << " with doc " << fromDocIdx << "\n";
+      GLEDITOR_LOG_DEBUG("xudu.links", "transclusion aligns doc {} with doc {}",
+                         toDocIdx, fromDocIdx);
     }
     // The document being brought over is the subject of the move, so it is the
     // one that takes longest and starts first. Everything else in this
@@ -992,7 +993,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
                            : glm::vec3(docSlots[d] - curPos.x, 0.0F, 0.0F);
 
       for (std::size_t p = 0;; ++p) {
-        const auto *page = doc->page(p);
+        const auto page = doc->page(p);
         if (!page) {
           break;
         }
@@ -1133,7 +1134,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   cellBody.mass            = bridgeConfig_.satelloid.mass;
   cellBody.pinned          = false;
 
-  if (const auto *existing = tensionEngine_.findCellBody(cellRef)) {
+  if (const auto existing = tensionEngine_.findCellBody(cellRef)) {
     cellBody.position = existing->position;
     cellBody.velocity = existing->velocity;
   }
@@ -1175,7 +1176,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
     }
   }
 
-  const auto *solved = tensionEngine_.findCellBody(cellRef);
+  const auto solved = tensionEngine_.findCellBody(cellRef);
   const glm::vec3 solvedPos =
       solved ? solved->position
              : glm::vec3(docPos.x + docHalfW + bridgeConfig_.satelloid.gap,
@@ -1253,8 +1254,8 @@ bool LinkBeams::openDangling(RenderState &state) {
     if (!showing) {
       continue;
     }
-    std::cout << "xudu: link " << waiting.link.link << " reaches "
-              << showing->str() << ", opening it\n";
+    GLEDITOR_LOG_DEBUG("xudu.links", "link {} reaches {}, opening it",
+                       waiting.link.link, showing->str());
     opener(*showing);
     // One a frame. Opening a document is a load and a page build, and the
     // strands are worked out again when it lands, which is when the next one
@@ -1277,8 +1278,8 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
                       caret->documentIndex() == strand.from.doc;
   const auto &there = atFrom ? strand.to : strand.from;
   if (there.isCell()) {
-    std::cout << "xudu: follow link " << strand.link << " to cell #"
-              << there.cell() << "\n";
+    GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to cell #{}", strand.link,
+                       there.cell());
     if (satelloidOverlay_ != nullptr) {
       satelloidOverlay_->triggerPulse(there.cell());
     }
@@ -1289,8 +1290,8 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
     return;
   }
   caret->placeAt(there.doc, there.start);
-  std::cout << "xudu: follow link " << strand.link << " to doc " << there.doc
-            << " [" << there.start << "," << there.end << ")\n";
+  GLEDITOR_LOG_DEBUG("xudu.links", "follow link {} to doc {} [{}, {})",
+                     strand.link, there.doc, there.start, there.end);
 }
 
 bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {

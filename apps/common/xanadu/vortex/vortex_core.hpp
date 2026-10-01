@@ -172,6 +172,24 @@ public:
   /// Mints a new named dimension and links it to the d.dims rank tail.
   CellRef mintDimension(std::string_view name);
 
+  /// The dimension named @p name on the d.dims rank, minting it onto the
+  /// rank's tail when there is none. What each front end (VQL, VPL, the
+  /// multi-store coordinator) does for a dimension it has no fixed slot for.
+  DimRef findOrMintDimension(std::string_view name);
+
+  // -- Library modules
+  // ---------------------------------------------------------
+
+  /// The module cell named @p modulePath on home's +d.stdlib rank.
+  [[nodiscard]] std::optional<CellRef>
+  findModule(std::string_view modulePath) const;
+  /// findModule(), minting the module onto the rank's tail when absent.
+  CellRef getOrCreateModule(std::string_view modulePath);
+  /// Export @p entryOp as @p symbolName under @p moduleCell: a symbol cell on
+  /// the module's +d.vars rank, with the op on the symbol's +d.values.
+  void exportSymbol(CellRef moduleCell, std::string_view symbolName,
+                    CellRef entryOp);
+
   [[nodiscard]] CellValue get(CellRef cell, std::int64_t offset = 0,
                               std::int64_t length = -1);
   [[nodiscard]] CellValue render(CellRef cell) const;
@@ -214,6 +232,19 @@ public:
   bool retireMemo(std::string_view opName);
 
 private:
+  /// cloneMaster(), total: a cell the arena cannot reach is its own master.
+  [[nodiscard]] CellRef masterOf(CellRef cell) const noexcept;
+  /// The base manifold's dimension named @p name, when there is a base.
+  [[nodiscard]] std::optional<DimRef>
+  baseDimensionNamed(std::string_view name) const;
+  /// The operands on @p opcode's input (POS) or output (NEG) wing.
+  [[nodiscard]] std::vector<CellRef> wingOf(CellRef opcode,
+                                            DimVector side) const;
+  /// The conditions on @p opcode's pre (NEG) or post (POS) contract rank.
+  [[nodiscard]] std::vector<CellRef> contractOf(CellRef opcode,
+                                                DimVector side) const;
+  void attachContract(CellRef opcode, DimVector side, CellRef conditionOp);
+
   void initGenesis();
   [[nodiscard]] CellRef mintNamedDimension(std::string_view name,
                                            CellRef &lastDimCell);

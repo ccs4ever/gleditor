@@ -19,9 +19,10 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
-#include "core/swarm_catalog.hpp"
+#include "common/xanadu/swarm_catalog.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class SwarmTelescopeOverlay

@@ -222,8 +222,9 @@ TEST(VortexHostTest, VQLCompilationPromotionToStore) {
   EXPECT_GT(store.opCount(), beforeOps);
 
   auto updatedManifold = store.rebuildManifold(promoted->version);
-  DimRef spinDim       = updatedManifold.dimensionNamed("d.spin", store);
-  ASSERT_NE(spinDim, noCell);
+  const auto spinName  = updatedManifold.dimensionNamed("d.spin", store);
+  ASSERT_TRUE(spinName.has_value());
+  const DimRef spinDim = *spinName;
   CellRef linkedToTarget =
       updatedManifold.linked(targetCell, spinDim, DimVector::POS);
   EXPECT_EQ(linkedToTarget, promoted->cells.front());
@@ -236,7 +237,7 @@ TEST(VortexHostTest, VQLQuickNavigationEvaluation) {
   CellRef root  = arena.makeCell("Start");
   CellRef child = arena.makeCell("Child");
   DimRef d1     = host.core().mintDimension("d.1");
-  arena.link(root, d1, DimVector::POS, child);
+  EXPECT_TRUE(arena.link(root, d1, DimVector::POS, child));
 
   // Navigate relative to root: "/d.1"
   auto target = host.navigatePath("/d.1", root);
@@ -283,7 +284,7 @@ TEST(VortexHostTest, VQLMacroRegistrationAndSystemStorePersistence) {
   CellRef root  = arena.makeCell("Root");
   CellRef child = arena.makeCell("Dest");
   DimRef d1     = host2.core().mintDimension("d.1");
-  arena.link(root, d1, DimVector::POS, child);
+  EXPECT_TRUE(arena.link(root, d1, DimVector::POS, child));
 
   ViewAxisBinding axes{};
   CellRef newFocus = noCell;
@@ -299,7 +300,7 @@ TEST(VortexHostTest, KeymapActionDispatching) {
   DimRef d1    = host.core().mintDimension("d.1");
   CellRef c1   = arena.makeCell("C1");
   CellRef c2   = arena.makeCell("C2");
-  arena.link(c1, d1, DimVector::POS, c2);
+  EXPECT_TRUE(arena.link(c1, d1, DimVector::POS, c2));
 
   ViewAxisBinding axes{
       .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
@@ -440,7 +441,7 @@ TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
   // Canonical navigation dispatch
   DimRef d1  = host.core().mintDimension("d.1");
   CellRef c2 = arena.makeCell("C2");
-  arena.link(root, d1, DimVector::POS, c2);
+  EXPECT_TRUE(arena.link(root, d1, DimVector::POS, c2));
 
   EXPECT_TRUE(host.dispatchAction("std:nav/step_x_pos", root, axes, newFocus));
   EXPECT_EQ(newFocus, c2);

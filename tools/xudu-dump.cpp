@@ -40,17 +40,17 @@
 #include <string_view>
 #include <vector>
 
-#include <xudu/core/compact_op.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/segmented_ops_spool.hpp>
-#include <xudu/core/store_tables.hpp>
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/store_tables.hpp"
 
 namespace {
 
-using xudu::CompactOpNode;
-using xudu::MicroversionId;
-using xudu::OpsSegmentHeader;
+using xanadu::CompactOpNode;
+using xanadu::MicroversionId;
+using xanadu::OpsSegmentHeader;
 
 /// Whether anything could not be made sense of. The exit status, so that a
 /// script can tell "dumped a healthy store" from "dumped what it could".
@@ -129,7 +129,7 @@ OpsFile readOpsFile(const std::filesystem::path &path) {
     return file;
   }
   std::memcpy(&file.header, bytes.data(), sizeof(OpsSegmentHeader));
-  file.hasHeader = file.header.signature == xudu::opsSegmentSignature;
+  file.hasHeader = file.header.signature == xanadu::opsSegmentSignature;
   if (!file.hasHeader) {
     trouble(path.string() +
             ": no operations segment signature. Written before headers "
@@ -207,7 +207,7 @@ void dumpOpsHeader(const OpsFile &file) {
     rooted = rooted || 0 != byte;
   }
   std::cout << "header    merkleRoot="
-            << ((h.flags & xudu::opsSegmentFlagMerkleRoot) != 0 ? "present"
+            << ((h.flags & xanadu::opsSegmentFlagMerkleRoot) != 0 ? "present"
                 : rooted ? "set-but-unflagged"
                          : "absent")
             << " reservedZero=" << h.reservedZero << '\n';
@@ -229,7 +229,7 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
     line << "op " << index << "  produces="
          << (named == names.end() ? std::string{"?"} : named->second.str())
          << " parent=" << node.parentIndex << " branch=" << node.branchOrdinal
-         << " kind=" << xudu::opKindName(node.kind) << " flags=0x" << std::hex
+         << " kind=" << xanadu::opKindName(node.kind) << " flags=0x" << std::hex
          << static_cast<unsigned>(node.flags) << std::dec << " at=" << node.at
          << " len=" << node.length << " to=" << node.to
          << " src=" << node.sourceOpIndex << " srcAt=" << node.sourceAt
@@ -243,25 +243,79 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
     // direction. A Structure op's `to` and `link` are cell references and its
     // `src` is the previous operation on the same cell, which is what tells a
     // reader whose link it is.
-    if (xudu::OpKind::Structure == node.kind) {
-      const auto verb = xudu::structureVerbOf(node.flags);
-      line << "  [" << xudu::structureVerbName(verb);
-      if (xudu::StructureVerb::SetLink == verb) {
-        line << (xudu::structureIsNegward(node.flags) ? " negward" : " posward")
+    if (xanadu::OpKind::Structure == node.kind) {
+      const auto verb = xanadu::structureVerbOf(node.flags);
+      line << "  [" << xanadu::structureVerbName(verb);
+      if (xanadu::StructureVerb::Make == verb) {
+        const auto skind = xanadu::structureKindOf(node.flags);
+        switch (skind) {
+        case xanadu::StructureKind::Cell:
+          line << " cell";
+          break;
+        case xanadu::StructureKind::Slice:
+          line << " slice";
+          break;
+        case xanadu::StructureKind::Xanadoc:
+          line << " xanadoc";
+          break;
+        case xanadu::StructureKind::Reserved:
+          line << " invalid (reserved)";
+          trouble("op " + std::to_string(index) +
+                  " has reserved StructureKind");
+          break;
+        default:
+          line << " invalid (unknown)";
+          trouble("op " + std::to_string(index) + " has unknown StructureKind");
+          break;
+        }
+      }
+      if (xanadu::StructureVerb::SetLink == verb) {
+        line << (xanadu::structureIsNegward(node.flags) ? " negward"
+                                                        : " posward")
              << " dim=" << node.linkId << " -> "
              << (0 == node.to ? std::string{"nothing"}
                               : std::to_string(node.to))
              << " cell@" << node.sourceOpIndex;
-      } else if (xudu::ValueKind::None != xudu::valueKindOf(node.flags)) {
-        line << ' ' << xudu::valueKindName(xudu::valueKindOf(node.flags));
+        if (node.sourceOpIndex >= file.firstOpIndex &&
+            node.sourceOpIndex < file.firstOpIndex + file.nodes.size()) {
+          const auto &subjNode =
+              file.nodes[node.sourceOpIndex - file.firstOpIndex];
+          if (subjNode.kind == xanadu::OpKind::Structure &&
+              xanadu::valueKindOf(subjNode.flags) ==
+                  xanadu::ValueKind::OpHandle) {
+            line << " rename target=" << subjNode.value;
+            if (node.to >= file.firstOpIndex &&
+                node.to < file.firstOpIndex + file.nodes.size()) {
+              const auto &aliasNode = file.nodes[node.to - file.firstOpIndex];
+              const auto aSpan      = aliasNode.span();
+              if (xanadu::localScroll == aliasNode.scrollId &&
+                  0 != aSpan.length &&
+                  aSpan.start + aSpan.length <= primedia.size()) {
+                line << " name="
+                     << excerpt(std::string_view{primedia}.substr(
+                            static_cast<std::size_t>(aSpan.start),
+                            static_cast<std::size_t>(aSpan.length)));
+              }
+            }
+          }
+        }
+      } else if (xanadu::ValueKind::None != xanadu::valueKindOf(node.flags)) {
+        line << ' ' << xanadu::valueKindName(xanadu::valueKindOf(node.flags));
+      }
+      if (const auto ctx = xanadu::contextOf(node); ctx != 0) {
+        line << " ctx=" << ctx;
       }
       line << ']';
+    } else {
+      if (const auto ctx = xanadu::contextOf(node); ctx != 0) {
+        line << "  [ctx=" << ctx << ']';
+      }
     }
 
     // The text the span names, which is the whole point of rendering an
     // operation rather than hexdumping it: a change that shifted a field puts
     // garbage here, and a diff of two dumps says so on the line it happened.
-    if (xudu::localScroll == node.scrollId && 0 != span.length &&
+    if (xanadu::localScroll == node.scrollId && 0 != span.length &&
         span.start + span.length <= primedia.size()) {
       line << " text="
            << excerpt(std::string_view{primedia}.substr(
@@ -282,7 +336,7 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
 /// One segment's fields, in the order the plaintext table wrote them, plus
 /// the two it silently dropped: whether the stretch is withheld, and what the
 /// record of that says.
-std::string segmentFields(const xudu::ScrollSegment &segment) {
+std::string segmentFields(const xanadu::ScrollSegment &segment) {
   std::ostringstream out;
   out << "at=" << segment.at << " len=" << segment.length
       << " torrent=" << segment.torrent.hex()
@@ -308,40 +362,11 @@ std::string segmentFields(const xudu::ScrollSegment &segment) {
 /// The side tables, from the one container they live in. Rendered in the same
 /// shape the plaintext files were rendered in, so that migration step 11's
 /// conversion is a diff of this output rather than a claim about it.
-void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
-                bool wantLinks) {
+void dumpTables(const xanadu::StoreTables &tables, bool wantScrolls) {
+  std::cout << "document  " << tables.documentId.str() << '\n';
   if (wantScrolls) {
-    for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
-      const auto &scroll = tables.scrolls[i];
-      const auto id      = i + 1;
-      std::cout << "scroll " << id << "  publisher="
-                << (scroll.isNamed() ? scroll.publisher.hex() : "-")
-                << " salt=" << (scroll.salt.empty() ? "-" : scroll.salt)
-                << " mime=" << scroll.defaultMimeType << '\n';
-      for (const auto &segment : scroll.segments) {
-        std::cout << "segment " << id << "  " << segmentFields(segment) << '\n';
-      }
-    }
     for (const auto &segment : tables.localSegments) {
       std::cout << "localsegment  " << segmentFields(segment) << '\n';
-    }
-  }
-  if (wantLinks) {
-    for (const auto &[id, link] : tables.links) {
-      std::ostringstream out;
-      out << "link " << id << "  type=" << xudu::linkTypeName(link.type)
-          << " tier=" << xudu::prominenceTierName(link.tier)
-          << " owner=" << (link.owner.empty() ? "-" : link.owner)
-          << " curator=" << (link.curator.empty() ? "-" : link.curator);
-      for (const auto &span : link.left) {
-        out << " left=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      for (const auto &span : link.right) {
-        out << " right=" << span.scroll << ':' << span.start << ','
-            << span.start + span.length;
-      }
-      std::cout << out.str() << '\n';
     }
   }
 }
@@ -349,18 +374,9 @@ void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
 /// The author-facing metadata, from the same container. Was two YAML files
 /// echoed line by line; is now rendered from the tables, so that the move is a
 /// diff of this output rather than a claim about it.
-void dumpVersions(const xudu::StoreTables &tables) {
-  for (const auto &id : tables.currentVersions) {
-    std::cout << "current  " << id.str() << '\n';
-  }
-  for (const auto &[id, annotation] : tables.versionAnnotations) {
-    std::cout << "version " << id.str() << "  alias="
-              << (annotation.alias.empty() ? "-" : annotation.alias)
-              << " tag=" << (annotation.tag.empty() ? "-" : annotation.tag)
-              << " timestamp="
-              << (annotation.timestamp.empty() ? "-" : annotation.timestamp)
-              << " description=" << excerpt(annotation.description) << '\n';
-  }
+void dumpVersions(const xanadu::StoreTables &) {
+  // Versions and annotations moved to first-class cells in ops.nodes (see
+  // §5.4).
 }
 
 void usage() {
@@ -489,8 +505,8 @@ int main(int argc, char **argv) {
   if (wants("scrolls") || wants("links") || wants("versions")) {
     if (exists("store.tables")) {
       try {
-        const auto tables = xudu::readStoreTables(target / "store.tables");
-        dumpTables(tables, wants("scrolls"), wants("links"));
+        const auto tables = xanadu::readStoreTables(target / "store.tables");
+        dumpTables(tables, wants("scrolls"));
         if (wants("versions")) {
           dumpVersions(tables);
         }

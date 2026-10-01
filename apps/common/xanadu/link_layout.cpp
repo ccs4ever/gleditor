@@ -5,9 +5,11 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <unordered_map>
 #include <utility>
 
+#include "common/xanadu/link_views.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
@@ -90,17 +92,18 @@ struct ViewPiece {
 
 } // namespace
 
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const UniversalViewContext &ctx,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving) {
   between.clear();
   leaving.clear();
 
-  for (const auto &[id, link] : links) {
-    if (LinkType::Format == link.type) {
-      continue;
-    }
+  // A format link has no second end to draw a beam to; it is presentation.
+  const auto drawable = [](const auto &entry) {
+    return xanadu::links::notOfType(LinkType::Format)(entry.second);
+  };
+  for (const auto &[id, link] : links | std::views::filter(drawable)) {
     std::vector<UniversalLinkEnd> lefts;
     std::vector<UniversalLinkEnd> rights;
 
@@ -169,7 +172,7 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   }
 }
 
-void placeLinks(const std::map<std::uint64_t, Link> &links,
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 const std::vector<const Version *> &views,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving) {

@@ -362,7 +362,8 @@ public:
 
   // -- ContentSource --------------------------------------------------------
 
-  [[nodiscard]] const Metainfo *metainfo(const InfoHash &hash) const override;
+  [[nodiscard]] gleditor::cpp26::optional<const Metainfo &>
+  metainfo(const InfoHash &hash) const override;
   [[nodiscard]] std::string readStream(const InfoHash &hash,
                                        std::uint64_t offset,
                                        std::uint64_t length) const override;

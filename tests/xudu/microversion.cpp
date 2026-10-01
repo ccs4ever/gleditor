@@ -10,11 +10,11 @@
 #include <utility>
 #include <vector>
 
-#include <xudu/core/microversion.hpp>
+#include "common/xanadu/microversion.hpp"
 
 namespace {
 
-using xudu::MicroversionId;
+using xanadu::MicroversionId;
 
 /// The names along a path, which is what most of these are really asserting
 /// about.

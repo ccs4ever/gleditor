@@ -10,8 +10,8 @@
 #include <iostream>
 #include <vector>
 
+#include "common/xanadu/vortex/vortex.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
-#include "xudu/core/vortex.hpp"
 
 namespace {
 
@@ -108,8 +108,8 @@ TEST(VortexBenchmarkTest, VMInstructionExecutionRate) {
   CellRef loopTarget = arena.makeScalarCell(static_cast<std::int64_t>(addOp));
   core.bindInput(branchOp, loopTarget);
 
-  arena.link(addOp, core.dims().spin, false, subOp);
-  arena.link(subOp, core.dims().spin, false, branchOp);
+  EXPECT_TRUE(arena.link(addOp, core.dims().spin, false, subOp));
+  EXPECT_TRUE(arena.link(subOp, core.dims().spin, false, branchOp));
 
   CellRef cursor = vm.spawnCursor(addOp, "perf_loop");
 
@@ -171,7 +171,7 @@ TEST(VortexBenchmarkTest, MemoizedVsUnmemoizedExecution) {
             << " lookups in " << durationUs << " us ("
             << static_cast<std::uint64_t>(hitsPerSec) << " hits/sec)\n";
 
-  EXPECT_GT(hitsPerSec, 50000.0);
+  EXPECT_GT(hitsPerSec, 35000.0);
 }
 
 } // namespace

@@ -63,9 +63,9 @@ struct DeviceDelegation {
    */
   [[nodiscard]] bool verify(std::string_view masterPublicKeyArmored) const;
 
-  [[nodiscard]] std::string toYaml() const;
+  [[nodiscard]] std::string toTsv() const;
   [[nodiscard]] static std::optional<DeviceDelegation>
-  fromYaml(std::string_view yaml);
+  fromTsv(std::string_view tsv);
 
   bool operator==(const DeviceDelegation &) const = default;
 };

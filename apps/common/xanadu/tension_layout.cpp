@@ -8,6 +8,8 @@
 #include <cmath>
 #include <glm/geometric.hpp>
 
+#include <gleditor/ranges.hpp>
+
 namespace xanadu {
 
 TensionLayoutEngine::TensionLayoutEngine(TensionParams params)
@@ -23,25 +25,24 @@ void TensionLayoutEngine::setBody(TensionBody body) {
   bodies_.push_back(body);
 }
 
-const TensionBody *
+namespace {
+auto isBody(const std::size_t targetId, const LinkTargetKind kind) {
+  return [=](const TensionBody &b) {
+    return b.targetKind == kind && b.targetId == targetId;
+  };
+}
+} // namespace
+
+gleditor::cpp26::optional<const TensionBody &>
 TensionLayoutEngine::findBody(const std::size_t targetId,
                               const LinkTargetKind kind) const {
-  for (const auto &b : bodies_) {
-    if (b.targetKind == kind && b.targetId == targetId) {
-      return &b;
-    }
-  }
-  return nullptr;
+  return gleditor::findRef(bodies_, isBody(targetId, kind));
 }
 
-TensionBody *TensionLayoutEngine::findBody(const std::size_t targetId,
-                                           const LinkTargetKind kind) {
-  for (auto &b : bodies_) {
-    if (b.targetKind == kind && b.targetId == targetId) {
-      return &b;
-    }
-  }
-  return nullptr;
+gleditor::cpp26::optional<TensionBody &>
+TensionLayoutEngine::findBody(const std::size_t targetId,
+                              const LinkTargetKind kind) {
+  return gleditor::findRef(bodies_, isBody(targetId, kind));
 }
 
 void TensionLayoutEngine::clear() {
@@ -369,9 +370,9 @@ void TensionLayoutEngine::solveEquilibrium() {
 
   // 2. Position satelloid cells and align constrained pairs
   for (const auto &c : constraints_) {
-    auto *const near = findBody(c.fromTarget, c.fromKind);
-    auto *const far  = findBody(c.toTarget, c.toKind);
-    if (near == nullptr || far == nullptr) {
+    auto near = findBody(c.fromTarget, c.fromKind);
+    auto far  = findBody(c.toTarget, c.toKind);
+    if (!near || !far) {
       continue;
     }
     const float deltaY = c.nearAnchorY - c.farAnchorY;

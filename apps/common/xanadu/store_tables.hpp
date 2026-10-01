@@ -104,18 +104,9 @@ struct VersionAnnotation {
 struct StoreTables {
   /// Stable local name of this store, unrelated to its current microversion.
   DocumentId documentId;
-  /// The scroll registry, indexed from one: entry i is ScrollId i + 1.
-  std::vector<Scroll> scrolls;
   /// The local spool's own segments. Not a Scroll: scroll zero is this
   /// machine's permascroll and has no entry in the registry to hold them.
   std::vector<ScrollSegment> localSegments;
-  /// Links by id.
-  std::map<std::uint64_t, Link> links;
-  /// The author's designated current versions, in the order they were set.
-  /// Empty means unset, which Store reports as {latest()}.
-  std::vector<MicroversionId> currentVersions;
-  /// Aliases, descriptions and tags, by the microversion they annotate.
-  std::map<MicroversionId, VersionAnnotation> versionAnnotations;
 };
 
 /// Write @p tables to @p path, header and all.

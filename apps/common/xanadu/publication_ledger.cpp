@@ -7,8 +7,6 @@
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
 
-#include "yaml.hpp"
-
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -22,6 +20,84 @@
 namespace xanadu {
 
 namespace {
+
+std::string tsvEscape(std::string_view value) {
+  std::string out;
+  for (char c : value) {
+    if (c == '\\' || c == '\t' || c == '\n' || c == '\r' || c == ',')
+      out.push_back('\\');
+    switch (c) {
+    case '\t':
+      out.push_back('t');
+      break;
+    case '\n':
+      out.push_back('n');
+      break;
+    case '\r':
+      out.push_back('r');
+      break;
+    default:
+      out.push_back(c);
+      break;
+    }
+  }
+  return out;
+}
+
+std::string tsvUnescape(std::string_view value) {
+  std::string out;
+  bool escaped = false;
+  for (char c : value) {
+    if (escaped) {
+      out.push_back(c == 't' ? '\t' : c == 'n' ? '\n' : c == 'r' ? '\r' : c);
+      escaped = false;
+    } else if (c == '\\') {
+      escaped = true;
+    } else {
+      out.push_back(c);
+    }
+  }
+  if (escaped) out.push_back('\\');
+  return out;
+}
+
+std::vector<std::string> splitTopics(std::string_view value) {
+  std::vector<std::string> out;
+  std::size_t start = 0;
+  bool escaped      = false;
+  for (std::size_t i = 0; i <= value.size(); ++i) {
+    if (i < value.size() && value[i] == '\\') {
+      escaped = !escaped;
+      continue;
+    }
+    if (i == value.size() || (value[i] == ',' && !escaped)) {
+      out.push_back(tsvUnescape(value.substr(start, i - start)));
+      start = i + 1;
+    }
+    escaped = false;
+  }
+  if (out.size() == 1 && out.front().empty()) out.clear();
+  return out;
+}
+
+std::array<std::uint8_t, 32> parseHex32(std::string_view value) {
+  std::array<std::uint8_t, 32> out{};
+  if (value.size() != 64) return out;
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    unsigned v = 0;
+    for (char c : value.substr(i * 2, 2)) {
+      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+            (c >= 'A' && c <= 'F')))
+        return {};
+      v <<= 4;
+      v |= c >= '0' && c <= '9'   ? c - '0'
+           : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                                  : c - 'A' + 10;
+    }
+    out[i] = static_cast<std::uint8_t>(v);
+  }
+  return out;
+}
 
 constexpr char kLeafDomain     = kMerkleLeafDomain;
 constexpr char kInteriorDomain = kMerkleInteriorDomain;
@@ -288,123 +364,77 @@ PublicationLedger::findByAuthor(std::string_view authorFingerprint) const {
   return out;
 }
 
-std::string PublicationLedger::toYaml() const {
+std::string PublicationLedger::toTsv() const {
   std::ostringstream ss;
-  ss << "publication_ledger:\n"
-     << "  root: \"" << rootHex() << "\"\n"
-     << "  count: " << impl_->entries.size() << "\n"
-     << "  entries:\n";
-
+  ss << "info_hash\tbep46_uri\ttitle\tauthor_name\tauthor_"
+        "fingerprint\tabstract\ttimestamp\tsequence\ttotal_"
+        "bytes\tmicroversions\thas_transcopyright\ttranscopyright_"
+        "terms\tmerkle_root\tsignature\ttopics\n";
   for (const auto &e : impl_->entries) {
-    ss << "    - info_hash: \"" << e.infoHash << "\"\n"
-       << "      bep46_uri: \"" << e.bep46Uri << "\"\n"
-       << "      title: \"" << e.title << "\"\n"
-       << "      author_name: \"" << e.authorName << "\"\n"
-       << "      author_fingerprint: \"" << e.authorFingerprint << "\"\n"
-       << "      abstract: \"" << e.abstractText << "\"\n"
-       << "      timestamp: " << e.timestamp << "\n"
-       << "      sequence: " << e.sequence << "\n"
-       << "      total_bytes: " << e.totalBytes << "\n"
-       << "      microversions: " << e.microversions << "\n"
-       << "      has_transcopyright: "
-       << (e.hasTranscopyright ? "true" : "false") << "\n"
-       << "      transcopyright_terms: \"" << e.transcopyrightTerms << "\"\n"
-       << "      merkle_root: \"" << toHex32(e.merkleRoot) << "\"\n"
-       << "      signature: \"" << e.signature << "\"\n"
-       << "      topics:\n";
-    for (const auto &t : e.topics) {
-      ss << "        - \"" << t << "\"\n";
+    ss << tsvEscape(e.infoHash) << '\t' << tsvEscape(e.bep46Uri) << '\t'
+       << tsvEscape(e.title) << '\t' << tsvEscape(e.authorName) << '\t'
+       << tsvEscape(e.authorFingerprint) << '\t' << tsvEscape(e.abstractText)
+       << '\t' << e.timestamp << '\t' << e.sequence << '\t' << e.totalBytes
+       << '\t' << e.microversions << '\t'
+       << (e.hasTranscopyright ? "true" : "false") << '\t'
+       << tsvEscape(e.transcopyrightTerms) << '\t' << toHex32(e.merkleRoot)
+       << '\t' << tsvEscape(e.signature) << '\t';
+    for (std::size_t i = 0; i < e.topics.size(); ++i) {
+      if (i) ss << ',';
+      ss << tsvEscape(e.topics[i]);
     }
+    ss << '\n';
   }
   return ss.str();
 }
 
-PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
+PublicationLedger PublicationLedger::fromTsv(const std::string_view tsv) {
   PublicationLedger ledger;
-  // Parse entries simply line by line or minimal YAML scanner
-  std::istringstream stream{std::string(yaml)};
+  std::istringstream stream{std::string(tsv)};
   std::string line;
-  PublicationEntry cur;
-  bool inEntry  = false;
-  bool inTopics = false;
-
+  if (!std::getline(stream, line) || !line.starts_with("info_hash\t")) {
+    return ledger;
+  }
   while (std::getline(stream, line)) {
-    const auto trimmed = line.find_first_not_of(" \t\r\n");
-    if (trimmed == std::string::npos) {
+    if (line.empty()) {
       continue;
     }
-    const auto content = line.substr(trimmed);
-
-    if (content.starts_with("- info_hash:")) {
-      if (inEntry) {
-        ledger.appendPublication(std::move(cur));
-        cur = PublicationEntry{};
+    std::vector<std::string> fields;
+    std::size_t start = 0;
+    while (start <= line.size()) {
+      const auto tab = line.find('\t', start);
+      fields.push_back(
+          line.substr(start, std::string::npos == tab ? tab : tab - start));
+      if (std::string::npos == tab) {
+        break;
       }
-      inEntry       = true;
-      inTopics      = false;
-      const auto q1 = content.find('"');
-      const auto q2 = content.rfind('"');
-      if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-        cur.infoHash = content.substr(q1 + 1, q2 - q1 - 1);
-      }
-    } else if (inEntry) {
-      auto extractQuoted = [&](std::string_view prefix) -> std::string {
-        if (content.starts_with(prefix)) {
-          const auto q1 = content.find('"');
-          const auto q2 = content.rfind('"');
-          if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-            return content.substr(q1 + 1, q2 - q1 - 1);
-          }
-        }
-        return {};
-      };
-
-      if (content.starts_with("bep46_uri:")) {
-        cur.bep46Uri = extractQuoted("bep46_uri:");
-      } else if (content.starts_with("title:")) {
-        cur.title = extractQuoted("title:");
-      } else if (content.starts_with("author_name:")) {
-        cur.authorName = extractQuoted("author_name:");
-      } else if (content.starts_with("author_fingerprint:")) {
-        cur.authorFingerprint = extractQuoted("author_fingerprint:");
-      } else if (content.starts_with("abstract:")) {
-        cur.abstractText = extractQuoted("abstract:");
-      } else if (content.starts_with("timestamp:")) {
-        cur.timestamp = std::strtoull(content.substr(10).c_str(), nullptr, 10);
-      } else if (content.starts_with("sequence:")) {
-        cur.sequence = std::strtoull(content.substr(9).c_str(), nullptr, 10);
-      } else if (content.starts_with("total_bytes:")) {
-        cur.totalBytes = std::strtoull(content.substr(12).c_str(), nullptr, 10);
-      } else if (content.starts_with("microversions:")) {
-        cur.microversions = static_cast<std::uint32_t>(
-            std::strtoul(content.substr(14).c_str(), nullptr, 10));
-      } else if (content.starts_with("has_transcopyright:")) {
-        cur.hasTranscopyright = (content.contains("true"));
-      } else if (content.starts_with("transcopyright_terms:")) {
-        cur.transcopyrightTerms = extractQuoted("transcopyright_terms:");
-      } else if (content.starts_with("merkle_root:")) {
-        const auto hex = extractQuoted("merkle_root:");
-        if (const auto opt = fromHex32(hex)) {
-          cur.merkleRoot = *opt;
-        }
-      } else if (content.starts_with("signature:")) {
-        cur.signature = extractQuoted("signature:");
-      } else if (content.starts_with("topics:")) {
-        inTopics = true;
-      } else if (inTopics && content.starts_with("- \"")) {
-        const auto q1 = content.find('"');
-        const auto q2 = content.rfind('"');
-        if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
-          cur.topics.push_back(content.substr(q1 + 1, q2 - q1 - 1));
-        }
-      }
+      start = tab + 1;
+    }
+    if (15 != fields.size()) {
+      continue;
+    }
+    try {
+      PublicationEntry entry;
+      entry.infoHash          = tsvUnescape(fields[0]);
+      entry.bep46Uri          = tsvUnescape(fields[1]);
+      entry.title             = tsvUnescape(fields[2]);
+      entry.authorName        = tsvUnescape(fields[3]);
+      entry.authorFingerprint = tsvUnescape(fields[4]);
+      entry.abstractText      = tsvUnescape(fields[5]);
+      entry.timestamp         = std::stoull(fields[6]);
+      entry.sequence          = std::stoull(fields[7]);
+      entry.totalBytes        = std::stoull(fields[8]);
+      entry.microversions = static_cast<std::uint32_t>(std::stoul(fields[9]));
+      entry.hasTranscopyright   = "true" == fields[10];
+      entry.transcopyrightTerms = tsvUnescape(fields[11]);
+      entry.merkleRoot          = parseHex32(fields[12]);
+      entry.signature           = tsvUnescape(fields[13]);
+      entry.topics              = splitTopics(fields[14]);
+      ledger.appendPublication(std::move(entry));
+    } catch (const std::exception &) {
+      continue;
     }
   }
-
-  if (inEntry) {
-    ledger.appendPublication(std::move(cur));
-  }
-
   return ledger;
 }
 
@@ -413,7 +443,7 @@ bool PublicationLedger::saveToFile(const std::string &path) const {
   if (!out.is_open()) {
     return false;
   }
-  out << toYaml();
+  out << toTsv();
   return out.good();
 }
 
@@ -425,15 +455,15 @@ PublicationLedger::loadFromFile(const std::string &path) {
   }
   std::string content((std::istreambuf_iterator<char>(in)),
                       std::istreambuf_iterator<char>());
-  return fromYaml(content);
+  return fromTsv(content);
 }
 
 MadeTorrent PublicationLedger::sealToTorrent(std::string_view name,
                                              std::uint64_t pieceLength) const {
   std::vector<TorrentContent> files;
-  const auto yamlStr = toYaml();
+  const auto tsv = toTsv();
   files.push_back(
-      TorrentContent{.path = "PUBLICATION_LEDGER.yaml", .data = yamlStr});
+      TorrentContent{.path = "PUBLICATION_LEDGER.tsv", .data = tsv});
 
   const auto rootStr = rootHex() + "\n";
   files.push_back(TorrentContent{.path = "ROOT.hex", .data = rootStr});

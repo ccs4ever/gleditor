@@ -8,11 +8,14 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <numeric>
+#include <ranges>
 #include <sstream>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vpl/lexer.hpp"
+#include "common/xanadu/zigzag/cell_views.hpp"
 
 namespace xanadu::vpl {
 
@@ -115,17 +118,7 @@ zigzag::DimRef VPLEngine::resolveDimension(std::string_view name) {
   if (name == "d.stdlib") return sysDims.stdlib;
   if (name == "d.clause") return sysDims.clause;
 
-  // Search existing dimensions on d.dims rank
-  zigzag::CellRef curr = sysDims.dims;
-  std::size_t limit    = core_->arena().cellCount() + 1;
-  while (curr != zigzag::noCell && limit-- > 0) {
-    if (core_->arena().textOf(curr) == name) {
-      return curr;
-    }
-    curr = core_->arena().linked(curr, sysDims.dims, zigzag::DimVector::POS);
-  }
-
-  return core_->mintDimension(name);
+  return core_->findOrMintDimension(name);
 }
 
 void VPLEngine::setVariable(std::string_view name, VplView value) {
@@ -291,7 +284,8 @@ VplView VPLEngine::evalVector(const VectorExpr &expr) {
 
   zigzag::DimRef axis = defaultDim();
   for (std::size_t i = 1; i < cells.size(); ++i) {
-    arena().link(cells[i - 1], axis, zigzag::DimVector::POS, cells[i]);
+    zigzag::expectWritten(
+        arena().link(cells[i - 1], axis, zigzag::DimVector::POS, cells[i]));
   }
   VplView res(cells[0], {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
   res.setExtents({cells.size()});
@@ -392,7 +386,8 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
     if (head == zigzag::noCell) {
       head = copy;
     } else {
-      arena().link(prev, axis, zigzag::DimVector::POS, copy);
+      zigzag::expectWritten(
+          arena().link(prev, axis, zigzag::DimVector::POS, copy));
     }
     prev = copy;
   }
@@ -513,14 +508,16 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
 
             if (rowHead == zigzag::noCell) rowHead = cell;
             if (prevCol != zigzag::noCell) {
-              arena().link(prevCol, dCol, zigzag::DimVector::POS, cell);
+              zigzag::expectWritten(
+                  arena().link(prevCol, dCol, zigzag::DimVector::POS, cell));
             }
             prevCol = cell;
           }
 
           if (root == zigzag::noCell) root = rowHead;
           if (prevRowHead != zigzag::noCell) {
-            arena().link(prevRowHead, dRow, zigzag::DimVector::POS, rowHead);
+            zigzag::expectWritten(arena().link(
+                prevRowHead, dRow, zigzag::DimVector::POS, rowHead));
           }
           prevRowHead = rowHead;
         }
@@ -562,7 +559,8 @@ VplView VPLEngine::evalDyadic(const DyadicExpr &expr) {
           }
           if (head == zigzag::noCell) head = copy;
           if (prev != zigzag::noCell) {
-            arena().link(prev, axis, zigzag::DimVector::POS, copy);
+            zigzag::expectWritten(
+                arena().link(prev, axis, zigzag::DimVector::POS, copy));
           }
           prev = copy;
         }
@@ -603,7 +601,8 @@ VplView VPLEngine::evalConjunction(const ConjunctionExpr &expr) {
       for (zigzag::CellRef m : members) {
         (void)m;
         zigzag::CellRef cloneCell = arena().makeCell();
-        arena().link(prev, dClone, zigzag::DimVector::POS, cloneCell);
+        zigzag::expectWritten(
+            arena().link(prev, dClone, zigzag::DimVector::POS, cloneCell));
         prev = cloneCell;
       }
     }
@@ -743,10 +742,10 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
       return *arg.enclosedView();
     }
     if (arg.origin() != zigzag::noCell) {
-      zigzag::CellRef master =
+      const auto master =
           arena().cloneMaster(arg.origin(), core_->dims().clone);
-      if (master != arg.origin() && master != zigzag::noCell) {
-        return {master, arg.axes()};
+      if (master && *master != arg.origin()) {
+        return {*master, arg.axes()};
       }
       auto cells = arg.collectCells(arena());
       if (!cells.empty()) {
@@ -808,12 +807,8 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
     std::vector<zigzag::CellRef> trans;
     zigzag::DimRef dTrans = resolveDimension("d.transclude");
     for (zigzag::CellRef c : cells) {
-      zigzag::CellRef t = arena().linked(c, dTrans, zigzag::DimVector::POS);
-      std::size_t limit = arena().cellCount() + 1;
-      while (t != zigzag::noCell && limit-- > 0) {
-        trans.push_back(t);
-        t = arena().linked(t, dTrans, zigzag::DimVector::POS);
-      }
+      std::ranges::copy(zigzag::rankAfter(arena(), c, dTrans),
+                        std::back_inserter(trans));
     }
     if (trans.empty()) return {};
     VplView res(trans[0],
@@ -848,21 +843,14 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     zigzag::DimRef d =
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
 
-    zigzag::CellRef endOfH =
-        arena().linked(core_->home(), d, zigzag::DimVector::POS);
-    zigzag::CellRef lastH = core_->home();
-    std::size_t limit     = arena().cellCount() + 1;
-    while (endOfH != zigzag::noCell && limit-- > 0) {
-      lastH  = endOfH;
-      endOfH = arena().linked(endOfH, d, zigzag::DimVector::POS);
-    }
+    const zigzag::CellRef lastH = zigzag::rankTail(arena(), core_->home(), d);
 
     zigzag::CellRef firstMinted = zigzag::noCell;
     zigzag::CellRef prev        = lastH;
     for (std::size_t i = 1; i <= n; ++i) {
       zigzag::CellRef c = arena().makeScalarCell(static_cast<std::int64_t>(i));
       if (firstMinted == zigzag::noCell) firstMinted = c;
-      arena().link(prev, d, zigzag::DimVector::POS, c);
+      zigzag::expectWritten(arena().link(prev, d, zigzag::DimVector::POS, c));
       prev = c;
     }
 
@@ -885,7 +873,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       zigzag::DimRef d = right.axes()[0].dim;
       auto cells       = left.collectCells(arena());
       for (std::size_t i = 1; i < cells.size(); ++i) {
-        arena().link(cells[i - 1], d, zigzag::DimVector::POS, cells[i]);
+        zigzag::expectWritten(
+            arena().link(cells[i - 1], d, zigzag::DimVector::POS, cells[i]));
       }
       VplView res(cells.empty() ? zigzag::noCell : cells[0],
                   {zigzag::DirectedDim{d, zigzag::DimVector::POS}});
@@ -933,14 +922,16 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
           }
           if (rowHead == zigzag::noCell) rowHead = cell;
           if (prevCol != zigzag::noCell) {
-            arena().link(prevCol, dCol, zigzag::DimVector::POS, cell);
+            zigzag::expectWritten(
+                arena().link(prevCol, dCol, zigzag::DimVector::POS, cell));
           }
           prevCol = cell;
         }
 
         if (root == zigzag::noCell) root = rowHead;
         if (prevRowHead != zigzag::noCell) {
-          arena().link(prevRowHead, dRow, zigzag::DimVector::POS, rowHead);
+          zigzag::expectWritten(
+              arena().link(prevRowHead, dRow, zigzag::DimVector::POS, rowHead));
         }
         prevRowHead = rowHead;
       }
@@ -982,7 +973,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     zigzag::DimRef axis =
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
     for (std::size_t i = 1; i < taken.size(); ++i) {
-      arena().link(taken[i - 1], axis, zigzag::DimVector::POS, taken[i]);
+      zigzag::expectWritten(
+          arena().link(taken[i - 1], axis, zigzag::DimVector::POS, taken[i]));
     }
     VplView res(taken.empty() ? zigzag::noCell : taken[0],
                 {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
@@ -1006,7 +998,8 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
     zigzag::DimRef axis =
         right.axes().empty() ? defaultDim() : right.axes()[0].dim;
     for (std::size_t i = 1; i < dropped.size(); ++i) {
-      arena().link(dropped[i - 1], axis, zigzag::DimVector::POS, dropped[i]);
+      zigzag::expectWritten(arena().link(dropped[i - 1], axis,
+                                         zigzag::DimVector::POS, dropped[i]));
     }
     VplView res(dropped.empty() ? zigzag::noCell : dropped[0],
                 {zigzag::DirectedDim{axis, zigzag::DimVector::POS}});
@@ -1251,7 +1244,7 @@ VplView VPLEngine::mintRank(const std::vector<double> &values,
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
     zigzag::CellRef c = arena().makeScalarCell(values[i]);
-    arena().link(prev, dim, zigzag::DimVector::POS, c);
+    zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;
   }
   VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
@@ -1267,7 +1260,7 @@ VplView VPLEngine::mintRank(const std::vector<std::int64_t> &values,
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
     zigzag::CellRef c = arena().makeScalarCell(values[i]);
-    arena().link(prev, dim, zigzag::DimVector::POS, c);
+    zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;
   }
   VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
@@ -1283,7 +1276,7 @@ VplView VPLEngine::mintRank(const std::vector<std::string> &values,
   zigzag::CellRef prev = head;
   for (std::size_t i = 1; i < values.size(); ++i) {
     zigzag::CellRef c = arena().makeCell(values[i]);
-    arena().link(prev, dim, zigzag::DimVector::POS, c);
+    zigzag::expectWritten(arena().link(prev, dim, zigzag::DimVector::POS, c));
     prev = c;
   }
   VplView res(head, {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});

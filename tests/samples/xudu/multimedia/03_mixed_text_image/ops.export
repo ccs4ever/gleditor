@@ -1,3 +1,20 @@
-1 transclude 0 0 0 0 228 0 0 0 0 1 0 0
-a1 insert 0 0 0 4070 467 0 0 0 0 0 0 0
-a2 insert 467 0 0 0 228 0 0 0 0 1 0 0
+# osmic 1
+1 transclude 0 0 0 0 228 0 0 0 0 1 0 0 0
+a1 insert 0 0 0 5028 467 0 0 0 0 0 0 0 0
+a2 insert 467 0 0 0 228 0 0 0 0 1 0 0 0
+a3 structure 0 0 0 5495 4 0 0 0 0 0 8 0 0
+a4 structure 0 0 0 5499 4 0 0 0 0 0 0 0 a3
+a5 structure 0 0 0 5503 6 0 0 0 0 0 0 0 a3
+a6 structure 0 0 6 0 0 a4 0 0 6 0 1 0 a3
+a7 structure 0 0 0 5509 10 0 0 0 0 0 0 0 a3
+a8 structure 0 0 8 0 0 a5 0 0 6 0 1 0 a3
+a9 structure 0 0 0 5519 12 0 0 0 0 0 0 0 a3
+a10 structure 0 0 10 0 0 a7 0 0 6 0 1 0 a3
+a11 structure 0 0 0 0 0 0 0 0 0 0 64 3 a3
+a12 structure 0 0 0 5531 7 0 0 0 0 0 0 0 a3
+a13 structure 0 0 13 0 0 a6 0 0 8 0 1 0 a6
+a14 structure 0 0 12 0 0 a12 0 0 10 0 1 0 a12
+a15 structure 0 0 0 5538 9 0 0 0 0 0 0 0 a3
+a16 structure 0 0 16 0 0 a9 0 0 6 0 1 0 a3
+a17 structure 0 0 0 5547 47 0 0 0 0 0 0 0 a3
+a18 structure 0 0 18 0 0 a13 0 0 16 0 1 0 a13

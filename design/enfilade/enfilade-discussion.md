@@ -11,24 +11,24 @@ ______________________________________________________________________
 ## Contents
 
 - [1. Executive Summary: The Tripartite Dialectic](#1-executive-summary-the-tripartite-dialectic)
-- [2. Foundations of Grand Enfilade Theory & the "Ent"](#2-foundations-of-grand-enfilade-theory--the-ent)
-  - [2.1 The Addressing Paradox and Coordinate Relativity](#21-the-addressing-paradox-and-coordinate-relativity)
-  - [2.2 The Algebraic Monoid Triplet: Dsp, Wid, and Action](#22-the-algebraic-monoid-triplet-dsp-wid-and-action)
+- [2. Foundations of Grand Enfilade Theory & the "Ent"][toc-01]
+  - [2.1 The Addressing Paradox and Coordinate Relativity][toc-02]
+  - [2.2 The Algebraic Monoid Triplet: Dsp, Wid, and Action][toc-03]
   - [2.3 The Udanax Green "Ent" vs. "Bert"](#23-the-udanax-green-ent-vs-bert)
   - [2.4 The Historic Enfilade Taxonomy](#24-the-historic-enfilade-taxonomy)
-- [3. Silicon & Network Stress-Testing: The Mechanical Critique](#3-silicon--network-stress-testing-the-mechanical-critique)
-  - [3.1 The Pointer-Chasing Penalty vs. Contiguous Cache Lines](#31-the-pointer-chasing-penalty-vs-contiguous-cache-lines)
-  - [3.2 The 4.96 ns Adjacency Walk vs. O(log N) Breakeven](#32-the-496-ns-adjacency-walk-vs-olog-n-breakeven)
-  - [3.3 Render-Path Latency and Text Shapers](#33-the-120-fps--833-ms-render-budget-and-text-shapers)
-  - [3.4 Swarm Transport: Merkle Trees vs. Relative Ents](#34-swarm-transport-merkle-trees-vs-relative-ents)
+- [3. Silicon & Network Stress-Testing: The Mechanical Critique][toc-04]
+  - [3.1 The Pointer-Chasing Penalty vs. Contiguous Cache Lines][toc-05]
+  - [3.2 The 4.96 ns Adjacency Walk vs. O(log N) Breakeven][toc-06]
+  - [3.3 Render-Path Latency and Text Shapers][toc-07]
+  - [3.4 Swarm Transport: Merkle Trees vs. Relative Ents][toc-08]
 - [4. Five High-Value Enfilade Frontiers Beyond U1](#4-five-high-value-enfilade-frontiers-beyond-u1)
-  - [4.1 Frontier 1: The True Spanfilade (Transclusion & Beam Discovery)](#41-frontier-1-the-true-spanfilade-transclusion--beam-discovery)
-  - [4.2 Frontier 2: The Layoutfilade (Virtualized Scrolling & Coordinate Mapping)](#42-frontier-2-the-layoutfilade-virtualized-scrolling--coordinate-mapping)
-  - [4.3 Frontier 3: The Osmic Chronofilade (100k Microversion Timeline Scrubbing)](#43-frontier-3-the-osmic-chronofilade-100k-microversion-timeline-scrubbing)
-  - [4.4 Frontier 4: The Holefilade & Transcopyright Settlement Ledger](#44-frontier-4-the-holefilade--transcopyright-settlement-ledger)
-  - [4.5 Frontier 5: Multi-Valence Arrayfilade & VQL Query Planning](#45-frontier-5-multi-valence-arrayfilade--vql-query-planning)
-- [5. Architectural Governance & Codebase Invariants](#5-architectural-governance--codebase-invariants)
-  - [5.1 Strict Enforcement of Architectural Rulings](#51-strict-enforcement-of-architectural-rulings)
+  - [4.1 Frontier 1: The True Spanfilade (Transclusion & Beam Discovery)][toc-09]
+  - [4.2 Frontier 2: The Layoutfilade (Virtualized Scrolling & Coordinate Mapping)][toc-10]
+  - [4.3 Frontier 3: The Osmic Chronofilade (100k Microversion Timeline Scrubbing)][toc-11]
+  - [4.4 Frontier 4: The Holefilade & Transcopyright Settlement Ledger][toc-12]
+  - [4.5 Frontier 5: Multi-Valence Arrayfilade & VQL Query Planning][toc-13]
+- [5. Architectural Governance & Codebase Invariants][toc-14]
+  - [5.1 Strict Enforcement of Architectural Rulings][toc-15]
   - [5.2 Cache-Conscious B-Enfilade Node (C++23)](#52-cache-conscious-b-enfilade-node-c23)
   - [5.3 External Side Arrays for Leaf References](#53-external-side-arrays-for-leaf-references)
 - [6. Conclusion](#6-conclusion)
@@ -244,8 +244,11 @@ ______________________________________________________________________
   offsets.
 - **Enfilade Solution**: A **Layoutfilade (2D Coordinate & Height Ent)**:
   - **Sequence**: Soft-broken visual lines or paragraphs.
+
   - **Dsp**: $(\Delta \text{bytes}, \Delta Y_{\text{px}})$.
+
   - **Wid**:
+
     ```cpp
     struct LayoutMetricsWid {
       uint32_t totalBytes{0};
@@ -254,7 +257,9 @@ ______________________________________________________________________
       float    maxLineWidthPx{0.0F};
     };
     ```
+
   - **Capabilities**:
+
     1. *Screen $Y \to (\text{Line}, \text{ByteOffset})$*: $O(\log N)$ descent down the tree,
        subtracting child $\Delta Y_{\text{px}}$ until reaching the visible band. Shapes *only*
        visible lines.
@@ -287,7 +292,9 @@ ______________________________________________________________________
   proof ledger.
 - **Enfilade Solution**: A **Holefilade & Settlement Ent**:
   - **Dsp**: Permascroll byte offset.
+
   - **Wid**:
+
     ```cpp
     struct PermascrollStatusWid {
       uint64_t clearBytes{0};
@@ -297,8 +304,10 @@ ______________________________________________________________________
       uint64_t microcentsOwed{0};  // Micropayment liability
     };
     ```
+
   - Instantly decomposes any requested span $[A, B)$ into cleartext slices and encrypted/locked
     slices in $O(\log N)$ time.
+
   - Paired with `merklecpp`, each crum maintains cumulative payment receipts, producing succinct
     inclusion proofs for BitTorrent peer-wire micropayment settlement.
 
@@ -309,18 +318,18 @@ ______________________________________________________________________
   iterating over every individual cell. In VQL (`design/vql-query-language.md`), predicate
   evaluation (`##/d.people[d.age > 30]/d.name`) naively streams and inspects every cell on the rank.
 - **Enfilade Solution**:
-  1. **Multi-Valence Arrayfilade (for VPL)**:
-     - Multi-dimensional Dsp $(\Delta d_1, \Delta d_2, \dots, \Delta d_m)$.
-     - Wid: Multidimensional bounding shape + parallel aggregation monoids (sum, min, max, count).
-     - Subscripting $A[i]$: $O(\log N)$ ordinal descent.
-     - Slicing $A[i_1..i_2, j_1..j_2]$: Returns a pruned subtree view in $O(\log N)$ time with zero
-       cell copying.
-     - Reductions (`+/A`, `⌊/A`): Evaluated in $O(1)$ directly from the root Wid!
-  1. **Topological Query Planning Index (for VQL)**:
-     - Ranks indexed by an enfilade whose Wids summarize scalar bounds (`[minScalar, maxScalar]`
-       from R6 canonical bits) and text functors (Bloom filter).
-     - Predicate Pushdown: For `[d.age > 30]`, if the crum's `maxScalar <= 30`, the entire subtree
-       is pruned in $O(1)$ without visiting any `DimLink`s.
+  - **Multi-Valence Arrayfilade (for VPL)**:
+    - Multi-dimensional Dsp $(\Delta d_1, \Delta d_2, \dots, \Delta d_m)$.
+    - Wid: Multidimensional bounding shape + parallel aggregation monoids (sum, min, max, count).
+    - Subscripting $A[i]$: $O(\log N)$ ordinal descent.
+    - Slicing $A[i_1..i_2, j_1..j_2]$: Returns a pruned subtree view in $O(\log N)$ time with zero
+      cell copying.
+    - Reductions (`+/A`, `⌊/A`): Evaluated in $O(1)$ directly from the root Wid!
+  - **Topological Query Planning Index (for VQL)**:
+    - Ranks indexed by an enfilade whose Wids summarize scalar bounds (`[minScalar, maxScalar]` from
+      R6 canonical bits) and text functors (Bloom filter).
+    - Predicate Pushdown: For `[d.age > 30]`, if the crum's `maxScalar <= 30`, the entire subtree is
+      pruned in $O(1)$ without visiting any `DimLink`s.
 
 ______________________________________________________________________
 
@@ -391,7 +400,7 @@ public:
   }
 
 private:
-  std::vector<uint32_t> cellToLeaf_; 
+  std::vector<uint32_t> cellToLeaf_;
   std::vector<xanadu::enfilade::CrumNode<uint32_t, uint32_t, 8>> nodes_;
 };
 
@@ -429,3 +438,19 @@ ______________________________________________________________________
 | Version | Date       | Description                                                                               |
 | :------ | :--------- | :---------------------------------------------------------------------------------------- |
 | 1.0     | 2026-09-11 | Initial discussion document: Grand Enfilade Theory, the Ent, and five frontiers beyond U1 |
+
+[toc-01]: #2-foundations-of-grand-enfilade-theory--the-ent
+[toc-02]: #21-the-addressing-paradox-and-coordinate-relativity
+[toc-03]: #22-the-algebraic-monoid-triplet-dsp-wid-and-action
+[toc-04]: #3-silicon--network-stress-testing-the-mechanical-critique
+[toc-05]: #31-the-pointer-chasing-penalty-vs-contiguous-cache-lines
+[toc-06]: #32-the-496-ns-adjacency-walk-vs-olog-n-breakeven
+[toc-07]: #33-the-120-fps--833-ms-render-budget-and-text-shapers
+[toc-08]: #34-swarm-transport-merkle-trees-vs-relative-ents
+[toc-09]: #41-frontier-1-the-true-spanfilade-transclusion--beam-discovery
+[toc-10]: #42-frontier-2-the-layoutfilade-virtualized-scrolling--coordinate-mapping
+[toc-11]: #43-frontier-3-the-osmic-chronofilade-100k-microversion-timeline-scrubbing
+[toc-12]: #44-frontier-4-the-holefilade--transcopyright-settlement-ledger
+[toc-13]: #45-frontier-5-multi-valence-arrayfilade--vql-query-planning
+[toc-14]: #5-architectural-governance--codebase-invariants
+[toc-15]: #51-strict-enforcement-of-architectural-rulings

@@ -107,7 +107,7 @@ ______________________________________________________________________
 
 Each ruling states its price. Where a tension is genuinely unresolved it is in §11 instead.
 
-### R1. `OpKind::Structure` is added. `OpKind::PageBreak` stays.
+### R1. `OpKind::Structure` is added. `OpKind::PageBreak` stays
 
 The sixth hyperop is implemented, and it is deliberately **not** used to re-express page breaks.
 
@@ -354,11 +354,22 @@ Set looked like a counterexample; it is not, once *identity* and *state* are sep
   correct answer to "where was I" across an edit, so the ruling is not to pretend there is one: **a
   resumed Vortex cursor re-derives its position or does not exist.**
 
-The general rule, of which all three are instances:
+The rule for a visited document or slice, of which all three are instances:
 
-> **Only a user-generated update persists. Navigation never does.** An op records that a person
+> **Only a user-generated update to that structure persists there.** An op records that a person
 > changed the structure. Where anything — a person, a query, a renderer — happens to be *looking* is
-> not a change to the structure and does not earn a name in hypertime.
+> not a change to that structure and does not earn a name in its hypertime.
+
+**Reader activity extension, proposed.** The
+[`Xuzz link traversal vision`](xuzz-unified-link-traversal-vision.md) calls for a separate,
+reader-owned `system://activity` store. A completed semantic transition becomes a persistent visit
+*in that store*, with its own parent and branches; returning to an old visit and continuing adds a
+child without deleting any prior future. Hover, cursor motion, camera frames, and endpoint preview
+remain ephemeral. Activity Back/Forward moves among existing visits and appends no new visit. The
+activity tree records where the reader went, while the visited document's and slice's hypertime
+record only edits to their content and structure. Activity IDs are not document `MicroversionId`s.
+The write and storage cost of meaningful visits is accepted in the user's activity store rather than
+charged to every visited document. This extension is a design decision, not an implemented store.
 
 This is what makes the two-type split in R8 mechanical rather than a matter of taste at each call
 site: a cursor's cell lives in the `Manifold`, its position and its generator state live in the
@@ -370,12 +381,12 @@ through the computation. Reachability GC ([`vql-query-language.md`](vql-query-la
 scoped to `ArenaManifold` only; on the persistent side `link(c, d, dir, -2)` records a Delete and
 reclaims nothing, because DELETE is REARRANGE TO LIMBO.
 
-The second loss is smaller but user-visible: **reopening a document does not restore where you
-were.** Caret position, scroll offset and open cursors come back at their defaults. That is a
-deliberate trade against the alternative — a spool in which the majority of ops record eye movement
-rather than authorship — and if it is ever wanted back, the place for it is a per-workstation
-session file outside the docuverse, which is a different artefact from a document's history and
-should never be confused with one.
+The second loss is smaller but user-visible in the current implementation: **reopening a document
+does not restore where you were.** Caret position, scroll offset and open cursors come back at their
+defaults. The proposed activity store restores completed visits and their saved view context across
+sessions without adding eye movement to the document spool. Its activity history is a different
+artifact from document hypertime. Because visits and annotations are user data, an unreadable
+activity store must be preserved and reported rather than regenerated like default configuration.
 
 ### R9. `Manifold` is an explicitly materialised view with a stated rebuild policy
 
@@ -420,7 +431,7 @@ invariant is not negotiable and is not what the version bump is spending.
 bytes per op inside the node — and an $O(n)$ rebuild pass per adopt. In exchange, "an op node is
 immutable" becomes true, which is what publication semantics already assumed.
 
-### R11. Bump the format version. Do not carry compatibility.
+### R11. Bump the format version. Do not carry compatibility
 
 Nothing built on this codebase is in production, no third party reads its files, and every store on
 disk can be regenerated from its inputs. Under those conditions a compatibility shim is not caution,
@@ -1892,7 +1903,9 @@ came back byte-identical across every regenerated fixture.
      accounting turns on.
    - **`promote()` mints only what the evaluation invented.** A ref without `ephemeralBit` already
      has a name in this document, so it maps to itself. Promoting an answer that quotes half a
-     document writes one operation per new cell, not per reachable cell.
+     document writes one operation per new cell, not per reachable cell. The graph walk stops at
+     unmodified base cells and treats dimension refs as edge names unless they are also reached by
+     an ordinary link; otherwise one answer can pull in the Vortex library behind `d.clone`.
 
    Not covered: promoting a shadow's *content* change back (its links are written, a restatement of
    its text is not), and an arena whose base is mutated underneath it — a shadow copies a cell, not
@@ -2151,12 +2164,9 @@ a 122× rank-hop penalty for. So: `Version`'s algorithm, the arena's layout.
   only two kinds and would publish a framed operation with its frame erased. Nothing here is blocked
   on it: a splice *is* an insert, a delete or a replacement, recorded as the sixth hyperop rather
   than as one of the five.
-- **`Splice` does not travel.** The wire encoder writes a Structure operation's `flags`, `to`,
-  `link`, span and `value`, and a splice also needs `at` and `length`. Publishing one today drops
-  both, so it would arrive as a splice at offset zero removing nothing. That is the same silent
-  change of meaning U3.2 found for framed operations, and it lands with the same fix: the Structure
-  encoder must carry `at` and `length`, which is `CompactBinaryV4`. **Until then a slice with edited
-  cells must not be published**, and the export path should refuse one rather than corrupt it.
+- **`Splice` travels via `CompactBinaryV4`.** The wire encoder now carries `at` and `length` for
+  `Splice` operations in `CompactBinaryV4`, so publishing a sliced store with spliced cell edits
+  round-trips without corruption (see `design/structure-hyperop/5.06-compact-binary-v4.md`).
 - **`resolveLocalCellView()` answers nothing for an edited cell.** A zero-copy view needs contiguous
   memory and an edited cell's content is several spans, so it returns empty and the caller falls
   back to `resolveCellText()`. Correct, but it means the zero-copy path quietly stops applying to
@@ -2337,7 +2347,7 @@ Source: `probe4.cpp`, same machine and compiler as above.
 
 ______________________________________________________________________
 
-## 13. Does This Layout Serve Vortex and VQL?
+## 13. Does This Layout Serve Vortex and VQL
 
 [Vortex](vortex-hyperstructural-runtime.md) and [VQL](vql-query-language.md) are the only specified
 consumers of a cell layout that this note does not itself design. Neither is built, so neither can

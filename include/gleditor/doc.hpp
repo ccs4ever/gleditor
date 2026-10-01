@@ -18,9 +18,13 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+
+#include <gleditor/cpp26.hpp>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -63,6 +67,26 @@ struct ClusterBox {
   /// Characters the cluster covers. Greater than one for a ligature, which is
   /// what makes a click inside the quad ambiguous without interpolation.
   std::uint32_t charCount{};
+};
+
+/// Where a caret sits on a page: its centre and height, in that page's
+/// pixel space.
+struct CaretGeometry {
+  float x{};
+  float y{};
+  float height{};
+};
+
+/// Where a LayoutBox landed on a page, in that page's pixel space.
+struct BoxGeometry {
+  float x{}; ///< Left edge.
+  /// Bottom edge, not the top: every caller wanting a box's position wants a
+  /// corner to draw a widget's rectangle up from.
+  float y{};
+  /// The placed size, which may be smaller than what was asked for if the
+  /// box was wider than the column.
+  float width{};
+  float height{};
 };
 
 /**
@@ -228,29 +252,21 @@ public:
    * same call an editor would make to place a cursor, and it already knows
    * about right-to-left runs and about offsets that fall inside a cluster.
    *
-   * @param[out] posX,posY Centre of the caret in this page's pixel space.
-   * @param[out] height Caret height in the same space.
-   * @return false when the offset is not on this page.
+   * @return the caret's centre and height in this page's pixel space, or
+   *         nullopt when the offset is not on this page.
    */
-  [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
-                                   float &posY, float &height) const;
+  [[nodiscard]] std::optional<CaretGeometry>
+  caretGeometry(std::uint32_t globalOffset) const;
 
   /**
    * @brief Where a LayoutBox anchored at a document-global byte offset
    *        landed, if this page holds one there.
    *
-   * @param[out] posX,posY The box's bottom-left corner in this page's pixel
-   *             space -- posY is the bottom edge, not the top, since every
-   *             caller wanting a box's position wants a corner to draw a
-   *             widget's rectangle up from.
-   * @param[out] width,height The box's placed size, which may be smaller
-   *             than what was asked for if it was wider than the column.
-   * @return false when the offset is not on this page, or nothing is
-   *         anchored there.
+   * @return the box's placement, or nullopt when the offset is not on this
+   *         page or nothing is anchored there. See BoxGeometry.
    */
-  [[nodiscard]] bool boxGeometry(std::uint32_t globalOffset, float &posX,
-                                 float &posY, float &width,
-                                 float &height) const;
+  [[nodiscard]] std::optional<BoxGeometry>
+  boxGeometry(std::uint32_t globalOffset) const;
 
   /// Blank border between a page's edge and the text on it, in that same
   /// pixel space. Public because it is not only the layout's business: what
@@ -345,6 +361,37 @@ private:
    * design/priority-page-building.md's Stage 2.
    */
   std::vector<std::optional<Page>> pages;
+
+  /// Every built page with its true index, skipping the gaps -- what each
+  /// page-by-page question walks, so none of them re-checks a slot by hand.
+  [[nodiscard]] auto builtPages() const {
+    return pages | std::views::enumerate |
+           std::views::filter(
+               [](const auto &slot) { return std::get<1>(slot).has_value(); }) |
+           std::views::transform([](const auto &slot) {
+             const auto &[index, page] = slot;
+             return std::pair<std::uint32_t, const Page &>{
+                 static_cast<std::uint32_t>(index), *page};
+           });
+  }
+
+  /// The built page holding document offset @p at: the last one starting at
+  /// or before it. nullopt before any page is built.
+  [[nodiscard]] std::optional<std::uint32_t>
+  pageHolding(std::uint32_t at) const;
+
+  /// The first answer @p ask gives for a built page, asking in page order.
+  /// @p ask takes (index, page) and answers an optional.
+  template <typename Ask>
+  [[nodiscard]] auto firstBuiltPage(Ask &&ask) const
+      -> std::invoke_result_t<Ask &, std::uint32_t, const Page &> {
+    for (const auto &[index, page] : builtPages()) {
+      if (auto answer = ask(index, page)) {
+        return answer;
+      }
+    }
+    return std::nullopt;
+  }
   /**
    * @brief Pages whose shaping is currently being kept, oldest first.
    *
@@ -869,12 +916,15 @@ public:
   /// so a result names which document was clicked.
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
-  [[nodiscard]] const Page *page(const std::size_t index) const {
-    // The has_value() check and the dereference both index the same
-    // pages[index] slot, evaluated left-to-right with no mutation between.
+  /// Built page @p index, or nothing for one not built yet or past the end.
+  [[nodiscard]] gleditor::cpp26::optional<const Page &>
+  page(const std::size_t index) const {
+    if (index >= pages.size() || !pages[index].has_value()) {
+      return gleditor::cpp26::nullopt;
+    }
+    // Checked on the line above; nothing between mutates pages.
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return (index < pages.size() && pages[index].has_value()) ? &*pages[index]
-                                                              : nullptr;
+    return *pages[index];
   }
 
   /// The measured coordinate frame of one built page.
@@ -895,8 +945,8 @@ public:
   /// The frame of a built page, or nothing while it is still being shaped.
   [[nodiscard]] std::optional<PageFrame>
   pageFrame(const std::size_t index) const {
-    const auto *const built = page(index);
-    if (built == nullptr) {
+    const auto built = page(index);
+    if (!built) {
       return std::nullopt;
     }
     return PageFrame{.localToWorld = modelMatrix() * built->getModel(),

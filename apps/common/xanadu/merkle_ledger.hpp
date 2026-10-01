@@ -86,12 +86,11 @@ struct MerkleProof {
   [[nodiscard]] bool
   verify(const std::array<std::uint8_t, 32> &expectedRoot) const;
 
-  /// Serializes the proof to YAML format.
-  [[nodiscard]] std::string toYaml() const;
+  /// Serializes the proof to deterministic TSV.
+  [[nodiscard]] std::string toTsv() const;
 
-  /// Deserializes a proof from YAML format.
-  [[nodiscard]] static std::optional<MerkleProof>
-  fromYaml(std::string_view yaml);
+  /// Deserializes a proof from deterministic TSV.
+  [[nodiscard]] static std::optional<MerkleProof> fromTsv(std::string_view tsv);
 
   bool operator==(const MerkleProof &) const = default;
 };
@@ -162,23 +161,23 @@ public:
   [[nodiscard]] std::vector<const GpgKeyLink *>
   findByEmail(std::string_view email) const;
 
-  /// Serialize the entire ledger to canonical YAML format.
-  [[nodiscard]] std::string toYaml() const;
+  /// Serialize the entire ledger to canonical TSV.
+  [[nodiscard]] std::string toTsv() const;
 
-  /// Parse a MerkleLedger from YAML text.
-  [[nodiscard]] static MerkleLedger fromYaml(std::string_view yaml);
+  /// Parse a MerkleLedger from TSV text.
+  [[nodiscard]] static MerkleLedger fromTsv(std::string_view tsv);
 
-  /// Save ledger YAML to a file on disk.
+  /// Save ledger TSV to a file on disk.
   [[nodiscard]] bool saveToFile(const std::string &path) const;
 
-  /// Load ledger YAML from a file on disk.
+  /// Load ledger TSV from a file on disk.
   [[nodiscard]] static std::optional<MerkleLedger>
   loadFromFile(const std::string &path);
 
   /**
    * @brief Seal the ledger into a BitTorrent metainfo archive.
    *
-   * Produces a torrent containing LEDGER.yaml, ROOT.hex, and KEYS.pub.
+   * Produces a torrent containing LEDGER.tsv, ROOT.hex, and KEYS.pub.
    */
   [[nodiscard]] MadeTorrent
   sealToTorrent(std::string_view name     = "gpg_identity_ledger",

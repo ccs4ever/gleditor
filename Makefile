@@ -101,7 +101,6 @@ CKSUM = cksum
 # cocmd builtin mkdir is sufficient for our needs
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
-# removed spdlog
 # SDL major version. SDL3 is what the code is written against and what is used
 # when it is installed; SDL2 is still what most distributions ship, so it is
 # the fallback rather than an error. Set GLEDITOR_SDL=2 or 3 to choose
@@ -147,7 +146,7 @@ GL_CFLAGS :=
 # the PDF figure extraction in text_source.cpp needs, live in libpoppler
 # itself. Listed separately so pkg-config contributes -lpoppler too, not to
 # add new cflags on top of what poppler-cpp already provides.
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler libmagic libvlc openssl $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler libmagic libvlc openssl spdlog $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -285,7 +284,7 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -353,6 +352,7 @@ A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/linux/$(A11Y_ARCH)/shared
 endif
 ifneq ($(wildcard $(ACCESSKIT_DIR)/include/accesskit.h),)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(ACCESSKIT_DIR)/include/accesskit.h
 A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
 A11Y_LIBS   := -L$(A11Y_LIBDIR) -laccesskit
 ifndef WINDOWS
@@ -364,12 +364,27 @@ endif
 endif
 else ifeq ($(shell pkg-config --exists accesskit && echo 1),1)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(wildcard $(shell pkg-config --variable=includedir accesskit)/accesskit.h)
 A11Y_CFLAGS := $(shell pkg-config $(STATIC) --cflags accesskit)
 A11Y_LIBS   := $(shell pkg-config $(STATIC) --libs accesskit)
 else ifneq ($(wildcard /usr/include/accesskit.h /usr/local/include/accesskit.h),)
 GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(firstword $(wildcard /usr/include/accesskit.h /usr/local/include/accesskit.h))
 A11Y_CFLAGS :=
 A11Y_LIBS   := -laccesskit
+endif
+
+# accesskit-c 0.23 renamed the tree description -- `accesskit_tree` and its
+# four entry points -- to `accesskit_tree_info`, to stop it being read as the
+# tree of nodes it is not. Both spellings have to be buildable: no
+# distribution packages accesskit-c at all, so whoever has it has whichever
+# release they happened to unpack. The header itself carries no version, and a
+# renamed function cannot be detected from the preprocessor, so the name is
+# looked for in the header the compiler is about to read.
+ifneq ($(A11Y_HEADER),)
+ifneq ($(shell grep -c accesskit_tree_info_new $(A11Y_HEADER) 2>/dev/null),0)
+A11Y_CFLAGS += -DGLEDITOR_ACCESSKIT_TREE_INFO=1
+endif
 endif
 
 ifndef GLEDITOR_HAVE_A11Y
@@ -438,7 +453,11 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include -isystem thirdparty/beman_optional/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+override CXXFLAGS += -isystem thirdparty/beman_inplace_vector/include
+ifeq ($(GLEDITOR_CPP26_FORCE_FALLBACK),1)
+override CXXFLAGS += -DGLEDITOR_CPP26_FORCE_FALLBACK=1
+endif
 ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif
@@ -499,12 +518,12 @@ ifneq ($(shell pkg-config --exists giflib && echo 1),1)
 LIBS += -lgif
 endif
 endif
-GLEDITOR_LIBS := -lryml
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
+GLEDITOR_LIBS :=
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
@@ -544,8 +563,13 @@ LIB_SRCS := $(filter-out src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,acces
 # .cpp extension every other source in this tree actually has.
 ZSTD_SEEKABLE_DIR := thirdparty/zstd/contrib/seekable_format
 ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
-                     $(ZSTD_SEEKABLE_DIR)/zstdseek_decompress.c
-# These two files' own #include "zstd.h"/"zstd_errors.h" resolve against
+                     $(ZSTD_SEEKABLE_DIR)/zstdseek_decompress.c \
+                     thirdparty/zstd/lib/common/xxhash.c
+# xxhash.c comes along because the seekable format's checksums call
+# XXH64_*, which the vendored xxhash.h renames to ZSTD_XXH64_* (its
+# XXH_NAMESPACE default) -- and the installed libzstd keeps those hidden, so
+# without this the link ends in undefined ZSTD_XXH64_reset/update/digest.
+# These three files' own #include "zstd.h"/"zstd_errors.h" resolve against
 # thirdparty/zstd/lib rather than the system libzstd this build otherwise
 # links (both are pinned to the same v1.5.7, so which one wins is not
 # supposed to matter -- see .gitmodules -- but pointing them at the vendored
@@ -563,6 +587,7 @@ GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # The xanalogical engine and common data models are shared between xudu and zigzag
 # under apps/common/xanadu/.
 COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
+COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_SRCS    := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
@@ -578,6 +603,7 @@ objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
 LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
+COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 ZIGZAG_OBJS     := $(call obj,$(ZIGZAG_SRCS))
@@ -658,7 +684,7 @@ endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) $(XUZZ_OBJS) \
-	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
+	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
@@ -793,8 +819,8 @@ $(OBJDIR)/xudu: $(OBJDIR)/xuzz
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
-$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) \
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
 	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
@@ -853,7 +879,7 @@ $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
@@ -1130,7 +1156,8 @@ SH_FORMAT_FILES  = $(shell $(GIT_LS) '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
 MD_FORMAT_FILES  = $(shell $(GIT_LS) '*.md' | grep -v '^thirdparty/')
 
-CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
+CLANG_FORMAT_MAJOR := 19
+CLANG_FORMAT := $(shell command -v clang-format-$(CLANG_FORMAT_MAJOR) 2>/dev/null || command -v clang-format 2>/dev/null)
 SHFMT        := $(shell command -v shfmt 2>/dev/null)
 YAMLFMT      := $(shell command -v yamlfmt 2>/dev/null)
 MDFORMAT     := $(shell command -v mdformat 2>/dev/null)
@@ -1141,6 +1168,29 @@ RUN_CLANG_TIDY := $(shell command -v run-clang-tidy 2>/dev/null)
 CLANG_TIDY     := $(shell command -v clang-tidy 2>/dev/null)
 SCAN_BUILD     := $(shell command -v scan-build 2>/dev/null)
 CPPCHECK       := $(shell command -v cppcheck 2>/dev/null)
+
+# .clang-format names keys that only exist from clang-format 18 on
+# (AlignFunctionPointers), and an older binary does not ignore them: it
+# refuses the whole file with "unknown key" and exits non-zero on every
+# source. A loop that counted failures therefore read as "every file is
+# unformatted" from 17 and as "nothing is unformatted" from anything that
+# swallowed the error -- neither of which is a formatting result at all.
+# 18 and 19 then disagree with each other on brace-init and aligned-
+# assignment continuations, so the tree can only be formatted to one major.
+# Refuse an older one by name rather than let it write a diff CI rejects;
+# only the formatting goals care, so a build on a machine with an ancient
+# clang-format is unaffected.
+FORMAT_GOALS := format format-check check
+ifneq (,$(filter $(FORMAT_GOALS),$(MAKECMDGOALS)))
+ifdef CLANG_FORMAT
+CLANG_FORMAT_FOUND_MAJOR := $(shell $(CLANG_FORMAT) --version | sed -n 's/.*version \([0-9][0-9]*\).*/\1/p')
+ifneq (,$(CLANG_FORMAT_FOUND_MAJOR))
+ifeq (1,$(shell test $(CLANG_FORMAT_FOUND_MAJOR) -lt $(CLANG_FORMAT_MAJOR) && echo 1))
+$(error clang-format $(CLANG_FORMAT_FOUND_MAJOR) ($(CLANG_FORMAT)) is older than the $(CLANG_FORMAT_MAJOR) this tree is formatted to; install clang-format-$(CLANG_FORMAT_MAJOR) (apt) or pip install 'clang-format==$(CLANG_FORMAT_MAJOR).*')
+endif
+endif
+endif
+endif
 
 # mdformat is useless to this tree without its plugins, and worse than useless
 # quietly: plain mdformat has no concept of GFM tables (it reflows them into
@@ -1257,6 +1307,8 @@ ifdef MDL
 	# it mdl reads the closing "---" as a second thematic break and flags
 	# MD035 against the "______" mdformat renders for real horizontal rules
 	# in the body.
+	GEM_HOME="$${GEM_HOME:-$$(unset XDG_DATA_HOME; ruby -e 'puts Gem.user_dir' 2>/dev/null)}" \
+	GEM_PATH="$${GEM_PATH:-$$(unset XDG_DATA_HOME; ruby -e 'puts Gem.path.join(":")' 2>/dev/null)}" \
 	$(MDL) -i $(MD_FORMAT_FILES)
 else
 	@echo "mdl not found, skipping Markdown lint"
@@ -1348,6 +1400,30 @@ install:
 	# and what it may not is the directory itself.
 	$(INSTALL) -d $(DESTDIR)$(includedir)
 	cp -R include/gleditor $(DESTDIR)$(includedir)/
+	# The C++26 facades in those headers pick native or fallback types, and a
+	# program has to pick what this library was built with or the two disagree
+	# on layout. Record the choices this build made -- the same compiler,
+	# standard library and flags as every object above -- and install the
+	# fallbacks, with their licences, where gleditor.pc points.
+	$(CXX) $(CXXFLAGS) -dM -E -x c++ include/gleditor/cpp26_select.hpp \
+	  | grep '^#define GLEDITOR_CPP26_NATIVE_' \
+	  > $(DESTDIR)$(includedir)/gleditor/cpp26_config.hpp
+	$(INSTALL) -d $(DESTDIR)$(includedir)/gleditor/cpp26-fallback
+	cp -R thirdparty/nontype_functional/include/std23 \
+	  thirdparty/beman_optional/include/beman \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/
+	cp -R thirdparty/beman_inplace_vector/include/beman/inplace_vector \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/
+	# Upstream build files ride along in their include trees; a header
+	# directory is no place for them.
+	find $(DESTDIR)$(includedir)/gleditor/cpp26-fallback \
+	  \( -name CMakeLists.txt -o -name '*.in' \) -delete
+	$(INSTALL) -m 644 thirdparty/nontype_functional/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/std23/LICENSE
+	$(INSTALL) -m 644 thirdparty/beman_optional/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/optional/LICENSE
+	$(INSTALL) -m 644 thirdparty/beman_inplace_vector/LICENSE \
+	  $(DESTDIR)$(includedir)/gleditor/cpp26-fallback/beman/inplace_vector/LICENSE
 	$(INSTALL) -d $(DESTDIR)$(libdir)/pkgconfig
 	$(SED) -e 's,@PREFIX@,$(prefix),g' -e 's,@LIBDIR@,$(libdir),g' \
 	       -e 's,@INCLUDEDIR@,$(includedir),g' -e 's,@VERSION@,$(VERS),g' \

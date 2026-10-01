@@ -16,6 +16,14 @@ rule 'MD013', :line_length => 100, :ignore_code_blocks => true, :tables => false
 # codebase's IndentWidth rather than markdownlint's four-space default.
 rule 'MD007', :indent => 2
 
+# mdformat indents children of numbered items by three spaces and children of
+# dash items by two. MD005 compares every list at a given depth across the
+# whole file, so it reports valid mixed lists as inconsistent.
+exclude_rule 'MD005'
+
+# TSV examples need literal separators inside fenced code blocks.
+rule 'MD010', :ignore_code_blocks => true
+
 # Several walkthroughs show a `$ command` shell prompt to set off a command
 # from the prose around it even when no output follows on the next line;
 # that is a deliberate narrative choice, not a missed convention.

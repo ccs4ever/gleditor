@@ -112,7 +112,7 @@ TEST(LayoutfiladeBenchmarkTest, IncrementalResizeLatency) {
     const std::size_t targetIdx = (iter * 37) % kNumLines;
     auto modEntry               = entries[targetIdx];
     modEntry.heightPx           = 25.0F + static_cast<float>(iter % 10);
-    filade.updateEntry(targetIdx, modEntry);
+    ASSERT_TRUE(filade.updateEntry(targetIdx, modEntry));
   }
   const auto t1 = std::chrono::steady_clock::now();
   const auto updateElapsedUs =

@@ -177,30 +177,33 @@ void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   revision_++;
 }
 
-bool MediaWidget::load(const MediaResourcePtr &resource) {
-  if (player_ != nullptr && resource != nullptr) {
-    if (title_.empty()) {
-      title_ = resource->name();
-    }
-    revision_++;
-    return player_->load(resource);
+MediaLoad MediaWidget::load(const MediaResourcePtr &resource) {
+  if (nullptr == player_) {
+    return std::unexpected{MediaError::NoPlayer};
   }
-  return false;
+  if (nullptr == resource) {
+    return std::unexpected{MediaError::InvalidResource};
+  }
+  if (title_.empty()) {
+    title_ = resource->name();
+  }
+  revision_++;
+  return player_->load(resource);
 }
 
-bool MediaWidget::loadFragment(const MediaResourcePtr &resource,
-                               const ByteRange &fragment,
-                               const std::uint64_t containerLength) {
+MediaLoad MediaWidget::loadFragment(const MediaResourcePtr &resource,
+                                    const ByteRange &fragment,
+                                    const std::uint64_t containerLength) {
   pendingFragment_.reset();
-  if (!load(resource)) {
-    return false;
+  if (auto loaded = load(resource); !loaded) {
+    return loaded;
   }
   if (containerLength > 0 && fragment.length < containerLength) {
     pendingFragment_        = fragment;
     pendingContainerLength_ = containerLength;
     applyPendingFragment();
   }
-  return true;
+  return {};
 }
 
 void MediaWidget::applyPendingFragment() {
@@ -354,9 +357,9 @@ std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
     // the same up-positive direction: converting means locating the top
     // edge in this same centre-relative pixel space, half the page's own
     // height above centre, then stepping down by pageY_.
-    const auto *const pageObj = doc_->page(pageIdx);
+    const auto pageObj = doc_->page(pageIdx);
     const float halfHeightPixels =
-        (pageObj != nullptr) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
+        (pageObj.has_value()) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
     effectiveY = halfHeightPixels - pageY_;
   } else {
     // The layout engine already decided where this widget's LayoutBox
@@ -431,10 +434,10 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     const float anchorX    = corner->x;
     const float effectiveY = corner->y;
 
-    const auto *const pageObj = doc_->page(pageIdx);
-    const float pageCenterY   = (pageObj != nullptr)
-                                    ? pageObj->getModel()[3][1]
-                                    : (-100.0F * static_cast<float>(pageIdx));
+    const auto pageObj      = doc_->page(pageIdx);
+    const float pageCenterY = (pageObj.has_value())
+                                  ? pageObj->getModel()[3][1]
+                                  : (-100.0F * static_cast<float>(pageIdx));
 
     const auto docModel = doc_->modelMatrix();
     // Scale from widget layout pixel space to document world space

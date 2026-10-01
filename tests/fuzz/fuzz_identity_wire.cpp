@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <span>
 
-#include <xudu/core/identity/identity_serialization.hpp>
+#include "common/xanadu/identity/identity_serialization.hpp"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   if (0 == size) {
@@ -21,7 +21,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   }
   const std::span<const std::uint8_t> bytes(data, size);
 
-  using namespace xudu::identity;
+  using namespace xanadu::identity;
 
   // The envelope, as on_extended sees it.
   const auto frame = decodeExtendedMessage(bytes);

@@ -36,6 +36,7 @@ class Gleditor < Formula
   depends_on "rnp"
   depends_on "sdl3"
   depends_on "sdl3_image"
+  depends_on "spdlog"
 
   # AccessKit is what reports the user interface to screen readers --
   # NSAccessibility here, via view subclassing rather than a system service,

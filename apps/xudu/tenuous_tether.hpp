@@ -28,6 +28,7 @@
 #include "common/xanadu/universal_link_endpoint.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 using xanadu::LinkTargetKind;
 
@@ -131,12 +132,14 @@ public:
   [[nodiscard]] float controlDepth() const noexcept { return controlDepth_; }
 
 private:
+  static constexpr std::size_t defaultTessellationSegments = 16;
+
   RendererRef renderer_;
   render::RenderDevice *device_{nullptr};
   std::unique_ptr<gleditor::Beams> beams_;
   std::vector<FlyingTetherAnchor> tethers_;
   bool visible_{true};
-  std::size_t segments_{16};
+  std::size_t segments_{defaultTessellationSegments};
   float controlDepth_{18.0F};
 };
 

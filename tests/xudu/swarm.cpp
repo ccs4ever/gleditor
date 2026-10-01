@@ -22,24 +22,24 @@
 #include <string>
 #include <thread>
 
-#include <xudu/core/mutable_link.hpp>
-#include <xudu/core/resolver.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace {
 
 using namespace std::chrono_literals;
 
-using xudu::InfoHash;
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::Resolver;
-using xudu::Scroll;
-using xudu::Store;
-using xudu::SwarmContentSource;
+using xanadu::InfoHash;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::Resolver;
+using xanadu::Scroll;
+using xanadu::Store;
+using xanadu::SwarmContentSource;
 
 /// Where the other peer is, as the harness reports it.
 struct PeerUnderTest {
@@ -110,8 +110,8 @@ TEST_F(SwarmTest, contentArrivesFromTheOtherMachine) {
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   // A range in the middle, so this is not accidentally reading a file that
   // happened to already exist.
@@ -129,8 +129,8 @@ TEST_F(SwarmTest, aRangeSpanningPiecesArrives) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   ASSERT_GT(meta->pieceCount(), 1U) << "the sample needs several pieces";
 
   const auto &file = meta->files().front();
@@ -150,8 +150,8 @@ TEST_F(SwarmTest, theWholeFileArrives) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   const auto &file = meta->files().front();
   const auto scroll =
@@ -164,21 +164,21 @@ TEST_F(SwarmTest, aMagnetGetsItsMetadataFromAPeer) {
   // The thing a magnet cannot do alone. The link names the content; the piece
   // hashes come from the other machine, and libtorrent accepts them only if
   // they hash back to the name the link carried.
-  const auto meta = xudu::Metainfo::parse(readWholeFile(peer.torrentPath));
+  const auto meta = xanadu::Metainfo::parse(readWholeFile(peer.torrentPath));
 
   SwarmContentSource swarm(options());
   const auto hash = swarm.addMagnet(meta.magnet(), downloads.string());
   EXPECT_EQ(hash, meta.hash());
 
   // Nothing can be described yet: that is what makes it a magnet.
-  EXPECT_EQ(swarm.metainfo(hash), nullptr);
+  EXPECT_FALSE((swarm.metainfo(hash)).has_value());
 
   swarm.connectPeer(hash, peer.host, peer.port);
   ASSERT_TRUE(swarm.waitForMetadata(hash, 30s))
       << "no metadata arrived from the peer";
 
-  const auto *fetched = swarm.metainfo(hash);
-  ASSERT_NE(fetched, nullptr);
+  const auto fetched = swarm.metainfo(hash);
+  ASSERT_TRUE((fetched).has_value());
   // Read back through this codebase's own parser, and it agrees about the
   // identity -- so the content really is what the magnet named.
   EXPECT_EQ(fetched->hash(), meta.hash());
@@ -193,8 +193,8 @@ TEST_F(SwarmTest, aDocumentQuotesContentThisMachineNeverHad) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
 
   Store store;
   store.setContentSource(&swarm);
@@ -220,8 +220,8 @@ TEST_F(SwarmTest, contentNobodyIsSeedingReadsAsNothing) {
   const auto hash = swarm.addTorrent(readWholeFile(peer.torrentPath),
                                      downloads.string(), false);
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);
@@ -250,8 +250,8 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
       << "the download directory has to start empty for this to prove anything";
 
   swarm.connectPeer(hash, peer.host, peer.port);
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);
@@ -284,7 +284,7 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
  */
 class MutableNameTest : public SwarmTest {
 protected:
-  xudu::MutableLink link;
+  xanadu::MutableLink link;
 
   void SetUp() override {
     SwarmTest::SetUp();
@@ -295,7 +295,7 @@ protected:
     if (key.empty()) {
       GTEST_SKIP() << "the peer is not publishing a name";
     }
-    link = xudu::MutableLink::parse("magnet:?xs=urn:btpk:" + key);
+    link = xanadu::MutableLink::parse("magnet:?xs=urn:btpk:" + key);
   }
 
   /// The same closed swarm, with the one network a mutable item lives on.
@@ -314,7 +314,8 @@ TEST_F(MutableNameTest, aNameResolvesToWhatItPointsAt) {
   const auto pointer = swarm.resolveMutable(link, 60s);
   ASSERT_TRUE(pointer.has_value()) << "the name did not resolve";
 
-  const auto expected = xudu::Metainfo::parse(readWholeFile(peer.torrentPath));
+  const auto expected =
+      xanadu::Metainfo::parse(readWholeFile(peer.torrentPath));
   EXPECT_EQ(pointer->hash, expected.hash());
   EXPECT_GT(pointer->sequence, 0);
 }
@@ -338,8 +339,8 @@ TEST_F(MutableNameTest, contentIsFetchedFromNothingButAName) {
   swarm.connectPeer(hash, peer.host, peer.port);
   ASSERT_TRUE(swarm.waitForMetadata(hash, 30s)) << "no metadata arrived";
 
-  const auto *meta = swarm.metainfo(hash);
-  ASSERT_NE(meta, nullptr);
+  const auto meta = swarm.metainfo(hash);
+  ASSERT_TRUE((meta).has_value());
   const auto &file = meta->files().front();
   const auto scroll =
       Scroll::ofTorrentFile(hash, 0, file.path, file.offset, file.length);
@@ -354,8 +355,8 @@ TEST_F(MutableNameTest, aNameNobodyHasPublishedResolvesToNothing) {
   SwarmContentSource swarm(dhtOptions());
   swarm.addDhtNode(peer.host, peer.port);
 
-  xudu::MutableLink unknown;
-  unknown.key = xudu::createMutableKeys().publicKey;
+  xanadu::MutableLink unknown;
+  unknown.key = xanadu::createMutableKeys().publicKey;
 
   const auto started = std::chrono::steady_clock::now();
   EXPECT_FALSE(swarm.resolveMutable(unknown, 3s).has_value());
@@ -380,16 +381,16 @@ TEST(LiveCollaborativeSwarmTest, bep10LiveOpEncodingAndDecoding) {
       .swarmHash =
           InfoHash::fromHex("0123456789abcdef0123456789abcdef01234567"),
       .version         = MicroversionId::parse("2a1"),
-      .op              = xudu::Op{.kind         = xudu::OpKind::Insert,
-                                  .parent       = MicroversionId::parse("2"),
-                                  .at           = 42,
-                                  .length       = 10,
-                                  .to           = 0,
-                                  .span         = xudu::PrimediaSpan{1, 100, 25},
-                                  .source       = MicroversionId{},
-                                  .sourceAt     = 0,
-                                  .sourceLength = 0,
-                                  .link         = 7},
+      .op              = xanadu::Op{.kind         = xanadu::OpKind::Insert,
+                                    .parent       = MicroversionId::parse("2"),
+                                    .at           = 42,
+                                    .length       = 10,
+                                    .to           = 0,
+                                    .span         = xanadu::PrimediaSpan{1, 100, 25},
+                                    .source       = MicroversionId{},
+                                    .sourceAt     = 0,
+                                    .sourceLength = 0,
+                                    .link         = 7},
       .primediaText    = "Collaborative Text Span",
       .authorScrollKey = "btpk:"
                          "0123456789abcdef0123456789abcdef0123456789abcdef01234"
@@ -445,8 +446,8 @@ TEST(LiveCollaborativeSwarmTest, remoteAuthorBufferZeroPermascrollPollution) {
       "btpk:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:"
       "main";
 
-  xudu::Op op;
-  op.kind        = xudu::OpKind::Insert;
+  xanadu::Op op;
+  op.kind        = xanadu::OpKind::Insert;
   op.parent      = MicroversionId{};
   op.at          = 0;
   op.span.scroll = 1;
@@ -489,8 +490,8 @@ TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
 
   // Alice inserts text and broadcasts live op to swarm
   const InfoHash docSwarm{};
-  xudu::Op insertOp;
-  insertOp.kind   = xudu::OpKind::Insert;
+  xanadu::Op insertOp;
+  insertOp.kind   = xanadu::OpKind::Insert;
   insertOp.parent = MicroversionId{};
   insertOp.at     = 0;
 
@@ -506,8 +507,8 @@ TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
   EXPECT_EQ(aliceStore.textOf(editVer),
             "Hello World from Collaborative Swarm!");
 
-  xudu::Op editOp;
-  editOp.kind   = xudu::OpKind::Insert;
+  xanadu::Op editOp;
+  editOp.kind   = xanadu::OpKind::Insert;
   editOp.parent = rootVer;
   editOp.at     = 11;
 
@@ -530,8 +531,8 @@ TEST(LiveCollaborativeSwarmTest, unsealedRemoteSpanResolvesLiveTextAndHoles) {
       "btpk:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789:"
       "main";
 
-  xudu::Op op;
-  op.kind        = xudu::OpKind::Insert;
+  xanadu::Op op;
+  op.kind        = xanadu::OpKind::Insert;
   op.parent      = MicroversionId{};
   op.at          = 0;
   op.span.scroll = 1;
@@ -566,8 +567,8 @@ TEST(LiveCollaborativeSwarmTest, trimRemoteAuthorBufferOnSealedNotification) {
       "btpk:111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000:"
       "main";
 
-  xudu::Op op1;
-  op1.kind        = xudu::OpKind::Insert;
+  xanadu::Op op1;
+  op1.kind        = xanadu::OpKind::Insert;
   op1.parent      = MicroversionId{};
   op1.at          = 0;
   op1.span.scroll = 1;
@@ -575,8 +576,8 @@ TEST(LiveCollaborativeSwarmTest, trimRemoteAuthorBufferOnSealedNotification) {
   op1.span.length = 8;
   bobStore.applyRemoteLiveOp(op1, "ChunkOne", aliceScrollKey);
 
-  xudu::Op op2;
-  op2.kind        = xudu::OpKind::Insert;
+  xanadu::Op op2;
+  op2.kind        = xanadu::OpKind::Insert;
   op2.parent      = MicroversionId::parse("1");
   op2.at          = 8;
   op2.span.scroll = 1;
@@ -646,3 +647,12 @@ TEST(LiveCollaborativeSwarmTest,
 }
 
 } // namespace
+
+// A peer's malformed hash is a malformed message: nullopt, as the decoder
+// promises, rather than an exception thrown out of the message handler.
+TEST(SwarmContentSourceTest, aBroadcastWithANonHexHashIsRejectedNotThrown) {
+  const std::string notHexHash =
+      "d1:h40:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzze";
+  EXPECT_FALSE(SwarmContentSource::decodeLiveOp(notHexHash).has_value());
+  EXPECT_FALSE(SwarmContentSource::decodeScrollSealed(notHexHash).has_value());
+}

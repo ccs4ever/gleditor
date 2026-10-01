@@ -18,40 +18,40 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/version.hpp>
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/version.hpp"
 
 #include "torrent_data.hpp"
 
 namespace {
 
-using xudu::adopt;
-using xudu::adoptLinkPackage;
-using xudu::createMutableKeys;
-using xudu::GlobalLink;
-using xudu::GlobalSpan;
-using xudu::HalfLink;
-using xudu::InfoHash;
-using xudu::Link;
-using xudu::LinkedPair;
-using xudu::linkPackageRendezvousTarget;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::MutableKeys;
-using xudu::placeLinks;
-using xudu::ProminenceTier;
-using xudu::Publication;
-using xudu::PublicKey;
-using xudu::publish;
-using xudu::publishLinkPackage;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::Store;
-using xudu::Version;
+using xanadu::adopt;
+using xanadu::adoptLinkPackage;
+using xanadu::createMutableKeys;
+using xanadu::GlobalLink;
+using xanadu::GlobalSpan;
+using xanadu::HalfLink;
+using xanadu::InfoHash;
+using xanadu::Link;
+using xanadu::LinkedPair;
+using xanadu::linkPackageRendezvousTarget;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::MutableKeys;
+using xanadu::placeLinks;
+using xanadu::ProminenceTier;
+using xanadu::Publication;
+using xanadu::PublicKey;
+using xanadu::publish;
+using xanadu::publishLinkPackage;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::Store;
+using xanadu::Version;
 
 Scroll makeNamedScroll(const PublicKey &key, std::string salt,
                        const std::uint64_t length) {
