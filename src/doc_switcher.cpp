@@ -211,10 +211,10 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
   if (!visible || currentTabs.empty()) {
     return;
   }
-  constexpr std::uint64_t barId = 1;
-  auto &bar                     = into.add(barId, a11y::Role::List);
-  bar.label                     = "Open Documents";
-
+  // The bar is added after its entries: add() may move every node already
+  // added, and the bar's children were once pushed through a reference that
+  // the next add() had left dangling.
+  std::vector<std::uint64_t> entries;
   for (std::size_t i = 0; i < currentTabs.size(); ++i) {
     const auto &tab      = currentTabs[i];
     const auto tabNodeId = 100U + i;
@@ -223,15 +223,19 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
     node.value           = tab.active ? "selected" : "";
     node.toggled         = tab.active;
     node.actions         = a11y::bit(a11y::Action::Click);
-    bar.children.push_back(into.id(tabNodeId));
+    entries.push_back(into.id(tabNodeId));
   }
 
   const auto newDocNodeId = 99U;
   auto &newNode           = into.add(newDocNodeId, a11y::Role::Button);
   newNode.label           = "New Document";
   newNode.actions         = a11y::bit(a11y::Action::Click);
-  bar.children.push_back(into.id(newDocNodeId));
+  entries.push_back(into.id(newDocNodeId));
 
+  constexpr std::uint64_t barId = 1;
+  auto &bar                     = into.add(barId, a11y::Role::List);
+  bar.label                     = "Open Documents";
+  bar.children                  = std::move(entries);
   into.contribute(into.id(barId));
 }
 

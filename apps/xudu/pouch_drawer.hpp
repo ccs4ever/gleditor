@@ -65,6 +65,8 @@ public:
   // Accessibility
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
+                     std::string_view value) override;
 
   void setOpen(bool open, bool animated = true) noexcept;
   [[nodiscard]] bool isOpen() const noexcept { return isOpen_; }

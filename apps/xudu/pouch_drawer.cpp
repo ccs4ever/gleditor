@@ -34,6 +34,9 @@ void PouchDrawer::deviceReady(render::RenderDevice &device,
 }
 
 void PouchDrawer::setOpen(const bool open, const bool animated) noexcept {
+  if (open != isOpen_) {
+    ++a11yRevision_;
+  }
   isOpen_           = open;
   targetSlideWidth_ = open ? kDrawerWidth : 0.0F;
   if (!animated) {
@@ -443,26 +446,101 @@ bool PouchDrawer::picked(const render::PickingResult &pick,
   return false;
 }
 
+// Local ids, stable across rebuilds so a screen reader keeps its place: one
+// drawer, a list per zone by position, and per item a card and its two
+// buttons by the item's own id.
+namespace {
+constexpr std::uint64_t kA11yDrawer     = 1;
+constexpr std::uint64_t kA11yZoneBase   = 0x100;
+constexpr std::uint64_t kA11yItemBase   = 0x1'0000'0000ULL;
+constexpr std::uint64_t kA11yRemoveBase = 0x2'0000'0000ULL;
+constexpr std::uint64_t kA11yOriginBase = 0x3'0000'0000ULL;
+} // namespace
+
 void PouchDrawer::describe(gleditor::a11y::Builder &into) {
-  if (!isOpen_ || currentSlideWidth_ < 1.0F) {
+  using gleditor::a11y::Action;
+  using gleditor::a11y::bit;
+  using gleditor::a11y::Role;
+  if (!isOpen_) {
     return;
   }
-  constexpr std::uint64_t kDrawerNodeId = 0x70000000ULL;
-  auto &drawerNode = into.add(kDrawerNodeId, gleditor::a11y::Role::Group);
-  drawerNode.label = "Pouch Drawer";
-
+  // A parent is added after its children: add() may move every node already
+  // added, so a reference to one is not held across another add().
+  std::vector<std::uint64_t> zoneIds;
   for (std::size_t i = 0; i < pouchManager_.zones().size(); ++i) {
-    const auto &z               = pouchManager_.zones()[i];
-    const std::uint64_t zNodeId = 0x70000100ULL + i;
-    auto &zNode = into.add(zNodeId, gleditor::a11y::Role::Group);
-    zNode.label =
-        z->label() + " (" + std::to_string(z->items().size()) + " items)";
-    drawerNode.children.push_back(zNodeId);
+    const auto &zone = *pouchManager_.zones()[i];
+    std::vector<std::uint64_t> cardIds;
+    for (const auto &item : zone.items()) {
+      auto &remove   = into.add(kA11yRemoveBase + item.itemId, Role::Button);
+      remove.label   = "Remove from " + zone.label();
+      remove.actions = bit(Action::Click);
+      auto &origin   = into.add(kA11yOriginBase + item.itemId, Role::Button);
+      origin.label   = "Go to where it came from";
+      origin.actions = bit(Action::Click);
+
+      auto &card       = into.add(kA11yItemBase + item.itemId, Role::ListItem);
+      card.label       = item.previewText;
+      card.description = "Activate to insert at the caret";
+      card.actions     = bit(Action::Click);
+      card.focusable   = true;
+      card.children    = {into.id(kA11yRemoveBase + item.itemId),
+                          into.id(kA11yOriginBase + item.itemId)};
+      cardIds.push_back(into.id(kA11yItemBase + item.itemId));
+    }
+    auto &list       = into.add(kA11yZoneBase + i, Role::List);
+    list.label       = zone.label();
+    const auto count = zone.items().size();
+    list.value    = std::to_string(count) + (1 == count ? " item" : " items");
+    list.children = std::move(cardIds);
+    zoneIds.push_back(into.id(kA11yZoneBase + i));
   }
+  auto &drawer    = into.add(kA11yDrawer, Role::Group);
+  drawer.label    = "Pouch drawer";
+  drawer.children = std::move(zoneIds);
+  into.contribute(into.id(kA11yDrawer));
 }
 
 std::uint64_t PouchDrawer::accessibilityRevision() const {
-  return a11yRevision_;
+  // system://pouches is append-only, so every drop, dismissal and new zone
+  // moves its operation count; opening, closing and docking move the rest.
+  return (a11yRevision_ << 32U) + pouchManager_.store().opCount() +
+         pouchManager_.zones().size();
+}
+
+bool PouchDrawer::performAction(const std::uint64_t nodeId,
+                                const gleditor::a11y::Action action,
+                                std::string_view /*value*/) {
+  if (gleditor::a11y::Action::Click != action || !isOpen_) {
+    return false;
+  }
+  const auto local = gleditor::a11y::Ids::localOf(nodeId);
+  if (local < kA11yItemBase) {
+    return false;
+  }
+  // Asked on the event thread; the items and the document are the render
+  // thread's, which is where a pick on the same buttons is handled.
+  const auto kind   = local & ~0xFFFF'FFFFULL;
+  const auto itemId = local & 0xFFFF'FFFFULL;
+  renderer_->runWithState([this, kind, itemId](RenderState &) {
+    if (kA11yRemoveBase == kind) {
+      pouchManager_.dismissItem(itemId);
+      return;
+    }
+    for (const auto &zone : pouchManager_.zones()) {
+      for (const auto &item : zone->items()) {
+        if (item.itemId != itemId) {
+          continue;
+        }
+        const auto &handler =
+            kA11yOriginBase == kind ? swingBackHandler_ : useHandler_;
+        if (handler) {
+          handler(item);
+        }
+        return;
+      }
+    }
+  });
+  return true;
 }
 
 } // namespace xudu
