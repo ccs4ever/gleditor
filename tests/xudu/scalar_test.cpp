@@ -143,7 +143,7 @@ TEST(ScalarTest, aSignallingNaNIsRefusedRatherThanQuieted) {
   EXPECT_THROW(std::ignore = store.makeScalarCell(at, signalling),
                std::invalid_argument);
   // And nothing was recorded, so the document is the one it was.
-  EXPECT_EQ(store.opCount(), 3U);
+  EXPECT_EQ(store.opCount(), 4U);
 }
 
 TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {

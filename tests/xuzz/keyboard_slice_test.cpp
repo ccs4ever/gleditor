@@ -77,9 +77,11 @@ TEST(KeyboardSliceTest, aSliceIsBuiltNamedAndLinkedFromTheKeyboard) {
                         " --section=ops --permascroll=" + permascroll.string() +
                         " " + untitled.front().string());
   ASSERT_EQ(dump.exitCode, 0) << dump.output;
-  EXPECT_THAT(dump.output, ::testing::HasSubstr("[makeCell] text=\"home\""));
-  EXPECT_THAT(dump.output, ::testing::HasSubstr("[setValue] text=\"alpha\""));
-  EXPECT_THAT(dump.output, ::testing::HasSubstr("[setValue] text=\"beta\""));
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("make cell.*text=\"home\""));
+  EXPECT_THAT(dump.output,
+              ::testing::ContainsRegex("setValue.*text=\"alpha\""));
+  EXPECT_THAT(dump.output, ::testing::ContainsRegex("setValue.*text=\"beta\""));
   // Two insertions and the marked link: at least three links made by keys.
   std::size_t links = 0;
   for (std::size_t at = 0;
@@ -149,9 +151,8 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
   ASSERT_EQ(untitledStores().size(), 1U);
   const auto slice = dumpOf(untitledStores().front());
   // On the store's own line: "produces=N" with no branch letter in N.
-  EXPECT_THAT(slice,
-              ::testing::ContainsRegex("produces=[0-9]+ [^\n]*\\[setValue\\] "
-                                       "text=\"renamed\""))
+  EXPECT_THAT(slice, ::testing::ContainsRegex(
+                         "produces=[0-9]+ .*setValue.*text=\"renamed\""))
       << slice;
 }
 

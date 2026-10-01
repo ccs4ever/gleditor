@@ -613,6 +613,7 @@ private:
   std::unique_ptr<gleditor::Canvas> ancillaryCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
+  std::vector<std::pair<CellID, CellID>> drawnEdges_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;
   std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
       pickTargets_;

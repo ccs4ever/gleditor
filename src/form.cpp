@@ -667,13 +667,13 @@ void Form::drawFrame(FrameContext &ctx) {
     // An open drop-down grows the panel rather than covering the rows under
     // it: a list that obscures the fields it is part of is a list somebody has
     // to close before they can see what they were filling in.
-    const auto listRows    = listDown && where < shown.size()
-                                 ? static_cast<float>(shown[where].options.size())
-                                 : 0.0F;
+    const auto listRows = listDown && where < shown.size()
+                              ? static_cast<float>(shown[where].options.size())
+                              : 0.0F;
     const auto panelHeight = (2 * padding) + (rowHeight * 2) +
                              ((rows + listRows) * rowHeight) + rowHeight;
-    const auto left   = std::max(0.0F, (width - panelWidth) / 2.0F);
-    const auto bottom = std::max(0.0F, (height - panelHeight) / 2.0F);
+    const auto left        = std::max(0.0F, (width - panelWidth) / 2.0F);
+    const auto bottom      = std::max(0.0F, (height - panelHeight) / 2.0F);
     canvas->addRect(left, bottom, panelWidth, panelHeight, ink(panelBack));
 
     auto top = bottom + panelHeight - padding;

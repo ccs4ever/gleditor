@@ -155,7 +155,7 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto anchor    = dim(kAnchor);
   const auto active    = dim(kActive);
   const auto along     = [&](const zigzag::CellRef from,
-                         const std::optional<zigzag::DimRef> onto) {
+                             const std::optional<zigzag::DimRef> onto) {
     return onto ? manifold.linked(from, *onto) : zigzag::noCell;
   };
   const auto activeCell = along(here, active);

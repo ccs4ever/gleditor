@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <stdexcept>
 #include <string_view>
@@ -135,6 +136,288 @@ ScalarValue scalarValue(const std::int64_t value) {
       // huge unsigned one that happens to have the same bits.
       .bits = std::bit_cast<std::uint64_t>(value),
   };
+}
+
+ScalarValue scalarTimestamp(const std::int64_t epochNanos) {
+  return ScalarValue{
+      .text = formatUtcTimestampIso8601(epochNanos),
+      .kind = ValueKind::Timestamp,
+      .bits = std::bit_cast<std::uint64_t>(epochNanos),
+  };
+}
+
+std::string formatUtcTimestampIso8601(const std::int64_t epochNanos) {
+  constexpr std::int64_t kNanosPerSec = 1'000'000'000LL;
+  std::int64_t s                      = epochNanos / kNanosPerSec;
+  std::int64_t remNanos               = epochNanos % kNanosPerSec;
+  if (remNanos < 0) {
+    remNanos += kNanosPerSec;
+    s -= 1;
+  }
+  const std::chrono::sys_seconds tp{std::chrono::seconds{s}};
+  const auto days = std::chrono::floor<std::chrono::days>(tp);
+  const std::chrono::year_month_day ymd{days};
+  const std::chrono::hh_mm_ss hms{tp - days};
+
+  const int year       = static_cast<int>(ymd.year());
+  const unsigned month = static_cast<unsigned>(ymd.month());
+  const unsigned day   = static_cast<unsigned>(ymd.day());
+  const unsigned hour  = static_cast<unsigned>(hms.hours().count());
+  const unsigned min   = static_cast<unsigned>(hms.minutes().count());
+  const unsigned sec   = static_cast<unsigned>(hms.seconds().count());
+
+  if (year >= 0 && year <= 9999) {
+    return std::format("{:04d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:09d}Z",
+                       year, month, day, hour, min, sec, remNanos);
+  }
+  if (year < 0) {
+    return std::format("{:05d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:09d}Z",
+                       year, month, day, hour, min, sec, remNanos);
+  }
+  return std::format("{:d}-{:02d}-{:02d}T{:02d}:{:02d}:{:02d}.{:09d}Z", year,
+                     month, day, hour, min, sec, remNanos);
+}
+
+bool parseUtcTimestampIso8601(const std::string_view text,
+                              std::int64_t &outNanos) noexcept {
+  if (text.empty()) {
+    return false;
+  }
+  std::size_t pos   = 0;
+  bool negativeYear = false;
+  if (text[pos] == '-') {
+    negativeYear = true;
+    ++pos;
+  } else if (text[pos] == '+') {
+    ++pos;
+  }
+
+  // Parse Year
+  const std::size_t yearStart = pos;
+  while (pos < text.size() &&
+         std::isdigit(static_cast<unsigned char>(text[pos])) != 0) {
+    ++pos;
+  }
+  if (pos - yearStart < 4 || pos >= text.size() || text[pos] != '-') {
+    return false;
+  }
+  int year = 0;
+  if (std::from_chars(text.data() + yearStart, text.data() + pos, year).ec !=
+      std::errc{}) {
+    return false;
+  }
+  if (negativeYear) {
+    year = -year;
+  }
+  ++pos; // skip '-'
+
+  // Parse Month
+  if (pos + 2 > text.size() ||
+      std::isdigit(static_cast<unsigned char>(text[pos])) == 0 ||
+      std::isdigit(static_cast<unsigned char>(text[pos + 1])) == 0) {
+    return false;
+  }
+  unsigned month = 0;
+  std::from_chars(text.data() + pos, text.data() + pos + 2, month);
+  pos += 2;
+  if (pos >= text.size() || text[pos] != '-') {
+    return false;
+  }
+  ++pos; // skip '-'
+
+  // Parse Day
+  if (pos + 2 > text.size() ||
+      std::isdigit(static_cast<unsigned char>(text[pos])) == 0 ||
+      std::isdigit(static_cast<unsigned char>(text[pos + 1])) == 0) {
+    return false;
+  }
+  unsigned day = 0;
+  std::from_chars(text.data() + pos, text.data() + pos + 2, day);
+  pos += 2;
+
+  // Validate Date
+  const std::chrono::year_month_day ymd{std::chrono::year{year},
+                                        std::chrono::month{month},
+                                        std::chrono::day{day}};
+  if (!ymd.ok()) {
+    return false;
+  }
+
+  // Separator 'T', 't', or ' '
+  if (pos >= text.size() ||
+      (text[pos] != 'T' && text[pos] != 't' && text[pos] != ' ')) {
+    return false;
+  }
+  ++pos;
+
+  // Parse Hour:Minute:Second
+  if (pos + 8 > text.size() || text[pos + 2] != ':' || text[pos + 5] != ':') {
+    return false;
+  }
+  unsigned hour = 0;
+  unsigned min  = 0;
+  unsigned sec  = 0;
+  if (std::from_chars(text.data() + pos, text.data() + pos + 2, hour).ec !=
+          std::errc{} ||
+      std::from_chars(text.data() + pos + 3, text.data() + pos + 5, min).ec !=
+          std::errc{} ||
+      std::from_chars(text.data() + pos + 6, text.data() + pos + 8, sec).ec !=
+          std::errc{}) {
+    return false;
+  }
+  pos += 8;
+  if (hour > 23 || min > 59 || sec > 60) {
+    return false;
+  }
+  if (sec == 60) {
+    sec = 59; // Clamp leap second
+  }
+
+  // Optional Fraction (.123456789)
+  std::int64_t fractionNanos = 0;
+  if (pos < text.size() && (text[pos] == '.' || text[pos] == ',')) {
+    ++pos;
+    const std::size_t fracStart = pos;
+    while (pos < text.size() &&
+           std::isdigit(static_cast<unsigned char>(text[pos])) != 0) {
+      ++pos;
+    }
+    const std::size_t fracDigits = pos - fracStart;
+    if (fracDigits == 0) {
+      return false;
+    }
+    // Convert up to 9 digits with padding or ties-to-even rounding
+    if (fracDigits <= 9) {
+      std::int64_t val = 0;
+      std::from_chars(text.data() + fracStart, text.data() + pos, val);
+      for (std::size_t i = fracDigits; i < 9; ++i) {
+        val *= 10;
+      }
+      fractionNanos = val;
+    } else {
+      std::int64_t val = 0;
+      std::from_chars(text.data() + fracStart, text.data() + fracStart + 9,
+                      val);
+      const char nextChar = text[fracStart + 9];
+      const int nextDigit = nextChar - '0';
+      // Check if remainder beyond 10th digit has any non-zero digits
+      bool hasMoreNonZero = false;
+      for (std::size_t i = fracStart + 10; i < pos; ++i) {
+        if (text[i] != '0') {
+          hasMoreNonZero = true;
+          break;
+        }
+      }
+      if (nextDigit > 5 || (nextDigit == 5 && hasMoreNonZero)) {
+        val += 1;
+      } else if (nextDigit == 5 && !hasMoreNonZero) {
+        // Exactly half: ties to even
+        if (val % 2 != 0) {
+          val += 1;
+        }
+      }
+      fractionNanos = val;
+    }
+  }
+
+  // Timezone Offset
+  int offsetMinutes = 0;
+  if (pos < text.size()) {
+    if (text[pos] == 'Z' || text[pos] == 'z') {
+      ++pos;
+    } else if (text[pos] == '+' || text[pos] == '-') {
+      const bool negOffset = (text[pos] == '-');
+      ++pos;
+      if (pos + 2 > text.size()) {
+        return false;
+      }
+      int offH = 0;
+      if (std::from_chars(text.data() + pos, text.data() + pos + 2, offH).ec !=
+          std::errc{}) {
+        return false;
+      }
+      pos += 2;
+      int offM = 0;
+      if (pos < text.size() && text[pos] == ':') {
+        ++pos;
+      }
+      if (pos + 2 <= text.size() &&
+          std::isdigit(static_cast<unsigned char>(text[pos])) != 0 &&
+          std::isdigit(static_cast<unsigned char>(text[pos + 1])) != 0) {
+        std::from_chars(text.data() + pos, text.data() + pos + 2, offM);
+        pos += 2;
+      }
+      if (offH > 23 || offM > 59) {
+        return false;
+      }
+      offsetMinutes = offH * 60 + offM;
+      if (negOffset) {
+        offsetMinutes = -offsetMinutes;
+      }
+    } else {
+      return false;
+    }
+  }
+
+  if (pos != text.size()) {
+    return false; // Trailing garbage
+  }
+
+  // Convert civil date and time to seconds since epoch
+  const std::chrono::sys_days sd{ymd};
+  const auto epochDays = sd.time_since_epoch();
+  const std::int64_t totalSec =
+      std::chrono::duration_cast<std::chrono::seconds>(epochDays).count() +
+      static_cast<std::int64_t>(hour) * 3600LL +
+      static_cast<std::int64_t>(min) * 60LL + static_cast<std::int64_t>(sec) -
+      static_cast<std::int64_t>(offsetMinutes) * 60LL;
+
+  constexpr std::int64_t kNanosPerSec = 1'000'000'000LL;
+  constexpr std::int64_t kMinSec =
+      std::numeric_limits<std::int64_t>::min() / kNanosPerSec;
+  constexpr std::int64_t kMaxSec =
+      std::numeric_limits<std::int64_t>::max() / kNanosPerSec;
+
+  if (totalSec < kMinSec || totalSec > kMaxSec) {
+    return false;
+  }
+
+  const std::int64_t baseNanos = totalSec * kNanosPerSec;
+  if (baseNanos >= 0) {
+    if (std::numeric_limits<std::int64_t>::max() - baseNanos < fractionNanos) {
+      return false;
+    }
+  }
+  outNanos = baseNanos + fractionNanos;
+  return true;
+}
+
+std::int64_t
+roundInstantToNearestTiesToEven(const std::int64_t nanos,
+                                const std::int64_t unitNanos) noexcept {
+  if (unitNanos <= 1) {
+    return nanos;
+  }
+  const std::int64_t q = nanos / unitNanos;
+  const std::int64_t r = nanos % unitNanos;
+  if (r == 0) {
+    return nanos;
+  }
+  const std::int64_t half = unitNanos / 2;
+  const std::int64_t absR = r < 0 ? -r : r;
+  if (absR < half) {
+    return q * unitNanos;
+  }
+  if (absR > half) {
+    const std::int64_t step = (nanos >= 0) ? 1 : -1;
+    return (q + step) * unitNanos;
+  }
+  // Exactly half: ties to even
+  if (q % 2 != 0) {
+    const std::int64_t step = (nanos >= 0) ? 1 : -1;
+    return (q + step) * unitNanos;
+  }
+  return q * unitNanos;
 }
 
 bool parseDouble(const std::string_view text, double &out) noexcept {

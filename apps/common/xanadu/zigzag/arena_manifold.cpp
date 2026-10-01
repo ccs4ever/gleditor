@@ -1619,10 +1619,14 @@ std::optional<Promoted> promote(xanadu::Store &store,
     // an edge; its own ranks are likewise outside this answer unless a link
     // also reaches it as a cell. A proxy is an external endpoint; its internal
     // store-refs filing edges must not be followed.
-    if (!from.holdsOwn(current) || from.isProxy(current)) {
+    if ((current != root && !isEphemeral(current) && !from.holdsOwn(current)) ||
+        from.isProxy(current)) {
       continue;
     }
     for (const auto &edge : from.dimensionsOf(current)) {
+      if (from.textOf(edge.dim) == "d.dims") {
+        continue;
+      }
       auto discover = [&](const CellRef next, const bool expand) {
         if (noCell == next || !from.contains(next) ||
             from.isProvenanceCell(next)) {
@@ -1785,7 +1789,7 @@ std::optional<Promoted> promote(xanadu::Store &store,
   // to let a caller avoid.
   auto known = store.rebuildManifold(out.version);
   for (const CellRef arena : order) {
-    if (from.isProxy(arena)) {
+    if (!from.holdsOwn(arena) || from.isProxy(arena)) {
       continue;
     }
     for (const auto &edge : from.dimensionsOf(arena)) {
@@ -1818,7 +1822,6 @@ std::optional<Promoted> promote(xanadu::Store &store,
       }
     }
   }
-
   return out;
 }
 

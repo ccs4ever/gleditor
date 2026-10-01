@@ -575,6 +575,22 @@ private:
   SpanfiladeCacheSignature spanfiladeSignature_{};
   bool spanfiladeClean_{false};
   int cellRadius_{3};
+
+  struct MarginAnchor {
+    Edge edge;
+    std::uint32_t colour{};
+    std::uint32_t tagId{};
+    bool farEnd{};
+    bool isActive{};
+    std::size_t docIndex{};
+    bool towardsRight{};
+    std::uint64_t linkId{};
+    ProminenceTier tier{};
+    LinkType type{};
+    bool transclusion{};
+  };
+
+  std::vector<MarginAnchor> allAnchors_;
 };
 
 } // namespace xudu

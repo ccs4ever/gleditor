@@ -54,7 +54,8 @@ public:
     return revision;
   }
 
-  static constexpr std::uint32_t kNewDocTag = 0xFFFEU;
+  static constexpr std::uint32_t kManagerTag = 0xFFFDU;
+  static constexpr std::uint32_t kNewDocTag  = 0xFFFEU;
 
   void setCloseHandler(std::function<void(std::uint32_t docIndex)> handler) {
     closeHandler = std::move(handler);
@@ -66,6 +67,10 @@ public:
 
   void setNewDocHandler(std::function<void()> handler) {
     newDocHandler = std::move(handler);
+  }
+
+  void setManagerHandler(std::function<void()> handler) {
+    managerHandler = std::move(handler);
   }
 
   void setVisible(const bool show) {
@@ -89,6 +94,7 @@ private:
   std::function<void(std::uint32_t)> closeHandler;
   std::function<void(std::uint32_t)> selectHandler;
   std::function<void()> newDocHandler;
+  std::function<void()> managerHandler;
 
   struct TabInfo {
     std::uint32_t docIndex{};

@@ -131,9 +131,10 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
 
   MicroversionId lastProduces{};
   for (const auto &record : ops) {
-    const auto &produces    = record.produces;
-    const auto &op          = record.op;
-    std::uint8_t tag        = 0;
+    const auto &produces = record.produces;
+    const auto &op       = record.op;
+    const auto &ctx  = !record.context.isZero() ? record.context : op.context;
+    std::uint8_t tag = 0;
     const bool isSequential = (produces == lastProduces.next());
     if (isSequential) {
       tag |= FLAG_SEQUENTIAL;
@@ -155,6 +156,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       writeVarint(out, op.at);
       if (!(tag & FLAG_AT_EQUALS_START)) {
         writeVarint(out, op.span.start);
@@ -176,6 +178,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       writeVarint(out, op.at);
       if (!(tag & FLAG_SINGLE_BYTE)) {
         writeVarint(out, op.length);
@@ -188,6 +191,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       writeVarint(out, op.at);
       writeVarint(out, op.length);
       writeVarint(out, op.to);
@@ -200,6 +204,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
         if (!isSequential) {
           writeMicroversionId(out, produces);
         }
+        writeMicroversionId(out, ctx);
         writeVarint(out, op.at);
         writeVarint(out, op.span.scroll);
         writeVarint(out, op.span.start);
@@ -210,6 +215,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
         if (!isSequential) {
           writeMicroversionId(out, produces);
         }
+        writeMicroversionId(out, ctx);
         writeVarint(out, op.at);
         writeMicroversionId(out, op.source);
         writeVarint(out, op.sourceAt);
@@ -223,6 +229,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       writeVarint(out, op.link);
       break;
 
@@ -232,6 +239,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       writeVarint(out, op.at);
       break;
 
@@ -241,6 +249,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       if (!isSequential) {
         writeMicroversionId(out, produces);
       }
+      writeMicroversionId(out, ctx);
       out.put(static_cast<char>(op.flags));
       writeVarint(out, op.span.scroll);
       writeVarint(out, op.span.start);
@@ -288,8 +297,14 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
       }
     }
 
+    MicroversionId context;
+    if (!readMicroversionId(in, context)) {
+      throw std::runtime_error("malformed binary op: truncated context");
+    }
+
     Op op;
-    op.parent = produces.parent();
+    op.parent  = produces.parent();
+    op.context = context;
 
     std::uint64_t v1 = 0;
     std::uint64_t v2 = 0;
@@ -467,6 +482,7 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
         .structureDimension   = structureDimension,
         .structureTarget      = structureTarget,
         .structureValueTarget = structureValueTarget,
+        .context              = context,
     });
     lastProduces = produces;
   }
@@ -474,22 +490,57 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
 
 void writeOsmicTextOpsSpool(std::ostream &out,
                             const std::vector<OpRecord> &ops) {
+  bool needsV1 = false;
   for (const auto &record : ops) {
-    const auto &id = record.produces;
-    const auto &op = record.op;
+    const auto &op  = record.op;
+    const auto &ctx = !record.context.isZero() ? record.context : op.context;
+    if (!ctx.isZero() || (OpKind::Structure == op.kind &&
+                          StructureVerb::Make == structureVerbOf(op.flags) &&
+                          StructureKind::Cell != structureKindOf(op.flags))) {
+      needsV1 = true;
+      break;
+    }
+  }
+
+  if (needsV1) {
+    out << "# osmic 1\n";
+  }
+
+  for (const auto &record : ops) {
+    const auto &id  = record.produces;
+    const auto &op  = record.op;
+    const auto &ctx = !record.context.isZero() ? record.context : op.context;
     out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
         << op.length << ' ' << op.to << ' ' << op.span.start << ' '
         << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
         << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link << ' '
         << op.span.scroll << ' ' << static_cast<unsigned>(op.flags) << ' '
-        << op.value << '\n';
+        << op.value;
+    if (needsV1) {
+      out << ' ' << (ctx.isZero() ? "0" : ctx.str());
+    }
+    out << '\n';
   }
 }
 
 void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   std::string line;
+  bool isV1      = false;
+  bool firstLine = true;
   while (std::getline(in, line)) {
     if (line.empty()) {
+      continue;
+    }
+    if (firstLine) {
+      firstLine = false;
+      if (line == "# osmic 1" || line == "# osmic v1") {
+        isV1 = true;
+        continue;
+      }
+      if (!line.empty() && line[0] == '#') {
+        continue;
+      }
+    } else if (!line.empty() && line[0] == '#') {
       continue;
     }
     std::istringstream fields(line);
@@ -524,9 +575,15 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
       op.value = 0;
       fields.clear();
     }
+    MicroversionId contextId{};
+    std::string contextStr;
+    if (fields >> contextStr) {
+      contextId = MicroversionId::parse(contextStr);
+    }
     const auto produces = MicroversionId::parse(id);
     op.source           = MicroversionId::parse(source);
     op.parent           = produces.parent();
+    op.context          = contextId;
     if ("insert" == kind) {
       op.kind = OpKind::Insert;
     } else if ("delete" == kind) {
@@ -544,12 +601,21 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }
+
+    if (!isV1 && OpKind::Structure == op.kind &&
+        StructureVerb::Make == structureVerbOf(op.flags) &&
+        StructureKind::Cell != structureKindOf(op.flags)) {
+      throw std::runtime_error(
+          "unversioned OSMIC text format cannot represent non-cell Make kinds");
+    }
+
     ops.push_back(OpRecord{
         .produces             = produces,
         .op                   = op,
         .structureDimension   = MicroversionId{},
         .structureTarget      = MicroversionId{},
         .structureValueTarget = MicroversionId{},
+        .context              = contextId,
     });
   }
 }
@@ -558,8 +624,10 @@ const char *opsSpoolVersionName(const OpsSpoolVersion version) {
   switch (version) {
   case OpsSpoolVersion::StandardOsmicText:
     return "OSMIC text (v0)";
-  case OpsSpoolVersion::CompactBinaryV4:
-    return "Compact binary (v4)";
+  case OpsSpoolVersion::OsmicTextV1:
+    return "OSMIC text (v1)";
+  case OpsSpoolVersion::CompactBinaryV5:
+    return "Compact binary (v5)";
   }
   return "unknown";
 }
@@ -576,16 +644,26 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
       throw std::runtime_error(
           "truncated binary ops spool header: missing version");
     }
-    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV4)) {
-      return OpsSpoolVersion::CompactBinaryV4;
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV5)) {
+      return OpsSpoolVersion::CompactBinaryV5;
     }
-    // Both numbers, so that versions 1, 2, and 3 -- which this build
-    // deliberately no longer reads, see OpsSpoolVersion -- says what it is
-    // rather than only that it is not wanted.
+    // Versions 1, 2, 3, and 4 -- which this build deliberately no longer
+    // reads, see OpsSpoolVersion -- says what it is rather than only that it
+    // is not wanted.
     throw std::runtime_error(
         "binary ops spool is version " + std::to_string(ver) +
         " and this build reads version " +
-        std::to_string(static_cast<int>(OpsSpoolVersion::CompactBinaryV4)));
+        std::to_string(static_cast<int>(OpsSpoolVersion::CompactBinaryV5)));
+  }
+  in.clear();
+  in.seekg(0, std::ios::beg);
+  std::string line;
+  if (std::getline(in, line)) {
+    if (line == "# osmic 1" || line == "# osmic v1") {
+      in.clear();
+      in.seekg(0, std::ios::beg);
+      return OpsSpoolVersion::OsmicTextV1;
+    }
   }
   in.clear();
   in.seekg(0, std::ios::beg);
@@ -595,9 +673,10 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
 void readOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   const auto version = detectOpsSpoolVersion(in);
   switch (version) {
-  case OpsSpoolVersion::CompactBinaryV4:
+  case OpsSpoolVersion::CompactBinaryV5:
     readBinaryOpsSpool(in, ops);
     break;
+  case OpsSpoolVersion::OsmicTextV1:
   case OpsSpoolVersion::StandardOsmicText:
     readOsmicTextOpsSpool(in, ops);
     break;

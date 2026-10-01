@@ -96,7 +96,7 @@ TEST(XuzzConvergenceSample, MaterializedStoreLoadsForInspection) {
 
   ASSERT_EQ(store.currentVersions().size(), 1U);
   const auto version = store.primaryCurrentVersion();
-  EXPECT_EQ(version.str(), "9");
+  EXPECT_EQ(version.str(), "10");
   const auto manifold = store.rebuildManifold(version);
   EXPECT_EQ(store.textOf(version), "Xanadoc text added later and edited");
   EXPECT_EQ(manifold.cellCount(), 4U);

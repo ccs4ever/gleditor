@@ -606,12 +606,8 @@ COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
 COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
-ZIGZAG_CORE_SRCS :=
-ZIGZAG_SRCS      := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
-XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
-                    apps/zigzag/zigzag_visualizer.cpp \
-                    apps/zigzag/unified_transclusion_engine.cpp \
-                    apps/zigzag/zigzag_commands.cpp
+ZIGZAG_SRCS    := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
+XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
@@ -627,10 +623,8 @@ COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
-ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
-ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
-XUZZ_OBJS        := $(call obj,$(XUZZ_SRCS))
-XUZZ_XUDU_OBJS   := $(filter-out $(OBJDIR)/apps/xudu/main.o,$(XUDU_OBJS))
+ZIGZAG_OBJS     := $(call obj,$(ZIGZAG_SRCS))
+XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
@@ -790,8 +784,7 @@ $(FLAGSTAMP): FORCE | $(OBJDIR)/
 $(ALL_OBJS): $(FLAGSTAMP)
 
 $(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
-$(OBJDIR)/apps/xudu/main.o $(OBJDIR)/apps/xudu/main.dep: $(OBJDIR)/src/config.h
-$(OBJDIR)/apps/zigzag/main.o $(OBJDIR)/apps/zigzag/main.dep: $(OBJDIR)/src/config.h
+$(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
 
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
@@ -840,23 +833,22 @@ $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
 .PHONY: gleditor
 
 xudu: $(OBJDIR)/xudu
-$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xudu: $(OBJDIR)/xuzz
+	rm -f $@ && ln -sf xuzz $@
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
-$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-                $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-	  $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
+	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag
-$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
+$(OBJDIR)/zigzag: $(OBJDIR)/xuzz
+	rm -f $@ && ln -sf xuzz $@
 .PHONY: zigzag
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -906,7 +898,7 @@ $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/main.o,$(ZIGZAG_OBJS)) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
@@ -1397,9 +1389,9 @@ analyze: tidy scan-build
 check: format-check lint analyze
 .PHONY: check
 
-clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
+clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test w:xuzz w:xuzz_test w:zigzag w:zigzag_test
 clean:
-	@$(RM) -rf gleditor gleditor_test xudu xudu_test build
+	@$(RM) -rf gleditor gleditor_test xudu xudu_test xuzz xuzz_test zigzag zigzag_test build
 
 # -- installation -------------------------------------------------------------
 
@@ -1413,14 +1405,16 @@ INSTALL_DATADIR := $(DESTDIR)$(appdir)
 # gets installed knows where its data went even if it is later moved somewhere
 # the executable-relative search cannot follow.
 install: GLEDITOR_DATADIR := $(appdir)
-install: $(OBJDIR)/gleditor $(OBJDIR)/xudu
+install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor
-	$(INSTALL) -m 755 $(OBJDIR)/xudu $(DESTDIR)$(bindir)/xudu
+	$(INSTALL) -m 755 $(OBJDIR)/xuzz $(DESTDIR)$(bindir)/xuzz
+	rm -f $(DESTDIR)$(bindir)/xudu && ln -sf xuzz $(DESTDIR)$(bindir)/xudu
+	rm -f $(DESTDIR)$(bindir)/zigzag && ln -sf xuzz $(DESTDIR)$(bindir)/zigzag
 	# The real name is what a program records; the linker name is what a later
 	# build resolves -lgleditor against, so both have to be installed.
 	$(INSTALL) -d $(DESTDIR)$(libdir)

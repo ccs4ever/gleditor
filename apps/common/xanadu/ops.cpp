@@ -29,8 +29,8 @@ const char *opKindName(const OpKind kind) {
 
 const char *structureVerbName(const StructureVerb verb) {
   switch (verb) {
-  case StructureVerb::MakeCell:
-    return "makeCell";
+  case StructureVerb::Make:
+    return "make";
   case StructureVerb::SetLink:
     return "setLink";
   case StructureVerb::SetValue:
@@ -38,9 +38,20 @@ const char *structureVerbName(const StructureVerb verb) {
   case StructureVerb::Splice:
     return "splice";
   }
-  // Not "makeCell": an unknown verb is what a build reading a newer spool sees,
-  // and naming it after a real one would make a dump of that spool a lie.
-  // zigzag::Manifold refuses it for the same reason.
+  return "unknown";
+}
+
+const char *structureKindName(const StructureKind kind) {
+  switch (kind) {
+  case StructureKind::Cell:
+    return "cell";
+  case StructureKind::Slice:
+    return "slice";
+  case StructureKind::Xanadoc:
+    return "xanadoc";
+  case StructureKind::Reserved:
+    return "reserved";
+  }
   return "unknown";
 }
 
@@ -58,6 +69,8 @@ const char *valueKindName(const ValueKind kind) {
     return "op_handle";
   case ValueKind::ExternRef:
     return "extern_ref";
+  case ValueKind::Timestamp:
+    return "timestamp";
   }
   return "unknown";
 }

@@ -23,6 +23,7 @@
 #include <glm/ext/matrix_transform.hpp>
 
 #include <gleditor/color.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/diagnostics.hpp>
@@ -121,7 +122,9 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
-  if (!presentation_visible_) return false;
+  if (!presentation_visible_) {
+    return false;
+  }
   return std::ranges::any_of(visible_cells_, [](const auto &entry) {
     const auto &cell = entry.second;
     return std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
@@ -142,7 +145,7 @@ void ZigzagVisualizer::populateFallbackStructure() {
   doc.meta.name = "Xanadu ZigZag Sample Structure";
   doc.focus     = 1;
   doc.view      = ViewAxisBinding{
-           .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
 
   Cell c1;
   c1.id         = 1;
@@ -820,6 +823,8 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
       return "extern / " + key + " @ " + target->produces.str();
     }
     return "extern / unresolved";
+  case xanadu::ValueKind::Timestamp:
+    return "timestamp";
   case xanadu::ValueKind::None:
     return std::string(role);
   }
@@ -1119,7 +1124,7 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
   metrics.titleTop         = metrics.height - verticalPadding;
   const float titleBottom  = metrics.titleTop - titleMetrics.height;
   const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
-                                           presentation_config_.cellBandGapPx
+                                            presentation_config_.cellBandGapPx
                                       : verticalPadding;
   const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
   metrics.labelTop =
@@ -1640,7 +1645,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // --- 1. Draw 3D Connection Beams ---
   beams_->clear();
-  std::vector<std::pair<CellID, CellID>> drawnEdges;
+  drawnEdges_.clear();
 
   if (engine_) {
     const auto &manifold = engine_->manifold();
@@ -1682,10 +1687,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
           const auto edge =
               std::pair{std::min(id, static_cast<CellID>(neighborId)),
                         std::max(id, static_cast<CellID>(neighborId))};
-          if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+          if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
             continue;
           }
-          drawnEdges.push_back(edge);
+          drawnEdges_.push_back(edge);
 
           const auto &neighborCell = visible_cells_.at(neighborId);
           const auto visual        = dimensionVisual(dimName);
@@ -1718,10 +1723,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
             const auto edge =
                 std::pair{std::min(id, static_cast<CellID>(neighborId)),
                           std::max(id, static_cast<CellID>(neighborId))};
-            if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+            if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
               continue;
             }
-            drawnEdges.push_back(edge);
+            drawnEdges_.push_back(edge);
 
             const auto &neighborCell = visible_cells_.at(neighborId);
             const float edgeAlpha =
@@ -1756,6 +1761,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     pickTargets_.clear();
     pickTargetVersion_ = pickVersion;
   }
+
+  const auto vpPresentation = ctx.viewProjection * presentation_transform_;
 
   for (const auto &[id, cell] : visible_cells_) {
     if (!shown(cell)) {
@@ -1799,6 +1806,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const auto &layout     = cellLayout(id, cell, isFocus);
     const float nodeWidth  = layout.width;
     const float nodeHeight = layout.height;
+
+    const auto cellMvp =
+        vpPresentation * glm::translate(glm::mat4(1.0F), cell.current_pos);
+    if (!isFocus &&
+        outsideFrustum(cellMvp, nodeWidth / 2.0F, nodeHeight / 2.0F, 10.0F)) {
+      continue;
+    }
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -1931,7 +1945,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   const float structureTop = hudTop - presentation_config_.hudVerticalPaddingPx;
   const float focusTop     = structureTop - structureMetrics.height -
-                         presentation_config_.hudVerticalPaddingPx;
+                             presentation_config_.hudVerticalPaddingPx;
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
                       structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
@@ -1959,7 +1973,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
-  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+  float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
   for (const auto &[label, colour] :
        {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
         std::pair{std::cref(modeLabel), 0xF59E0BFFU},
