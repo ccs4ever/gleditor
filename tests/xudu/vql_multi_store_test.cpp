@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -187,6 +188,31 @@ TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
     }
   }
   EXPECT_TRUE(foundStep);
+}
+
+// A document branch forked from the root before the slice existed has the
+// greatest name, so latest() names it; the store's home is on branch 0. Folded
+// at latest(), `##` answered with a cell holding the store's label.
+TEST(VQLMultiStoreTest, AGuessedVersionFoldsWhereTheHomeIs) {
+  const auto dir = tempStoreDir("forked_document");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto scroll       = std::make_shared<UserPermascroll>(config);
+  auto store        = std::make_shared<Store>(scroll);
+
+  const auto typed  = store->insert(xanadu::MicroversionId{}, 0, "a document");
+  const auto sliced = store->sliceGenesis(typed);
+  const auto cell   = store->makeCell(sliced, "a cell");
+  std::ignore = store->insert(xanadu::MicroversionId{}, 0, "another branch");
+  ASSERT_FALSE(store->latest().isAncestorOf(cell)) << "latest is the fork";
+
+  MultiStoreCoordinator coord;
+  coord.addStore("forked", "primary", store);
+
+  const auto folded = coord.findStore("forked");
+  ASSERT_TRUE(folded.has_value());
+  EXPECT_NE(folded->manifold->home(), noCell);
+  EXPECT_EQ(coord.arena().textOf(coord.homeAnchor(), *store), "home");
 }
 
 } // namespace

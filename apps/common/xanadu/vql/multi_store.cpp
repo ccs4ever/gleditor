@@ -9,6 +9,7 @@
 #include <ranges>
 #include <stdexcept>
 
+#include <gleditor/logging.hpp>
 #include <gleditor/ranges.hpp>
 
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -191,6 +192,28 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
   }
   auto foldedManifold =
       std::make_shared<zigzag::Manifold>(store->rebuildManifold(v));
+  // latest() names the greatest branch, and a branch forked for a document
+  // before the slice existed outranks every operation that built it: folded
+  // there, a store with a perfectly good home answers `##` with nothing. A
+  // version named by the caller is taken as asked; a guessed one falls back
+  // to a structure head, preferring one that descends from the guess.
+  if (version.isZero() && foldedManifold->home() == noCell) {
+    const auto heads = store->structureHeads();
+    const auto descends =
+        std::ranges::find_if(heads, [&v](const xanadu::MicroversionId &head) {
+          return head == v || v.isAncestorOf(head);
+        });
+    const auto head =
+        descends != heads.end() ? *descends : store->structureHead();
+    if (!head.isZero()) {
+      GLEDITOR_LOG_DEBUG("vql.stores",
+                         "{}: no home at {}, folding at structure head {}",
+                         label, v.str(), head.str());
+      v = head;
+      foldedManifold =
+          std::make_shared<zigzag::Manifold>(store->rebuildManifold(v));
+    }
+  }
 
   zigzag::Space space{
       .manifold = foldedManifold.get(),
