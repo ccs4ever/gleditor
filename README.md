@@ -232,7 +232,7 @@ defines platform-independent nodes; `src/a11y/` sends them through AccessKit to 
 Automation on Windows, and NSAccessibility on macOS. A build without AccessKit still builds the
 internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requires the binding;
 `ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
-for headless inspection.
+for headless inspection, at its place among the other automation options.
 
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2

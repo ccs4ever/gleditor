@@ -236,6 +236,27 @@ TEST(AutomationScript, pressesAreHeldUntilReleased) {
   EXPECT_EQ(script[5].input.kind, Input::ButtonUp);
 }
 
+// A leading bracket opens a decoration list, so "[[" is how text that starts
+// with one is typed: a run once typed "[RESUMED]" as nothing at all.
+TEST(AutomationScript, aDoubledBracketTypesALiteralOne) {
+  const auto script = scriptOf({"--type", "[[RESUMED] here"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "[RESUMED] here");
+  EXPECT_EQ(script[0].decorations, gleditor::DecorationMask{0});
+}
+
+// A dump is a step, in order: a tree printed before a quitting chord is one
+// the run gets to see.
+TEST(AutomationScript, dumpingTheTreeIsAnOrderedRepeatableStep) {
+  const auto script = scriptOf(
+      {"--dump-a11y", "--chord", "Ctrl+N", "--dump-a11y", "--chord", "Ctrl+Q"});
+  ASSERT_EQ(script.size(), 4U);
+  EXPECT_EQ(script[0].kind, Kind::DumpAccessibility);
+  EXPECT_EQ(script[1].kind, Kind::Input);
+  EXPECT_EQ(script[2].kind, Kind::DumpAccessibility);
+  EXPECT_EQ(script[3].kind, Kind::Input);
+}
+
 namespace {
 
 /// Parse words as a program built on the library would, and ask whether the
@@ -270,6 +291,7 @@ TEST(AutomationScript, everyScriptedStepWantsFrames) {
 
 TEST(AutomationScript, observingAFrameWantsFrames) {
   EXPECT_TRUE(wantsFramesFor({"--dump-a11y"}));
+  EXPECT_TRUE(wantsFramesFor({"--dump-a11y", "--dump-a11y"}));
   EXPECT_TRUE(wantsFramesFor({"--screenshot", "a.ppm"}));
   EXPECT_TRUE(wantsFramesFor({"--benchmark", "10"}));
   EXPECT_TRUE(wantsFramesFor({"--record-frames", "2"}));

@@ -427,6 +427,8 @@ private:
   bool draggingSelection{false};
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
+  /// A scripted --dump-a11y, printed after this frame's rebuild.
+  bool pendingScriptDump{};
   /// Wall time of each settled frame, of collecting its page draws, and of
   /// handing them to the device. Gathered only when --benchmark asked for it.
   std::vector<std::chrono::nanoseconds> benchFrame;

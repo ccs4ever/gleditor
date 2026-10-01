@@ -232,6 +232,10 @@ parseTypeValue(const std::string &value) {
   if (value.empty() || '[' != value.front()) {
     return {0, value};
   }
+  // "[[" is a literal bracket, so text that opens with one can be typed.
+  if (value.starts_with("[[")) {
+    return {0, value.substr(1)};
+  }
   const auto close = value.find(']');
   if (std::string::npos == close) {
     return {0, value};
@@ -441,6 +445,11 @@ readAutomationScript(const int argc, const char *const *const argv) {
       continue;
     }
     const std::string_view arg{argv[i]};
+    // The one step that takes no value.
+    if ("--dump-a11y" == arg) {
+      script.push_back(Step{.kind = Step::Kind::DumpAccessibility});
+      continue;
+    }
     for (const auto *const option : scriptedOptions) {
       if (arg == option) {
         // "--click 3,4": the value is the argument after it.
@@ -467,7 +476,7 @@ bool wantsFrames(const argparse::ArgumentParser &parser) {
       std::ranges::any_of(scriptedOptions, [&parser](const char *option) {
         return parser.is_used(option);
       });
-  return scripted || parser["--dump-a11y"] == true ||
+  return scripted || parser.is_used("--dump-a11y") ||
          !parser.get<std::string>("--screenshot").empty() ||
          parser.get<std::string>("--benchmark") != "0" ||
          parser.get<int>("--record-frames") > 0;
@@ -875,14 +884,15 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "collect and record times and exit. The median is reported rather "
              "than the mean, because a software rasteriser produces occasional "
              "hundred-millisecond frames no average removes.");
-  automation(parser.add_argument("--dump-a11y").flag(),
-             "print what a screen reader would be told, then carry on",
-             "Print the accessibility tree once the frame has settled: every "
-             "node this program reports to the platform, indented, with its "
-             "role, its name, its value and where the caret is. What an "
-             "assistive technology is handed, in the one form that can be "
-             "read without running one. Pairs with --profile to print it and "
-             "quit.");
+  automation(parser.add_argument("--dump-a11y").flag().append(),
+             "print what a screen reader would be told here; repeatable",
+             "Print the accessibility tree at this point in the script, once "
+             "the frame has settled: every node this program reports to the "
+             "platform, indented, with its role, its name, its value and "
+             "where the caret is. What an assistive technology is handed, in "
+             "the one form that can be read without running one. Repeatable "
+             "and ordered with the other automation options, like --capture, "
+             "so a tree can be printed before a step that quits.");
   automation(parser.add_argument("--screenshot").default_value(std::string{}),
              "write the first settled frame to this path as a PPM",
              "Write the first fully drawn frame to this path as a binary PPM. "
@@ -925,9 +935,10 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "caret there, and print where it landed. Repeatable.");
   automation(parser.add_argument("--select").append(),
              "select the document byte range START,END; repeatable",
-             "Select the document byte range START,END, as a click and drag "
-             "would. Carried out in the order it was written among the other "
-             "automation options.");
+             "Select the byte range START,END of the document the caret is "
+             "in -- the first, before anything has placed it -- as a click "
+             "and drag would. Carried out in the order it was written among "
+             "the other automation options.");
   automation(parser.add_argument("--type").append().default_value(
                  std::vector<std::string>{}),
              "insert text at the caret; repeatable",
@@ -937,7 +948,9 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "the sequence it reads as. The document is spliced immediately "
              "and the layout that follows is scheduled off the render "
              "thread. Goes to whatever has the keyboard, so while a dialog is "
-             "up this fills in the field it is on rather than the document.");
+             "up this fills in the field it is on rather than the document. "
+             "A leading [NAME,...] decorates the inserted text with those "
+             "decorations; \"[[\" at the start types one literal \"[\".");
   automation(parser.add_argument("--do").append(),
              "run the command called NAME; repeatable",
              "Run the bound command called NAME -- the names are the ones "
@@ -1033,7 +1046,6 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->screenshotPath  = parser.get<std::string>("--screenshot");
   state->recordFrames    = parser.get<int>("--record-frames");
   state->recordPrefix    = parser.get<std::string>("--record-prefix");
-  state->dumpAccessibility = parser["--dump-a11y"] == true;
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
   {

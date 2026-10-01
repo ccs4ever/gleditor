@@ -560,6 +560,19 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   device->endFrame();
 
+  if (pendingScriptDump) {
+    // After this frame's rebuild, so what is printed is what would be sent
+    // rather than the frame before it.
+    pendingScriptDump = false;
+    if (const auto &publisher = this->state->accessibility; publisher) {
+      std::cout << gleditor::a11y::Publisher::describe(publisher->snapshot());
+    }
+    nextStep++;
+    if (this->state->profiling && scriptFinished()) {
+      this->state->alive = false;
+    }
+  }
+
   if (pendingScriptCapture.has_value()) {
     writeScreenshot(device->captureColorTarget(), *pendingScriptCapture);
     pendingScriptCapture.reset();
@@ -577,16 +590,6 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
-  if (settled && !hasPendingWork() && scriptFinished() &&
-      this->state->dumpAccessibility) {
-    // Once, on the first settled frame, and after the rebuild above so that
-    // what is printed is what would be sent rather than the frame before it.
-    this->state->dumpAccessibility = false;
-    if (const auto &publisher = this->state->accessibility; publisher) {
-      std::cout << gleditor::a11y::Publisher::describe(publisher->snapshot());
-    }
-  }
-
   if (settled && !hasPendingWork() && scriptFinished() &&
       !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
@@ -834,6 +837,9 @@ void Renderer::advanceScript(RenderState &state) {
   case Kind::Capture:
     pendingScriptCapture = step.text;
     return;
+  case Kind::DumpAccessibility:
+    pendingScriptDump = true;
+    return;
   case Kind::Input:
     // Handled on the event thread, like the platform's own input; the step
     // finishes once that has happened and whatever it asked of this thread
@@ -904,10 +910,16 @@ void Renderer::advanceScript(RenderState &state) {
     if (state.docs.empty()) {
       std::cerr << "--select with no document to select in\n";
     } else {
-      caret->placeAt(0, step.from);
+      // In the document the caret is in, as a drag would select: a run that
+      // has moved to another document selects there, not in the first one.
+      const auto doc =
+          caret->active() && caret->documentIndex() < state.docs.size()
+              ? caret->documentIndex()
+              : 0U;
+      caret->placeAt(doc, step.from);
       caret->anchorSelection();
       caret->extendTo(step.to);
-      std::cout << std::format("select: doc 0 [{},{})\n",
+      std::cout << std::format("select: doc {} [{},{})\n", doc,
                                caret->selectionStart(), caret->selectionEnd());
     }
     finishStepWhenSettled();

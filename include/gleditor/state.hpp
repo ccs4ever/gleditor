@@ -92,11 +92,12 @@ struct AppState {
       Pick,    ///< Report what is at a pixel.
       Click,   ///< Place the caret at a pixel.
       Type,    ///< Insert text at the caret, or into whatever has the keyboard.
-      Select,  ///< Select a byte range of the first document.
+      Select,  ///< Select a byte range of the document the caret is in.
       Command, ///< Run a bound command by name.
       Press,   ///< A key a modal takes: tab, enter, escape and friends.
       Capture, ///< Write the frame drawn for this point in the script.
-      Input,   ///< Make one input event; see SyntheticInput.
+      DumpAccessibility, ///< Print the accessibility tree at this point.
+      Input,             ///< Make one input event; see SyntheticInput.
     };
     Kind kind{};
     int x{}; ///< Pick and click: the pixel.
@@ -152,14 +153,6 @@ struct AppState {
   std::vector<std::pair<render::DiagnosticSeverity, std::string>>
       requestedToasts;
   bool profiling{};
-  /**
-   * @brief Print the accessibility tree once the frame has settled.
-   *
-   * What a screen reader would be handed, as indented text. The one way to
-   * check the description without a screen reader, an accessibility bus and a
-   * person listening to it -- and the way the tests check it.
-   */
-  bool dumpAccessibility{};
   /// Report where the data files were found and quit, without opening a
   /// window. The one thing a package can be asked on a machine whose GL driver
   /// cannot give it a context -- and the thing packaging most often gets wrong.
