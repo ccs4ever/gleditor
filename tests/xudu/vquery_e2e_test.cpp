@@ -147,6 +147,17 @@ TEST_F(VQueryE2ETest, OutputStoreCreation) {
   EXPECT_FALSE(store.primaryCurrentVersion().isZero());
 }
 
+// A named permascroll that is not there answered every query blank and
+// exited 0, and opening it created it.
+TEST_F(VQueryE2ETest, AMissingPermascrollIsRefused) {
+  const auto missing = testDir / "no-such-permascroll";
+  auto res = runVQuery("--permascroll " + missing.string() + " -e \"##\"");
+  EXPECT_EQ(res.exitCode, 1) << res.output;
+  EXPECT_NE(res.output.find("no permascroll at"), std::string::npos)
+      << res.output;
+  EXPECT_FALSE(fs::exists(missing));
+}
+
 TEST_F(VQueryE2ETest, InPlaceStoreMutation) {
   fs::path sampleSrc = "tests/samples/xudu/core_hypertext/xanadoc_a";
   if (!fs::exists(sampleSrc)) {

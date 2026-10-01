@@ -328,6 +328,12 @@ int main(int argc, char *argv[]) {
   auto permaDir = program.get<std::string>("--permascroll");
   xanadu::UserPermascroll::Config permaConfig;
   if (!permaDir.empty()) {
+    // A named permascroll that is not there is a mistyped path: reading
+    // against it answers every query blank, and opening it would create it.
+    if (!std::filesystem::exists(permaDir)) {
+      std::cerr << "Error: no permascroll at " << permaDir << "\n";
+      return 1;
+    }
     permaConfig.storageDir = permaDir;
   } else if (!storePaths.empty()) {
     std::filesystem::path p(storePaths[0]);
