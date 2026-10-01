@@ -51,7 +51,7 @@ cp build/xudu.exe "$stage/xudu.exe" 2>/dev/null || cp build/xudu "$stage/xudu.ex
 cp build/libgleditor.dll "$stage/"
 cp assets/shaders/*.glsl "$stage/assets/shaders/"
 cp assets/shaders/vulkan/*.spv "$stage/assets/shaders/vulkan/"
-cp logo.png "$stage/assets/logo.png"
+cp assets/logo.png "$stage/assets/logo.png"
 cp LICENSE README.md "$stage/"
 
 # AccessKit, when this was built with it. Copied by name rather than left to

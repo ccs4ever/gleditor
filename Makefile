@@ -1466,13 +1466,13 @@ ifdef GLEDITOR_ENABLE_VULKAN
 	$(INSTALL) -d $(INSTALL_DATADIR)/shaders/vulkan
 	$(INSTALL) -m 644 $(SPIRV) $(INSTALL_DATADIR)/shaders/vulkan
 endif
-	$(INSTALL) -m 644 logo.png $(INSTALL_DATADIR)/logo.png
+	$(INSTALL) -m 644 assets/logo.png $(INSTALL_DATADIR)/logo.png
 	$(INSTALL) -d $(DESTDIR)$(datadir)/applications
 	$(INSTALL) -m 644 packaging/gleditor.desktop $(DESTDIR)$(datadir)/applications/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/metainfo
 	$(INSTALL) -m 644 packaging/gleditor.metainfo.xml $(DESTDIR)$(datadir)/metainfo/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps
-	$(INSTALL) -m 644 logo.png $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
+	$(INSTALL) -m 644 assets/logo.png $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
 	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
 	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1

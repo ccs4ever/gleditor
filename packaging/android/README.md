@@ -95,7 +95,7 @@ with `adb install` or by dragging it onto a running emulator window.
 - **xudu.** Needs `libtorrent-rasterbar`, Boost and OpenSSL cross-built for Android on top of
   everything here.
 - **A launcher icon.** The manifest names none; Android shows a generic placeholder in its place.
-  `logo.png` at the repository root is the source to derive one from.
+  `assets/logo.png` is the source to derive one from.
 - **An in-app file picker.** A fresh install with nothing shared or opened into it still starts on
   an empty document -- the same thing `gleditor` with no arguments does on desktop. What *is* wired
   up is the other direction: `android:intent-filter`s on `SDLActivity` (see `AndroidManifest.xml`)
