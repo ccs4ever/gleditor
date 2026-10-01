@@ -75,6 +75,17 @@ resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
         }
       }
     }
+    if (source.empty()) {
+      // A cell the query minted -- a line find() read out of a document --
+      // says where it came from along d.source.
+      if (const auto sourceDim = coordinator.core().findDimension("d.source")) {
+        const auto &arena = coordinator.arena();
+        if (const auto origin = arena.linked(cell, *sourceDim);
+            zigzag::noCell != origin) {
+          source = arena.textOf(origin);
+        }
+      }
+    }
     rows.push_back({.text = std::move(rendered), .source = std::move(source)});
   }
   return rows;
@@ -448,7 +459,12 @@ int main(int argc, char *argv[]) {
     } else {
       // Direct fast-path execution
       xanadu::vql::VQLEngine engine(coordinator);
-      results = engine.execute(ast);
+      try {
+        results = engine.execute(ast);
+      } catch (const std::runtime_error &err) {
+        std::cerr << "Error: " << err.what() << "\n";
+        return false;
+      }
     }
 
     lastResults = results;

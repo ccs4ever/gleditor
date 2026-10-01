@@ -79,12 +79,16 @@ CellRef VortexCore::mintDimension(std::string_view name) {
   return mintNamedDimension(name, tail);
 }
 
+std::optional<DimRef>
+VortexCore::findDimension(const std::string_view name) const {
+  return zigzag::firstOf(zigzag::rank(arena_, dims_.dims, dims_.dims) |
+                         std::views::filter([&](const DimRef dim) {
+                           return arena_.textOf(dim) == name;
+                         }));
+}
+
 DimRef VortexCore::findOrMintDimension(const std::string_view name) {
-  const auto minted =
-      zigzag::firstOf(zigzag::rank(arena_, dims_.dims, dims_.dims) |
-                      std::views::filter([&](const DimRef dim) {
-                        return arena_.textOf(dim) == name;
-                      }));
+  const auto minted = findDimension(name);
   return minted ? *minted : mintDimension(name);
 }
 

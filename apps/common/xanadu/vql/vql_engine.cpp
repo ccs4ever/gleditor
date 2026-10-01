@@ -349,6 +349,34 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
   return results;
 }
 
+void VQLEngine::findInDocuments(const StoreInfo &info,
+                                const std::string_view needle,
+                                std::vector<zigzag::CellRef> &out) {
+  // A document's prose is no cell, so a hit is answered with one: the line it
+  // is on, linked along d.source to where that line was found. Scratch, like
+  // every cell a query mints; :save writes rows by their text either way.
+  const auto identity =
+      info.path.empty() ? "store:" + info.store->documentId().str() : info.path;
+  const auto sourceDim = coordinator_.resolveDimension("d.source");
+  auto &arena          = core_->arena();
+  for (const auto &version : info.store->currentVersions()) {
+    const auto text = info.store->textOf(version);
+    for (auto at = text.find(needle); std::string::npos != at;) {
+      const auto newline = text.rfind('\n', at);
+      const auto begin   = std::string::npos == newline ? 0 : newline + 1;
+      const auto end     = std::min(text.find('\n', at), text.size());
+      const auto hit =
+          arena.makeCell(std::string_view(text).substr(begin, end - begin));
+      const auto source = arena.makeCell(
+          identity + "#version=" + version.str() + "&at=" + std::to_string(at));
+      zigzag::expectWritten(
+          arena.link(hit, sourceDim, zigzag::DimVector::POS, source));
+      out.push_back(hit);
+      at = end < text.size() ? text.find(needle, end) : std::string::npos;
+    }
+  }
+}
+
 std::vector<zigzag::CellRef>
 VQLEngine::performCreates(const SignedDimensionStep &dimStep,
                           const std::vector<zigzag::CellRef> &inputs) {
@@ -418,12 +446,13 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
 std::vector<zigzag::CellRef>
 VQLEngine::evaluateStep(const PathStep &step,
                         const std::vector<zigzag::CellRef> &currentCells) {
-  // count() and find() have answers for nothing flowing in: zero, what a
-  // count's argument path finds, and what a search finds anywhere.
+  // A function has an answer for nothing flowing in -- zero, what a search
+  // finds anywhere, whether one string holds another -- except the two that
+  // act on their inputs. A name nobody knows is still reported below.
   const auto *const function = std::get_if<FunctionInvocation>(&step.selector);
   if (currentCells.empty() &&
-      (nullptr == function ||
-       ("count" != function->name && "find" != function->name))) {
+      (nullptr == function || "value" == function->name ||
+       "link" == function->name)) {
     return {};
   }
 
@@ -518,7 +547,18 @@ VQLEngine::evaluateStep(const PathStep &step,
                 core_->arena().proxyFor(info.spaceId, slot.birthOp));
           }
         }
+        if (!needle.empty()) {
+          findInDocuments(info, needle, stepOutput);
+        }
       }
+    } else if (fn.name == "contains" && fn.args.size() >= 2) {
+      // The predicate's answer, as a query of its own: true or false.
+      const auto context =
+          currentCells.empty() ? zigzag::noCell : currentCells.front();
+      const auto haystack = textOfValue(evaluateValueExpr(fn.args[0], context));
+      const auto needle   = textOfValue(evaluateValueExpr(fn.args[1], context));
+      stepOutput.push_back(core_->arena().makeScalarCell(
+          std::string::npos != haystack.find(needle)));
     } else if (fn.name == "count") {
       // count(path) counts what the path finds from here; bare count()
       // counts what flowed into the step.
@@ -614,6 +654,10 @@ VQLEngine::evaluateStep(const PathStep &step,
           stepOutput = attachedClones;
         }
       }
+    } else {
+      // Answering nothing for a name it does not know reads as "no match".
+      throw std::runtime_error("no function " + fn.name + " taking " +
+                               std::to_string(fn.args.size()) + " argument(s)");
     }
   }
 

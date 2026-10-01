@@ -83,6 +83,11 @@ private:
   performCreates(const SignedDimensionStep &dimStep,
                  const std::vector<zigzag::CellRef> &inputs);
 
+  /// find()'s second half: the lines of @p info's current documents that
+  /// hold @p needle, each a cell linked along d.source to where it was found.
+  void findInDocuments(const StoreInfo &info, std::string_view needle,
+                       std::vector<zigzag::CellRef> &out);
+
   // Predicate & Boolean Evaluation
   bool evaluatePredicate(const BooleanExpr &expr, zigzag::CellRef context);
   bool evaluateTerm(const BooleanTerm &term, zigzag::CellRef context);

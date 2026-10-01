@@ -8,12 +8,14 @@
 
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vql/multi_store.hpp"
+#include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
 
@@ -213,6 +215,51 @@ TEST(VQLMultiStoreTest, AGuessedVersionFoldsWhereTheHomeIs) {
   ASSERT_TRUE(folded.has_value());
   EXPECT_NE(folded->manifold->home(), noCell);
   EXPECT_EQ(coord.arena().textOf(coord.homeAnchor(), *store), "home");
+}
+
+// A document's prose is no cell; find() answers a hit in it with the line,
+// linked along d.source to where the line was found. Before, a store's own
+// visible text was invisible to every query.
+TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
+  const auto dir = tempStoreDir("find_prose");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto scroll       = std::make_shared<UserPermascroll>(config);
+  auto store        = std::make_shared<Store>(scroll);
+  std::ignore       = store->insert(xanadu::MicroversionId{}, 0,
+                                    "first line\nthe needle line\nlast line");
+
+  MultiStoreCoordinator coord;
+  coord.addStore("prose", "primary", store);
+  xanadu::vql::VQLEngine engine(coord);
+
+  const auto hits = engine.execute(R"(find("needle"))");
+  ASSERT_EQ(hits.size(), 1U);
+  const auto &arena = coord.arena();
+  EXPECT_EQ(arena.textOf(hits[0]), "the needle line");
+  const auto sourceDim = coord.core().findDimension("d.source");
+  ASSERT_TRUE(sourceDim.has_value());
+  const auto origin = arena.linked(hits[0], *sourceDim);
+  ASSERT_NE(origin, noCell);
+  EXPECT_THAT(arena.textOf(origin), ::testing::EndsWith("&at=15"));
+}
+
+TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
+  MultiStoreCoordinator coord;
+  xanadu::vql::VQLEngine engine(coord);
+  const auto yes = engine.execute(R"(contains("abc", "b"))");
+  ASSERT_EQ(yes.size(), 1U);
+  EXPECT_EQ(coord.core().render(yes[0]), zigzag::vortex::CellValue(true));
+  const auto no = engine.execute(R"(contains("abc", "z"))");
+  ASSERT_EQ(no.size(), 1U);
+  EXPECT_EQ(coord.core().render(no[0]), zigzag::vortex::CellValue(false));
+}
+
+// Answering nothing for a function nobody defined reads as "no match".
+TEST(VQLMultiStoreTest, AnUnknownFunctionIsRefusedByName) {
+  MultiStoreCoordinator coord;
+  xanadu::vql::VQLEngine engine(coord);
+  EXPECT_THROW(std::ignore = engine.execute("frob(1)"), std::runtime_error);
 }
 
 } // namespace
