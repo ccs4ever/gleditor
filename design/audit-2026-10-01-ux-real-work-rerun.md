@@ -178,6 +178,34 @@ fails loudly with exit 1.
 - The build has no AccessKit; the accessibility evidence is the harness's own dump, and the keyboard
   and accessibility review role was not run.
 
+## After the run
+
+Each finding was rerun by the lead before it was fixed. Two did not survive the rerun: the runners
+had misread their own frames.
+
+| #   | Outcome                                                                                                                                              | Commit    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | Fixed: a guessed version that folds no home falls back to a structure head                                                                           | `1288f7e` |
+| 2   | Fixed: a store that is all slice opens on its slice, ZigZag holding the keyboard                                                                     | `46cfe2e` |
+| 3   | Not a defect: the click panned the view, as a minimap does, and the one line went under the header; scrolling back shows it                          | —         |
+| 4   | Fixed: `find` reads current documents' lines, linked along `d.source`; bare `contains` answers; an unknown function is refused by name               | `fc30ef2` |
+| 5   | Fixed: the drawer contributes a list per zone and a card per item, with Remove and Go to where it came from; its revision follows `system://pouches` | `5929b08` |
+| 6   | Not a defect: after Enter the frame reads "right member 1"; after Cross the reader is still on the left text, which is what "left member 1" says     | —         |
+| 7   | Fixed: a named permascroll that does not exist is refused, exit 1, nothing created                                                                   | `4546563` |
+
+Finding 2 was also narrower than reported: after Alt+Home the result row was on screen; only the
+launch framing was wrong. The runner's identical frames were likely the `--headless` gap below.
+
+Harness gaps fixed: `--headless` with any scripted or frame-observing option (`6082945`);
+`--dump-a11y` as an ordered, repeatable step, `--select` in the caret's document, and `[[` for a
+literal leading bracket in `--type` (`e420bc5`). Found while fixing finding 5:
+`DocumentSwitcher::describe()` pushed children through a node reference the next `add()` could leave
+dangling (`5929b08`).
+
+Still open: the accessibility actions on pouch cards are untested against a real assistive
+technology, since this build has no AccessKit; the "1" to "3" tab label seen in J5; and a `find` hit
+holds its line as scratch text, so a saved result row is a copy, as every saved row is.
+
 ## Not validated
 
 - Dropping onto a second, different open page (J3): one document at a time was on screen, so only a
