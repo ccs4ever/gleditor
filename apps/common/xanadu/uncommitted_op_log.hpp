@@ -68,13 +68,17 @@ public:
 
   /**
    * @brief Compact the recorded operations using algebraic coalescing and
-   *        annihilation rules.
+   *        consolidation rules without truncating inserts.
    *
    * 1. Contiguous sequential inserts are merged into single spans.
    * 2. Consecutive backspaces (left-deletes) and forward deletes are merged
-   * into single delete ranges.
-   * 3. Insertions immediately followed by backspaces on the newly inserted text
-   *    are truncated or annihilated.
+   *    into single delete ranges.
+   * 3. Deletes following an insert consolidate into a dedicated delete range
+   *    without truncating or annihilating the insert, strictly preserving
+   *    hypertime edit history so deleted text can be retrieved when traveling
+   *    backward in time.
+   * 4. Subsequent inserts start a new insert op after the delete range without
+   *    requiring intermediate ops spool write-backs.
    */
   [[nodiscard]] std::vector<CompactedOp> compact() const;
 
