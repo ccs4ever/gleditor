@@ -87,14 +87,14 @@ int XuzzApp::executeCheckAuthorship(const std::string &where) {
     return std::string{std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>()};
   };
-  xudu::SignedProvenance sealed{.yaml = slurp(record), .signature = slurp(sig)};
-  if (sealed.yaml.empty()) {
+  xudu::SignedProvenance sealed{.tsv = slurp(record), .signature = slurp(sig)};
+  if (sealed.tsv.empty()) {
     std::cerr << "no authorship record at " << record << "\n";
     return 1;
   }
 
   const auto check = xudu::verifyProvenance(sealed);
-  std::cout << sealed.yaml;
+  std::cout << sealed.tsv;
   if (!check.signatureValid) {
     std::cout << "\nxuzz: this record is NOT vouched for -- " << check.detail
               << "\n";
@@ -110,7 +110,7 @@ int XuzzApp::executeCheckAuthorship(const std::string &where) {
                       "only their say-so")
             << "\n";
 
-  if (const auto said = xudu::parseProvenance(sealed.yaml); said) {
+  if (const auto said = xudu::parseProvenance(sealed.tsv); said) {
     const auto content = record.parent_path() / xudu::sealedContentName;
     if (const auto bytes = slurp(content); !bytes.empty()) {
       const auto matches = xudu::sha256Hex(bytes) == said->contentDigest &&
@@ -188,7 +188,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   if (opts.showConfig) {
     std::cout << "# " << xudu::configPath() << "\n"
-              << xudu::loadConfig().toYaml();
+              << xudu::loadConfig().toTsv();
     return 0;
   }
 
@@ -288,9 +288,24 @@ int XuzzApp::run(const int argc, char **argv) {
       if (colon != std::string::npos) {
         const auto verStr   = spec.substr(0, colon);
         const auto aliasStr = spec.substr(colon + 1);
-        session->store(0).setVersionAnnotation(
-            xanadu::MicroversionId::parse(verStr),
-            {.alias = aliasStr, .description = {}, .tag = {}, .timestamp = {}});
+        const auto targetId = xanadu::MicroversionId::parse(verStr);
+        auto &st            = session->store(0);
+        try {
+          const auto latest = st.latest();
+          if (!latest.isZero()) {
+            st.designateEdition(latest, aliasStr, targetId);
+          } else {
+            st.setVersionAnnotation(targetId, {.alias       = aliasStr,
+                                               .description = {},
+                                               .tag         = {},
+                                               .timestamp   = {}});
+          }
+        } catch (...) {
+          st.setVersionAnnotation(targetId, {.alias       = aliasStr,
+                                             .description = {},
+                                             .tag         = {},
+                                             .timestamp   = {}});
+        }
       }
     }
   }
@@ -398,8 +413,9 @@ int XuzzApp::run(const int argc, char **argv) {
         return false;
       });
 
-  docSwitcher->setCloseHandler(
-      [&views](const std::uint32_t docIndex) { views.closeDocument(docIndex); });
+  docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
+    views.closeDocument(docIndex);
+  });
   docSwitcher->setNewDocHandler([&views]() { views.newDocument(); });
   docSwitcher->setManagerHandler(
       [&storeObjectManager]() { storeObjectManager.toggle(); });
@@ -757,7 +773,7 @@ int XuzzApp::run(const int argc, char **argv) {
     // 1. If kinetic tether is currently dragging:
     if (kineticTetherEngine.isDragging()) {
       if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
-        const bool hitZone = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+        const bool hitZone = pouchDrawer.zoneAt(screenX, screenY).has_value();
         const bool hitLeft = pouchDrawer.forge().containsLeft(screenX, screenY);
         const bool hitRight =
             pouchDrawer.forge().containsRight(screenX, screenY);
@@ -786,7 +802,7 @@ int XuzzApp::run(const int argc, char **argv) {
     if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
       return false;
     }
-    const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+    const bool hitZone  = pouchDrawer.zoneAt(screenX, screenY).has_value();
     const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
     const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
 

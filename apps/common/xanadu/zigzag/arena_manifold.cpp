@@ -13,7 +13,6 @@
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
-#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include <gleditor/logging.hpp>
 
 namespace zigzag {
@@ -1566,20 +1565,6 @@ std::optional<Promoted> promote(xanadu::Store &store,
       return std::nullopt;
     }
   }
-          order.push_back(next);
-        }
-        if (expand && queued.insert(next).second) {
-          frontier.push_back(next);
-        }
-      };
-      discover(edge.dim, false);
-      discover(edge.pos, true);
-      discover(edge.neg, true);
-    }
-    if (order.size() > budget.maxOps) {
-      return std::nullopt;
-    }
-  }
 
   // Nothing is written until the walk has finished and the budget has held, so
   // a refusal leaves the store exactly as it was.
@@ -1704,19 +1689,9 @@ std::optional<Promoted> promote(xanadu::Store &store,
       if (noCell == edge.pos) {
         continue;
       }
-      DimRef dimCell = noCell;
-      if (const auto found = real.find(edge.dim); found != real.end()) {
-        dimCell = found->second;
-      } else {
-        const std::string dimName = from.textOf(edge.dim);
-        if (!dimName.empty()) {
-          dimCell = DimensionRegistry::instance().getOrCreate(
-              store, out.version, known, dimName);
-          real.emplace(edge.dim, dimCell);
-        }
-      }
-      const auto to = real.find(edge.pos);
-      if (dimCell == noCell || to == real.end()) {
+      const auto dim = real.find(edge.dim);
+      const auto to  = real.find(edge.pos);
+      if (dim == real.end() || to == real.end()) {
         continue;
       }
       if (nullptr != from.base() && !isEphemeral(arena) &&
@@ -1725,8 +1700,8 @@ std::optional<Promoted> promote(xanadu::Store &store,
           continue;
         }
       }
-      out.version = store.setLink(out.version, real.at(arena), dimCell, false,
-                                  to->second, &known);
+      out.version = store.setLink(out.version, real.at(arena), dim->second,
+                                  false, to->second, &known);
       // The next setLink reads `known`, so a link it failed to fold would
       // make every later one validate against a stale view.
       if (const auto stepped = known.advance(store, out.version); !stepped) {

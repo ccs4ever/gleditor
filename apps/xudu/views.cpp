@@ -143,19 +143,21 @@ void Views::syncMediaWidgets(RenderState &rState) {
 }
 
 void Views::showAlongside(const MicroversionId &version, const float depthZ,
-                          const std::size_t storeIndex) {
-  renderer->push(
-      RenderItemOpenDoc(session.sourceFor(version, storeIndex), depthZ));
-  renderer->runWithState([this, version, storeIndex](RenderState &rState) {
-    if (rState.docs.empty()) {
-      return;
-    }
-    primaryDocument_ = rState.docs.front();
-    rState.docs.back()->addObserver(&session);
-    session.viewOpened(version, storeIndex);
-    map.setCurrent(session.views().front().version);
-    syncMediaWidgets(rState);
-  });
+                          const std::size_t storeIndex,
+                          const std::uint32_t focusedBirth) {
+  renderer->push(RenderItemOpenDoc(
+      session.sourceFor(version, storeIndex, focusedBirth), depthZ));
+  renderer->runWithState(
+      [this, version, storeIndex, focusedBirth](RenderState &rState) {
+        if (rState.docs.empty()) {
+          return;
+        }
+        primaryDocument_ = rState.docs.front();
+        rState.docs.back()->addObserver(&session);
+        session.viewOpened(version, storeIndex, focusedBirth);
+        map.setCurrent(session.views().front().version);
+        syncMediaWidgets(rState);
+      });
 }
 
 std::optional<glm::mat4> Views::presentationTransform() const {

@@ -62,7 +62,8 @@ public:
 
   void showOnly(const MicroversionId &version, std::size_t storeIndex = 0);
   void showAlongside(const MicroversionId &version, float depthZ = 0.0F,
-                     std::size_t storeIndex = 0);
+                     std::size_t storeIndex     = 0,
+                     std::uint32_t focusedBirth = 0);
 
   void syncMediaWidgets(RenderState &rState);
 
