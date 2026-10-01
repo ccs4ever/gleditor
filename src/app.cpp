@@ -271,6 +271,16 @@ std::string defaultBackendName() {
   return GLEDITOR_DEFAULT_BACKEND;
 }
 
+/// Every option that adds a step to the automation script. One list, read by
+/// both readAutomationScript() and wantsFrames(): a program deciding whether a
+/// run needs its render loop by its own list of options is how --chord came to
+/// be dropped without a word under --headless.
+constexpr std::array scriptedOptions = {
+    "--pick",        "--click",      "--capture",    "--type",
+    "--select",      "--do",         "--key",        "--chord",
+    "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
+    "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
+
 } // namespace
 
 /**
@@ -426,17 +436,12 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   };
 
-  static constexpr std::array scripted = {
-      "--pick",        "--click",      "--capture",    "--type",
-      "--select",      "--do",         "--key",        "--chord",
-      "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
-      "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
     }
     const std::string_view arg{argv[i]};
-    for (const auto *const option : scripted) {
+    for (const auto *const option : scriptedOptions) {
       if (arg == option) {
         // "--click 3,4": the value is the argument after it.
         if (i + 1 < argc && nullptr != argv[i + 1]) {
@@ -455,6 +460,17 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   }
   return script;
+}
+
+bool wantsFrames(const argparse::ArgumentParser &parser) {
+  const bool scripted =
+      std::ranges::any_of(scriptedOptions, [&parser](const char *option) {
+        return parser.is_used(option);
+      });
+  return scripted || parser["--dump-a11y"] == true ||
+         !parser.get<std::string>("--screenshot").empty() ||
+         parser.get<std::string>("--benchmark") != "0" ||
+         parser.get<int>("--record-frames") > 0;
 }
 
 void CommandTable::bind(const int scancode, const Mod mods, std::string name,

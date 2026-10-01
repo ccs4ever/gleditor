@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include <argparse/argparse.hpp>
 #include <gleditor/app.hpp>
 
 namespace {
@@ -233,4 +234,49 @@ TEST(AutomationScript, pressesAreHeldUntilReleased) {
   EXPECT_EQ(script[4].input.kind, Input::ButtonDown);
   EXPECT_EQ(script[4].input.button, 3);
   EXPECT_EQ(script[5].input.kind, Input::ButtonUp);
+}
+
+namespace {
+
+/// Parse words as a program built on the library would, and ask whether the
+/// run needs frames drawn.
+bool wantsFramesFor(std::vector<std::string> words) {
+  words.insert(words.begin(), "gleditor");
+  argparse::ArgumentParser parser("gleditor");
+  gleditor::addCommonArguments(parser, false);
+  parser.parse_args(words);
+  return gleditor::wantsFrames(parser);
+}
+
+} // namespace
+
+// A windowless batch path asks this before it exits. Every step a script can
+// carry out is a reason not to: --chord under --headless once exited 0 having
+// pressed nothing, because that path kept its own shorter list of options.
+TEST(AutomationScript, everyScriptedStepWantsFrames) {
+  const std::vector<std::vector<std::string>> lines = {
+      {"--pick", "1,2"},        {"--click", "1,2"},    {"--capture", "a.ppm"},
+      {"--type", "x"},          {"--select", "1,2"},   {"--do", "save"},
+      {"--key", "enter"},       {"--chord", "Ctrl+N"}, {"--mouse-down", "1,2"},
+      {"--mouse-move", "1,2"},  {"--mouse-up", "1,2"}, {"--drag", "1,2:3,4"},
+      {"--right-click", "1,2"}, {"--wheel", "0,1"},    {"--ctrl-wheel", "0,1"},
+      {"--shift-wheel", "0,1"}, {"--chord=Alt+Home"},
+  };
+  for (const auto &line : lines) {
+    ASSERT_FALSE(scriptOf(line).empty()) << line.front();
+    EXPECT_TRUE(wantsFramesFor(line)) << line.front();
+  }
+}
+
+TEST(AutomationScript, observingAFrameWantsFrames) {
+  EXPECT_TRUE(wantsFramesFor({"--dump-a11y"}));
+  EXPECT_TRUE(wantsFramesFor({"--screenshot", "a.ppm"}));
+  EXPECT_TRUE(wantsFramesFor({"--benchmark", "10"}));
+  EXPECT_TRUE(wantsFramesFor({"--record-frames", "2"}));
+}
+
+TEST(AutomationScript, aRunAskingForNoFrameWantsNone) {
+  EXPECT_FALSE(wantsFramesFor({}));
+  EXPECT_FALSE(wantsFramesFor({"--font", "Serif 12", "--fov", "9"}));
+  EXPECT_FALSE(wantsFramesFor({"--profile"}));
 }
