@@ -1289,11 +1289,11 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
   // An annotation without claimed timestamp has an empty timestamp field;
   // it is never synthesized or derived from the MicroversionId
   const auto v2 = slice.store.insert(slice.at, 15, " and another");
-  slice.at = slice.store.annotateVersion(v2, v2,
-                                         {.alias       = "v2.0",
-                                          .description = "No clock reading",
-                                          .tag         = "unclocked",
-                                          .timestamp   = ""});
+  slice.at      = slice.store.annotateVersion(v2, v2,
+                                              {.alias       = "v2.0",
+                                               .description = "No clock reading",
+                                               .tag         = "unclocked",
+                                               .timestamp   = ""});
 
   const auto ann2 = slice.store.versionAnnotation(v2);
   ASSERT_TRUE(ann2.has_value());

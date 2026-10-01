@@ -89,8 +89,8 @@ OverlayTargetResult declareOverlayTarget(Store &store,
     if (const auto rec = reg.findRecord(*sid);
         rec.has_value() && rec->cell != zigzag::noCell) {
       const auto scrollTail = zigzag::rankTail(fold, rec->cell, dimScrollRefs);
-      curHead = store.setLink(curHead, scrollTail, dimScrollRefs,
-                              zigzag::DimVector::POS, targetCell, &fold);
+      curHead               = store.setLink(curHead, scrollTail, dimScrollRefs,
+                                            zigzag::DimVector::POS, targetCell, &fold);
     }
   }
 
@@ -144,8 +144,8 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
   fold                  = store.rebuildManifold(curHead);
 
   const auto claimsTail = zigzag::rankTail(fold, releaseCell, dimOverlayClaims);
-  curHead = store.setLink(curHead, claimsTail, dimOverlayClaims,
-                          zigzag::DimVector::POS, handleCell, &fold);
+  curHead               = store.setLink(curHead, claimsTail, dimOverlayClaims,
+                                        zigzag::DimVector::POS, handleCell, &fold);
 
   return OverlayClaimResult{
       .version = curHead, .handleCell = handleCell, .releaseCell = releaseCell};
