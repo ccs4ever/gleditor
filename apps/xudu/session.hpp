@@ -112,9 +112,9 @@ public:
         ranges(std::move(aDecoratedRanges)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
-  [[nodiscard]] std::string name() const override {
-    return customName.empty() ? id.str() : customName;
-  }
+  /// The document's title, empty for an untitled one -- never the version
+  /// name, which changes with every edit; version() says which version.
+  [[nodiscard]] std::string name() const override { return customName; }
   [[nodiscard]] const MicroversionId &version() const { return id; }
   [[nodiscard]] std::shared_ptr<const render::PickSemanticTarget>
   pickSemanticTarget() const override {

@@ -41,6 +41,23 @@
 namespace xudu {
 
 namespace {
+
+/// The branch @p version is on, as its name spells it without the state
+/// number: "3b2" is on "3b", "a1" on "a", and the main line on nothing.
+std::string branchOf(const MicroversionId &version) {
+  const auto segments = version.segments();
+  std::string out;
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto &segment = segments[i];
+    if (MicroversionId::noBranch != segment.branch) {
+      out += MicroversionId::branchLetters(segment.branch);
+    }
+    if (i + 1 < segments.size()) {
+      out += std::to_string(segment.number);
+    }
+  }
+  return out;
+}
 constexpr std::uint32_t kCollaboratorColors[] = {
     0x38BDF8FF, // Sky 400
     0xF43F5EFF, // Rose 500
@@ -1603,6 +1620,27 @@ Session::sourceFor(const MicroversionId &version,
         ann && !ann->alias.empty()) {
       title = ann->alias;
     }
+  }
+  // The store's own name, which does not change as it is edited. The version
+  // name used to stand in, so a tab read "1", then "3" once a transclusion
+  // reloaded it. An untitled store has no name of its own yet; the tab bar
+  // numbers those.
+  if (title.empty() && !isTemporaryStore(storeIndex)) {
+    const auto named =
+        std::filesystem::path(path(storeIndex)).lexically_normal();
+    auto base = named.filename().string();
+    if (base.empty()) {
+      base = named.parent_path().filename().string();
+    }
+    if (!base.starts_with("untitled-")) {
+      title = std::move(base);
+    }
+  }
+  // Two views of one store on different branches would read alike; the
+  // branch -- the version name without its last number -- tells them apart
+  // and, unlike the version, stays put while either is edited.
+  if (const auto branch = branchOf(version); !branch.empty()) {
+    title = (title.empty() ? std::string{"Untitled"} : title) + " · " + branch;
   }
 
   auto target =

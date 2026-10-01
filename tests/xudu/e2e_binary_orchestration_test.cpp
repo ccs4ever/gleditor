@@ -825,6 +825,29 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   EXPECT_THAT(written.output, ::testing::HasSubstr("kept untitled xanadoc"));
 }
 
+// A tab names its document, not its version: it read "1", then "3" once a
+// transclusion reloaded it. Branches of one store are told apart by branch,
+// which an edit does not change.
+TEST(E2EBinaryOrchestrationTest, aTabKeepsItsNameThroughEdits) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_tab_names";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() + " XDG_DATA_HOME=" +
+      (testRoot / "data").string() + " timeout 120 " + xuduBin.string() +
+      " --backend " + activeBackend() + " " + (testRoot / "notes").string() +
+      " --type 'first words' --select 0,5 --chord Ctrl+T --type 'more'"
+      " --dump-a11y --profile");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, ::testing::HasSubstr("list item \"notes\""));
+  EXPECT_THAT(result.output,
+              ::testing::HasSubstr("list item \"notes \u00b7 a\""));
+}
+
 // Editing from the keyboard: the audit found no key moved the caret, Return
 // ran a ZigZag action, Backspace needed a selection and typing over one did
 // not replace it. Each step's operation shows where the caret was.
