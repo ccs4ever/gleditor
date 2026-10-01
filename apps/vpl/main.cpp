@@ -159,8 +159,14 @@ resultRows(const VplView &view, const ArenaManifold &arena,
         }
       }
     }
-    rows.push_back(
-        {.text = persistedCellText(arena, cell), .source = std::move(source)});
+    std::optional<xanadu::QuotedSpans> quote;
+    if (const auto quoted = arena.quotedContent(cell)) {
+      quote = xanadu::QuotedSpans{.store = quoted->store,
+                                  .spans = std::move(quoted->spans)};
+    }
+    rows.push_back({.text   = persistedCellText(arena, cell),
+                    .source = std::move(source),
+                    .quote  = std::move(quote)});
   }
   return rows;
 }

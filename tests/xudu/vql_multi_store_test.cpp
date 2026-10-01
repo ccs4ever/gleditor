@@ -237,6 +237,12 @@ TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
   ASSERT_EQ(hits.size(), 1U);
   const auto &arena = coord.arena();
   EXPECT_EQ(arena.textOf(hits[0]), "the needle line");
+  // The document's own bytes, not a copy of them.
+  const auto quoted = arena.quotedContent(hits[0]);
+  ASSERT_TRUE(quoted.has_value());
+  EXPECT_EQ(quoted->store, store.get());
+  EXPECT_EQ(quoted->spans,
+            store->rebuild(store->primaryCurrentVersion()).spansFor(11, 15));
   const auto sourceDim = coord.core().findDimension("d.source");
   ASSERT_TRUE(sourceDim.has_value());
   const auto origin = arena.linked(hits[0], *sourceDim);

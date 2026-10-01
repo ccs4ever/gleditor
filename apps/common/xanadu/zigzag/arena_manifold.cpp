@@ -1095,6 +1095,17 @@ std::string ArenaManifold::textOf(const CellRef ref,
       }
     }
   }
+  // A quotation's spans are in its space's namespace, whatever was passed.
+  if (const auto quoted = quoteSpace_.find(target);
+      quoteSpace_.end() != quoted) {
+    if (const auto s = spaceAt(quoted->second)) {
+      if (nullptr != s->reader) {
+        reader = s->reader;
+      } else if (nullptr != s->store) {
+        reader = s->store;
+      }
+    }
+  }
   std::string out;
   for (const auto &span : contentOf(ref)) {
     if (xanadu::scratchScroll == span.scroll) {
@@ -1154,6 +1165,42 @@ CellRef ArenaManifold::makeCell() {
 CellRef ArenaManifold::makeCell(const xanadu::PrimediaSpan &content) {
   return mintSlot(xanadu::ValueKind::None, 0,
                   std::span<const xanadu::PrimediaSpan>{&content, 1});
+}
+
+CellRef
+ArenaManifold::makeQuote(const std::uint32_t space,
+                         const std::span<const xanadu::PrimediaSpan> content) {
+  const auto cell = mintSlot(xanadu::ValueKind::None, 0, content);
+  quoteSpace_.emplace(cell, space);
+  quoteSpaceOrder_.push_back(cell);
+  return cell;
+}
+
+std::optional<ArenaManifold::QuotedContent>
+ArenaManifold::quotedContent(const CellRef ref) const {
+  CellRef target = ref;
+  if (isQuoteOccurrence(ref)) {
+    target = canonicalProxyOf(ref);
+  }
+  const xanadu::Store *store = store_;
+  if (const auto foreign = foreignOf(target)) {
+    const auto s = spaceAt(foreign->space);
+    store        = s ? s->store : nullptr;
+  } else if (const auto quoted = quoteSpace_.find(target);
+             quoteSpace_.end() != quoted) {
+    const auto s = spaceAt(quoted->second);
+    store        = s ? s->store : nullptr;
+  } else if (nullptr == store && nullptr != base_) {
+    store = base_->store();
+  }
+  const auto spans = contentOf(ref);
+  if (nullptr == store || spans.empty() ||
+      std::ranges::any_of(spans, [](const xanadu::PrimediaSpan &span) {
+        return xanadu::scratchScroll == span.scroll;
+      })) {
+    return std::nullopt;
+  }
+  return QuotedContent{.store = store, .spans = {spans.begin(), spans.end()}};
 }
 
 CellRef ArenaManifold::makeCell(const std::string_view text) {
@@ -1408,6 +1455,7 @@ Mark ArenaManifold::mark() noexcept {
           static_cast<std::uint32_t>(quoteOccurrenceOrder_.size()),
       .proxyShadowedEdgeCount =
           static_cast<std::uint32_t>(proxyShadowedEdgeOrder_.size()),
+      .quoteSpaceCount = static_cast<std::uint32_t>(quoteSpaceOrder_.size()),
   };
   floors_.push_back(Floors{.cells   = taken.cellCount,
                            .links   = taken.linkSize,
@@ -1429,6 +1477,11 @@ void ArenaManifold::discard(const Mark &m) noexcept {
 }
 
 void ArenaManifold::release(const Mark &m) noexcept {
+  for (std::size_t i = quoteSpaceOrder_.size(); i > m.quoteSpaceCount; i--) {
+    quoteSpace_.erase(quoteSpaceOrder_[i - 1]);
+  }
+  quoteSpaceOrder_.resize(m.quoteSpaceCount);
+
   // Truncate proxy shadowed edges
   for (std::size_t i = proxyShadowedEdgeOrder_.size();
        i > m.proxyShadowedEdgeCount; i--) {
@@ -1591,6 +1644,23 @@ std::optional<Promoted> promote(xanadu::Store &store,
     }
   }
 
+  // A quotation of another store's bytes is written as a transclusion of them,
+  // so each of its spans must be nameable here; checked before anything is
+  // written, for the same reason as the budget.
+  for (const CellRef arena : order) {
+    if (!isEphemeral(arena) || from.isProxy(arena)) {
+      continue;
+    }
+    if (const auto quoted = from.quotedContent(arena);
+        quoted && quoted->store != &store &&
+        !std::ranges::all_of(
+            quoted->spans, [&](const xanadu::PrimediaSpan &span) {
+              return xanadu::canCarry(*quoted->store, store, span);
+            })) {
+      return std::nullopt;
+    }
+  }
+
   // Nothing is written until the walk has finished and the budget has held, so
   // a refusal leaves the store exactly as it was.
   std::unordered_map<CellRef, CellRef> real;
@@ -1648,8 +1718,18 @@ std::optional<Promoted> promote(xanadu::Store &store,
         }
       }
     }
-    const auto spans = from.contentOf(arena);
-    const auto kind  = from.valueKindOf(arena);
+    const auto content = from.contentOf(arena);
+    std::vector<xanadu::PrimediaSpan> spans(content.begin(), content.end());
+    if (const auto quoted = from.quotedContent(arena);
+        quoted && quoted->store != &store) {
+      for (auto &span : spans) {
+        if (const auto carried =
+                xanadu::carrySpan(*quoted->store, store, span)) {
+          span = *carried;
+        }
+      }
+    }
+    const auto kind = from.valueKindOf(arena);
 
     xanadu::MicroversionId minted = out.version;
     if (xanadu::ValueKind::Double == kind) {

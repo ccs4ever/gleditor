@@ -181,6 +181,7 @@ struct Mark {
   std::uint32_t proxyCount{0};
   std::uint32_t quoteOccurrenceCount{0};
   std::uint32_t proxyShadowedEdgeCount{0};
+  std::uint32_t quoteSpaceCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -323,6 +324,32 @@ public:
   [[nodiscard]] gleditor::cpp26::optional<
       std::pair<const xanadu::Store *, CellRef>>
   resolveForeign(CellRef ref) const noexcept;
+
+  /**
+   * @brief Mint a cell quoting @p content, addressed in @p space's scrolls.
+   *
+   * What a query answers with when what it found is no cell -- a line of a
+   * document's prose: the bytes stay where they are, in the scroll they were
+   * typed into, and this cell names them. Read through that space's reader,
+   * since a span's scroll id means something only in the store it came from.
+   */
+  CellRef makeQuote(std::uint32_t space,
+                    std::span<const xanadu::PrimediaSpan> content);
+
+  /// Spans in a store's own scroll namespace, and the store.
+  struct QuotedContent {
+    const xanadu::Store *store{nullptr};
+    std::vector<xanadu::PrimediaSpan> spans;
+  };
+
+  /**
+   * @brief Where @p ref's content already lives: a proxy's cell in its store,
+   *        a makeQuote() cell's spans, a base cell's in the base document.
+   *
+   * Nothing for content the evaluation constructed -- any scratch span --
+   * which has no address outside this arena until promote() gives it one.
+   */
+  [[nodiscard]] std::optional<QuotedContent> quotedContent(CellRef ref) const;
 
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
@@ -647,6 +674,11 @@ private:
   std::unordered_map<CellRef, QuoteViewId> occurrenceToView_;
   std::map<std::pair<QuoteViewId, CellRef>, CellRef> viewCanonicalToOccurrence_;
   std::vector<CellRef> quoteOccurrenceOrder_;
+
+  /// makeQuote() cells -> the space their spans are addressed in, and the
+  /// order they were minted in, so release() can drop a failed branch's.
+  std::unordered_map<CellRef, std::uint32_t> quoteSpace_;
+  std::vector<CellRef> quoteSpaceOrder_;
 
   std::unordered_map<DimRef, BoundDimensionSet> boundDimensions_;
 

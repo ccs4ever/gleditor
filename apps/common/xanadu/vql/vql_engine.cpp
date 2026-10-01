@@ -352,21 +352,25 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
 void VQLEngine::findInDocuments(const StoreInfo &info,
                                 const std::string_view needle,
                                 std::vector<zigzag::CellRef> &out) {
-  // A document's prose is no cell, so a hit is answered with one: the line it
-  // is on, linked along d.source to where that line was found. Scratch, like
-  // every cell a query mints; :save writes rows by their text either way.
+  // A document's prose is no cell, so a hit is answered with one: a quotation
+  // of the line it is on -- the document's own spans, so the bytes stay in
+  // the scroll they were typed into -- linked along d.source to where that
+  // line was found.
   const auto identity =
       info.path.empty() ? "store:" + info.store->documentId().str() : info.path;
   const auto sourceDim = coordinator_.resolveDimension("d.source");
   auto &arena          = core_->arena();
   for (const auto &version : info.store->currentVersions()) {
-    const auto text = info.store->textOf(version);
+    const auto document = info.store->rebuild(version);
+    const auto text     = info.store->textOf(version);
     for (auto at = text.find(needle); std::string::npos != at;) {
       const auto newline = text.rfind('\n', at);
       const auto begin   = std::string::npos == newline ? 0 : newline + 1;
       const auto end     = std::min(text.find('\n', at), text.size());
-      const auto hit =
-          arena.makeCell(std::string_view(text).substr(begin, end - begin));
+      const auto spans =
+          document.spansFor(static_cast<std::uint32_t>(begin),
+                            static_cast<std::uint32_t>(end - begin));
+      const auto hit    = arena.makeQuote(info.spaceId, spans);
       const auto source = arena.makeCell(
           identity + "#version=" + version.str() + "&at=" + std::to_string(at));
       zigzag::expectWritten(

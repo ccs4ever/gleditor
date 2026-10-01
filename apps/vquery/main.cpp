@@ -86,7 +86,17 @@ resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
         }
       }
     }
-    rows.push_back({.text = std::move(rendered), .source = std::move(source)});
+    // The bytes where they already are: a cell of a loaded store, or a line a
+    // search quoted out of a document. A constructed value has none.
+    std::optional<xanadu::QuotedSpans> quote;
+    if (const auto quoted = coordinator.arena().quotedContent(
+            coordinator.derefCloneMaster(cell))) {
+      quote = xanadu::QuotedSpans{.store = quoted->store,
+                                  .spans = std::move(quoted->spans)};
+    }
+    rows.push_back({.text   = std::move(rendered),
+                    .source = std::move(source),
+                    .quote  = std::move(quote)});
   }
   return rows;
 }
