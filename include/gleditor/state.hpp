@@ -262,6 +262,15 @@ struct AppState {
    */
   std::function<bool()> documentTakesText;
   /**
+   * @brief Told on the render thread when a scripted --select has placed a
+   *        selection in a document.
+   *
+   * A press and drag would have been picked, and a program with a second
+   * pane moves the keyboard to the documents from that pick; a --select is
+   * no pick, so it says so here instead. Unset does nothing.
+   */
+  std::function<void()> documentSelected;
+  /**
    * @brief Asked on the render thread when a left press lands inside the
    *        selection, at byte @p offset of document @p docIndex and window
    *        pixel @p x, @p y: whether the program picks the selection up to

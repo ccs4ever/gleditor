@@ -925,6 +925,9 @@ void Renderer::advanceScript(RenderState &state) {
       caret->extendTo(step.to);
       std::cout << std::format("select: doc {} [{},{})\n", doc,
                                caret->selectionStart(), caret->selectionEnd());
+      if (this->state->documentSelected) {
+        this->state->documentSelected();
+      }
     }
     finishStepWhenSettled();
     return;

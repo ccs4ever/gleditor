@@ -2737,6 +2737,9 @@ int XuzzApp::run(const int argc, char **argv) {
   // D. Scope & Keyboard Routing
   app.commands().setScopeResolver(
       [&keyboardPane] { return keyboardPane.scope(); });
+  state->documentSelected = [&keyboardPane] {
+    keyboardPane.leaveZigzag(false);
+  };
   state->documentTakesText = [&keyboardPane] {
     return !keyboardPane.inZigzag();
   };
