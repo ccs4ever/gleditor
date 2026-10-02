@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
@@ -32,7 +33,6 @@
 #include "common/xanadu/vpl/view.hpp"
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
@@ -132,8 +132,8 @@ std::string formatView(const VplView &view, const ArenaManifold &arena) {
 
 std::vector<xanadu::ResultRow>
 resultRows(const VplView &view, const ArenaManifold &arena,
-           const xanadu::vql::MultiStoreCoordinator &coordinator,
-           const std::optional<xanadu::vql::StoreInfo> &currentStore,
+           const xanadu::MultiStoreCoordinator &coordinator,
+           const std::optional<xanadu::StoreInfo> &currentStore,
            const std::string_view transientPath = {}) {
   std::vector<xanadu::ResultRow> rows;
   if (view.isScalar()) {
@@ -376,7 +376,7 @@ int main(int argc, char *argv[]) {
   vortex::VortexVM vm(core);
   VPLEngine directEngine(core);
   VPLCompiler compiler(core, vm);
-  xanadu::vql::MultiStoreCoordinator coordinator(core);
+  xanadu::MultiStoreCoordinator coordinator(core);
 
   // Optional store loading
   auto inputStore = program.get<std::string>("--store");
@@ -392,7 +392,7 @@ int main(int argc, char *argv[]) {
           : std::make_shared<xanadu::UserPermascroll>(
                 xanadu::UserPermascroll::Config{.storageDir = permascrollPath});
   xanadu::Store store(permascroll);
-  std::optional<xanadu::vql::StoreInfo> currentStore;
+  std::optional<xanadu::StoreInfo> currentStore;
   if (!inputStore.empty() &&
       std::filesystem::exists(inputStore + "/ops.nodes")) {
     coordinator.loadAndAddStore(

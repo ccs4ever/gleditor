@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
@@ -30,7 +31,6 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/vql/compiler.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
@@ -46,7 +46,7 @@ std::string extractStoreLabel(const std::string &path) {
 }
 
 std::vector<xanadu::ResultRow>
-resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
+resultRows(const xanadu::MultiStoreCoordinator &coordinator,
            const std::vector<zigzag::CellRef> &results,
            const std::string_view transientPath = {}) {
   std::vector<xanadu::ResultRow> rows;
@@ -89,10 +89,11 @@ resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
     // The bytes where they already are: a cell of a loaded store, or a line a
     // search quoted out of a document. A constructed value has none.
     std::optional<xanadu::QuotedSpans> quote;
-    if (const auto quoted = coordinator.arena().quotedContent(
-            coordinator.derefCloneMaster(cell))) {
-      quote = xanadu::QuotedSpans{.store = quoted->store,
-                                  .spans = std::move(quoted->spans)};
+    if (const auto master = coordinator.derefCloneMaster(cell)) {
+      if (const auto quoted = coordinator.arena().quotedContent(*master)) {
+        quote = xanadu::QuotedSpans{.store = quoted->store,
+                                    .spans = std::move(quoted->spans)};
+      }
     }
     rows.push_back({.text   = std::move(rendered),
                     .source = std::move(source),
@@ -372,7 +373,7 @@ int main(int argc, char *argv[]) {
               << " holds no text, so results will have none; pass "
                  "--permascroll with the one the store was written against\n";
   }
-  xanadu::vql::MultiStoreCoordinator coordinator;
+  xanadu::MultiStoreCoordinator coordinator;
 
   std::string primaryPath;
   if (!storePaths.empty()) {
@@ -666,7 +667,10 @@ int main(int argc, char *argv[]) {
       std::cout << "Registered stores on ##/d.stores rank:\n";
       for (const auto &s : coordinator.stores()) {
         std::cout << "  - " << s.label << " (role: " << s.role << ")"
-                  << " [master: #" << s.homeCell << ", rep: #" << s.storeCell
+                  << " [master: #"
+                  << (s.homeCell ? std::to_string(*s.homeCell) : "none")
+                  << ", rep: #"
+                  << (s.storeCell ? std::to_string(*s.storeCell) : "none")
                   << ", path: " << (s.path.empty() ? "(in-memory)" : s.path)
                   << "]\n";
       }

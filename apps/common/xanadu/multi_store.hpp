@@ -1,8 +1,8 @@
 /**
  * @file multi_store.hpp
- * @brief Multi-store connection topology and coordinate manager for VQL.
+ * @brief Multi-store connection topology and coordinate manager for Xanadu.
  *
- * Implements Stage 0 of the VQL architecture:
+ * Implements Stage 0 of the multi-store architecture:
  * - Standard connection points along system dimension `d.stores` off home.
  * - Slices and xanadocs joined to representative cells via `d.clone` ranks
  *   where the slice's home cell is the authoritative clone master.
@@ -11,8 +11,8 @@
  * - Universal `>` clone master dereference (sugar for /d.clone::head).
  * - Direct resolution of `##NAME` shorthand (##/d.stores>[d.name = "NAME"]).
  */
-#ifndef COMMON_XANADU_VQL_MULTI_STORE_HPP
-#define COMMON_XANADU_VQL_MULTI_STORE_HPP
+#ifndef COMMON_XANADU_MULTI_STORE_HPP
+#define COMMON_XANADU_MULTI_STORE_HPP
 
 #include <cstdint>
 #include <memory>
@@ -24,13 +24,17 @@
 #include <vector>
 
 #include <gleditor/cpp26.hpp>
+#include <gleditor/sentinel.hpp>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
-namespace xanadu::vql {
+namespace xanadu {
 
 using zigzag::CellRef;
 using zigzag::DimRef;
@@ -46,10 +50,10 @@ struct StoreInfo {
   std::string path;
   std::shared_ptr<xanadu::Store> store{nullptr};
   std::shared_ptr<zigzag::Manifold> manifold{nullptr};
-  CellRef homeCell{
-      noCell}; ///< Slice's home cell (clone master carrying metadata)
-  CellRef storeCell{
-      noCell}; ///< Representative cell on coordinator's d.stores rank
+  std::optional<CellRef> homeCell{
+      std::nullopt}; ///< Slice's home cell (clone master carrying metadata)
+  std::optional<CellRef> storeCell{
+      std::nullopt}; ///< Representative cell on coordinator's d.stores rank
   std::uint32_t spaceId{0};
 };
 
@@ -91,20 +95,21 @@ public:
   /// Resolves default home anchor '##'.
   /// In single-store mode, returns that store's home cell; in multi-store mode,
   /// returns the coordinator origin home cell.
-  [[nodiscard]] CellRef homeAnchor() const noexcept;
+  [[nodiscard]] std::optional<CellRef> homeAnchor() const noexcept;
 
   /// The universal '>' clone master dereference (cell/d.clone::head).
   /// Walks negward along d.clone until reaching the clone master.
-  [[nodiscard]] CellRef derefCloneMaster(CellRef cell) const noexcept;
+  [[nodiscard]] std::optional<CellRef>
+  derefCloneMaster(CellRef cell) const noexcept;
 
   /// Resolves the '##NAME' shorthand: ##/d.stores>[d.name = "NAME"].
-  /// Returns the named slice's home cell (the clone master), or noCell if not
+  /// Returns the named slice's home cell (the clone master), or nullopt if not
   /// found.
   [[nodiscard]] std::optional<CellRef>
   resolveNamedStore(std::string_view name) const;
 
   /// Multi-store coordinator genesis origin cell.
-  [[nodiscard]] CellRef coordinatorHome() const noexcept {
+  [[nodiscard]] std::optional<CellRef> coordinatorHome() const noexcept {
     return coordinatorHome_;
   }
 
@@ -152,8 +157,8 @@ public:
 
   /// Imports an entire zigzag::Manifold into an ArenaManifold, preserving
   /// all cells, dimensions, links, text spans, and canonical scalar bits.
-  static CellRef importManifold(const zigzag::Manifold &source,
-                                zigzag::ArenaManifold &dest);
+  static std::optional<CellRef> importManifold(const zigzag::Manifold &source,
+                                               zigzag::ArenaManifold &dest);
 
 private:
   void initDimensions();
@@ -164,21 +169,17 @@ private:
   std::unique_ptr<zigzag::vortex::VortexCore> ownedCore_{nullptr};
   zigzag::vortex::VortexCore *core_{nullptr};
 
-  CellRef coordinatorHome_{noCell};
-  CellRef storesTail_{noCell};
+  std::optional<CellRef> coordinatorHome_{std::nullopt};
+  std::optional<CellRef> storesTail_{std::nullopt};
 
-  DimRef dimStores_{noCell};
-  DimRef dimClone_{noCell};
-  DimRef dimName_{noCell};
-  DimRef dimRole_{noCell};
+  DimRef dimStores_{0};
+  DimRef dimClone_{0};
+  DimRef dimName_{0};
+  DimRef dimRole_{0};
 
   std::vector<StoreInfo> stores_;
 };
 
-} // namespace xanadu::vql
+} // namespace xanadu
 
-namespace zigzag::vql {
-using namespace ::xanadu::vql;
-} // namespace zigzag::vql
-
-#endif // COMMON_XANADU_VQL_MULTI_STORE_HPP
+#endif // COMMON_XANADU_MULTI_STORE_HPP

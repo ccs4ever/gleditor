@@ -150,7 +150,9 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
 
   switch (anchor.kind) {
   case AnchorKind::Home:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::NamedStore: {
@@ -161,19 +163,23 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   }
 
   case AnchorKind::Root:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::Cursor:
     if (core_->dims().cursors != zigzag::noCell) {
       results.push_back(core_->dims().cursors);
-    } else {
-      results.push_back(coordinator_.homeAnchor());
+    } else if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
     }
     break;
 
   case AnchorKind::NamedCursor:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::Variable: {
@@ -221,7 +227,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
 
   if (anchor.derefMaster) {
     for (auto &c : results) {
-      c = coordinator_.derefCloneMaster(c);
+      c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
 
@@ -668,7 +674,7 @@ VQLEngine::evaluateStep(const PathStep &step,
   // Master Dereference >
   if (step.derefMaster) {
     for (auto &c : stepOutput) {
-      c = coordinator_.derefCloneMaster(c);
+      c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
 

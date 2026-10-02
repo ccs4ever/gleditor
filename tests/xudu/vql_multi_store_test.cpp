@@ -7,22 +7,24 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
+using xanadu::MultiStoreCoordinator;
 using xanadu::Store;
 using xanadu::UserPermascroll;
-using xanadu::vql::MultiStoreCoordinator;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -38,11 +40,11 @@ fs::path tempStoreDir(const std::string &name) {
 TEST(VQLMultiStoreTest, CoordinatorGenesis) {
   MultiStoreCoordinator coord;
 
-  EXPECT_NE(coord.coordinatorHome(), noCell);
-  EXPECT_NE(coord.dimStores(), noCell);
-  EXPECT_NE(coord.dimClone(), noCell);
-  EXPECT_NE(coord.dimName(), noCell);
-  EXPECT_NE(coord.dimRole(), noCell);
+  EXPECT_TRUE(coord.coordinatorHome().has_value());
+  EXPECT_NE(coord.dimStores(), 0u);
+  EXPECT_NE(coord.dimClone(), 0u);
+  EXPECT_NE(coord.dimName(), 0u);
+  EXPECT_NE(coord.dimRole(), 0u);
   EXPECT_EQ(coord.storeCount(), 0u);
 }
 
@@ -54,14 +56,16 @@ TEST(VQLMultiStoreTest, SingleSliceRegistration) {
   CellRef storeCell   = coord.addSlice("primary_slice", "primary", mySliceHome);
 
   EXPECT_EQ(coord.storeCount(), 1u);
-  EXPECT_EQ(coord.homeAnchor(), mySliceHome);
+  EXPECT_EQ(coord.homeAnchor(), std::optional<CellRef>{mySliceHome});
   EXPECT_NE(storeCell, noCell);
 
   // The representative cell on d.stores clones mySliceHome
-  EXPECT_EQ(coord.derefCloneMaster(storeCell), mySliceHome);
+  EXPECT_EQ(coord.derefCloneMaster(storeCell),
+            std::optional<CellRef>{mySliceHome});
 
   // Resolves via ##NAME shorthand
-  EXPECT_EQ(coord.resolveNamedStore("primary_slice"), mySliceHome);
+  EXPECT_EQ(coord.resolveNamedStore("primary_slice"),
+            std::optional<CellRef>{mySliceHome});
   EXPECT_EQ(coord.resolveNamedStore("non_existent"), std::nullopt);
 }
 
@@ -83,8 +87,8 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
 
   // Verify d.stores rank posward walk: coordHome -> storeUsers -> storeMath ->
   // storeGeo
-  CellRef step1 =
-      arena.linked(coord.coordinatorHome(), coord.dimStores(), false);
+  CellRef step1 = arena.linked(coord.coordinatorHome().value_or(noCell),
+                               coord.dimStores(), false);
   EXPECT_EQ(step1, storeUsers);
 
   CellRef step2 = arena.linked(step1, coord.dimStores(), false);
@@ -96,9 +100,11 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(arena.linked(step3, coord.dimStores(), false), noCell);
 
   // Test the universal '>' clone master dereference on each storeCell
-  EXPECT_EQ(coord.derefCloneMaster(storeUsers), homeUsers);
-  EXPECT_EQ(coord.derefCloneMaster(storeMath), homeMath);
-  EXPECT_EQ(coord.derefCloneMaster(storeGeo), homeGeo);
+  EXPECT_EQ(coord.derefCloneMaster(storeUsers),
+            std::optional<CellRef>{homeUsers});
+  EXPECT_EQ(coord.derefCloneMaster(storeMath),
+            std::optional<CellRef>{homeMath});
+  EXPECT_EQ(coord.derefCloneMaster(storeGeo), std::optional<CellRef>{homeGeo});
 
   // Verify metadata on slice home cells
   CellRef nameUsers = arena.linked(homeUsers, coord.dimName(), false);
@@ -114,9 +120,10 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(arena.textOf(nameMath), "math");
 
   // Test ##NAME shorthand resolution
-  EXPECT_EQ(coord.resolveNamedStore("users"), homeUsers);
-  EXPECT_EQ(coord.resolveNamedStore("math"), homeMath);
-  EXPECT_EQ(coord.resolveNamedStore("geo"), homeGeo);
+  EXPECT_EQ(coord.resolveNamedStore("users"),
+            std::optional<CellRef>{homeUsers});
+  EXPECT_EQ(coord.resolveNamedStore("math"), std::optional<CellRef>{homeMath});
+  EXPECT_EQ(coord.resolveNamedStore("geo"), std::optional<CellRef>{homeGeo});
   EXPECT_EQ(coord.resolveNamedStore("missing"), std::nullopt);
 }
 
@@ -138,9 +145,9 @@ TEST(VQLMultiStoreTest, UniversalCloneMasterDereferenceChain) {
   EXPECT_TRUE(arena.link(cellC, coord.dimClone(), DimVector::NEG, cellB));
 
   // Dereferencing any cell in the chain via '>' lands on Master A
-  EXPECT_EQ(coord.derefCloneMaster(cellA), cellA);
-  EXPECT_EQ(coord.derefCloneMaster(cellB), cellA);
-  EXPECT_EQ(coord.derefCloneMaster(cellC), cellA);
+  EXPECT_EQ(coord.derefCloneMaster(cellA), std::optional<CellRef>{cellA});
+  EXPECT_EQ(coord.derefCloneMaster(cellB), std::optional<CellRef>{cellA});
+  EXPECT_EQ(coord.derefCloneMaster(cellC), std::optional<CellRef>{cellA});
 }
 
 TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
@@ -214,7 +221,8 @@ TEST(VQLMultiStoreTest, AGuessedVersionFoldsWhereTheHomeIs) {
   const auto folded = coord.findStore("forked");
   ASSERT_TRUE(folded.has_value());
   EXPECT_NE(folded->manifold->home(), noCell);
-  EXPECT_EQ(coord.arena().textOf(coord.homeAnchor(), *store), "home");
+  EXPECT_EQ(coord.arena().textOf(coord.homeAnchor().value_or(noCell), *store),
+            "home");
 }
 
 // A document's prose is no cell; find() answers a hit in it with the line,
@@ -266,6 +274,48 @@ TEST(VQLMultiStoreTest, AnUnknownFunctionIsRefusedByName) {
   MultiStoreCoordinator coord;
   xanadu::vql::VQLEngine engine(coord);
   EXPECT_THROW(std::ignore = engine.execute("frob(1)"), std::runtime_error);
+}
+
+TEST(VQLMultiStoreTest, StoreLoaderLoadStorePathways) {
+  const auto dir = tempStoreDir("loader_pathway");
+  auto scroll    = std::make_shared<UserPermascroll>();
+  Store originalStore(scroll);
+  const auto v1 =
+      originalStore.insert(xanadu::MicroversionId{}, 0, "Test Store Content");
+  originalStore.save(dir.string());
+
+  // Pathway 1: loadStore(Store &store, path)
+  Store destStore(scroll);
+  xanadu::loadStore(destStore, dir);
+  EXPECT_EQ(destStore.allVersions().size(), 1u);
+  EXPECT_EQ(destStore.rebuild(v1).materialize(*scroll), "Test Store Content");
+
+  // Pathway 2: loadStore(path, permascroll) -> std::unique_ptr<Store>
+  auto loadedPtr = xanadu::loadStore(dir, scroll);
+  ASSERT_NE(loadedPtr, nullptr);
+  EXPECT_EQ(loadedPtr->allVersions().size(), 1u);
+  EXPECT_EQ(loadedPtr->rebuild(v1).materialize(*scroll), "Test Store Content");
+}
+
+TEST(VQLMultiStoreTest, StoreLoaderImportFileStore) {
+  const auto tempDir = tempStoreDir("import_file_test");
+  const auto srcFile = tempDir / "sample_import.txt";
+  const auto dstDir  = tempDir / "saved_store";
+
+  {
+    std::ofstream out(srcFile);
+    out << "Singular Store Loader File Import Test Content\nLine 2";
+  }
+
+  auto scroll        = std::make_shared<UserPermascroll>();
+  auto importedStore = xanadu::importFileStore(srcFile, scroll, dstDir);
+  ASSERT_NE(importedStore, nullptr);
+  EXPECT_TRUE(fs::exists(dstDir / "ops.nodes"));
+
+  const auto versions = importedStore->allVersions();
+  ASSERT_FALSE(versions.empty());
+  EXPECT_EQ(importedStore->rebuild(versions.front()).materialize(*scroll),
+            "Singular Store Loader File Import Test Content\nLine 2");
 }
 
 } // namespace
