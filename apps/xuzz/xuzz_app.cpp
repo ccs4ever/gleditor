@@ -782,7 +782,7 @@ int XuzzApp::run(const int argc, char **argv) {
       });
   links.setLinkContext(&linkContext);
 
-  xudu::LinkPanelOverlay linkPanel(linkContext, *session);
+  xudu::LinkPanelOverlay linkPanel(linkContext, *session, renderer);
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
       -> std::optional<xudu::LinkPanelOverlay::AnchorPair> {
@@ -1197,6 +1197,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(&quotationOverlay);
   state->accessibility->addSource(radialMenu.get());
   state->accessibility->addSource(&pouchDrawer);
+  state->accessibility->addSource(&linkPanel);
   state->accessibility->addSource(&storeObjectManager);
   state->accessibility->setToolkit("xuzz", TOSTRING(GLEDITOR_VERSION));
 
