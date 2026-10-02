@@ -603,6 +603,39 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
             "std:xudu/new_doc");
   EXPECT_EQ(xanadu::legacyKeymapAction("new-doc"), "new-doc");
 
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-bold"),
+            "std:xudu/format_bold");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_bold"), "format-bold");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-italic"),
+            "std:xudu/format_italic");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_italic"),
+            "format-italic");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-underline"),
+            "std:xudu/format_underline");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_underline"),
+            "format-underline");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("save-document"), "std:xudu/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/save_document"),
+            "std:xudu/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("insert-break"),
+            "std:xudu/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/insert_break"),
+            "std:xudu/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("clear-bench"),
+            "std:xudu/clear_bench");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/clear_bench"), "clear-bench");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("bundle-execution"),
+            "std:ui/bundle_execution");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/bundle_execution"),
+            "bundle-execution");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("bundle-cycle"),
+            "std:ui/bundle_cycle");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/bundle_cycle"), "bundle-cycle");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("view-mode-topology"),
+            "std:ui/view_mode_topology");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/view_mode_topology"),
+            "view-mode-topology");
+
   Store setStore;
   xanadu::initializeSystemStore(setStore, SystemDocKind::Settings);
   const auto setCfg = SettingsConfig::fromStore(setStore);

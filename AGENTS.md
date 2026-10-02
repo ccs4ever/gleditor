@@ -144,7 +144,7 @@ Xanadu/ZigZag store (`XuzzConvergenceSample`), from `sources/slice_then_xanadoc.
 naming both sizes — a red test, not a working one. Regenerate in the same commit:
 
 ```sh
-make -j$(nproc) xudu
+make -j$(nproc) xuzz
 ./tools/create-sample-xanadocs.sh        # core_hypertext, multimedia, beams, permascroll/, the xuzz sample
 ./tools/create-floating-image-sample.sh  # multimedia/11_floating_image, which the script above deletes
 ```
@@ -442,14 +442,14 @@ arises when meaning is hidden in paragraph structure or embedded markup.
 
 ## Sovereign keymap and Vortex governance
 
-- Every key binding in `xuzz` (including compatibility invocations) is defined in `system://keymap`,
-  never hardcoded; binding actions are Vortex calls or registered Vortex routines/macros. `gleditor`
-  is exempt and must share no code or dependency with Xanadu, ZigZag or Xuzz.
+- Every key binding across `xuzz` is defined in `system://keymap`, never hardcoded; binding actions
+  are Vortex calls or registered Vortex routines/macros. `gleditor` is exempt and must share no code
+  or dependency with Xanadu, ZigZag or Xuzz.
 - New C++ must justify why it is not Vortex (hardware/driver interfacing, rendering intrinsics,
   allocator primitives, raw OS events).
 - New Vortex standard-library code reuses existing standard-library functions unless it cannot.
-- Configuration lives in system xanadocs (xudu/xuzz), sovereign-store-backed system slices (zigzag),
-  or gleditor's YAML — no naked magic numbers in algorithms; see
+- Configuration lives in system xanadocs (`system://keymap`, `system://settings`, `system://layout`,
+  `system://ui`, `system://pouches`), or gleditor's YAML — no naked magic numbers in algorithms; see
   `.agents/rules/architectural_governance.md`.
 
 ## Makefile gotchas

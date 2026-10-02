@@ -131,6 +131,7 @@ public:
    * moved.
    * @return true if the action was handled by a Vortex routine or macro.
    */
+  bool dispatchAction(std::string_view actionName);
   bool dispatchAction(std::string_view actionName, CellRef focusCell,
                       ViewAxisBinding &axes, CellRef &newFocusOut);
   bool dispatchAction(std::string_view actionName, CellRef focusCell,

@@ -318,6 +318,22 @@ inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
+inline constexpr std::string_view kKeymapFormatBold = "std:xudu/format_bold";
+inline constexpr std::string_view kKeymapFormatItalic =
+    "std:xudu/format_italic";
+inline constexpr std::string_view kKeymapFormatUnderline =
+    "std:xudu/format_underline";
+inline constexpr std::string_view kKeymapFormatStrikethrough =
+    "std:xudu/format_strikethrough";
+inline constexpr std::string_view kKeymapFormatSuperscript =
+    "std:xudu/format_superscript";
+inline constexpr std::string_view kKeymapFormatSubscript =
+    "std:xudu/format_subscript";
+inline constexpr std::string_view kKeymapSaveDocument =
+    "std:xudu/save_document";
+inline constexpr std::string_view kKeymapExportOsmic = "std:xudu/export_osmic";
+inline constexpr std::string_view kKeymapInsertBreak = "std:xudu/insert_break";
+inline constexpr std::string_view kKeymapClearBench  = "std:xudu/clear_bench";
 inline constexpr std::string_view kKeymapQuotationToggle =
     "std:xudu/quotation_toggle";
 inline constexpr std::string_view kKeymapQuotationToggleF9 =

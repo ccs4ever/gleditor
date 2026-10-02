@@ -2558,6 +2558,65 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
   if (!vortex_host_) {
     ensureVortexHost();
   }
+
+  const auto canonical = xanadu::canonicalKeymapAction(actionName);
+  if (actionName == "bundle-execution" ||
+      canonical == "std:ui/bundle_execution") {
+    setDimensionBundle(DimensionBundle::Execution);
+    return true;
+  }
+  if (actionName == "bundle-scope" || canonical == "std:ui/bundle_scope") {
+    setDimensionBundle(DimensionBundle::Scope);
+    return true;
+  }
+  if (actionName == "bundle-contract" ||
+      canonical == "std:ui/bundle_contract") {
+    setDimensionBundle(DimensionBundle::Contract);
+    return true;
+  }
+  if (actionName == "bundle-logic" || canonical == "std:ui/bundle_logic") {
+    setDimensionBundle(DimensionBundle::Logic);
+    return true;
+  }
+  if (actionName == "bundle-stdlib" || canonical == "std:ui/bundle_stdlib") {
+    setDimensionBundle(DimensionBundle::Stdlib);
+    return true;
+  }
+  if (actionName == "bundle-cycle" || canonical == "std:ui/bundle_cycle") {
+    cycleDimensionBundle(true);
+    return true;
+  }
+  if (actionName == "view-mode-content-1" ||
+      actionName == "view-mode-content-v" ||
+      canonical == "std:ui/view_mode_content_1" ||
+      canonical == "std:ui/view_mode_content_v" ||
+      canonical == "std:ui/zigzag_view_mode_content") {
+    setViewMode(ViewMode::CellContent);
+    return true;
+  }
+  if (actionName == "view-mode-topology" ||
+      actionName == "view-mode-topology-t" ||
+      canonical == "std:ui/view_mode_topology" ||
+      canonical == "std:ui/view_mode_topology_t" ||
+      canonical == "std:ui/zigzag_view_mode_topology") {
+    setViewMode(ViewMode::Topology);
+    return true;
+  }
+  if (actionName == "toggle-palette" || canonical == "std:ui/toggle_palette" ||
+      canonical == "std:ui/zigzag_toggle_palette") {
+    togglePalette();
+    return true;
+  }
+  if (actionName == "toggle-command-bar" ||
+      canonical == "std:ui/toggle_command_bar" ||
+      canonical == "std:ui/zigzag_toggle_command_bar") {
+    toggleCommandBar();
+    return true;
+  }
+  if (actionName == "save-store" || canonical == "std:zigzag/save_store") {
+    return saveStore("");
+  }
+
   if (vortex_host_ && accursed_cell_focus_ != 0) {
     if (vortex_host_->hasCustomAction(actionName)) {
       CellRef newFocus   = zigzag::noCell;
@@ -2883,6 +2942,10 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
     }
     cycleDimensions(false);
     return true;
+  }
+
+  if (vortex_host_) {
+    return vortex_host_->dispatchAction(actionName);
   }
   return false;
 }
@@ -3226,6 +3289,55 @@ ZigzagVisualizer::executeVQLScript(const std::string_view script) {
     }
   }
   return res;
+}
+
+vortex::VortexHost::ScriptResult
+ZigzagVisualizer::executeVPL(const std::string_view expr) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    return {.success = false, .message = "VortexHost unavailable"};
+  }
+  auto res                   = vortex_host_->executeVPL(expr);
+  commandBarFeedback_        = res.message;
+  commandBarFeedbackIsError_ = !res.success;
+  if (res.success) {
+    if (!res.affectedCells.empty()) {
+      navigateFocusTo(static_cast<CellID>(res.affectedCells.back()));
+    } else {
+      refreshCellLayouts();
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
+  }
+  return res;
+}
+
+std::vector<vortex::LogicSolution>
+ZigzagVisualizer::executeLogicQuery(const std::string_view query) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    commandBarFeedback_        = "VortexHost unavailable";
+    commandBarFeedbackIsError_ = true;
+    return {};
+  }
+  auto solutions = vortex_host_->solveLogic(query);
+  if (!solutions.empty()) {
+    commandBarFeedback_ =
+        std::format("Logic query succeeded ({} solution(s))", solutions.size());
+    commandBarFeedbackIsError_ = false;
+    for (const auto &sol : solutions) {
+      for (const auto &[_, cell] : sol.bindings) {
+        if (const auto optCell = gleditor::fromSentinel<zigzag::noCell>(cell)) {
+          navigateFocusTo(static_cast<CellID>(*optCell));
+          break;
+        }
+      }
+    }
+  } else {
+    commandBarFeedback_        = "Logic query failed: no solutions";
+    commandBarFeedbackIsError_ = true;
+  }
+  return solutions;
 }
 
 bool ZigzagVisualizer::defineMacro(const std::string_view name,
@@ -3847,6 +3959,112 @@ bool ZigzagVisualizer::executeCommandBar() {
   // 13. List overlays (:overlay-list)
   if (text == ":overlay-list") {
     commandBarFeedback_ = "Active overlays: 0 attached, 0 applied claims";
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+
+  // 14. VPL mode: starts with ')' or ':vpl '
+  if (text.starts_with(')') || text.starts_with(":vpl ") ||
+      text.starts_with(":vpl\t")) {
+    std::string_view vplExpr = text;
+    if (text.starts_with(":vpl ") || text.starts_with(":vpl\t")) {
+      vplExpr = text.substr(5);
+    }
+    auto res = executeVPL(vplExpr);
+    return res.success;
+  }
+
+  // 15. Logic mode: starts with ':logic ', ':query ', or '?-'
+  if (text.starts_with(":logic ") || text.starts_with(":logic\t") ||
+      text.starts_with(":query ") || text.starts_with(":query\t") ||
+      text.starts_with("?-")) {
+    std::string_view query = text;
+    if (text.starts_with(":logic ") || text.starts_with(":logic\t")) {
+      query = text.substr(7);
+    } else if (text.starts_with(":query ") || text.starts_with(":query\t")) {
+      query = text.substr(7);
+    }
+    auto solutions = executeLogicQuery(query);
+    return !solutions.empty();
+  }
+
+  // 16. Bridge commands
+  if (text.starts_with(":bridge-to-cell ") ||
+      text.starts_with(":bridge-to-cell\t")) {
+    std::string_view rest = text.substr(16);
+    std::istringstream iss{std::string(rest)};
+    std::uint64_t cellVal{};
+    if (iss >> cellVal) {
+      focusCell(static_cast<CellRef>(cellVal));
+      commandBarFeedback_ = std::format("Bridged focus to cell {}", cellVal);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Usage: :bridge-to-cell <cell>";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+  if (text.starts_with(":bridge-to-doc ") ||
+      text.starts_with(":bridge-to-doc\t")) {
+    std::string docName = std::string(text.substr(15));
+    commandBarFeedback_ = std::format(
+        "Bridge target document: {} (current: {})", docName, documentId());
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-royalty" || text.starts_with(":bridge-royalty ") ||
+      text.starts_with(":bridge-royalty\t")) {
+    CellRef target = focusCell();
+    if (text.size() > 15) {
+      std::istringstream iss{std::string(text.substr(16))};
+      std::uint64_t cellVal{};
+      if (iss >> cellVal) {
+        target = static_cast<CellRef>(cellVal);
+      }
+    }
+    auto royalty = cellRoyalty(target);
+    if (royalty) {
+      commandBarFeedback_ =
+          std::format("Cell {} royalty: {} {}", target,
+                      royalty->priceAtomicUnits, royalty->currencySymbol);
+    } else {
+      commandBarFeedback_ =
+          std::format("Cell {} has no royalty restriction", target);
+    }
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-unlock" || text.starts_with(":bridge-unlock ") ||
+      text.starts_with(":bridge-unlock\t")) {
+    CellRef target = focusCell();
+    if (text.size() > 14) {
+      std::istringstream iss{std::string(text.substr(15))};
+      std::uint64_t cellVal{};
+      if (iss >> cellVal) {
+        target = static_cast<CellRef>(cellVal);
+      }
+    }
+    bool ok = unlockCell(target);
+    commandBarFeedback_ =
+        ok ? std::format("Unlocked cell {}", target)
+           : std::format("Cell {} is already unlocked or invalid", target);
+    commandBarFeedbackIsError_ = !ok;
+    return ok;
+  }
+  if (text == ":bridge-text") {
+    std::string t;
+    if (engine_) {
+      t = engine_->manifold().textOf(focusCell(), engine_->store());
+    } else if (vortex_host_ && vortex_host_->arena().contains(focusCell())) {
+      t = vortex_host_->arena().textOf(focusCell());
+    }
+    commandBarFeedback_ = std::format("Cell {} text: \"{}\"", focusCell(), t);
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-version") {
+    commandBarFeedback_ =
+        std::format("Document version: {}", documentVersion());
     commandBarFeedbackIsError_ = false;
     return true;
   }

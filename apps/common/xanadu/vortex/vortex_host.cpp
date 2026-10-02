@@ -165,6 +165,12 @@ DimRef VortexHost::resolveDimRef(std::string_view dimName) {
   return core_.mintDimension(dimName);
 }
 
+bool VortexHost::dispatchAction(const std::string_view actionName) {
+  ViewAxisBinding axes{};
+  CellRef newFocusOut{};
+  return dispatchAction(actionName, 0, axes, newFocusOut);
+}
+
 bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                                 const ViewAxisBinding &axes,
                                 CellRef &newFocusOut) {
@@ -183,9 +189,11 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   }
   if (macroIt != macroRegistry_.end()) {
     auto target = navigatePath(macroIt->second, focusCell);
-    if (target.has_value() && *target != noCell) {
-      newFocusOut = *target;
-      return true;
+    if (target.has_value()) {
+      if (const auto cell = gleditor::fromSentinel<zigzag::noCell>(*target)) {
+        newFocusOut = *cell;
+        return true;
+      }
     }
     auto res = executeScript(macroIt->second, focusCell);
     if (res.success && !res.affectedCells.empty()) {
@@ -198,11 +206,14 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   if (customIt == customActionRoutines_.end() && canonical != actionName) {
     customIt = customActionRoutines_.find(std::string(canonical));
   }
-  if (customIt != customActionRoutines_.end() && customIt->second != noCell) {
-    CellRef cursor = vm_.spawnCursor(customIt->second, actionName);
-    if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
-      GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", actionName,
-                        ran.errorMessage);
+  if (customIt != customActionRoutines_.end()) {
+    if (const auto routineCell =
+            gleditor::fromSentinel<zigzag::noCell>(customIt->second)) {
+      CellRef cursor = vm_.spawnCursor(*routineCell, actionName);
+      if (const auto ran = vm_.run(cursor, 1000); !ran.success) {
+        GLEDITOR_LOG_WARN("vortex.host", "action {} failed: {}", actionName,
+                          ran.errorMessage);
+      }
     }
   }
 
