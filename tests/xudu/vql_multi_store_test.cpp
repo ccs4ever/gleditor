@@ -256,6 +256,11 @@ TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
   const auto origin = arena.linked(hits[0], *sourceDim);
   ASSERT_NE(origin, noCell);
   EXPECT_THAT(arena.textOf(origin), ::testing::EndsWith("&at=15"));
+
+  // And reached by the query a reader would type, not only from C++.
+  const auto sources = engine.execute(R"(find("needle")/d.source)");
+  ASSERT_EQ(sources.size(), 1U);
+  EXPECT_EQ(arena.textOf(sources[0]), arena.textOf(origin));
 }
 
 TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
@@ -316,6 +321,26 @@ TEST(VQLMultiStoreTest, StoreLoaderImportFileStore) {
   ASSERT_FALSE(versions.empty());
   EXPECT_EQ(importedStore->rebuild(versions.front()).materialize(*scroll),
             "Singular Store Loader File Import Test Content\nLine 2");
+}
+
+// A store with a slice is the arena's base; a dimension the query minted
+// must be found again by name, or a step along it walks a fresh, empty one.
+TEST(VQLMultiStoreTest, AMintedDimensionIsFoundAgainOverASlice) {
+  const auto dir = tempStoreDir("minted_dimension");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto store =
+      std::make_shared<Store>(std::make_shared<UserPermascroll>(config));
+  const auto typed = store->insert(xanadu::MicroversionId{}, 0, "a needle");
+  std::ignore      = store->sliceGenesis(typed);
+
+  MultiStoreCoordinator coord;
+  coord.addStore("sliced", "primary", store);
+  EXPECT_EQ(coord.resolveDimension("d.source"),
+            coord.resolveDimension("d.source"));
+
+  xanadu::vql::VQLEngine engine(coord);
+  EXPECT_EQ(engine.execute(R"(find("needle")/d.source)").size(), 1U);
 }
 
 } // namespace

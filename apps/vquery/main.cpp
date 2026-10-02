@@ -557,15 +557,26 @@ int main(int argc, char *argv[]) {
       auto &store         = *primStore->store;
       const auto &arena   = coordinator.arena();
       std::size_t written = 0;
-      for (const auto result : lastResults) {
-        if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
-            arena.resolveForeign(result)) {
-          continue;
+      // From the version the query read, each promotion after the last.
+      // latest() names the greatest branch, which on a store with a second
+      // branch is not where the cells the query reached live, and the store
+      // refused the write as reaching into the future of its parent.
+      auto version = primStore->version;
+      try {
+        for (const auto result : lastResults) {
+          if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
+              arena.resolveForeign(result)) {
+            continue;
+          }
+          if (const auto promoted =
+                  zigzag::promote(store, version, arena, result)) {
+            version = promoted->version;
+            written += promoted->cells.size();
+          }
         }
-        if (const auto promoted =
-                zigzag::promote(store, store.latest(), arena, result)) {
-          written += promoted->cells.size();
-        }
+      } catch (const std::invalid_argument &err) {
+        std::cerr << "Error: cannot write in place: " << err.what() << "\n";
+        return 1;
       }
       if (0 == written) {
         std::cout << "Nothing to write in place: the query minted no cells\n";

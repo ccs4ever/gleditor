@@ -187,6 +187,26 @@ TEST_F(VQueryE2ETest, InPlaceStoreMutation) {
   EXPECT_GT(store.opCount(), opsBefore);
 }
 
+// A store with a second branch: in place once promoted at latest(), the
+// short branch, and the store refused the write as reaching into the future
+// of its parent -- an uncaught exception and exit 134.
+TEST_F(VQueryE2ETest, InPlaceOnAStoreWithTwoBranches) {
+  const fs::path sampleSrc = "tests/samples/xudu/beams/01_one_to_many";
+  if (!fs::exists(sampleSrc)) {
+    GTEST_SKIP() << "Sample fixture 01_one_to_many not present";
+  }
+  const auto copyStore = testDir / "two_branches";
+  fs::copy(sampleSrc, copyStore, fs::copy_options::recursive);
+  fs::copy("tests/samples/xudu/permascroll", testDir / "permascroll",
+           fs::copy_options::recursive);
+
+  auto res = runVQuery(copyStore.string() + " --permascroll " +
+                       (testDir / "permascroll").string() +
+                       " -e \"##/d.mutated%'CellData'\" --in-place");
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_NE(res.output.find("Wrote "), std::string::npos) << res.output;
+}
+
 TEST_F(VQueryE2ETest, QueryFileExecution) {
   fs::path qFile = testDir / "query.vql";
   {

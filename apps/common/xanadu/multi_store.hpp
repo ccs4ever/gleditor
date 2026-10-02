@@ -26,6 +26,7 @@
 #include <gleditor/cpp26.hpp>
 #include <gleditor/sentinel.hpp>
 
+#include "common/xanadu/microversion.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -55,6 +56,9 @@ struct StoreInfo {
   std::optional<CellRef> storeCell{
       std::nullopt}; ///< Representative cell on coordinator's d.stores rank
   std::uint32_t spaceId{0};
+  /// The version the manifold was folded at: what a query read, and so the
+  /// parent anything written back into the store must hang from.
+  xanadu::MicroversionId version;
 };
 
 /**

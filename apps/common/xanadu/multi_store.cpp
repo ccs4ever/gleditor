@@ -254,6 +254,7 @@ MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
       .homeCell  = gleditor::fromSentinel<zigzag::noCell>(importedHome),
       .storeCell = storeCell,
       .spaceId   = spaceId,
+      .version   = v,
   };
   stores_.push_back(std::move(info));
   return storeCell;
