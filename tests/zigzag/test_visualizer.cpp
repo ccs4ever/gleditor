@@ -3,6 +3,7 @@
  * @brief Unit tests for ZigzagVisualizer navigation and state management.
  */
 #include <filesystem>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <gleditor/doc.hpp>
@@ -916,6 +917,104 @@ TEST(ZigzagVisualizerTest, CommandOmnibarViewAndLibraryCommands) {
   EXPECT_FALSE(viz.commandBarFeedbackIsError());
 
   fs::remove_all(tmpDir);
+}
+
+TEST(ZigzagVisualizerTest, DimensionBundlesAndViewModesDispatching) {
+  ZigzagVisualizer viz("Sans 12");
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-topology"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+
+  EXPECT_TRUE(viz.dispatchAction("std:ui/view_mode_content_1"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-topology-t"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-content-v"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-execution"));
+  EXPECT_EQ(viz.dimensionBundle(),
+            ZigzagVisualizer::DimensionBundle::Execution);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.spin");
+
+  EXPECT_TRUE(viz.dispatchAction("std:ui/bundle_scope"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Scope);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.lexical");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-contract"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Contract);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.require");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-logic"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Logic);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.clause");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-stdlib"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Stdlib);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.stdlib");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-cycle"));
+  EXPECT_EQ(viz.dimensionBundle(),
+            ZigzagVisualizer::DimensionBundle::Execution);
+}
+
+TEST(ZigzagVisualizerTest, VPLExecutionAndLogicQueries) {
+  ZigzagVisualizer viz("Sans 12");
+
+  auto vplRes = viz.executeVPL("10 + 20");
+  EXPECT_TRUE(vplRes.success) << vplRes.message;
+  EXPECT_THAT(vplRes.message, testing::HasSubstr("30"));
+
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":vpl 6 * 7");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("42"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(") 5 + 3");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("8"));
+}
+
+TEST(ZigzagVisualizerTest, BridgeCommandOmnibarCommands) {
+  ZigzagVisualizer viz("Sans 12");
+  viz.setCommandBarVisible(true);
+
+  viz.setCommandBarText(":bridge-version");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(),
+              testing::HasSubstr("Document version:"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-text");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("text:"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-to-doc test-doc-target");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("test-doc-target"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  const auto focus = viz.focusCellId();
+  viz.setCommandBarText(std::format(":bridge-to-cell {}", focus));
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_EQ(viz.focusCellId(), focus);
+  EXPECT_THAT(
+      viz.commandBarFeedback(),
+      testing::HasSubstr(std::format("Bridged focus to cell {}", focus)));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-royalty");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("royalty"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-unlock");
+  std::ignore = viz.executeCommandBar();
+  EXPECT_FALSE(viz.commandBarFeedback().empty());
 }
 
 TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {

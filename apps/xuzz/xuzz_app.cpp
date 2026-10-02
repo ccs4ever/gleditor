@@ -46,6 +46,7 @@
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/zz_xudu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
@@ -78,20 +79,74 @@ namespace {
 
 constexpr float kBackgroundDepthZ = -500.0F;
 
-void applyKeymap(gleditor::CommandTable &commands, const xudu::Store &store) {
+void applyKeymap(
+    gleditor::CommandTable &commands, const xudu::Store &store,
+    const std::shared_ptr<zigzag::ZigzagVisualizer> &zigzagPresentation =
+        nullptr,
+    const std::shared_ptr<zigzag::vortex::VortexHost> &vHost = nullptr) {
+  if (vHost) {
+    vHost->loadMacrosFromStore(store);
+    for (const auto &macroName : vHost->listMacros()) {
+      commands.registerOrRebindAction(
+          macroName, "User macro: " + macroName,
+          [zigzagPresentation, vHost, macroName] {
+            if (zigzagPresentation) {
+              std::ignore = zigzagPresentation->dispatchAction(macroName);
+            } else if (vHost) {
+              std::ignore = vHost->dispatchAction(macroName);
+            }
+          });
+    }
+  }
+
   for (const auto &[act, comboStr] :
        xudu::KeymapConfig::fromStore(store).bindings) {
     const auto combo = gleditor::parseKeyCombo(comboStr);
     if (!combo) {
       GLEDITOR_LOG_WARN("xuzz.keymap", "{}: \"{}\" is not a key combination",
                         act, comboStr);
-    } else if (commands.rebind(act, combo->first, combo->second)) {
+      continue;
+    }
+
+    if (commands.rebind(act, combo->first, combo->second)) {
       GLEDITOR_LOG_DEBUG("xuzz.keymap", "{} bound to {}", act, comboStr);
+      continue;
+    }
+
+    const auto canonical = xanadu::canonicalKeymapAction(act);
+    if (canonical != act &&
+        commands.rebind(canonical, combo->first, combo->second)) {
+      GLEDITOR_LOG_DEBUG("xuzz.keymap", "{} ({}) bound to {}", canonical, act,
+                         comboStr);
+      continue;
+    }
+
+    const auto legacy = xanadu::legacyKeymapAction(act);
+    if (legacy != act && commands.rebind(legacy, combo->first, combo->second)) {
+      GLEDITOR_LOG_DEBUG("xuzz.keymap", "{} ({}) bound to {}", legacy, act,
+                         comboStr);
+      continue;
+    }
+
+    if (zigzagPresentation || vHost) {
+      commands.registerOrRebindAction(
+          act, "Custom keymap action: " + act,
+          [zigzagPresentation, vHost, act] {
+            if (zigzagPresentation) {
+              std::ignore = zigzagPresentation->dispatchAction(act);
+            } else if (vHost) {
+              std::ignore = vHost->dispatchAction(act);
+            }
+          },
+          combo->first, combo->second);
+      GLEDITOR_LOG_DEBUG("xuzz.keymap", "dynamically registered {} bound to {}",
+                         act, comboStr);
     } else {
       GLEDITOR_LOG_DEBUG("xuzz.keymap", "{}: not a command in this program",
                          act);
     }
   }
+
   for (const auto &[kept, shadowed] : commands.conflicts()) {
     GLEDITOR_LOG_WARN("xuzz.keymap",
                       "{} and {} are on the same key; only {} can run", kept,
@@ -2592,11 +2647,10 @@ int XuzzApp::run(const int argc, char **argv) {
         }
         switch (kind) {
         case xudu::SystemDocKind::Keymap: {
-          applyKeymap(app.commands(), store);
+          const auto vHost =
+              zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
+          applyKeymap(app.commands(), store, zigzagPresentation, vHost);
           showKeyHints();
-          if (auto vHost = zigzagPresentation->vortexHost()) {
-            vHost->loadMacrosFromStore(store);
-          }
           break;
         }
         case xudu::SystemDocKind::Settings: {
@@ -2645,7 +2699,9 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
     const auto &kmStore = session->store(kmIdx);
     if (kmStore.opCount() > 0) {
-      applyKeymap(app.commands(), kmStore);
+      const auto vHost =
+          zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
+      applyKeymap(app.commands(), kmStore, zigzagPresentation, vHost);
     }
     showKeyHints();
     const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);

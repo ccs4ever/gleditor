@@ -350,6 +350,12 @@ public:
   /// One-time script execution
   vortex::VortexHost::ScriptResult executeVQLScript(std::string_view script);
 
+  /// Execute a VPL expression via VortexHost
+  vortex::VortexHost::ScriptResult executeVPL(std::string_view expr);
+
+  /// Execute a logic goal query via VortexHost
+  std::vector<vortex::LogicSolution> executeLogicQuery(std::string_view query);
+
   /// Define and persist a named macro into the sovereign keymap store
   bool defineMacro(std::string_view name, std::string_view vqlExpr,
                    std::string_view keyBinding = {});
