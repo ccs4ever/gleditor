@@ -42,7 +42,7 @@ does; code that looks as if it should work is not a pass.
   `--drag X1,Y1:X2,Y2`, `--right-click X,Y`, `--capture FILE`, `--screenshot FILE` and
   `--dump-a11y`. Prefer `--chord` with the default binding to `--do NAME`; use `--do` only for an
   action whose binding is confirmed in `system://keymap` (run once with
-  `SPDLOG_LEVEL=xudu.keymap=debug`, which logs each binding made and warns about any that do not
+  `SPDLOG_LEVEL=xuzz.keymap=debug`, which logs each binding made and warns about any that do not
   parse), and record the chord. An action with no binding and no control is *No affordance* however
   well `--do` drives it.
 
