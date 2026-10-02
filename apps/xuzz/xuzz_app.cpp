@@ -5,6 +5,7 @@
 #include "xuzz_app.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -57,16 +58,20 @@
 #include "xudu/batch_orchestrator.hpp"
 #include "xudu/beams.hpp"
 #include "xudu/bridge_coordinator.hpp"
+#include "xudu/collaborator_overlay.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/link_context.hpp"
 #include "xudu/link_panel_overlay.hpp"
 #include "xudu/overview_overlay.hpp"
+#include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
+#include "xudu/transcopyright_overlay.hpp"
 #include "xudu/views.hpp"
+#include "xudu/wireframe_hull.hpp"
 #include "zigzag/zigzag_commands.hpp"
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/logging.hpp>
@@ -410,9 +415,12 @@ int XuzzApp::run(const int argc, char **argv) {
               << session->path(0) << ", opening " << opening.str() << "\n";
   }
 
+  // BatchOrchestrator::execute() has already saved and returned for a
+  // headless run with nothing to draw. One still here has a script or a
+  // frame to capture: it runs offscreen and quits when that is done. An
+  // unconditional return here dropped every scripted step without a word.
   if (opts.headless) {
-    session->saveAll();
-    return 0;
+    state->profiling = true;
   }
 
   // 4. Renderer & Graphical Subsystems
@@ -595,8 +603,51 @@ int XuzzApp::run(const int argc, char **argv) {
 
   pouchDrawer.setSwingBackHandler(
       [&views](const xudu::PouchItem &item) { views.swingBackToSpan(item); });
+  // A card's + inserts its item at the caret, as a transclusion.
+  pouchDrawer.setUseHandler([&views](const xudu::PouchItem &item) {
+    views.insertSpanAtCaret(item.span);
+  });
 
   xudu::KineticTetherEngine kineticTetherEngine;
+  // The drag ghost, the page-split control, transcopyright unlocking, the
+  // hull and collaborators' carets: each drawn by an overlay that the fold
+  // into xuzz constructed nowhere, so dragging a selection showed nothing and
+  // none of the four could be reached.
+  xudu::KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine,
+                                                  "Sans 10");
+  renderer->addFrameContributor(&kineticTetherOverlay);
+
+  xudu::PageBreakOverlay pageBreakOverlay(*session, renderer, "Sans 10");
+  renderer->addFrameContributor(&pageBreakOverlay);
+  renderer->addPickObserver(&pageBreakOverlay);
+  pageBreakOverlay.setOnSplit(
+      [&views](const std::uint32_t docIdx, const std::uint32_t charOffset) {
+        views.insertPageBreak(docIdx, charOffset);
+      });
+
+  xudu::TranscopyrightOverlay transcopyrightOverlay(*session, renderer,
+                                                    "Sans 10");
+  renderer->addFrameContributor(&transcopyrightOverlay);
+  renderer->addPickObserver(&transcopyrightOverlay);
+  transcopyrightOverlay.setUnlockCallback(
+      [&views](const std::size_t sIdx, const xanadu::PrimediaSpan &span) {
+        views.unlockTranscopyright(sIdx, span);
+      });
+  session->setTranscopyrightUnlockedHandler(
+      [&transcopyrightOverlay](const std::size_t docIdx,
+                               const xanadu::PrimediaSpan &span,
+                               const std::uint64_t cost) {
+        transcopyrightOverlay.notifyUnlocked(docIdx, span, cost);
+      });
+
+  xudu::WireframeHullOverlay wireframeHullOverlay(renderer, "Sans 10");
+  renderer->addFrameContributor(&wireframeHullOverlay);
+  views.setWireframeOverlay(&wireframeHullOverlay);
+
+  xudu::CollaboratorCaretOverlay collaboratorOverlay(*session, renderer,
+                                                     "Sans 9");
+  renderer->addFrameContributor(&collaboratorOverlay);
+
   kineticTetherEngine.setVoidSpawnHandler(
       [&views](const xudu::TetherPayload &payload, const float sx,
                const float sy) {
@@ -605,11 +656,20 @@ int XuzzApp::run(const int argc, char **argv) {
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>("Sans 11");
   radialMenu->setActionHandler(
-      [&session, &views, &quotationOverlay](
-          const std::string &id, [[maybe_unused]] const std::string &action,
-          const std::uint32_t docIndex, const std::uint32_t charOffset,
-          const std::uint32_t charLength) {
-        if (id == "format:bold") {
+      [&session, &views, &quotationOverlay,
+       state](const std::string &id, [[maybe_unused]] const std::string &action,
+              const std::uint32_t docIndex, const std::uint32_t charOffset,
+              const std::uint32_t charLength) {
+        // An entry naming a keymap action runs it, so a menu and a key reach
+        // the same command: File > New xanadoc, New slice and Open. The fold
+        // into xuzz dropped this, and every one of them did nothing.
+        if (constexpr std::string_view run = "run:"; id.starts_with(run)) {
+          const auto name = id.substr(run.size());
+          if (!state->runCommand || !state->runCommand(name)) {
+            GLEDITOR_LOG_WARN("xuzz.radial", "{} is not a command in xuzz",
+                              name);
+          }
+        } else if (id == "format:bold") {
           session->markDecorated(
               docIndex, charOffset, charLength,
               gleditor::decorationBit(gleditor::Decoration::Bold));
@@ -1752,11 +1812,18 @@ int XuzzApp::run(const int argc, char **argv) {
                                 "switch to previous document",
                                 [&views] { views.prevDoc(); });
 
-  for (int i = 1; i <= 9; ++i) {
-    const auto targetIndex = static_cast<std::uint32_t>(i - 1);
-    app.commands().registerAction(
-        "doc-" + std::to_string(i), "switch to document " + std::to_string(i),
-        [&views, targetIndex] { views.selectDoc(targetIndex); });
+  // Under the names system://keymap binds. Registered as "doc-N", they took
+  // none of their Ctrl+1..9 defaults: each logged "not a command" at debug.
+  namespace keys                    = xanadu::settings;
+  constexpr std::array documentKeys = {
+      keys::kKeymapDoc1, keys::kKeymapDoc2, keys::kKeymapDoc3,
+      keys::kKeymapDoc4, keys::kKeymapDoc5, keys::kKeymapDoc6,
+      keys::kKeymapDoc7, keys::kKeymapDoc8, keys::kKeymapDoc9};
+  for (std::uint32_t index = 0; index < documentKeys.size(); ++index) {
+    app.commands().registerAction(std::string(documentKeys[index]),
+                                  "switch to document " +
+                                      std::to_string(index + 1),
+                                  [&views, index] { views.selectDoc(index); });
   }
 
   app.commands().registerAction(

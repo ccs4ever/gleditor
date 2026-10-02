@@ -786,6 +786,26 @@ TEST(E2EBinaryOrchestrationTest, newDocumentTakesTypingInView) {
 // is work: it outlives the session in the xanadocs folder, where it used to be
 // deleted from a temporary directory on quit. One opened and never touched is
 // removed rather than left as clutter.
+// --headless with a script runs the script: the fused xuzz once returned
+// before its renderer whenever --headless was given, so a chord and a dump
+// did nothing and the run still exited 0.
+TEST(E2EBinaryOrchestrationTest, aHeadlessScriptRuns) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_headless";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + " --backend " + activeBackend() + " --headless " +
+      (testRoot / "notes").string() + " --type 'typed headless' --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, ::testing::HasSubstr("typed headless"));
+}
+
 TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
