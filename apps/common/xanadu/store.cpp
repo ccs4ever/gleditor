@@ -1966,6 +1966,16 @@ MicroversionId Store::structureHead() const {
   return heads.empty() ? MicroversionId{} : std::ranges::max(heads);
 }
 
+std::vector<MicroversionId> Store::branchHeads() const {
+  return std::ranges::to<std::vector<MicroversionId>>(
+      std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
+      std::views::filter([this](const std::uint32_t idx) {
+        return opsSpool.childrenOf(idx).empty();
+      }) |
+      std::views::transform(
+          [this](const std::uint32_t idx) { return opsSpool.idOf(idx); }));
+}
+
 const std::vector<MicroversionId> &Store::currentVersions() const {
   if (currentVersions_.empty()) {
     const auto sHead  = structureHead();

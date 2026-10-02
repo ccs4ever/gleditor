@@ -797,6 +797,10 @@ public:
   [[nodiscard]] MicroversionId structureHead() const;
   [[nodiscard]] std::vector<MicroversionId> structureHeads() const;
 
+  /// Every state no other state descends from: the head of each branch,
+  /// designated current or not, in replay order.
+  [[nodiscard]] std::vector<MicroversionId> branchHeads() const;
+
   /// The head/leaf microversion of the specified structure birth on branch @p
   /// branch. Defaults to latest() branch if branch is zero.
   [[nodiscard]] MicroversionId

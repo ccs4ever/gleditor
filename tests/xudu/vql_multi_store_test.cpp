@@ -263,6 +263,33 @@ TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
   EXPECT_EQ(arena.textOf(sources[0]), arena.textOf(origin));
 }
 
+// A word written on a branch the store does not designate current is still
+// written; and a line two branches share is one line, found once.
+TEST(VQLMultiStoreTest, FindReadsEveryBranchAndReportsASharedLineOnce) {
+  const auto dir = tempStoreDir("find_branches");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto store =
+      std::make_shared<Store>(std::make_shared<UserPermascroll>(config));
+  const auto shared =
+      store->insert(xanadu::MicroversionId{}, 0, "shared needle line");
+  const auto alpha = store->insert(shared, 18, "\nalpha needle");
+  std::ignore      = store->insert(shared, 18, "\nbeta needle");
+  store->setCurrentVersions({alpha});
+
+  MultiStoreCoordinator coord;
+  coord.addStore("branched", "primary", store);
+  xanadu::vql::VQLEngine engine(coord);
+
+  const auto hits = engine.execute(R"(find("needle"))");
+  std::vector<std::string> lines;
+  for (const auto hit : hits) {
+    lines.push_back(coord.arena().textOf(hit));
+  }
+  EXPECT_THAT(lines, ::testing::UnorderedElementsAre(
+                         "shared needle line", "alpha needle", "beta needle"));
+}
+
 TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
   MultiStoreCoordinator coord;
   xanadu::vql::VQLEngine engine(coord);

@@ -10,7 +10,9 @@
 #include <concepts>
 #include <format>
 #include <iterator>
+#include <set>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_set>
 
 #include "common/xanadu/vql/parser.hpp"
@@ -366,7 +368,22 @@ void VQLEngine::findInDocuments(const StoreInfo &info,
       info.path.empty() ? "store:" + info.store->documentId().str() : info.path;
   const auto sourceDim = coordinator_.resolveDimension("d.source");
   auto &arena          = core_->arena();
-  for (const auto &version : info.store->currentVersions()) {
+  // Every branch head, not only the ones the store designates current: a
+  // reader searching wants the word wherever it was written. The designated
+  // ones go first, so a line every branch shares is reported from one of
+  // them, and a line is reported once however many branches share it --
+  // which its spans, not its text, decide, so two lines that merely read
+  // alike are both found.
+  auto versions = info.store->currentVersions();
+  for (const auto &head : info.store->branchHeads()) {
+    if (std::ranges::find(versions, head) == versions.end()) {
+      versions.push_back(head);
+    }
+  }
+  using SpanKey =
+      std::vector<std::tuple<xanadu::ScrollId, std::uint64_t, std::uint64_t>>;
+  std::set<SpanKey> found;
+  for (const auto &version : versions) {
     const auto document = info.store->rebuild(version);
     const auto text     = info.store->textOf(version);
     for (auto at = text.find(needle); std::string::npos != at;) {
@@ -376,13 +393,23 @@ void VQLEngine::findInDocuments(const StoreInfo &info,
       const auto spans =
           document.spansFor(static_cast<std::uint32_t>(begin),
                             static_cast<std::uint32_t>(end - begin));
-      const auto hit    = arena.makeQuote(info.spaceId, spans);
-      const auto source = arena.makeCell(
-          identity + "#version=" + version.str() + "&at=" + std::to_string(at));
+      const auto hitAt = at;
+      at = end < text.size() ? text.find(needle, end) : std::string::npos;
+      SpanKey key;
+      key.reserve(spans.size());
+      for (const auto &span : spans) {
+        key.emplace_back(span.scroll, span.start, span.length);
+      }
+      if (!found.insert(std::move(key)).second) {
+        continue;
+      }
+      const auto hit = arena.makeQuote(info.spaceId, spans);
+      const auto source =
+          arena.makeCell(identity + "#version=" + version.str() +
+                         "&at=" + std::to_string(hitAt));
       zigzag::expectWritten(
           arena.link(hit, sourceDim, zigzag::DimVector::POS, source));
       out.push_back(hit);
-      at = end < text.size() ? text.find(needle, end) : std::string::npos;
     }
   }
 }
