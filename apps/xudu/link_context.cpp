@@ -47,8 +47,17 @@ xanadu::LinkKey LinkContext::keyOf(const zigzag::CellRef id) const {
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
 LinkContext::resolve(const xanadu::LinkKey &key) const {
-  const auto &primary = session.store();
-  if (key.authority != primary.documentId()) {
+  // Any open store, not only the primary: a resumed session reopens the
+  // stores it was reading as auxiliaries of the default one, and a link
+  // selected in one of them must still resolve there.
+  const xanadu::Store *authority = nullptr;
+  for (std::size_t i = 0; i < session.storeCount(); ++i) {
+    if (session.store(i).documentId() == key.authority) {
+      authority = &session.store(i);
+      break;
+    }
+  }
+  if (nullptr == authority) {
     return std::unexpected(xanadu::LinkQueryError::LinkNotFound);
   }
   std::vector<xanadu::DocumentView> documents;
@@ -67,7 +76,7 @@ LinkContext::resolve(const xanadu::LinkKey &key) const {
                      .manifold = *manifold,
                      .cells    = everyCell});
   }
-  return xanadu::resolveLinkOccurrences(primary, key.id, documents, cells);
+  return xanadu::resolveLinkOccurrences(*authority, key.id, documents, cells);
 }
 
 std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
@@ -119,14 +128,14 @@ std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
 
 xanadu::ReadingPosition LinkContext::reading() const {
   xanadu::ReadingPosition position;
-  const auto current = navigator.currentVisit();
-  const auto visit   = current
-                           ? activity.find(*current)
-                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto current  = navigator.currentVisit();
+  const auto visit    = current
+                            ? activity.find(*current)
+                            : gleditor::cpp26::optional<const xanadu::Visit &>{};
   const auto selected = navigator.selection();
   position.entered    = visit && selected &&
-                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
-                        visit->link && visit->link->key == selected->key;
+                     xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                     visit->link && visit->link->key == selected->key;
   const bool inCell =
       visit && std::holds_alternative<xanadu::CellSite>(visit->target);
   position.here =
@@ -200,8 +209,8 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
   }
 }
 
-void LinkContext::restoreCurrentSelection() {
-  if (auto effect = navigator.restoreCurrentSelection()) apply(*effect);
+void LinkContext::restoreSelection(const xanadu::LinkVisitContext &saved) {
+  if (auto effect = navigator.restoreSelection(saved)) apply(*effect);
 }
 
 std::optional<xanadu::OccurrenceSite> LinkContext::originSite() const {

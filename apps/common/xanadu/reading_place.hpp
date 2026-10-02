@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "link_navigation.hpp"
 #include "microversion.hpp"
 
 namespace xanadu {
@@ -52,6 +53,9 @@ struct ReadingPlace {
   std::string zigzagVersion;
   std::int64_t zigzagFocus{};
   bool zigzagHasKeyboard{};
+  /// The link selected when the session stopped, with the member and
+  /// occurrence chosen on each side.
+  std::optional<LinkVisitContext> link;
 
   bool operator==(const ReadingPlace &) const = default;
 };
@@ -63,8 +67,8 @@ struct ReadingPlace {
  * end of the home cell's d.places rank, with its documents along
  * d.documents, each document's version, caret and anchor along d.version,
  * d.caret and d.anchor, the camera along d.camera, the ZigZag store,
- * version, focus and keyboard along d.zigzag and the active document along
- * d.active. Earlier places stay,
+ * version, focus and keyboard along d.zigzag, the active document along
+ * d.active and the selected link along d.selected-link. Earlier places stay,
  * which is what a history of visits needs later. Starts the slice if the
  * store has none.
  */

@@ -374,6 +374,10 @@ int XuzzApp::run(const int argc, char **argv) {
   if (batchRes.shouldExit) {
     return batchRes.exitCode;
   }
+  // The orchestrator registers views to resolve spans against; from here the
+  // renderer opens its own, and a view with no document behind it is saved
+  // into the reading place and comes back as a second tab.
+  session->clearViews();
   auto opening            = batchRes.opening;
   const auto extraImports = batchRes.extraImports;
 
@@ -1677,9 +1681,12 @@ int XuzzApp::run(const int argc, char **argv) {
         }
       });
     }
-    renderer->runWithState([&linkContext](RenderState &) {
-      linkContext.restoreCurrentSelection();
-    });
+    if (resuming->link) {
+      renderer->runWithState(
+          [&linkContext, saved = *resuming->link](RenderState &) {
+            linkContext.restoreSelection(saved);
+          });
+    }
   } else if (opts.askedVersion.empty() && opts.read.empty() &&
              opts.alongside.empty() && extraImports.empty()) {
     const auto &primaryStore = session->store(0);
@@ -2869,6 +2876,7 @@ int XuzzApp::run(const int argc, char **argv) {
     place.zigzagVersion     = zigzagPresentation->sliceHead().str();
     place.zigzagFocus       = zigzagPresentation->focusCell();
     place.zigzagHasKeyboard = keyboardPane.inZigzag();
+    place.link              = linkContext.selectionContext();
     session->rememberPlace(place);
   }
   session->saveAll();

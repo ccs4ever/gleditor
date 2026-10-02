@@ -297,6 +297,13 @@ public:
   /// The returned resolution request changes no reading place or visit.
   NavigationResult restoreCurrentSelection();
 
+  /// Reselect the link @p saved names, as a session resuming does; the
+  /// reader's place and visits are left as they are.
+  NavigationResult restoreSelection(const LinkVisitContext &saved);
+
+  /// The selection as a session keeps it, or nothing with no link selected.
+  [[nodiscard]] std::optional<LinkVisitContext> selectionContext() const;
+
   /**
    * @brief Deliver the occurrences a ResolveRequest asked for.
    *
@@ -341,6 +348,9 @@ private:
   /// The selection, once its occurrences have been supplied.
   std::expected<SelectedLink *, NavigationError> resolved();
   NavigationResult restoreVisit(const Visit &visit);
+  /// Make @p saved the selection, keeping a resolved one's occurrences.
+  NavigationEffect reselect(const LinkVisitContext &saved,
+                            NavigationEffect effect);
 
   ActivityLog &activity;
   std::optional<SelectedLink> selected;

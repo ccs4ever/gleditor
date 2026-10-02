@@ -4,8 +4,10 @@
  */
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <tuple>
@@ -33,7 +35,23 @@ void PrintTo(const ReadingPlace &place, std::ostream *out) {
     *out << "-";
   }
   *out << " zigzag:" << place.zigzagStore << "@" << place.zigzagVersion << "#"
-       << place.zigzagFocus << (place.zigzagHasKeyboard ? " keys" : "") << "}";
+       << place.zigzagFocus << (place.zigzagHasKeyboard ? " keys" : "")
+       << " link:";
+  if (place.link) {
+    const auto index = [](const std::optional<std::uint32_t> at) {
+      return at ? std::to_string(*at) : std::string{"-"};
+    };
+    const auto &link = *place.link;
+    *out << link.key.authority.str() << "#" << link.key.id << " side "
+         << static_cast<int>(link.active) << " left " << index(link.left.member)
+         << "/" << index(link.left.occurrence) << " right "
+         << index(link.right.member) << "/" << index(link.right.occurrence)
+         << " origin "
+         << (link.origin ? std::to_string(link.origin->value) : "-");
+  } else {
+    *out << "-";
+  }
+  *out << "}";
 }
 } // namespace xanadu
 
@@ -105,6 +123,29 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
 
   xanadu::Store reopened(perma);
   reopened.load((root / "activity").string());
+  EXPECT_EQ(xanadu::latestPlace(reopened), twoDocuments());
+}
+
+// A link selected and not entered names no visit, so only the place can
+// bring it back: the panel the reader left open is part of where they were.
+TEST_F(ReadingPlaceTest, theSelectedLinkComesBackWithItsCursors) {
+  auto withLink = twoDocuments();
+  withLink.link = xanadu::LinkVisitContext{
+      .key    = {xanadu::DocumentId{}, 42},
+      .active = xanadu::LinkSide::Right,
+      .left   = {.member = 1, .occurrence = 0},
+      .right  = {.member = 0, .occurrence = std::nullopt},
+      .origin = xanadu::VisitId{3}};
+  xanadu::Store store(perma);
+  std::ignore = xanadu::recordPlace(store, withLink);
+  store.save((root / "activity").string());
+
+  xanadu::Store reopened(perma);
+  reopened.load((root / "activity").string());
+  EXPECT_EQ(xanadu::latestPlace(reopened), withLink);
+
+  // Dismissing it before the next quit leaves the next place without one.
+  std::ignore = xanadu::recordPlace(reopened, twoDocuments());
   EXPECT_EQ(xanadu::latestPlace(reopened), twoDocuments());
 }
 

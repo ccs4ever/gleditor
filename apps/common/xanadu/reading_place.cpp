@@ -5,7 +5,10 @@
  */
 #include "reading_place.hpp"
 
+#include <array>
+#include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string_view>
 #include <utility>
 
@@ -25,6 +28,21 @@ constexpr std::string_view kAnchor    = "d.anchor";
 constexpr std::string_view kCamera    = "d.camera";
 constexpr std::string_view kZigzag    = "d.zigzag";
 constexpr std::string_view kActive    = "d.active";
+constexpr std::string_view kLink      = "d.selected-link";
+
+// A cursor with nothing chosen is kept as -1, which no index can be.
+std::int64_t cursorValue(const std::optional<std::uint32_t> index) {
+  return index ? std::int64_t{*index} : -1;
+}
+
+std::optional<std::uint32_t>
+cursorIndex(const std::optional<std::int64_t> value) {
+  if (!value || *value < 0 ||
+      *value > std::numeric_limits<std::uint32_t>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint32_t>(*value);
+}
 
 /// Appends operations to one store, keeping the state they build on.
 class Writer {
@@ -76,6 +94,45 @@ public:
   MicroversionId at;
 };
 
+/// The link a place's d.link rank from @p authority names; nothing for a
+/// rank too short to name one or an authority that is not a document id.
+std::optional<LinkVisitContext> linkOf(const zigzag::Manifold &manifold,
+                                       const Store &store,
+                                       const zigzag::OptionalCell authority,
+                                       const zigzag::DimRef dim) {
+  if (zigzag::noCell == authority) {
+    return std::nullopt;
+  }
+  const auto id = DocumentId::parse(manifold.textOf(authority, store));
+  if (!id) {
+    return std::nullopt;
+  }
+  std::array<std::optional<std::int64_t>, 7> values{};
+  auto cell = authority;
+  for (auto &value : values) {
+    cell = manifold.linked(cell, dim);
+    if (zigzag::noCell == cell) {
+      return std::nullopt;
+    }
+    value = manifold.asInt64(cell);
+  }
+  const auto [linkId, side, lm, lo, rm, ro, origin] = values;
+  if (!linkId || *linkId < 0 ||
+      *linkId > std::numeric_limits<zigzag::CellRef>::max() || !side ||
+      (*side != 0 && *side != 1)) {
+    return std::nullopt;
+  }
+  return LinkVisitContext{.key = {*id, static_cast<zigzag::CellRef>(*linkId)},
+                          .active = static_cast<LinkSide>(*side),
+                          .left   = {cursorIndex(lm), cursorIndex(lo)},
+                          .right  = {cursorIndex(rm), cursorIndex(ro)},
+                          .origin =
+                              origin && *origin > 0
+                                  ? std::optional<VisitId>{VisitId{
+                                        static_cast<std::uint64_t>(*origin)}}
+                                  : std::nullopt};
+}
+
 } // namespace
 
 MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
@@ -123,6 +180,25 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
     out.link(head, zigzagDim, focus);
     out.link(focus, zigzagDim, out.scalar(place.zigzagHasKeyboard));
   }
+  if (place.link) {
+    const auto linkDim = out.dimension(kLink);
+    const auto &link   = *place.link;
+    const std::array<std::int64_t, 7> values{
+        static_cast<std::int64_t>(link.key.id),
+        static_cast<std::int64_t>(link.active),
+        cursorValue(link.left.member),
+        cursorValue(link.left.occurrence),
+        cursorValue(link.right.member),
+        cursorValue(link.right.occurrence),
+        link.origin ? static_cast<std::int64_t>(link.origin->value) : 0};
+    last = out.text(link.key.authority.str());
+    out.link(here, linkDim, last);
+    for (const auto value : values) {
+      const auto cell = out.scalar(value);
+      out.link(last, linkDim, cell);
+      last = cell;
+    }
+  }
   return out.at;
 }
 
@@ -155,7 +231,7 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
   const auto anchor    = dim(kAnchor);
   const auto active    = dim(kActive);
   const auto along     = [&](const zigzag::CellRef from,
-                             const std::optional<zigzag::DimRef> onto) {
+                         const std::optional<zigzag::DimRef> onto) {
     return onto ? manifold.linked(from, *onto) : zigzag::OptionalCell{};
   };
   const auto activeCell = along(here, active);
@@ -212,6 +288,10 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
             zigzag::noCell != keys && manifold.asBool(keys).value_or(false);
       }
     }
+  }
+  if (const auto linkDim = dim(kLink)) {
+    place.link =
+        linkOf(manifold, store, manifold.linked(here, *linkDim), *linkDim);
   }
   return place;
 }

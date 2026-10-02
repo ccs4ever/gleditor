@@ -22,24 +22,9 @@ std::string bytesOf(const DocumentId &id) { return id.str().substr(6); }
 
 DocumentId parseId(const std::string &hex) {
   if (hex.size() != 32) throw std::runtime_error("activity: bad document id");
-  std::array<char, 16> bytes{};
-  for (std::size_t i = 0; i < bytes.size(); ++i) {
-    unsigned int high{};
-    unsigned int low{};
-    const auto parse = [](const char digit) -> unsigned int {
-      if (digit >= '0' && digit <= '9') return digit - '0';
-      if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
-      throw std::runtime_error("activity: bad document id");
-    };
-    high     = parse(hex[2 * i]);
-    low      = parse(hex[2 * i + 1]);
-    bytes[i] = static_cast<char>((high << 4U) | low);
-  }
-  DocumentId id;
-  if (!DocumentId::fromBytes({bytes.data(), bytes.size()}, id)) {
-    throw std::runtime_error("activity: bad document id");
-  }
-  return id;
+  auto id = DocumentId::parse(hex);
+  if (!id) throw std::runtime_error("activity: bad document id");
+  return *id;
 }
 
 std::int64_t indexOf(const std::optional<std::uint32_t> index) {

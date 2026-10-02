@@ -363,6 +363,31 @@ TEST(LinkNavigationTest, RestartRestoresSelectedLinkWithoutAnotherVisit) {
   EXPECT_EQ(h.log.size(), before);
 }
 
+// Selecting appends no visit, so a link chosen and never entered survives a
+// restart only through the context the session saved.
+TEST(LinkNavigationTest, RestartRestoresALinkSelectedButNeverEntered) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto before = h.log.size();
+  const auto saved  = h.navigator.selectionContext();
+  ASSERT_TRUE(saved);
+
+  xanadu::LinkNavigator reopened{h.log};
+  EXPECT_FALSE(reopened.selectionContext());
+  const auto restored = reopened.restoreSelection(*saved);
+  ASSERT_TRUE(restored && restored->resolve);
+  EXPECT_FALSE(restored->focus);
+  EXPECT_FALSE(restored->visit);
+  ASSERT_TRUE(reopened.supply(restored->resolve->generation,
+                              h.resolve(restored->resolve->key)));
+  EXPECT_EQ(reopened.selectionContext(), saved);
+  EXPECT_EQ(h.log.size(), before);
+}
+
 TEST(LinkNavigationTest, ActivityForwardChoosesEitherExistingBranch) {
   Harness h;
   const auto origin = arrive(h);

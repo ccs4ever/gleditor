@@ -103,8 +103,15 @@ public:
    */
   xanadu::NavigationResult execute(const xanadu::NavigationCommand &command);
 
-  /// Rehydrate the selected link after reopened views can resolve its ends.
-  void restoreCurrentSelection();
+  /// Reselect the link a session was left on, once its reopened views can
+  /// resolve the link's ends.
+  void restoreSelection(const xanadu::LinkVisitContext &saved);
+
+  /// The selection as a session keeps it across a relaunch.
+  [[nodiscard]] std::optional<xanadu::LinkVisitContext>
+  selectionContext() const {
+    return navigator.selectionContext();
+  }
 
   [[nodiscard]] gleditor::cpp26::optional<const xanadu::SelectedLink &>
   selection() const noexcept {

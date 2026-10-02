@@ -377,13 +377,13 @@ NavigationResult LinkNavigator::enter() {
   const auto &target = member.occurrences[*cursor.occurrence].site;
   current            = activity.append(
       Visit{.parent  = current,
-            .target  = target,
-            .arrival = Arrival::EnteredEndpoint,
-            .link    = LinkVisitContext{.key    = selection.key,
-                                        .active = selection.active,
-                                        .left   = selection.left,
-                                        .right  = selection.right,
-                                        .origin = selection.origin}});
+                       .target  = target,
+                       .arrival = Arrival::EnteredEndpoint,
+                       .link    = LinkVisitContext{.key    = selection.key,
+                                                   .active = selection.active,
+                                                   .left   = selection.left,
+                                                   .right  = selection.right,
+                                                   .origin = selection.origin}});
   return NavigationEffect{.focus = target, .visit = current};
 }
 
@@ -412,7 +412,11 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
     // made the trip.
     return effect;
   }
-  const auto &saved = *visit.link;
+  return reselect(*visit.link, effect);
+}
+
+NavigationEffect LinkNavigator::reselect(const LinkVisitContext &saved,
+                                         NavigationEffect effect) {
   if (selected && saved.key == selected->key && selected->occurrences) {
     selected->active = saved.active;
     selected->left   = saved.left;
@@ -432,6 +436,22 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   effect.resolve =
       ResolveRequest{.key = saved.key, .generation = selected->generation};
   return effect;
+}
+
+NavigationResult
+LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
+  return reselect(saved, {});
+}
+
+std::optional<LinkVisitContext> LinkNavigator::selectionContext() const {
+  if (!selected) {
+    return std::nullopt;
+  }
+  return LinkVisitContext{.key    = selected->key,
+                          .active = selected->active,
+                          .left   = selected->left,
+                          .right  = selected->right,
+                          .origin = selected->origin};
 }
 
 NavigationResult LinkNavigator::restoreCurrentSelection() {
