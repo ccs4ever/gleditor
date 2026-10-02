@@ -34,17 +34,17 @@ The fold was found by comparing every handler, overlay and accessibility registr
 
 What still blocks or misleads, most severe first:
 
-| #   | Finding                                                                             | Journeys | Outcome       |
-| --- | ----------------------------------------------------------------------------------- | -------- | ------------- |
-| 1   | View modes (Unified, Xanadoc, ZigZag, cycle) have no key binding and no control     | J4       | No affordance |
-| 2   | A selected link does not come back after a relaunch; Alt+Shift+N reselects it       | J5       | Fail          |
-| 3   | The link panel is absent from the accessibility tree                                | J4       | Missing       |
-| 4   | After radial File > New xanadoc, typing lands in the previous document              | J1       | Fail          |
-| 5   | Store Object Manager "+ Slice" opens the new slice in two tabs                      | J2       | Fail          |
-| 6   | The Store Object Manager button's "=" is drawn at the top of the window; no binding | J1, J2   | Fail          |
-| 7   | An untitled document's tab reads "Doc 2" live and "Untitled · a" after a relaunch   | J5       | Fail          |
-| 8   | `find` searches only the documents a store designates current                       | J6       | Partial       |
-| 9   | Smaller: see below                                                                  | various  | —             |
+| #   | Finding                                                                                                         | Journeys             | Outcome       |
+| --- | --------------------------------------------------------------------------------------------------------------- | -------------------- | ------------- |
+| 1   | View modes (Unified, Xanadoc, ZigZag, cycle) have no key binding and no control                                 | J4                   | No affordance |
+| 2   | A selected link does not come back after a relaunch; Alt+Shift+N reselects it                                   | J5                   | Fail          |
+| 3   | The link panel is absent from the accessibility tree                                                            | J4                   | Missing       |
+| 4   | After radial File > New xanadoc, typing lands in the previous document                                          | J1                   | Fail          |
+| 5   | Store Object Manager "+ Slice" opens the new slice in two tabs                                                  | J2                   | Fail          |
+| 6   | The Store Object Manager button's "=" is drawn at the top of the window; no binding                             | J1, J2               | Fail          |
+| 7   | An untitled document's tab reads "Doc 2" live and "Untitled · a" after a relaunch                               | J5                   | Fail          |
+| 8   | `find` searches only the documents a store designates current                                                   | J6                   | Partial       |
+| 9   | `count(find("x")/d.source)` parses; `--engine vortex` refuses `find()`; the radial File sub-wheel is named File | `cf98bf9`, `a320f87` |               |
 
 ## Steps
 
@@ -170,3 +170,42 @@ than once.
 - Multi-member endsets, several links over one span, links into another store.
 - Closing through a menu control, reopening from inside the program.
 - Vulkan and OpenGL ES; J7–J16.
+
+## After the run
+
+Every finding above is fixed on `feature/xuzz-link-context`; each was rechecked headless on a copy
+of the fixture it was found on, and all four suites pass (gleditor 538, xudu 1203, xuzz 56, zigzag
+120).
+
+| #   | Fix                                                                                                                    | Commit    |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | --------- |
+| 1   | Ctrl+Alt+V cycles view modes; Ctrl+Alt+Shift+U/X/Z pick one; radial View sub-wheel                                     | `a320f87` |
+| 2   | The reading place keeps the selected link along `d.selected-link`; a resumed session reselects it                      | `ee5382a` |
+| 3   | The link panel is an accessibility source: a "Selected link" group with its lines and buttons                          | `25e56a5` |
+| 4   | A harness defect, not the program's: a `--click` step let the next step run before the click's queued work             | `9b64353` |
+| 5   | "+ Slice" opens the new slice once                                                                                     | `a320f87` |
+| 6   | The Store Object Manager's glyph is drawn on its button; Ctrl+Alt+M opens it                                           | `a320f87` |
+| 7   | An untitled document's tab has no branch suffix                                                                        | `bc291c1` |
+| 8   | `find` reads every branch head, designated ones first, and reports a line once by its spans                            | `88a8b2b` |
+| 9   | `count(find("x")/d.source)` parses; `--engine vortex` refuses `find()` by name; the radial File sub-wheel is announced | `cf98bf9` |
+
+Fixing 2 turned up two defects the run had not seen:
+
+- **Links resolved only in store 0.** A resumed session reopens its stores as auxiliaries of the
+  default one, so a link in any of them was "not found". The resolver now looks in every open store
+  (`ee5382a`).
+- **A headless session saved a phantom document.** The batch orchestrator's view registrations
+  survived into the UI, so every `--headless` session recorded its document twice and came back with
+  a second tab of the same version. They are cleared before the renderer opens its own (`ee5382a`).
+  Earlier relaunch evidence from headless runs is affected: a duplicated tab there was this, not the
+  program.
+
+Finding 4 reproduced only under the harness. A person types long after the queued open and caret
+move have run; a scripted `--type` straight after `--click` ran in the same frame, on a "settled"
+judged before the click's handler queued them. Ctrl+N passed because a chord is an input step, which
+already waited.
+
+The harness gaps are closed too: `--select` moves the keyboard to the documents (`1c832e0`), and
+`tools/repl-transcript.py` drives a REPL through a PTY for the terminal journeys (`9ed4230`). F2 and
+Ctrl+1–5 stay shared between a document action and a ZigZag action by scope, as intended. The
+orphaned `xuzz` livelock was not reproduced.
