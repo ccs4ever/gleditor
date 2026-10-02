@@ -329,6 +329,22 @@ inline constexpr std::string_view kKeymapFormatSuperscript =
     "std:xudu/format_superscript";
 inline constexpr std::string_view kKeymapFormatSubscript =
     "std:xudu/format_subscript";
+inline constexpr std::string_view kKeymapFormatOverline =
+    "std:xudu/format_overline";
+inline constexpr std::string_view kKeymapAlignLeft   = "std:xudu/align_left";
+inline constexpr std::string_view kKeymapAlignCentre = "std:xudu/align_centre";
+inline constexpr std::string_view kKeymapAlignRight  = "std:xudu/align_right";
+inline constexpr std::string_view kKeymapAlignJustify =
+    "std:xudu/align_justify";
+inline constexpr std::string_view kKeymapStoreManager =
+    "std:xuzz/store_manager_toggle";
+inline constexpr std::string_view kKeymapViewModeCycle =
+    "std:xuzz/cycle_view_mode";
+inline constexpr std::string_view kKeymapViewUnified = "std:xuzz/view_unified";
+inline constexpr std::string_view kKeymapViewXanadocOnly =
+    "std:xuzz/view_xanadoc";
+inline constexpr std::string_view kKeymapViewZigzagOnly =
+    "std:xuzz/view_zigzag";
 inline constexpr std::string_view kKeymapSaveDocument =
     "std:xudu/save_document";
 inline constexpr std::string_view kKeymapExportOsmic = "std:xudu/export_osmic";

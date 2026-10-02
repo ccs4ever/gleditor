@@ -86,7 +86,9 @@ StoreObjectManager *StoreObjectManager::createSlice() {
     }
   }
   refresh();
-  if (!items_.empty() && onToggle_) {
+  // onCreate_ opens what it makes; opening it again here gave one new
+  // slice two tabs. Only an item this manager made itself is opened here.
+  if (!onCreate_ && !items_.empty() && onToggle_) {
     const auto &last = items_.back();
     if (last.kind == StructureKind::Slice && !last.isOpen) {
       onToggle_(last.birthOp, last.kind, true);
@@ -104,7 +106,9 @@ StoreObjectManager *StoreObjectManager::createXanadoc() {
     std::ignore       = store_.makeXanadoc(parent, name);
   }
   refresh();
-  if (!items_.empty() && onToggle_) {
+  // onCreate_ opens what it makes; opening it again here gave one new
+  // xanadoc two tabs. Only an item this manager made itself is opened here.
+  if (!onCreate_ && !items_.empty() && onToggle_) {
     const auto &last = items_.back();
     if (last.kind == StructureKind::Xanadoc && !last.isOpen) {
       onToggle_(last.birthOp, last.kind, true);

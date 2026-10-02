@@ -1178,6 +1178,70 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to insert manual page break",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Return"}}}}},
+        {.name    = std::string(settings::kKeymapFormatItalic),
+         .notes   = "Italicise the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+I"}}}}},
+        {.name    = std::string(settings::kKeymapFormatBold),
+         .notes   = "Embolden the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+B"}}}}},
+        {.name    = std::string(settings::kKeymapFormatUnderline),
+         .notes   = "Underline the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+U"}}}}},
+        {.name    = std::string(settings::kKeymapFormatOverline),
+         .notes   = "Overline the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+O"}}}}},
+        {.name    = std::string(settings::kKeymapFormatStrikethrough),
+         .notes   = "Strike through the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+X"}}}}},
+        {.name    = std::string(settings::kKeymapFormatSuperscript),
+         .notes   = "Raise the selection to a superscript",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Up"}}}}},
+        {.name    = std::string(settings::kKeymapFormatSubscript),
+         .notes   = "Lower the selection to a subscript",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Down"}}}}},
+        {.name    = std::string(settings::kKeymapAlignLeft),
+         .notes   = "Align the selected paragraphs left",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+L"}}}}},
+        {.name    = std::string(settings::kKeymapAlignCentre),
+         .notes   = "Centre the selected paragraphs",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+E"}}}}},
+        {.name    = std::string(settings::kKeymapAlignRight),
+         .notes   = "Align the selected paragraphs right",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+R"}}}}},
+        {.name    = std::string(settings::kKeymapAlignJustify),
+         .notes   = "Justify the selected paragraphs",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+J"}}}}},
+        {.name    = std::string(settings::kKeymapStoreManager),
+         .notes   = "Show or hide the store object manager",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+M"}}}}},
+        {.name    = std::string(settings::kKeymapViewModeCycle),
+         .notes   = "Cycle the view mode: unified, xanadoc only, ZigZag only",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+V"}}}}},
+        {.name    = std::string(settings::kKeymapViewUnified),
+         .notes   = "Show xanadocs and ZigZag together",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+U"}}}}},
+        {.name    = std::string(settings::kKeymapViewXanadocOnly),
+         .notes   = "Show xanadocs only, ZigZag suspended",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+X"}}}}},
+        {.name    = std::string(settings::kKeymapViewZigzagOnly),
+         .notes   = "Show ZigZag only",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+Z"}}}}},
         {.name    = std::string(settings::kKeymapHypertimeMap),
          .notes   = "Shortcut to toggle hypertime map",
          .schemas = {{.expectedTypes = {"string"},
@@ -1365,7 +1429,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapSaveStore),
          .notes   = "Shortcut to save current slice to sovereign store",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+Shift+S"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+S"}}}}},
 
         // Xuzz Zigzag Presentation Actions
         {.name    = std::string(settings::kKeymapZigzagTogglePalette),
@@ -1565,9 +1629,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                             = store.makeCell(cur, storeNoteText);
-    const auto noteRef              = store.cellRefOf(cur);
-    manifold                        = store.rebuildManifold(cur);
+    cur                = store.makeCell(cur, storeNoteText);
+    const auto noteRef = store.cellRefOf(cur);
+    manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
                         noteRef);
     manifold = store.rebuildManifold(cur);
@@ -1580,9 +1644,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur      = store.setLink(cur, store.homeCell(), groupsDim,
-                             zigzag::DimVector::POS, emptyGroupRef);
-    manifold = store.rebuildManifold(cur);
+    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
+                                             zigzag::DimVector::POS, emptyGroupRef);
+    manifold                 = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -2084,9 +2148,9 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements   = entry.value.valueCells |
-                             std::views::transform(valueOf) |
-                             std::ranges::to<std::vector>();
+    entry.value.elements = entry.value.valueCells |
+                           std::views::transform(valueOf) |
+                           std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -2504,6 +2568,9 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy    = "format-superscript",
      .canonical = "std:xudu/format_superscript"},
     {.legacy = "format-subscript", .canonical = "std:xudu/format_subscript"},
+    {.legacy = "format-overline", .canonical = "std:xudu/format_overline"},
+    {.legacy    = "store-manager-toggle",
+     .canonical = "std:xuzz/store_manager_toggle"},
     {.legacy = "save-document", .canonical = "std:xudu/save"},
     {.legacy = "std:xudu/save_document", .canonical = "std:xudu/save"},
     {.legacy = "export-osmic", .canonical = "std:xudu/export_osmic"},
@@ -2746,7 +2813,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                      static_cast<double>(cfg.physics.maxVelocity)));
+                                  static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 
@@ -2848,7 +2915,7 @@ gleditor::RadialConfig createDefaultRadialConfig() {
 
   auto alignAction =
       makeAction("group:align", "Align", "=", "subwheel:alignment");
-  alignAction.desc       = "Alignment Sub-Menu";
+  alignAction.desc       = "Alignment";
   alignAction.subActions = {
       makeAction("align:left", "Left", "|<", "align:left"),
       makeAction("align:centre", "Centre", "><", "align:centre"),
@@ -2868,6 +2935,17 @@ gleditor::RadialConfig createDefaultRadialConfig() {
       makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
   };
 
+  auto viewAction = makeAction("group:view", "View", "V", "subwheel:view");
+  viewAction.desc = "View Mode";
+  viewAction.subActions = {
+      makeAction("run:std:xuzz/view_unified", "Unified", "U",
+                 "run:std:xuzz/view_unified"),
+      makeAction("run:std:xuzz/view_xanadoc", "Xanadocs only", "X",
+                 "run:std:xuzz/view_xanadoc"),
+      makeAction("run:std:xuzz/view_zigzag", "ZigZag only", "Z",
+                 "run:std:xuzz/view_zigzag"),
+  };
+
   cfg.actions = {
       std::move(fileAction),
       makeAction("format:bold", "Bold", "B", "format:bold"),
@@ -2876,7 +2954,11 @@ gleditor::RadialConfig createDefaultRadialConfig() {
       makeAction("format:superscript", "Superscript", "X²",
                  "format:superscript"),
       makeAction("format:subscript", "Subscript", "X₂", "format:subscript"),
+      makeAction("format:overline", "Overline", "Ō", "format:overline"),
+      makeAction("format:strikethrough", "Strikethrough", "-S-",
+                 "format:strikethrough"),
       std::move(alignAction),
+      std::move(viewAction),
       makeAction("op:pagebreak", "Page Break", "--", "op:pagebreak"),
       makeAction("op:transclude", "Transclude", "[]", "op:transclude"),
       makeAction("info:author", "Author", "@", "info:author"),

@@ -18,6 +18,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -656,10 +657,10 @@ int XuzzApp::run(const int argc, char **argv) {
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>("Sans 11");
   radialMenu->setActionHandler(
-      [&session, &views, &quotationOverlay,
-       state](const std::string &id, [[maybe_unused]] const std::string &action,
-              const std::uint32_t docIndex, const std::uint32_t charOffset,
-              const std::uint32_t charLength) {
+      [&session, &views, &quotationOverlay, state, renderer](
+          const std::string &id, [[maybe_unused]] const std::string &action,
+          const std::uint32_t docIndex, const std::uint32_t charOffset,
+          const std::uint32_t charLength) {
         // An entry naming a keymap action runs it, so a menu and a key reach
         // the same command: File > New xanadoc, New slice and Open. The fold
         // into xuzz dropped this, and every one of them did nothing.
@@ -685,6 +686,14 @@ int XuzzApp::run(const int argc, char **argv) {
           session->markDecorated(
               docIndex, charOffset, charLength,
               gleditor::decorationBit(gleditor::Decoration::Superscript));
+        } else if (id == "format:overline") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Overline));
+        } else if (id == "format:strikethrough") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Strikethrough));
         } else if (id == "format:subscript") {
           session->markDecorated(
               docIndex, charOffset, charLength,
@@ -702,7 +711,8 @@ int XuzzApp::run(const int argc, char **argv) {
           session->setAlignment(docIndex, charOffset, charLength,
                                 gleditor::TextAlign::Justify);
         } else if (id == "op:pagebreak") {
-          session->insertBreak(docIndex, charOffset);
+          // Through Views, which redraws the page it splits.
+          views.insertPageBreak(docIndex, charOffset);
         } else if (id == "op:transclude") {
           views.transcludeSelection();
         } else if (id == "op:quote") {
@@ -714,6 +724,12 @@ int XuzzApp::run(const int argc, char **argv) {
                                     ps->config().masterIdentity.view());
           }
           std::cout << "xuzz: " << authorStr << "\n";
+        }
+        // Formatting changes no text; the page is redrawn to show it.
+        if (id.starts_with("format:") || id.starts_with("align:")) {
+          renderer->runWithState([&views, docIndex](RenderState &rState) {
+            views.reloadDocument(rState, docIndex);
+          });
         }
       });
 
@@ -1240,7 +1256,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                             changedCell != zigzag::noCell;
+                            changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -2024,9 +2040,12 @@ int XuzzApp::run(const int argc, char **argv) {
                                 "insert a page break at the caret position",
                                 [&views] { views.insertPageBreakAtCaret(); });
 
-  const auto applyDecoration = [&session,
+  // A format link changes no text, so nothing redraws the document unless
+  // asked: the formatting was stored and appeared only after a reload.
+  const auto applyDecoration = [&session, &views,
                                 renderer](const gleditor::Decoration deco) {
-    renderer->runWithState([&session, renderer, deco](RenderState &rState) {
+    renderer->runWithState([&session, &views, renderer,
+                            deco](RenderState &rState) {
       auto *const caret = renderer->editCaret();
       if (caret && caret->active() &&
           caret->documentIndex() < rState.docs.size() &&
@@ -2035,6 +2054,7 @@ int XuzzApp::run(const int argc, char **argv) {
         const auto start = caret->selectionStart();
         const auto len   = caret->selectionEnd() - start;
         session->markDecorated(doc, start, len, gleditor::decorationBit(deco));
+        views.reloadDocument(rState, doc);
       }
     });
   };
@@ -2061,6 +2081,40 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(
       "format-subscript", "toggle subscript on selected text",
       [applyDecoration] { applyDecoration(gleditor::Decoration::Subscript); });
+  app.commands().registerAction(
+      "format-overline", "toggle overline on selected text",
+      [applyDecoration] { applyDecoration(gleditor::Decoration::Overline); });
+
+  // Alignment from the keyboard as well as the radial menu: every format link
+  // has a key, and the four alignments had none.
+  const auto applyAlignment = [&session, &views,
+                               renderer](const gleditor::TextAlign align) {
+    renderer->runWithState([&session, &views, renderer,
+                            align](RenderState &rState) {
+      auto *const caret = renderer->editCaret();
+      if (caret && caret->active() &&
+          caret->documentIndex() < rState.docs.size()) {
+        const auto doc   = caret->documentIndex();
+        const auto start = caret->selectionStart();
+        session->setAlignment(doc, start, caret->selectionEnd() - start, align);
+        views.reloadDocument(rState, doc);
+      }
+    });
+  };
+  namespace keys = xanadu::settings;
+  for (const auto &[name, help, align] :
+       {std::tuple{keys::kKeymapAlignLeft, "align the paragraph left",
+                   gleditor::TextAlign::Left},
+        std::tuple{keys::kKeymapAlignCentre, "centre the paragraph",
+                   gleditor::TextAlign::Centre},
+        std::tuple{keys::kKeymapAlignRight, "align the paragraph right",
+                   gleditor::TextAlign::Right},
+        std::tuple{keys::kKeymapAlignJustify, "justify the paragraph",
+                   gleditor::TextAlign::Justify}}) {
+    app.commands().registerAction(
+        std::string(name), help,
+        [applyAlignment, align] { applyAlignment(align); });
+  }
 
   // Hyphenated & Legacy Script Action Aliases
   app.commands().registerAction("save", "save or preserve active document",

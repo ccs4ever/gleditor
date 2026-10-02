@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/render/types.hpp>
@@ -202,6 +203,32 @@ TEST(StoreObjectManagerTest, AccessibilityDescriptionExposesAllControls) {
   manager.describe(builder);
 
   EXPECT_GE(manager.accessibilityRevision(), 1U);
+}
+
+// A creator that opens what it makes, as xuzz's does: the manager opening
+// the new slice again gave it two tabs.
+TEST(StoreObjectManagerTest, ACreatedSliceIsOpenedOnce) {
+  auto scroll = std::make_shared<UserPermascroll>();
+  Store store(scroll);
+  StoreObjectManager manager(store, "Sans 10");
+
+  int toggles = 0;
+  manager.setOnToggle(
+      [&toggles](std::uint32_t, StructureKind, bool) { ++toggles; });
+  manager.setOnCreate([&store](const StructureKind) {
+    std::ignore = store.sliceGenesis(MicroversionId{}, "Made");
+  });
+  manager.createSlice();
+  EXPECT_EQ(toggles, 0) << "onCreate already opened it";
+
+  // Without a creator the manager makes and opens the slice itself.
+  Store bare(scroll);
+  StoreObjectManager plain(bare, "Sans 10");
+  int opened = 0;
+  plain.setOnToggle(
+      [&opened](std::uint32_t, StructureKind, bool) { ++opened; });
+  plain.createSlice();
+  EXPECT_EQ(opened, 1);
 }
 
 } // namespace

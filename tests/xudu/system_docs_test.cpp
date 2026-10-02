@@ -12,6 +12,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -110,6 +111,28 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
     EXPECT_TRUE(fresh) << chord << " is bound to both " << where->second
                        << " and " << spec.name;
   }
+}
+
+// Every format link the document model has is reachable from the keyboard:
+// J17 found the seven decorations without defaults and alignment with no
+// command at all.
+TEST(SystemDocsTest, EveryFormatLinkHasADefaultChord) {
+  std::set<std::string> bound;
+  for (const auto &spec : xanadu::defaultSettingSpecs(SystemDocKind::Keymap)) {
+    bound.insert(spec.name);
+  }
+  namespace keys = xanadu::settings;
+  for (const auto action :
+       {keys::kKeymapFormatItalic, keys::kKeymapFormatBold,
+        keys::kKeymapFormatUnderline, keys::kKeymapFormatOverline,
+        keys::kKeymapFormatStrikethrough, keys::kKeymapFormatSuperscript,
+        keys::kKeymapFormatSubscript, keys::kKeymapAlignLeft,
+        keys::kKeymapAlignCentre, keys::kKeymapAlignRight,
+        keys::kKeymapAlignJustify}) {
+    EXPECT_TRUE(bound.contains(std::string(action))) << action;
+  }
+  EXPECT_EQ(xanadu::allFormatAttributes.size(), 11U)
+      << "a format link was added: give it a default chord here too";
 }
 
 TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {

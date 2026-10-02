@@ -172,6 +172,10 @@ public:
   void summonPublication(const PublicationEntry &entry);
 
   void insertPageBreak(std::uint32_t docIndex, std::uint32_t charOffset);
+
+  /// Redraw @p docIndex from its current version: what an edit that changes
+  /// no text -- a format link, an alignment -- needs to be seen at all.
+  void reloadDocument(RenderState &rState, std::uint32_t docIndex);
   void insertPageBreakAtCaret();
 
   void exportOsmic();
