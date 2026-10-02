@@ -3970,6 +3970,10 @@ void Store::load(const std::string &directory) {
   versionAnnotations_.clear();
   aliasIndex_.clear();
 
+  if (userPermascroll_ != nullptr) {
+    userPermascroll_->refresh();
+  }
+
   if (std::filesystem::exists(dir / opsNodesFile)) {
     // Taken in whole: the nodes are already the shape they are held in, and
     // every name is worked out from the tree rather than read from the file.

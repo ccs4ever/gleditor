@@ -184,9 +184,16 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
       }
     }
     if (isValueOpt) {
-      options.push_back(arg);
       if (i + 1 < argc) {
-        options.emplace_back(argv[++i]);
+        std::string next = argv[++i];
+        if (next == "-" && (arg == "-o" || arg == "--output-store")) {
+          options.push_back("--output-store=-");
+        } else {
+          options.push_back(arg);
+          options.push_back(std::move(next));
+        }
+      } else {
+        options.push_back(arg);
       }
     } else if (arg.starts_with("-") && arg != "-") {
       options.push_back(arg);
@@ -589,6 +596,7 @@ int main(int argc, char *argv[]) {
         std::cout.flush();
         std::cout.rdbuf(originalOutput);
         xanadu::writeStoreStream(destination, std::cout);
+        std::cout.flush();
       } else {
         std::cout << "Result store written to: " << outPath << "\n";
       }

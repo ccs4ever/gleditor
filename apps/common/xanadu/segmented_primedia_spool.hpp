@@ -95,6 +95,11 @@ public:
   bool openActiveSegment(const std::filesystem::path &path);
 
   /**
+   * @brief Refresh unread trailing bytes from the active segment file on disk.
+   */
+  bool refreshActiveSegment();
+
+  /**
    * @brief Seal the current active segment and start a new active segment.
    */
   bool sealActive(const std::filesystem::path &newActivePath);

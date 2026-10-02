@@ -269,6 +269,40 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   return true;
 }
 
+bool SegmentedPrimediaSpool::refreshActiveSegment() {
+  if (activeFd < 0) {
+    return false;
+  }
+  struct stat st{};
+  if (::fstat(activeFd, &st) < 0) {
+    return false;
+  }
+  const auto currentLoaded =
+      totalBytes.load(std::memory_order_relaxed) - activeStart;
+  if (st.st_size <= static_cast<off_t>(currentLoaded)) {
+    return true;
+  }
+  const auto newBytes = static_cast<std::size_t>(st.st_size) -
+                        static_cast<std::size_t>(currentLoaded);
+  if (!ensureCommitted(activeStart + currentLoaded + newBytes)) {
+    return false;
+  }
+  std::size_t got = 0;
+  while (got < newBytes) {
+    const auto n =
+        ::pread(activeFd, arena.base() + activeStart + currentLoaded + got,
+                newBytes - got, static_cast<off_t>(currentLoaded + got));
+    if (n <= 0) {
+      break;
+    }
+    got += static_cast<std::size_t>(n);
+  }
+  totalBytes.store(activeStart + currentLoaded + got,
+                   std::memory_order_release);
+  flushedBytes = totalBytes.load(std::memory_order_relaxed);
+  return got == newBytes;
+}
+
 bool SegmentedPrimediaSpool::sealActive(
     const std::filesystem::path &newActivePath) {
   flush();

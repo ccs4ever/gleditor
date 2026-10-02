@@ -189,6 +189,9 @@ public:
   /// Synchronize unwritten active bytes to disk.
   bool flush();
 
+  /// Refresh unread bytes written by another process from active segment.
+  bool refresh();
+
   [[nodiscard]] const Config &config() const noexcept { return config_; }
 
 private:
