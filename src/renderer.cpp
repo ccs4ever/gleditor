@@ -485,8 +485,12 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // !docsLoading(state) together, matching advanceScript()'s own doc
   // comment ("One step per settled frame at most"). When an edit has
   // scheduled a reflow, the script waits for the reflow to settle before
-  // taking the next step.
-  if (settled) {
+  // taking the next step. settled was judged before this frame collected its
+  // picks, and a pick's handler may queue work of its own -- a menu entry
+  // that opens a document and moves the caret into it -- so work that has
+  // appeared since unsettles the frame too; otherwise a scripted click's
+  // next step ran before what the click asked for.
+  if (settled && !hasPendingWork()) {
     const auto serviceClickOrDrag = [&]() {
       if (this->state->clickPending.exchange(false)) {
         const auto clickX   = this->state->clickX.load();
