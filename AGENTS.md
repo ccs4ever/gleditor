@@ -263,7 +263,8 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
 - `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,
   `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
   `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,
-  `xudu-swarm-peer.cpp`, `code-quality-audit.py`, and the scene/showcase generators.
+  `xudu-swarm-peer.cpp`, `code-quality-audit.py`, `repl-transcript.py` (a REPL driven through a PTY,
+  for the UX journeys), and the scene/showcase generators.
 - `packaging/` (arch, debian, fedora, macos, windows, nix), `design/` (the *why*), `thirdparty/`.
 
 ### The engine's load-bearing types

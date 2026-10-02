@@ -56,7 +56,10 @@ build does; code that looks as if it should work is not a pass.
   their prompts in a PTY and keep the full input and output transcript. Do not use `-e`, `--store`,
   `--output-store`, a pipe or a prepared source file to complete a journey step. These can be used
   separately to diagnose a finding, but their success is not a journey pass. Check that the answer
-  uses the user's data and that a later prompt can continue the work.
+  uses the user's data and that a later prompt can continue the work. `tools/repl-transcript.py` is
+  that terminal: it runs the program under a PTY, types each line once the last answer has finished,
+  leaves with Ctrl+D and writes the transcript, prompts and echo included. Use it rather than
+  writing another driver.
 
 - **Track every handoff.** For a journey crossing programs, retain the input and output artifacts,
   their source cell identities and record counts at each stage. A manually copied value is not
