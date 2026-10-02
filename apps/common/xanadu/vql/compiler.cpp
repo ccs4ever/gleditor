@@ -515,6 +515,12 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
         } else {
           nextStream = attachedClones;
         }
+      } else {
+        // Refused rather than compiled to nothing, which answered find(),
+        // count() and the rest with an empty result and a zero exit.
+        throw std::invalid_argument(
+            fn.name + "() is not compiled to Vortex yet; run the query with "
+                      "--engine direct");
       }
     }
 

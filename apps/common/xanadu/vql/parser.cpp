@@ -812,8 +812,19 @@ ValueExpr Parser::parseValueExpr() {
     return ValueExpr{.kind = vTok.stringValue};
   }
   if (check(TokenKind::Identifier) && peekToken().is(TokenKind::OpenParen)) {
-    return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
-                         parseFunctionInvocation())};
+    auto fn = parseFunctionInvocation();
+    if (!check(TokenKind::Slash)) {
+      return ValueExpr{.kind =
+                           std::make_shared<FunctionInvocation>(std::move(fn))};
+    }
+    // A call that a step follows is a path's first step, as it is at the top
+    // of a query: count(find("x")/d.source) counts where the hits came from.
+    PathExpression path{.anchor = AnchorNode{.kind = AnchorKind::Context}};
+    path.steps.push_back(PathStep{.selector = std::move(fn)});
+    while (check(TokenKind::Slash)) {
+      path.steps.push_back(parsePathStep(true /*requireSlash*/));
+    }
+    return ValueExpr{.kind = std::make_shared<PathExpression>(std::move(path))};
   }
 
   // Fallback: PathExpression

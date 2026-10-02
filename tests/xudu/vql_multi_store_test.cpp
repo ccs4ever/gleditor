@@ -261,6 +261,12 @@ TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
   const auto sources = engine.execute(R"(find("needle")/d.source)");
   ASSERT_EQ(sources.size(), 1U);
   EXPECT_EQ(arena.textOf(sources[0]), arena.textOf(origin));
+
+  // A call a step follows is a path inside an argument too.
+  const auto counted = engine.execute(R"(count(find("needle")/d.source))");
+  ASSERT_EQ(counted.size(), 1U);
+  EXPECT_EQ(coord.core().render(counted[0]),
+            zigzag::vortex::CellValue(std::int64_t{1}));
 }
 
 // A word written on a branch the store does not designate current is still
