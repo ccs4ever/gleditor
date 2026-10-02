@@ -1711,9 +1711,12 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
   }
   // Two views of one store on different branches would read alike; the
   // branch -- the version name without its last number -- tells them apart
-  // and, unlike the version, stays put while either is edited.
-  if (const auto branch = branchOf(version); !branch.empty()) {
-    title = (title.empty() ? std::string{"Untitled"} : title) + " · " + branch;
+  // and, unlike the version, stays put while either is edited. An untitled
+  // store has no name to qualify, and its tabs are numbered already: a
+  // suffix read "Doc 2" live and "Untitled · a" after a relaunch.
+  if (const auto branch = branchOf(version);
+      !branch.empty() && !title.empty()) {
+    title += " · " + branch;
   }
 
   auto target =
