@@ -916,10 +916,14 @@ void Renderer::advanceScript(RenderState &state) {
     } else {
       // In the document the caret is in, as a drag would select: a run that
       // has moved to another document selects there, not in the first one.
-      const auto doc =
-          caret->active() && caret->documentIndex() < state.docs.size()
-              ? caret->documentIndex()
-              : 0U;
+      const bool placed =
+          caret->active() && caret->documentIndex() < state.docs.size();
+      const auto doc = placed ? caret->documentIndex() : 0U;
+      if (!placed && state.docs.size() > 1) {
+        // A click on nothing clears the caret, and a run that went on to
+        // select by offset then edited the first document without a word.
+        std::cerr << "--select with no caret: selecting in document 0\n";
+      }
       caret->placeAt(doc, step.from);
       caret->anchorSelection();
       caret->extendTo(step.to);
