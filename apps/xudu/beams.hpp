@@ -76,7 +76,8 @@ public:
    *        opened -- which is the ordinary case for a link, since a link is
    *        made to content and not to whatever happens to be open.
    */
-  using Opener = std::function<void(const MicroversionId &)>;
+  using Opener =
+      std::function<void(const MicroversionId &, std::size_t storeIndex)>;
 
   /**
    * @brief Where a media span's own widget sits, as an anchor a beam can use

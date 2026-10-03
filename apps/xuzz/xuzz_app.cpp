@@ -498,6 +498,9 @@ int XuzzApp::run(const int argc, char **argv) {
     swarmTelescope.setVisible(true);
   }
 
+  // The open document a quotation is being built into, chosen when the
+  // builder opens; its store, not the primary's, is what the builder writes.
+  std::optional<std::size_t> quotedView;
   xanadu::QuotationBuilderOverlay quotationOverlay(
       session->store(),
       session->views().empty() ? xanadu::MicroversionId{}
@@ -510,14 +513,32 @@ int XuzzApp::run(const int argc, char **argv) {
         }
         return openStores;
       },
-      [&session](const xanadu::MicroversionId newVersion,
-                 const zigzag::CellRef /*quotationCell*/) {
-        if (!session->views().empty()) {
-          auto &view   = session->views()[0];
-          view.version = newVersion;
-          view.pieces  = session->store().rebuild(newVersion);
+      [&session, &quotedView](const xanadu::MicroversionId newVersion,
+                              const zigzag::CellRef /*quotationCell*/) {
+        if (!quotedView || *quotedView >= session->views().size()) {
+          return;
         }
+        auto &view   = session->views()[*quotedView];
+        view.version = newVersion;
+        view.pieces  = session->store(view.storeIndex).rebuild(newVersion);
       });
+  // On the render thread, where the views and the switcher's choice are.
+  const auto toggleQuotation = [&quotationOverlay, &quotedView, &session,
+                                docSwitcher, renderer] {
+    renderer->runWithState(
+        [&quotationOverlay, &quotedView, &session, docSwitcher](RenderState &) {
+          if (!quotationOverlay.isVisible()) {
+            const auto active = docSwitcher->activeDocIndex();
+            if (active < session->views().size()) {
+              const auto &view = session->views()[active];
+              quotationOverlay.setTarget(session->store(view.storeIndex),
+                                         view.version);
+              quotedView = active;
+            }
+          }
+          quotationOverlay.toggle();
+        });
+  };
 
   xanadu::StoreObjectManager storeObjectManager(
       session->store(), "Sans 10",
@@ -661,7 +682,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>("Sans 11");
   radialMenu->setActionHandler(
-      [&session, &views, &quotationOverlay, state, renderer](
+      [&session, &views, &toggleQuotation, state, renderer](
           const std::string &id, [[maybe_unused]] const std::string &action,
           const std::uint32_t docIndex, const std::uint32_t charOffset,
           const std::uint32_t charLength) {
@@ -720,7 +741,7 @@ int XuzzApp::run(const int argc, char **argv) {
         } else if (id == "op:transclude") {
           views.transcludeSelection();
         } else if (id == "op:quote") {
-          quotationOverlay.toggle();
+          toggleQuotation();
         } else if (id == "info:author") {
           std::string authorStr = "Local Sovereign Author";
           if (const auto *ps = session->userPermascroll()) {
@@ -908,16 +929,20 @@ int XuzzApp::run(const int argc, char **argv) {
   zigzagPresentation->setPresentationTransformResolver(
       [&views] { return views.presentationTransform(); });
 
+  // The store whose slice the ZigZag presentation shows; bindZigzag moves it.
+  std::size_t zigzagStoreIndex = 0;
   xudu::BridgeCoordinator bridgeCoordinator(links, renderer,
                                             *state->accessibility);
   bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
   bridgeCoordinator.setDocumentFocusHandler(
-      [&views, &linkContext, &renderer,
-       &session](const zigzag::CellRef cell,
-                 const std::span<const xanadu::PrimediaSpan> content) {
+      [&views, &linkContext, &renderer, &session, &zigzagStoreIndex,
+       zigzagPresentation](
+          const zigzag::CellRef cell,
+          const std::span<const xanadu::PrimediaSpan> content) {
         std::vector<xanadu::PrimediaSpan> spans(content.begin(), content.end());
         renderer->runWithState(
-            [&views, &linkContext, &session, cell,
+            [&views, &linkContext, &session, &zigzagStoreIndex,
+             zigzagPresentation, cell,
              spans = std::move(spans)](RenderState &) mutable {
               // Activating a cell that holds one of the selected link's
               // members is choosing that member, the same gesture as picking
@@ -929,10 +954,11 @@ int XuzzApp::run(const int argc, char **argv) {
                 for (const auto &span : spans) {
                   length += static_cast<std::uint32_t>(span.length);
                 }
-                const auto &primary = session->store();
+                // The slice on screen, which need not be the primary store's.
+                const auto &slice = session->store(zigzagStoreIndex);
                 const xanadu::OccurrenceSite whole =
-                    xanadu::CellSite{.store   = primary.documentId(),
-                                     .version = primary.primaryCurrentVersion(),
+                    xanadu::CellSite{.store   = slice.documentId(),
+                                     .version = zigzagPresentation->sliceHead(),
                                      .cell    = cell,
                                      .range   = {.start = 0, .end = length}};
                 const auto holds = [&](const xanadu::LinkMember &member) {
@@ -940,7 +966,8 @@ int XuzzApp::run(const int argc, char **argv) {
                       member.occurrences, [&](const xanadu::Occurrence &o) {
                         const auto *const at =
                             std::get_if<xanadu::CellSite>(&o.site);
-                        return nullptr != at && at->cell == cell;
+                        return nullptr != at && at->cell == cell &&
+                               at->store == slice.documentId();
                       });
                 };
                 if (std::ranges::any_of(selected->occurrences->left, holds) ||
@@ -977,7 +1004,6 @@ int XuzzApp::run(const int argc, char **argv) {
   linkContext.setCellFocusQuery(
       [&zigzagPresentation] { return zigzagPresentation->focusCell(); });
 
-  std::size_t zigzagStoreIndex = 0;
   std::unordered_map<std::size_t, xanadu::MicroversionId> sliceHeads;
   satelloidOverlay.setSiteFilter(
       [&session, &zigzagStoreIndex](const xanadu::CellSite &site) {
@@ -1148,8 +1174,9 @@ int XuzzApp::run(const int argc, char **argv) {
                                   renderer, state);
   viewCoordinator.setViewMode(opts.viewMode);
 
-  links.setOpener([&views](const xanadu::MicroversionId &version) {
-    views.showAlongside(version);
+  links.setOpener([&views](const xanadu::MicroversionId &version,
+                           const std::size_t storeIndex) {
+    views.showAlongside(version, 0.0F, storeIndex);
   });
   links.setMediaRectResolver(
       [&images, &views,
@@ -1921,9 +1948,7 @@ int XuzzApp::run(const int argc, char **argv) {
       std::string(xanadu::settings::kKeymapTelescopeToggleF3),
       "toggle decentralized swarm telescope overlay", toggleTelescopeAction);
 
-  const auto toggleQuotationAction = [&quotationOverlay] {
-    quotationOverlay.toggle();
-  };
+  const auto toggleQuotationAction = [&toggleQuotation] { toggleQuotation(); };
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapQuotationToggle),
       "toggle quoted structure builder overlay", toggleQuotationAction);

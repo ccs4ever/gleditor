@@ -990,25 +990,26 @@ std::size_t Session::storeIndexOf(const std::uint32_t docIndex) const {
   return docIndex < open.size() ? open[docIndex].storeIndex : 0U;
 }
 
-std::optional<MicroversionId>
-Session::versionShowing(const std::vector<PrimediaSpan> &ends,
-                        const std::vector<MicroversionId> &except) const {
+std::optional<Session::VersionInStore> Session::versionShowing(
+    const std::vector<PrimediaSpan> &ends,
+    const std::vector<std::pair<std::size_t, MicroversionId>> &except) const {
   if (ends.empty()) {
     return std::nullopt;
   }
-  for (const auto &entry : stores) {
+  for (std::size_t index = 0; index < stores.size(); ++index) {
+    const auto &entry = stores[index];
     if (!entry.store) {
       continue;
     }
     auto candidates = entry.store->allVersions();
     for (const auto &id : std::ranges::reverse_view(candidates)) {
-      if (std::ranges::find(except, id) != except.end()) {
+      if (std::ranges::find(except, std::pair{index, id}) != except.end()) {
         continue;
       }
       const auto pieces = entry.store->rebuild(id);
       for (const auto &span : ends) {
         if (!pieces.occurrencesOf(span).empty()) {
-          return id;
+          return VersionInStore{.storeIndex = index, .version = id};
         }
       }
     }

@@ -18,8 +18,13 @@ QuotationBuilder::setForeignStore(std::string scrollKey, const Store *store,
   sealedAs_                = sealedAs;
 
   if (foreignStore_ != nullptr) {
-    config_.pinnedVersion = pinnedVersion.value_or(foreignStore_->latest());
-    foreignFold_          = std::make_shared<zigzag::Manifold>(
+    // The state with the slice in it: a store's newest state can be on a
+    // text branch that holds none of its cells, and a quotation pinned there
+    // found not even the home cell.
+    const auto sliced     = zigzag::noCell != foreignStore_->homeCell();
+    config_.pinnedVersion = pinnedVersion.value_or(
+        sliced ? foreignStore_->structureHead() : foreignStore_->latest());
+    foreignFold_ = std::make_shared<zigzag::Manifold>(
         foreignStore_->rebuildManifold(config_.pinnedVersion));
 
     if (config_.rootRef.produces.isZero() &&

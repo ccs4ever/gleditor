@@ -525,12 +525,18 @@ public:
    * linear in the operations behind it. Meant to be asked once when a link
    * first needs following, not per frame.
    *
-   * @param except States to pass over, which is how the documents already open
-   *        are excluded.
+   * @param except States to pass over, by store, which is how the documents
+   *        already open are excluded.
+   * @return The state and the store it is a state of: version names are only
+   *         unique within one store.
    */
-  [[nodiscard]] std::optional<MicroversionId>
-  versionShowing(const std::vector<PrimediaSpan> &ends,
-                 const std::vector<MicroversionId> &except) const;
+  struct VersionInStore {
+    std::size_t storeIndex{};
+    MicroversionId version;
+  };
+  [[nodiscard]] std::optional<VersionInStore> versionShowing(
+      const std::vector<PrimediaSpan> &ends,
+      const std::vector<std::pair<std::size_t, MicroversionId>> &except) const;
 
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.

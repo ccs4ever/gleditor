@@ -102,6 +102,13 @@ public:
     activeVersion_ = version;
     return this;
   }
+  /// Build into @p store at @p version from now on.
+  QuotationBuilderOverlay *setTarget(Store &store,
+                                     MicroversionId version) noexcept {
+    localStore_    = &store;
+    activeVersion_ = version;
+    return this;
+  }
   [[nodiscard]] MicroversionId activeVersion() const noexcept {
     return activeVersion_;
   }
@@ -121,7 +128,8 @@ public:
   bool commitQuotation();
 
 private:
-  Store &localStore_;
+  /// Where a quotation is built: the document read when the builder opened.
+  Store *localStore_;
   MicroversionId activeVersion_;
   RendererRef renderer_;
   SwarmCatalog *catalog_{nullptr};

@@ -188,12 +188,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
             .to   = one.to,
         });
       }
-      // The opener opens a version of the primary store, so only its
-      // half-links can bring their far document over.
-      if (0 == store) {
-        for (auto &one : unplaced) {
-          dangling.push_back(Dangling{.link = std::move(one), .looked = false});
-        }
+      for (auto &one : unplaced) {
+        dangling.push_back(Dangling{.link = std::move(one), .looked = false});
       }
     }
   };
@@ -1312,10 +1308,10 @@ bool LinkBeams::openDangling(RenderState &state) {
   // Every version already on screen, so that the search does not offer back a
   // document that is open -- which for a link whose ends are both quoted from
   // one state is otherwise the first thing it would find.
-  std::vector<MicroversionId> open;
+  std::vector<std::pair<std::size_t, MicroversionId>> open;
   open.reserve(session.views().size());
   for (const auto &view : session.views()) {
-    open.push_back(view.version);
+    open.emplace_back(view.storeIndex, view.version);
   }
 
   for (auto &waiting : dangling) {
@@ -1330,9 +1326,10 @@ bool LinkBeams::openDangling(RenderState &state) {
     if (!showing) {
       continue;
     }
-    GLEDITOR_LOG_DEBUG("xudu.links", "link {} reaches {}, opening it",
-                       waiting.link.link, showing->str());
-    opener(*showing);
+    GLEDITOR_LOG_DEBUG(
+        "xudu.links", "link {} reaches {} of store {}, opening it",
+        waiting.link.link, showing->version.str(), showing->storeIndex);
+    opener(showing->version, showing->storeIndex);
     // One a frame. Opening a document is a load and a page build, and the
     // strands are worked out again when it lands, which is when the next one
     // can be judged -- so there is more to come.
