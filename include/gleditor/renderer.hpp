@@ -321,6 +321,10 @@ protected:
     int x{};
     int y{};
     PickAnswer then;
+    /// Whether the device took the read. One it refused -- a backend with a
+    /// result still uncollected drops the request -- is asked again next
+    /// frame, or it would wait for an answer that never comes.
+    bool requested{};
   };
   std::vector<PendingPickAnswer> pickAnswers;
   std::vector<gleditor::PickObserver *> pickObservers;
@@ -455,7 +459,9 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
-  void requestPick(RenderState &state, int x, int y);
+  /// Whether the device took the read; one it refused is the caller's to
+  /// ask again.
+  bool requestPick(RenderState &state, int x, int y);
 
 public:
   void pickThen(int x, int y, PickAnswer then) override;
