@@ -89,11 +89,13 @@ public:
   }
 
   /// The links on screen, in the stable order Next/Previous link walk.
-  void setCandidates(const std::vector<zigzag::CellRef> &linkIds);
+  void setCandidates(std::vector<xanadu::LinkKey> keys) {
+    navigator.setCandidates(std::move(keys));
+  }
 
-  /// The key of link @p id in the primary store, which holds every link the
-  /// beams draw; federated links need their own authority design.
-  [[nodiscard]] xanadu::LinkKey keyOf(zigzag::CellRef id) const;
+  /// The key of link @p id in open store @p store, the one it was forged in.
+  [[nodiscard]] xanadu::LinkKey keyOf(std::size_t store,
+                                      zigzag::CellRef id) const;
 
   /**
    * @brief Carry out @p command. Render thread only: it may move the caret.

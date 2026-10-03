@@ -32,17 +32,9 @@ std::optional<xanadu::LinkKey> keyNamed(const xanadu::NavigationCommand &c) {
 
 } // namespace
 
-void LinkContext::setCandidates(const std::vector<zigzag::CellRef> &linkIds) {
-  std::vector<xanadu::LinkKey> keys;
-  keys.reserve(linkIds.size());
-  for (const auto id : linkIds) {
-    keys.push_back(keyOf(id));
-  }
-  navigator.setCandidates(std::move(keys));
-}
-
-xanadu::LinkKey LinkContext::keyOf(const zigzag::CellRef id) const {
-  return {.authority = session.store().documentId(), .id = id};
+xanadu::LinkKey LinkContext::keyOf(const std::size_t store,
+                                   const zigzag::CellRef id) const {
+  return {.authority = session.store(store).documentId(), .id = id};
 }
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
