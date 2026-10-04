@@ -231,4 +231,31 @@ TEST_F(StoreFormatRoundTripTest,
   EXPECT_EQ(reloaded.formatAttributeOf(stored), FormatAttribute::Underline);
 }
 
+TEST_F(StoreFormatRoundTripTest, removedFormattingStaysRemovedAfterReload) {
+  MicroversionId version;
+  {
+    Store store(perma);
+    version        = store.insert({}, 0, "alpha bravo");
+    const auto all = store.rebuild(version).spansFor(0, 11);
+    version = store.setFormat(version, all, FormatAttribute::Overline, true);
+    const auto middle = store.rebuild(version).spansFor(2, 5);
+    version =
+        store.setFormat(version, middle, FormatAttribute::Overline, false);
+    store.save(dir.string());
+  }
+  Store reloaded(perma);
+  reloaded.load(dir.string());
+  const auto &link = reloaded.links().begin()->second;
+  ASSERT_EQ(link.left.size(), 2U);
+  EXPECT_EQ(link.left[0].length, 2U);
+  EXPECT_EQ(link.left[1].length, 4U);
+  const auto all = reloaded.rebuild(version).spansFor(0, 11);
+  version = reloaded.setFormat(version, all, FormatAttribute::Overline, false);
+  reloaded.save(dir.string());
+  Store again(perma);
+  again.load(dir.string());
+  ASSERT_EQ(again.links().size(), 1U);
+  EXPECT_TRUE(again.links().begin()->second.left.empty());
+}
+
 } // namespace

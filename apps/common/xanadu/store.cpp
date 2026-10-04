@@ -1213,10 +1213,10 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
       if (states.empty()) states.resize(versions.size());
       const auto links = manifold.dimensionsOf(slot.birthOp);
       states[vIdx]     = CellState{
-          .text  = manifold.textOf(slot.birthOp, *this),
-          .kind  = slot.valueKind,
-          .bits  = slot.valueBits,
-          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+              .text  = manifold.textOf(slot.birthOp, *this),
+              .kind  = slot.valueKind,
+              .bits  = slot.valueBits,
+              .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
     }
   }
   for (const auto &[ref, states] : cells) {
@@ -1864,6 +1864,68 @@ MicroversionId Store::addLink(const MicroversionId &parent, Link link) {
   return curHead;
 }
 
+MicroversionId Store::setFormat(const MicroversionId &parent,
+                                const std::span<const PrimediaSpan> content,
+                                const FormatAttribute attribute,
+                                const bool enabled) {
+  if (content.empty()) return parent;
+  if (enabled) {
+    Link link;
+    link.type  = LinkType::Format;
+    link.owner = "local";
+    link.left.assign(content.begin(), content.end());
+    link.right.push_back(vocabularySpanFor(attribute));
+    return addLink(parent, std::move(link));
+  }
+  // Copy before appending: a new fold updates the link table while we edit.
+  std::vector<Link> affected;
+  for (const auto &[link, named] : formatLinks()) {
+    if (named == attribute) affected.push_back(link);
+  }
+  auto head = parent;
+  for (const auto &link : affected) {
+    auto retained = link.left;
+    for (const auto &removed : content) {
+      std::vector<PrimediaSpan> next;
+      for (const auto &span : retained) {
+        const auto overlap = span.intersect(removed);
+        if (overlap.empty()) {
+          next.push_back(span);
+          continue;
+        }
+        if (span.start < overlap.start) {
+          next.push_back(PrimediaSpan{.scroll = span.scroll,
+                                      .start  = span.start,
+                                      .length = overlap.start - span.start});
+        }
+        if (overlap.end() < span.end()) {
+          next.push_back(PrimediaSpan{.scroll = span.scroll,
+                                      .start  = overlap.end(),
+                                      .length = span.end() - overlap.end()});
+        }
+      }
+      retained = std::move(next);
+    }
+    if (retained == link.left) continue;
+    const auto manifold = rebuildManifold(head);
+    const auto dim      = manifold.dimensionNamed("d.from", *this);
+    if (!dim) continue;
+    const auto endpoint =
+        manifold.linked(link.id, *dim, zigzag::DimVector::POS);
+    if (!endpoint) continue;
+    std::uint64_t length = 0;
+    for (const auto &span : link.left) length += span.length;
+    head = spliceCellSpan(head, *endpoint, 0, length, PrimediaSpan{});
+    std::uint64_t at = 0;
+    for (const auto &span : retained) {
+      head = spliceCellSpan(head, *endpoint, at, 0, span);
+      at += span.length;
+    }
+    syncLinksFromRank(rebuildManifold(head));
+  }
+  return head;
+}
+
 std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
   if (LinkType::Format != link.type || link.right.empty()) {
     return std::nullopt;
@@ -2216,7 +2278,7 @@ void Store::syncScrollsFromRank(const zigzag::Manifold &manifold) {
 
 void Store::syncLinksFromRank(const zigzag::Manifold &manifold) {
   const auto mlinks = manifold.links(*this);
-  linkTable.insert(mlinks.begin(), mlinks.end());
+  for (const auto &[id, link] : mlinks) linkTable.insert_or_assign(id, link);
 }
 
 MicroversionId Store::registerScroll(const MicroversionId &parent,
@@ -2471,8 +2533,8 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
           currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
       if (placeholder && *placeholder != zigzag::noCell) {
         const auto dimOriginCell = ensureDim("d.origin-cell");
-        curHead = setLink(curHead, itemCell, dimOriginCell,
-                          zigzag::DimVector::POS, *placeholder);
+        curHead                  = setLink(curHead, itemCell, dimOriginCell,
+                                           zigzag::DimVector::POS, *placeholder);
         updateFold(curHead);
       }
     }

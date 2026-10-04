@@ -726,6 +726,12 @@ public:
    */
   MicroversionId addLink(const MicroversionId &parent, Link link);
 
+  /// Set an attribute on content addresses. Removing it splices only those
+  /// addresses out of existing format endsets; previous operations stay intact.
+  MicroversionId setFormat(const MicroversionId &parent,
+                           std::span<const PrimediaSpan> content,
+                           FormatAttribute attribute, bool enabled);
+
   [[nodiscard]] const std::map<zigzag::CellRef, Link> &links() const {
     return linkTable;
   }

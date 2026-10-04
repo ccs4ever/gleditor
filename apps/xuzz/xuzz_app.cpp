@@ -698,31 +698,32 @@ int XuzzApp::run(const int argc, char **argv) {
         } else if (id == "format:bold") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Bold));
+              gleditor::decorationBit(gleditor::Decoration::Bold), true);
         } else if (id == "format:italic") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Italic));
+              gleditor::decorationBit(gleditor::Decoration::Italic), true);
         } else if (id == "format:underline") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Underline));
+              gleditor::decorationBit(gleditor::Decoration::Underline), true);
         } else if (id == "format:superscript") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Superscript));
+              gleditor::decorationBit(gleditor::Decoration::Superscript), true);
         } else if (id == "format:overline") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Overline));
+              gleditor::decorationBit(gleditor::Decoration::Overline), true);
         } else if (id == "format:strikethrough") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Strikethrough));
+              gleditor::decorationBit(gleditor::Decoration::Strikethrough),
+              true);
         } else if (id == "format:subscript") {
           session->markDecorated(
               docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Subscript));
+              gleditor::decorationBit(gleditor::Decoration::Subscript), true);
         } else if (id == "align:left") {
           session->setAlignment(docIndex, charOffset, charLength,
                                 gleditor::TextAlign::Left);
@@ -752,8 +753,8 @@ int XuzzApp::run(const int argc, char **argv) {
         }
         // Formatting changes no text; the page is redrawn to show it.
         if (id.starts_with("format:") || id.starts_with("align:")) {
-          renderer->runWithState([&views, docIndex](RenderState &rState) {
-            views.reloadDocument(rState, docIndex);
+          renderer->runWithState([&views](RenderState &rState) {
+            views.reloadFormatting(rState);
           });
         }
       });
@@ -2077,19 +2078,20 @@ int XuzzApp::run(const int argc, char **argv) {
   // asked: the formatting was stored and appeared only after a reload.
   const auto applyDecoration = [&session, &views,
                                 renderer](const gleditor::Decoration deco) {
-    renderer->runWithState([&session, &views, renderer,
-                            deco](RenderState &rState) {
-      auto *const caret = renderer->editCaret();
-      if (caret && caret->active() &&
-          caret->documentIndex() < rState.docs.size() &&
-          caret->hasSelection()) {
-        const auto doc   = caret->documentIndex();
-        const auto start = caret->selectionStart();
-        const auto len   = caret->selectionEnd() - start;
-        session->markDecorated(doc, start, len, gleditor::decorationBit(deco));
-        views.reloadDocument(rState, doc);
-      }
-    });
+    renderer->runWithState(
+        [&session, &views, renderer, deco](RenderState &rState) {
+          auto *const caret = renderer->editCaret();
+          if (caret && caret->active() &&
+              caret->documentIndex() < rState.docs.size() &&
+              caret->hasSelection()) {
+            const auto doc   = caret->documentIndex();
+            const auto start = caret->selectionStart();
+            const auto len   = caret->selectionEnd() - start;
+            session->markDecorated(doc, start, len,
+                                   gleditor::decorationBit(deco), true);
+            views.reloadFormatting(rState);
+          }
+        });
   };
 
   app.commands().registerAction(

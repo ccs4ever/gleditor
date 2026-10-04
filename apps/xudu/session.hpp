@@ -723,7 +723,8 @@ public:
   void markDecorated(Doc &doc, std::uint32_t at, std::uint32_t length,
                      gleditor::DecorationMask mask);
   void markDecorated(std::size_t docIndex, std::uint32_t at,
-                     std::uint32_t length, gleditor::DecorationMask mask);
+                     std::uint32_t length, gleditor::DecorationMask mask,
+                     bool toggle = false);
 
   /**
    * @brief Apply paragraph alignment over [@p at, @p at + @p length).

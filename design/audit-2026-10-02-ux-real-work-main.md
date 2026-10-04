@@ -209,3 +209,10 @@ The harness gaps are closed too: `--select` moves the keyboard to the documents 
 `tools/repl-transcript.py` drives a REPL through a PTY for the terminal journeys (`9ed4230`). F2 and
 Ctrl+1–5 stay shared between a document action and a ZigZag action by scope, as intended. The
 orphaned `xuzz` livelock was not reproduced.
+
+## Remaining-gap follow-up
+
+The [2026-10-03 follow-up](audit-2026-10-03-ux-validation-gaps.md) checks camera restoration,
+in-session close/reopen, many-member and cross-store links, and additional backends. Camera and link
+checks pass within its stated scope. Reopening a closed document inside the application resets its
+caret; the File submenu still lacks Close. See that report for evidence and limits.

@@ -235,6 +235,7 @@ void Views::showAlongside(const MicroversionId &version, const float depthZ,
         rState.docs.back()->addObserver(&session);
         session.viewOpened(version, storeIndex, focusedBirth);
         map.setCurrent(session.views().front().version);
+        reloadFormatting(rState);
         syncMediaWidgets(rState);
       });
 }
@@ -847,6 +848,17 @@ void Views::preserveAnswers(const std::size_t storeIdx,
 
 void Views::closeDocument(const std::uint32_t docIndex) {
   session.flushUncommitted(docIndex);
+  const auto place = currentPlace();
+  if (docIndex < place.documents.size()) {
+    auto closed      = place;
+    closed.documents = {place.documents[docIndex]};
+    closed.active    = 0;
+    std::erase_if(closedPlaces_, [&closed](const auto &saved) {
+      return saved.documents.front().storePath ==
+             closed.documents.front().storePath;
+    });
+    closedPlaces_.push_back(std::move(closed));
+  }
   renderer->push(RenderItemCloseDoc(docIndex));
   renderer->runWithState([this, docIndex](RenderState &rState) {
     session.viewClosed(docIndex);
@@ -880,6 +892,26 @@ void Views::activateNewest() {
       activateDocument(rState,
                        static_cast<std::uint32_t>(rState.docs.size() - 1));
     }
+  });
+}
+
+void Views::activateReopened(const std::size_t storeIndex) {
+  const auto saved = std::ranges::find_if(
+      closedPlaces_, [this, storeIndex](const auto &place) {
+        return place.documents.front().storePath == session.path(storeIndex);
+      });
+  if (saved == closedPlaces_.end()) {
+    activateNewest();
+    return;
+  }
+  const auto place = *saved;
+  renderer->runWithState([this, place, storeIndex](RenderState &) {
+    if (session.views().empty()) return;
+    const auto index  = static_cast<std::uint32_t>(session.views().size() - 1);
+    const auto &view  = session.views().back();
+    const auto length = static_cast<std::uint32_t>(
+        session.sourceFor(view.version, storeIndex)->text().size());
+    restorePlace(place, {index}, {length});
   });
 }
 
@@ -1071,6 +1103,12 @@ void Views::reloadDocument(RenderState &rState, const std::uint32_t docIndex) {
           session.sourceFor(view.version, view.storeIndex, view.focusedBirth)) {
     rState.docs[docIndex]->load(*src);
     syncMediaWidgets(rState);
+  }
+}
+
+void Views::reloadFormatting(RenderState &rState) {
+  for (std::uint32_t i = 0; i < session.views().size(); ++i) {
+    reloadDocument(rState, i);
   }
 }
 
@@ -1317,9 +1355,16 @@ void Views::openDocumentFromPath(const std::string &chosen) {
     try {
       const auto sIdx = session.loadAuxiliaryStore(chosen);
       auto &st        = session.store(sIdx);
-      const auto head = st.primaryCurrentVersion();
+      auto head       = st.primaryCurrentVersion();
+      const auto saved =
+          std::ranges::find_if(closedPlaces_, [this, sIdx](const auto &place) {
+            return place.documents.front().storePath == session.path(sIdx);
+          });
+      if (saved != closedPlaces_.end()) {
+        head = MicroversionId::parse(saved->documents.front().version);
+      }
       showAlongside(head, 0.0F, sIdx);
-      activateNewest();
+      activateReopened(sIdx);
       std::cout << "xudu: opened store " << chosen << " (store " << sIdx
                 << ")\n";
     } catch (const std::exception &err) {

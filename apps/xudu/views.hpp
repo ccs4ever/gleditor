@@ -146,6 +146,7 @@ public:
   void closeDocument(std::uint32_t docIndex);
   void closeActive();
   void activateNewest();
+  void activateReopened(std::size_t storeIndex);
   void activateDocument(RenderState &rState, std::uint32_t index);
   std::size_t newDocument();
 
@@ -176,6 +177,7 @@ public:
   /// Redraw @p docIndex from its current version: what an edit that changes
   /// no text -- a format link, an alignment -- needs to be seen at all.
   void reloadDocument(RenderState &rState, std::uint32_t docIndex);
+  void reloadFormatting(RenderState &rState);
   void insertPageBreakAtCaret();
 
   void exportOsmic();
@@ -228,6 +230,7 @@ private:
   std::weak_ptr<Doc> presentationAnchor_;
   std::function<bool()> pendingCamera_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
+  std::vector<xanadu::ReadingPlace> closedPlaces_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};

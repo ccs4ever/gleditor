@@ -25,6 +25,7 @@
 #include <tuple>
 #include <vector>
 
+#include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/link_package.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/publication.hpp"
@@ -278,7 +279,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  std::ignore    = std::system(py.c_str());
+  std::ignore = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -478,8 +479,8 @@ TEST(E2EBinaryOrchestrationTest,
   Store storeA(permascrollAt(testRoot / "permascroll"));
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
-                      "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
+  auto pubA      = publish(storeA, vA1, authorA, "xanadoc_a",
+                           "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
   pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
 
   const auto pubAPath = testRoot / "xanadoc_a.manifest";
@@ -806,6 +807,59 @@ TEST(E2EBinaryOrchestrationTest, aHeadlessScriptRuns) {
   EXPECT_THAT(result.output, ::testing::HasSubstr("typed headless"));
 }
 
+TEST(E2EBinaryOrchestrationTest, closeAndOpenRestoresTheSelection) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_reopen";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path   = root / "notes";
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") + " --backend " +
+      activeBackend() + " --headless --profile " + path.string() +
+      " --type 'Camera and caret restoration probe alpha bravo charlie.'"
+      " --select 10,30 --chord Ctrl+W --chord Ctrl+O --key tab --type " +
+      path.string() + " --key enter --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 30 from 10]"));
+  EXPECT_THAT(result.output, testing::HasSubstr("(store 0)"));
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  // Closing and reopening are reader movement, so only the typing earns an op.
+  EXPECT_EQ(reopened.opCount(), 1U);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     repeatedOverlineCommandPreservesOtherAttributes) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_toggle";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path   = root / "notes";
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") + " --backend " +
+      activeBackend() + " --headless --profile " + path.string() +
+      " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+U"
+      " --chord Ctrl+Alt+O --chord Ctrl+Alt+O --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  const auto spans = reopened.rebuild(reopened.latest()).spansFor(0, 5);
+  const auto resultFormat =
+      xanadu::FormatResolver(reopened).resolveSpans(spans);
+  ASSERT_EQ(resultFormat.decoratedRanges.size(), 1U);
+  EXPECT_TRUE(
+      gleditor::hasDecoration(resultFormat.decoratedRanges.front().decorations,
+                              gleditor::Decoration::Underline));
+}
+
 TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
@@ -817,9 +871,9 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
-                          " timeout 120 " + xuduBin.string() + " --backend " +
-                          activeBackend() + " --profile " + script);
+                               " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                               " timeout 120 " + xuduBin.string() + " --backend " +
+                               activeBackend() + " --profile " + script);
   };
   const auto untitled = [&] {
     std::vector<fs::path> found;
@@ -1403,8 +1457,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pages) +
                                  "x" + std::to_string(pages) + "_pages";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1479,8 +1533,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
                                  "x" + std::to_string(pagesB) + "_asymmetric";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1913,10 +1967,10 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
            "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
   }
   const auto storePath = testRoot / "store";
-  const auto res = executeProcess(xuduBin.string() +
-                                  permascrollFlag(testRoot / "permascroll") +
-                                  " --headless --structure-script " +
-                                  script.string() + " " + storePath.string());
+  const auto res       = executeProcess(xuduBin.string() +
+                                        permascrollFlag(testRoot / "permascroll") +
+                                        " --headless --structure-script " +
+                                        script.string() + " " + storePath.string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   Store store(permascrollAt(testRoot / "permascroll"));
@@ -2127,8 +2181,8 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer = store.transclude(textVer, at, pngVersion, 0,
-                             static_cast<std::uint32_t>(pngBytes.size()));
+  textVer          = store.transclude(textVer, at, pngVersion, 0,
+                                      static_cast<std::uint32_t>(pngBytes.size()));
   at += static_cast<std::uint32_t>(pngBytes.size());
   textVer = store.insert(textVer, at, between);
   at += static_cast<std::uint32_t>(between.size());

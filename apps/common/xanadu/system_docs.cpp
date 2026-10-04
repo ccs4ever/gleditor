@@ -2926,13 +2926,15 @@ gleditor::RadialConfig createDefaultRadialConfig() {
   // Entries naming a keymap action run it, so a menu and a key reach the
   // same command and neither can drift from the other.
   auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
-  fileAction.desc = "New and Open";
+  fileAction.desc = "File";
   fileAction.subActions = {
       makeAction("run:std:xudu/new_doc", "New xanadoc", "+",
                  "run:std:xudu/new_doc"),
       makeAction("run:std:xuzz/new_slice", "New slice", "#",
                  "run:std:xuzz/new_slice"),
       makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
+      makeAction("run:std:xudu/close", "Close document", "X",
+                 "run:std:xudu/close"),
   };
 
   auto viewAction = makeAction("group:view", "View", "V", "subwheel:view");

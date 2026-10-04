@@ -863,6 +863,13 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
 }
 
 std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
+  const auto requested = std::filesystem::weakly_canonical(aPath);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (!path(i).empty() &&
+        std::filesystem::weakly_canonical(path(i)) == requested) {
+      return i;
+    }
+  }
   auto perma    = (stores.empty() || !stores[0].store)
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
@@ -1665,7 +1672,10 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
   }
 
   // Extract presentation formatting and paragraph alignment from Format links
-  const FormatResolver formatResolver(st);
+  FormatResolver formatResolver(st);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (i != storeIndex) formatResolver.include(store(i), st);
+  }
   auto formattingResult = formatResolver.resolveVersion(rebuilt);
   std::vector<gleditor::DecoratedRange> decoratedRanges =
       std::move(formattingResult.decoratedRanges);
@@ -2105,7 +2115,8 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
 
 void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
                             const std::uint32_t length,
-                            const gleditor::DecorationMask mask) {
+                            const gleditor::DecorationMask mask,
+                            const bool toggle) {
   if (docIndex >= open.size()) {
     return;
   }
@@ -2137,6 +2148,11 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     return;
   }
   auto version = open[docIndex].version;
+  FormatResolver resolver(st);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (i != sIdx) resolver.include(store(i), st);
+  }
+  const auto formatted = resolver.resolveSpans(content);
   for (const auto decoration :
        {gleditor::Decoration::Bold, gleditor::Decoration::Italic,
         gleditor::Decoration::Underline, gleditor::Decoration::Overline,
@@ -2148,6 +2164,47 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     const auto attribute = xudu::formatAttributeFromDecoration(decoration);
     if (!attribute) {
       continue;
+    }
+    if (toggle) {
+      std::vector<std::pair<std::uint32_t, std::uint32_t>> ranges;
+      for (const auto &range : formatted.decoratedRanges) {
+        if (gleditor::hasDecoration(range.decorations, decoration)) {
+          ranges.emplace_back(range.start, range.end);
+        }
+      }
+      std::ranges::sort(ranges);
+      std::uint64_t covered = 0;
+      for (const auto &[first, last] : ranges) {
+        if (first > covered) break;
+        covered = std::max(covered, static_cast<std::uint64_t>(last));
+      }
+      std::uint64_t total = 0;
+      for (const auto &span : content) total += span.length;
+      if (covered >= total) {
+        for (std::size_t i = 0; i < stores.size(); ++i) {
+          auto &authority = store(i);
+          std::vector<PrimediaSpan> mapped;
+          for (const auto &span : content) {
+            if (const auto address =
+                    FormatResolver::spanIn(st, authority, span)) {
+              mapped.push_back(*address);
+            }
+          }
+          auto parent = i == sIdx ? version : authority.latest();
+          const auto next =
+              authority.setFormat(parent, mapped, *attribute, false);
+          if (next != parent) {
+            for (std::size_t view = 0; view < open.size(); ++view) {
+              if (open[view].storeIndex == i && open[view].version == parent) {
+                refresh(static_cast<std::uint32_t>(view), next);
+              }
+            }
+            if (i == sIdx) version = next;
+            save(i);
+          }
+        }
+        continue;
+      }
     }
     Link link;
     link.type  = LinkType::Format;
