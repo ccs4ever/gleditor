@@ -157,3 +157,75 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
 }
 
 } // namespace
+
+TEST(PublicationUiTest, aSliceCanBeAddedToTheCurrentTextStoreAndReopened) {
+  ASSERT_TRUE(fs::exists(built("xuzz")));
+  const auto root = fs::current_path() / "build" / "publication_same_store";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto store       = root / "story";
+  const auto permascroll = root / "permascroll";
+  const auto launch      = [&](const std::string &script) {
+    return run("XDG_CONFIG_HOME=" + (root / "config").string() +
+               " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+               built("xuzz").string() + " " + store.string() +
+               " --permascroll " + permascroll.string() + " --profile " +
+               script);
+  };
+  const auto first = launch("--type 'Story Ideas' --chord Ctrl+Alt+Shift+N"
+                            " --chord N --chord E --type alpha --chord Return"
+                            " --dump-a11y --capture " +
+                            (root / "slice.ppm").string());
+  ASSERT_EQ(first.exitCode, 0) << first.output;
+  EXPECT_THAT(first.output,
+              ::testing::HasSubstr("started a new slice (store 0)"));
+  EXPECT_THAT(first.output, ::testing::Not(::testing::HasSubstr(
+                                "created new sovereign document")));
+  const auto dump = [&] {
+    return run(built("xudu-dump").string() + " --section=ops --permascroll=" +
+               permascroll.string() + " " + store.string());
+  };
+  const auto before = dump();
+  ASSERT_EQ(before.exitCode, 0) << before.output;
+  EXPECT_THAT(before.output, ::testing::HasSubstr("Story Ideas"));
+  EXPECT_THAT(before.output,
+              ::testing::ContainsRegex("setValue.*text=\"alpha\""));
+  const auto reopened =
+      launch("--dump-a11y --capture " + (root / "reopened.ppm").string());
+  ASSERT_EQ(reopened.exitCode, 0) << reopened.output;
+  const auto after = dump();
+  ASSERT_EQ(after.exitCode, 0) << after.output;
+  EXPECT_THAT(after.output, ::testing::HasSubstr("Story Ideas"));
+  EXPECT_THAT(after.output,
+              ::testing::ContainsRegex("setValue.*text=\"alpha\""));
+}
+
+TEST(PublicationUiTest, telescopeSearchDoesNotWriteIntoTheDocument) {
+  ASSERT_TRUE(fs::exists(built("xuzz")));
+  const auto root = fs::current_path() / "build" / "publication_search";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto store       = root / "notes";
+  const auto permascroll = root / "permascroll";
+  const auto session =
+      run("XDG_CONFIG_HOME=" + (root / "config").string() + " XDG_DATA_HOME=" +
+          (root / "data").string() + " timeout 120 " + built("xuzz").string() +
+          " " + store.string() + " --permascroll " + permascroll.string() +
+          " --profile --type 'Private notes.' --chord F3"
+          " --type 'Ideas café' --chord Backspace --dump-a11y --capture " +
+          (root / "search.ppm").string() +
+          " --chord Escape --dump-a11y --capture " +
+          (root / "document.ppm").string());
+  ASSERT_EQ(session.exitCode, 0) << session.output;
+  EXPECT_THAT(session.output,
+              ::testing::HasSubstr("Search publications\" = \"Ideas caf\""));
+  EXPECT_THAT(session.output,
+              ::testing::HasSubstr("focus: Search publications"));
+  const auto dump = run(built("xudu-dump").string() +
+                        " --section=ops --permascroll=" + permascroll.string() +
+                        " " + store.string());
+  ASSERT_EQ(dump.exitCode, 0) << dump.output;
+  EXPECT_THAT(dump.output, ::testing::HasSubstr("Private notes."));
+  EXPECT_THAT(dump.output, ::testing::Not(::testing::HasSubstr("Ideas")));
+  EXPECT_THAT(dump.output, ::testing::Not(::testing::HasSubstr("caf")));
+}

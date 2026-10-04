@@ -7,6 +7,11 @@
 #include <algorithm>
 #include <array>
 #include <format>
+#include <limits>
+#include <memory>
+#include <mutex>
+
+#include <lmdb.h>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -529,19 +534,8 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   }
 
   if (!into.empty()) {
-    // A directory named as the torrent names it, holding the files it
-    // describes, so that a seeder handed this finds what it expects.
-    const std::filesystem::path dir = std::filesystem::path(into) / name;
-    std::filesystem::create_directories(dir);
-    {
-      std::ofstream out(std::filesystem::path(into) / (name + ".torrent"),
-                        std::ios::binary);
-      out << sealed.torrentFile;
-    }
-    for (const auto &file : files) {
-      std::ofstream out(dir / file.path, std::ios::binary);
-      out << file.data;
-    }
+    (void)writeTorrentSeed(into, MadeTorrent{sealed.torrentFile, sealed.hash},
+                           files);
   }
   return sealed;
 }
@@ -832,7 +826,8 @@ std::string sealableOps(const Store &store,
   for (std::uint32_t index = sinceExclusive + 1;
        index <= store.segmentedOps().size(); index++) {
     const auto *const node = store.segmentedOps().get(index);
-    if (nullptr == node || node->scrollId == localScroll) {
+    if (nullptr == node || node->scrollId == localScroll ||
+        node->scrollId == breakMarkerScroll) {
       continue; // zero is the scroll being sealed; see sealableOps()'s comment
     }
     if (named.contains(node->scrollId)) {
@@ -896,6 +891,7 @@ void applyOpsSegment(const std::string_view sealed, Store &history,
   // stream.
   std::map<ScrollId, ScrollId> remap;
   remap.emplace(localScroll, selfScrollInHistory);
+  remap.emplace(breakMarkerScroll, breakMarkerScroll);
   for (std::uint64_t i = 0; i < count; i++) {
     std::uint64_t id     = 0;
     std::uint64_t keyLen = 0;
@@ -1121,6 +1117,29 @@ Publication publish(const Store &store, const MicroversionId &version,
     }
   }
 
+  if (!opsSegments.empty()) {
+    // A history may quote scrolls absent from the selected document's current
+    // EDL: deleted quotations, other branches and cells still need their bytes.
+    const auto include = [&](const PrimediaSpan &span) {
+      if (span.scroll == breakMarkerScroll) return;
+      const auto global = globalise(store, span, localSealedAs);
+      const auto scroll = scrollFor(span);
+      if (!global || !scroll || global->scroll.empty()) {
+        throw std::runtime_error(std::format(
+            "cannot publish history: scroll {} has not been published",
+            span.scroll));
+      }
+      pub.scrolls.insert_or_assign(global->scroll, *scroll);
+    };
+    for (std::uint32_t i = 1; i <= store.segmentedOps().size(); ++i) {
+      if (const auto *node = store.segmentedOps().get(i)) include(node->span());
+    }
+    for (const auto &link : store.linkView()) {
+      for (const auto &span : link.left) include(span);
+      for (const auto &span : link.right) include(span);
+    }
+  }
+
   pub.signature = signMutableItem(publicationSigningBuffer(pub), keys);
   return pub;
 }
@@ -1199,27 +1218,107 @@ Library::linksTouching(const GlobalSpan &span) const {
   return out;
 }
 
-Publication
-publishDocument(Store &store, const MicroversionId &version,
-                const MutableKeys &documentKeys, std::string salt,
-                std::string title, const std::int64_t sequence,
-                const std::uint64_t published,
-                const SignedProvenance &permascrollProvenance,
-                [[maybe_unused]] const SignedProvenance &documentProvenance,
-                const std::string &torrentOutputDir,
-                const std::vector<PublishedHoleRecord> &holes) {
-  if (!torrentOutputDir.empty()) {
-    std::error_code ec;
-    std::filesystem::create_directories(torrentOutputDir, ec);
+std::int64_t reservePublicationSequence(const std::filesystem::path &directory,
+                                        const PublicKey &publisher,
+                                        const std::string_view salt,
+                                        const std::int64_t observedFloor) {
+  if (directory.empty() || publisher.isZero() || salt.size() > 64 ||
+      observedFloor < 0) {
+    throw std::invalid_argument(
+        "invalid publication sequence identity or floor");
   }
-  if (store.userPermascrollPtr()) {
-    store.userPermascrollPtr()->sealIncremental(torrentOutputDir,
-                                                permascrollProvenance, holes);
+  // LMDB permits one environment handle per path in a process. Opening only
+  // within this guard keeps its process locks intact, including on close.
+  static std::mutex mutex;
+  const std::scoped_lock lock(mutex);
+  std::filesystem::create_directories(directory);
+  const auto check = [](const int rc) {
+    if (MDB_SUCCESS != rc) {
+      throw std::runtime_error("publication sequence: " +
+                               std::string(mdb_strerror(rc)));
+    }
+  };
+  MDB_env *rawEnv = nullptr;
+  check(mdb_env_create(&rawEnv));
+  const std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(rawEnv,
+                                                               mdb_env_close);
+  check(mdb_env_open(env.get(), directory.string().c_str(), 0, 0600));
+  MDB_txn *rawTxn = nullptr;
+  check(mdb_txn_begin(env.get(), nullptr, 0, &rawTxn));
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> txn(rawTxn, mdb_txn_abort);
+  MDB_dbi db;
+  check(mdb_dbi_open(txn.get(), nullptr, 0, &db));
+  auto name = publisher.hex() + ":" + std::string(salt);
+  MDB_val key{name.size(), name.data()};
+  MDB_val value{};
+  std::uint64_t prior = static_cast<std::uint64_t>(observedFloor);
+  const auto found    = mdb_get(txn.get(), db, &key, &value);
+  if (MDB_SUCCESS == found) {
+    const std::string_view record(static_cast<const char *>(value.mv_data),
+                                  value.mv_size);
+    if (record.size() != 12 || !record.starts_with("XPS")) {
+      throw PublicationSequenceUnreadable(
+          std::format("publication sequence format 1: expected 12 bytes and "
+                      "XPS signature, got {} bytes",
+                      record.size()));
+    }
+    if (record[3] != '1') {
+      throw PublicationSequenceUnreadable(std::format(
+          "publication sequence version 1 expected (byte 49), got byte {}",
+          static_cast<unsigned char>(record[3])));
+    }
+    std::uint64_t stored = 0;
+    for (const auto byte : record.substr(4)) {
+      stored = (stored << 8) | static_cast<unsigned char>(byte);
+    }
+    prior = std::max(prior, stored);
+  } else if (MDB_NOTFOUND != found) {
+    check(found);
   }
+  if (prior >=
+      static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+    throw std::overflow_error("publication sequence exhausted");
+  }
+  const auto next    = prior + 1;
+  std::string record = "XPS1";
+  for (int shift = 56; shift >= 0; shift -= 8) {
+    record.push_back(static_cast<char>((next >> shift) & 0xffU));
+  }
+  value = MDB_val{record.size(), record.data()};
+  check(mdb_put(txn.get(), db, &key, &value, 0));
+  check(mdb_txn_commit(txn.release()));
+  return static_cast<std::int64_t>(next);
+}
 
+Publication publishDocument(Store &store, const MicroversionId &version,
+                            const MutableKeys &documentKeys, std::string salt,
+                            std::string title, const std::int64_t sequence,
+                            const std::uint64_t published,
+                            const SignedProvenance &permascrollProvenance,
+                            const SignedProvenance &documentProvenance,
+                            const std::string &torrentOutputDir,
+                            const std::vector<PublishedHoleRecord> &holes) {
+  if (!store.userPermascrollPtr()) {
+    throw std::runtime_error("publication requires the author's permascroll");
+  }
+  if (permascrollProvenance.tsv.empty() ||
+      permascrollProvenance.signature.empty() ||
+      documentProvenance.tsv.empty() || documentProvenance.signature.empty()) {
+    throw std::runtime_error(
+        "publication requires signed permascroll and history provenance");
+  }
+  store.userPermascrollPtr()->sealIncremental(torrentOutputDir,
+                                              permascrollProvenance, holes);
   const auto userScroll = store.userPermascroll().currentScroll();
+  // The convenience path publishes a complete history snapshot. The session
+  // path keeps incremental history segments in its durable SealState instead.
+  const auto history =
+      sealLocalSpool(store, documentKeys, "history", torrentOutputDir,
+                     documentProvenance, userScroll);
+  std::vector<ScrollSegment> ops;
+  if (history.opsSegment) ops.push_back(*history.opsSegment);
   return publish(store, version, documentKeys, std::move(salt),
-                 std::move(title), sequence, published, &userScroll);
+                 std::move(title), sequence, published, &userScroll, ops);
 }
 
 } // namespace xanadu

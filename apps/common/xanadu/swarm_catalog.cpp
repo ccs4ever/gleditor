@@ -24,9 +24,7 @@ struct SwarmCatalog::Impl {
 SwarmCatalog::SwarmCatalog() : SwarmCatalog(":memory:") {}
 
 SwarmCatalog::SwarmCatalog(const std::string &cacheDbPath)
-    : impl_(std::make_unique<Impl>(cacheDbPath)) {
-  seedDefaultDocuverse();
-}
+    : impl_(std::make_unique<Impl>(cacheDbPath)) {}
 
 SwarmCatalog::~SwarmCatalog()                                   = default;
 SwarmCatalog::SwarmCatalog(SwarmCatalog &&) noexcept            = default;

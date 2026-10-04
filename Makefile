@@ -118,11 +118,9 @@ SDL_IMAGE_PKG := SDL2_image
 else
 $(error GLEDITOR_SDL must be 2 or 3, got "$(GLEDITOR_SDL)")
 endif
-# Skipped when every requested goal is one of the text-only targets below:
-# format, format-check and lint touch no source that needs a compiler, and
-# would otherwise fail this check on a machine that has never installed SDL
-# at all -- which is the point of having them not need to.
-NO_SDL_GOALS := format format-check lint
+# These goals need no native development packages on the host. Formatting and
+# linting compile nothing; swarm-image compiles inside its container.
+NO_SDL_GOALS := format format-check lint swarm-image
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
 $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
@@ -950,6 +948,18 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
 $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+# All compilation happens inside the image, so the host needs only git and
+# the container engine, not the native SDL/engine development packages.
+CONTAINER_ENGINE ?= docker
+SWARM_IMAGE ?= gleditor-swarm-test:local
+SWARM_IMAGE_BASE ?= debian:forky-slim
+.PHONY: swarm-image
+swarm-image:
+	git submodule update --init --recursive
+	$(CONTAINER_ENGINE) build --file packaging/docker/swarm.Dockerfile \
+	  --build-arg SWARM_IMAGE_BASE="$(SWARM_IMAGE_BASE)" \
+	  --build-arg GLEDITOR_VERSION="$(VERS)" --tag "$(SWARM_IMAGE)" .
 
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc

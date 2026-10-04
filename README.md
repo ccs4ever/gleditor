@@ -191,6 +191,12 @@ global spans rather than injecting raw remote text into an author's local permas
 [publication and discovery design](design/bep46-publication-and-discovery.md) and
 [identity model](design/oracle-identity-model.md) for protocol details.
 
+`Ctrl+Alt+Shift+N` adds a slice to the current document's store; `Ctrl+Alt+N` starts a standalone
+slice store. Swarm Telescope (`F3`) takes search input until Escape closes it. Publication counters
+are persisted per publishing key and salt. See
+[publication implementation progress](design/publication-implementation-progress.md) for the
+repaired prerequisites and remaining network/UI work.
+
 ### Configuration and computation
 
 Xudu and Xuzz keep keymaps, settings, layout, UI state, and pouches in five sovereign system

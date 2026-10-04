@@ -690,7 +690,8 @@ CellRef VQLCompiler::compileAnchor(const AnchorNode &anchor) {
 
 CellRef VQLCompiler::compilePathStep(const PathStep &step,
                                      CellRef inStreamCell) {
-  PathExpression dummy{.steps = {step}};
+  PathExpression dummy;
+  dummy.steps.push_back(step);
   return compilePathExpression(dummy, inStreamCell);
 }
 

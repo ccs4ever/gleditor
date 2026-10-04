@@ -643,3 +643,112 @@ TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
                    xanadu::sealLocalSpool(store, mine, "primedia", "", halfway),
                std::runtime_error);
 }
+
+TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
+  const Keyring keyring;
+  ASSERT_TRUE(keyring.usable()) << "cannot create temporary GPG signing key";
+  const auto mine = xanadu::createMutableKeys();
+  const auto dir  = std::filesystem::temp_directory_path() /
+                    ("xudu-publication-" + mine.publicKey.hex());
+  Store store;
+  const auto text   = store.insert({}, 0, "Story Ideas");
+  const auto branch = store.insert(text, 11, " alternate");
+  const std::vector<xanadu::TorrentContent> researchFiles{
+      {"research", "Research ideas"}};
+  const auto researchTorrent = xanadu::makeTorrent(researchFiles, "research");
+  const auto researchScroll =
+      Scroll::ofTorrentFile(researchTorrent.hash, 0, "research", 0, 14);
+  const auto quotation =
+      store.transcludeExternal(text, 11, researchScroll, 0, 14);
+  const auto pageBreak = store.insertBreak(text, 5);
+  auto head            = store.sliceGenesis(text);
+  const auto dimension = store.makeDimension(head, "d.next");
+  head                 = store.makeCell(dimension.version, "idea one");
+  const auto left      = store.cellRefOf(head);
+  head                 = store.makeCell(head, "idea two");
+  const auto right     = store.cellRefOf(head);
+  head =
+      store.setLink(head, left, dimension.dim, zigzag::DimVector::POS, right);
+  auto record             = signable();
+  record.publisher        = mine.publicKey.hex();
+  record.permascroll      = store.userPermascroll().globalScrollKey();
+  record.salt             = "doc:ideas";
+  record.title            = "Story Ideas";
+  record.version          = text.str();
+  record.contentLength    = store.primedia().bytes().size();
+  record.contentDigest    = xanadu::sha256Hex(store.primedia().bytes());
+  record.opsLength        = xanadu::sealableOps(store).size();
+  record.opsDigest        = xanadu::sha256Hex(xanadu::sealableOps(store));
+  const auto signedRecord = xanadu::signProvenance(record);
+  {
+    std::ofstream bad(dir);
+    bad << "a file cannot be a seed directory";
+  }
+  EXPECT_THROW((void)xanadu::publishDocument(
+                   store, text, mine, "doc:ideas", "Story Ideas", 1, 1700000000,
+                   signedRecord, signedRecord, dir.string()),
+               std::filesystem::filesystem_error);
+  EXPECT_EQ(store.userPermascroll().currentScroll().length(), 0U);
+  std::filesystem::remove(dir);
+  const auto researchRoot =
+      xanadu::writeTorrentSeed(dir, researchTorrent, researchFiles);
+  const auto first = xanadu::publishDocument(
+      store, text, mine, "doc:ideas", "Story Ideas", 1, 1700000000,
+      signedRecord, signedRecord, dir.string());
+  ASSERT_EQ(first.opsSegments.size(), 1U);
+  const auto historyPath = dir / first.opsSegments.front().torrent.hex() /
+                           "history" / xanadu::sealedOpsName;
+  const auto read        = [](const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+  };
+  const auto firstOps = read(historyPath);
+  ASSERT_FALSE(firstOps.empty());
+  const auto &scroll = store.userPermascroll().currentScroll();
+  ASSERT_TRUE(first.scrolls.contains(xanadu::scrollKey(scroll)));
+  xanadu::DirectoryContentSource source;
+  EXPECT_EQ(source.add(researchTorrent.file, researchRoot.string()),
+            researchTorrent.hash);
+  for (const auto &segment : scroll.segments) {
+    const auto root = dir / segment.torrent.hex();
+    EXPECT_EQ(source.add(read(root / "metainfo.torrent"), root.string()),
+              segment.torrent);
+  }
+  auto history = xanadu::historyFromSeal(firstOps, scroll, first.scrolls);
+  ASSERT_NE(history, nullptr);
+  history->setContentSource(&source);
+  EXPECT_EQ(history->textOf(text), "Story Ideas");
+  EXPECT_EQ(history->textOf(branch), "Story Ideas alternate");
+  EXPECT_EQ(history->textOf(quotation), "Story IdeasResearch ideas");
+  EXPECT_EQ(history->rebuild(pageBreak).forcedBreaks(),
+            std::vector<std::uint32_t>{5});
+  const auto manifold = history->rebuildManifold(head);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  const auto readerLeft  = history->cellRefOf(store.segmentedOps().idOf(left));
+  const auto readerRight = history->cellRefOf(store.segmentedOps().idOf(right));
+  const auto readerDim =
+      history->cellRefOf(store.segmentedOps().idOf(dimension.dim));
+  EXPECT_EQ(manifold.textOf(readerLeft, *history), "idea one");
+  EXPECT_EQ(manifold.linked(readerLeft, readerDim, zigzag::DimVector::POS),
+            readerRight);
+  const auto changed      = store.insert(text, 11, " revised");
+  record.version          = changed.str();
+  record.contentLength    = store.primedia().bytes().size();
+  record.contentDigest    = xanadu::sha256Hex(store.primedia().bytes());
+  record.opsLength        = xanadu::sealableOps(store).size();
+  record.opsDigest        = xanadu::sha256Hex(xanadu::sealableOps(store));
+  const auto secondRecord = xanadu::signProvenance(record);
+  const auto second       = xanadu::publishDocument(
+      store, changed, mine, "doc:ideas", "Story Ideas", 2, 1700000000,
+      secondRecord, secondRecord, dir.string());
+  ASSERT_EQ(second.opsSegments.size(), 1U);
+  EXPECT_NE(second.opsSegments.front().torrent,
+            first.opsSegments.front().torrent);
+  EXPECT_EQ(read(historyPath), firstOps);
+  EXPECT_EQ(read(dir / scroll.segments.front().torrent.hex() / "permascroll" /
+                 xanadu::sealedContentName)
+                .substr(0, 11),
+            "Story Ideas");
+  std::filesystem::remove_all(dir);
+}

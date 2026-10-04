@@ -4,6 +4,8 @@
  */
 #include <gtest/gtest.h>
 
+#include <optional>
+
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -135,21 +137,22 @@ TEST(DimensionRegistryTest, ExplicitHeadOverload) {
 }
 
 TEST(DimensionRegistryTest, StoreDestructionUnregisters) {
-  auto &reg             = DimensionRegistry::instance();
-  const Store *storePtr = nullptr;
+  auto &reg = DimensionRegistry::instance();
+  std::optional<Store> storage(std::in_place);
 
   {
-    Store scopedStore;
-    storePtr      = &scopedStore;
-    auto manifold = scopedStore.rebuildManifold(scopedStore.latest());
+    auto &scopedStore = *storage;
+    auto manifold     = scopedStore.rebuildManifold(scopedStore.latest());
     const auto dim =
         reg.getOrCreate(scopedStore, manifold, "d.temp_dim").value();
     EXPECT_NE(dim, noCell);
     EXPECT_EQ(reg.get(scopedStore, "d.temp_dim"), dim);
   }
 
-  // After scopedStore is destructed, storeDims_ entry must be removed
-  EXPECT_EQ(reg.get(*storePtr, "d.temp_dim"), std::nullopt);
+  // Reusing the same storage exposes stale entries without a dead reference.
+  storage.reset();
+  storage.emplace();
+  EXPECT_EQ(reg.get(*storage, "d.temp_dim"), std::nullopt);
 }
 
 TEST(DimensionRegistryTest, GetOrCreateNamesWhyItMadeNothing) {

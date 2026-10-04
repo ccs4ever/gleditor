@@ -65,8 +65,10 @@ TEST(CompoundPublicationTest, StageAndSealCompoundTorrents) {
   EXPECT_FALSE(compound.mediaTorrents[0].provenance.signature.empty());
 
   // Verify .torrent and files were written to publish directory
-  EXPECT_TRUE(std::filesystem::exists(tempDir / "pub" / "test_salt.torrent"));
-  EXPECT_TRUE(std::filesystem::exists(tempDir / "pub" / "test_salt"));
+  EXPECT_TRUE(std::filesystem::exists(
+      tempDir / "pub" / compound.mainSeal.hash.hex() / "metainfo.torrent"));
+  EXPECT_TRUE(std::filesystem::exists(
+      tempDir / "pub" / compound.mainSeal.hash.hex() / "test_salt"));
   EXPECT_TRUE(std::filesystem::exists(tempDir / "pub" / "diagram.png.torrent"));
   EXPECT_TRUE(
       std::filesystem::exists(tempDir / "pub" / "diagram.png" / "diagram.png"));

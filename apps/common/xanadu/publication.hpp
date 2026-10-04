@@ -31,10 +31,12 @@
 #define XUDU_PUBLICATION_H
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -354,9 +356,27 @@ publish(const Store &store, const MicroversionId &version,
         const Scroll *localSealedAs                   = nullptr,
         const std::vector<ScrollSegment> &opsSegments = {});
 
+class PublicationSequenceUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief Reserve a durable sequence for one (publisher, salt) before signing.
+ *
+ * A failed publication may leave a gap, but a reserved number is never reused.
+ * @p observedFloor imports an already published sequence from an older client.
+ * Transactions serialize writers across processes; commits sync before return.
+ */
+[[nodiscard]] std::int64_t
+reservePublicationSequence(const std::filesystem::path &directory,
+                           const PublicKey &publisher, std::string_view salt,
+                           std::int64_t observedFloor = 0);
+
 /**
  * @brief Publish a document under @p documentKeys, incrementally sealing the
- *        user's shared permascroll.
+ *        user's shared permascroll and carrying a full V5 history snapshot.
+ *        Emitted torrents include seedable files in hash-addressed directories.
  */
 [[nodiscard]] Publication
 publishDocument(Store &store, const MicroversionId &version,

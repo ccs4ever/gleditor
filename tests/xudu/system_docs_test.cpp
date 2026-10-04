@@ -688,7 +688,7 @@ TEST(SystemDocsTest, UserPermascrollWithheldSpanSealing) {
   EXPECT_EQ(scroll.read(pubSpan2), " Public footer text.");
 
   // Inspect the generated torrent file
-  const auto torrentPath = tempDir / (seg->torrent.hex() + ".torrent");
+  const auto torrentPath = tempDir / seg->torrent.hex() / "metainfo.torrent";
   ASSERT_TRUE(std::filesystem::exists(torrentPath));
 
   std::filesystem::remove_all(tempDir);
@@ -735,7 +735,8 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   [[maybe_unused]] const auto seal1 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirWithheld.string(), prov, {}, 0, {hole});
 
-  const auto primediaWithheldPath = outDirWithheld / "essay" / "primedia";
+  const auto primediaWithheldPath =
+      outDirWithheld / seal1.hash.hex() / "essay" / "primedia";
   ASSERT_TRUE(std::filesystem::exists(primediaWithheldPath));
   const auto wireWithheld = readFileContent(primediaWithheldPath);
 
@@ -757,7 +758,8 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   [[maybe_unused]] const auto seal2 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirPublished.string(), prov, {}, 0, {});
 
-  const auto primediaPublishedPath = outDirPublished / "essay" / "primedia";
+  const auto primediaPublishedPath =
+      outDirPublished / seal2.hash.hex() / "essay" / "primedia";
   ASSERT_TRUE(std::filesystem::exists(primediaPublishedPath));
   const auto wirePublished = readFileContent(primediaPublishedPath);
 

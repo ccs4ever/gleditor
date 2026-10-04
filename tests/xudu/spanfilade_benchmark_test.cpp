@@ -78,6 +78,7 @@ TEST(SpanfiladeBenchmarkTest, ScaledOccurrencesOfSpeedup) {
             << "  Speedup factor       : " << speedup << "x\n";
 
   // Verify correctness
+  EXPECT_GT(static_cast<std::size_t>(sink), 0U);
   EXPECT_TRUE(filade.verifyAgainstLinearScan(targetSpan, doc, 0));
 }
 

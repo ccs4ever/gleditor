@@ -9,13 +9,16 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -29,7 +32,9 @@ using namespace ::xanadu;
  * @brief 3-column discovery deck and search engine for swarm publications.
  */
 class SwarmTelescopeOverlay : public gleditor::FrameContributor,
-                              public gleditor::PickObserver {
+                              public gleditor::PickObserver,
+                              public gleditor::ModalInput,
+                              public gleditor::a11y::Source {
 public:
   static constexpr std::uint32_t kTagTelescopeClose  = 14001U;
   static constexpr std::uint32_t kTagTabRecent       = 14002U;
@@ -56,6 +61,15 @@ public:
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
 
+  [[nodiscard]] bool grabbing() const override;
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
+  void textTyped(const std::string &utf8) override;
+  [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
+                     std::string_view value) override;
+
   void setVisible(bool visible);
   void toggle();
   [[nodiscard]] bool isVisible() const noexcept;
@@ -66,14 +80,8 @@ public:
   void selectCategory(CatalogCategory cat);
   void selectItem(std::size_t index);
 
-  void setOnSummon(SummonHandler handler) { onSummon_ = std::move(handler); }
-
-  void setSampleForceVisible(bool force) {
-    sampleForceVisible_ = force;
-    if (force) {
-      visible_ = true;
-    }
-  }
+  void setOnSummon(SummonHandler handler);
+  void setSampleForceVisible(bool force);
 
 private:
   void refreshSearch();
@@ -84,10 +92,15 @@ private:
   std::unique_ptr<gleditor::Canvas> canvas_;
   SummonHandler onSummon_;
 
+  mutable std::recursive_mutex guard_;
+  std::uint64_t revision_{1};
+  std::size_t searchCaret_{0};
+  bool searchFocused_{true};
+  std::optional<gleditor::InputArea> inputArea_;
   bool visible_{false};
   bool sampleForceVisible_{false};
   CatalogCategory activeCategory_{CatalogCategory::TopicSwarms};
-  std::string searchQuery_{"#hypertext author:nelson"};
+  std::string searchQuery_;
   std::vector<SearchResult> currentResults_;
   std::size_t selectedResultIndex_{0};
 

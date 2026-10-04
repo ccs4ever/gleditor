@@ -290,17 +290,10 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
                                    .data = provenance.signature});
   }
 
-  auto made = makeTorrent(files, currentScroll_.salt);
+  auto made = makeTorrent(files, "permascroll");
 
   if (!outputDir.empty()) {
-    std::error_code ec;
-    std::filesystem::create_directories(outputDir, ec);
-    const auto torrentPath = outputDir / (made.hash.hex() + ".torrent");
-    std::ofstream out(torrentPath, std::ios::binary);
-    if (out.is_open()) {
-      out.write(made.file.data(),
-                static_cast<std::streamsize>(made.file.size()));
-    }
+    (void)writeTorrentSeed(outputDir, made, files);
   }
 
   ScrollSegment segment;

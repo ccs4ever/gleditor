@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/swarm_catalog_index.hpp"
 
 namespace xudu {
@@ -163,3 +164,11 @@ TEST(SwarmCatalogIndexTest, SwarmHealthUpdate) {
 
 } // namespace
 } // namespace xudu
+
+TEST(SwarmCatalogTest, aFreshCatalogContainsNoDemonstrationPublications) {
+  xanadu::SwarmCatalog catalog;
+  EXPECT_TRUE(catalog.search("").empty());
+  EXPECT_TRUE(catalog.search("Ideas").empty());
+  EXPECT_TRUE(catalog.followedAuthors().empty());
+  EXPECT_TRUE(catalog.topicSwarms().empty());
+}

@@ -528,7 +528,9 @@ inline constexpr std::string_view kKeymapSelectLineEnd =
 inline constexpr std::string_view kKeymapNewline = "std:edit/newline";
 inline constexpr std::string_view kKeymapDeleteForward =
     "std:edit/delete_forward";
-inline constexpr std::string_view kKeymapNewSlice  = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapNewSlice = "std:xuzz/new_slice";
+inline constexpr std::string_view kKeymapNewSliceInStore =
+    "std:xuzz/new_slice_in_store";
 inline constexpr std::string_view kKeymapPouchDrop = "std:xudu/pouch_drop";
 inline constexpr std::string_view kKeymapPouchDropToLinkLeft =
     "std:xudu/pouch_drop_to_link_left";

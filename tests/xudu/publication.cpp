@@ -18,8 +18,14 @@
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <lmdb.h>
 
+#include <filesystem>
+#include <fstream>
+#include <future>
+#include <limits>
 #include <map>
+#include <set>
 #include <string>
 #include <tuple>
 
@@ -500,3 +506,109 @@ TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
 }
 
 } // namespace
+
+TEST(PublicationSequenceTest, reservationsSurviveReopenAndArePerNameAndKey) {
+  const auto keys  = xanadu::createMutableKeys();
+  const auto other = xanadu::createMutableKeys();
+  const auto dir   = std::filesystem::temp_directory_path() /
+                     ("xudu-sequences-" + keys.publicKey.hex());
+  std::filesystem::remove_all(dir);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 2);
+  EXPECT_EQ(xanadu::reservePublicationSequence(dir, keys.publicKey, "catalog"),
+            1);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, other.publicKey, "doc:ideas"), 1);
+  EXPECT_EQ(xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas",
+                                               1700000000),
+            1700000001);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"),
+      1700000002);
+  EXPECT_THROW((void)xanadu::reservePublicationSequence(
+                   dir, keys.publicKey, "doc:ideas",
+                   std::numeric_limits<std::int64_t>::max()),
+               std::overflow_error);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"),
+      1700000003);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(PublicationSequenceTest, simultaneousReservationsNeverReuseASequence) {
+  const auto keys = xanadu::createMutableKeys();
+  const auto dir  = std::filesystem::temp_directory_path() /
+                    ("xudu-sequences-" + keys.publicKey.hex());
+  std::vector<std::future<std::int64_t>> writers;
+  for (int i = 0; i < 12; ++i) {
+    writers.push_back(std::async(std::launch::async, [&] {
+      return xanadu::reservePublicationSequence(dir, keys.publicKey,
+                                                "doc:ideas");
+    }));
+  }
+  std::set<std::int64_t> reservations;
+  for (auto &writer : writers) reservations.insert(writer.get());
+  EXPECT_EQ(reservations.size(), 12U);
+  EXPECT_EQ(*reservations.begin(), 1);
+  EXPECT_EQ(*reservations.rbegin(), 12);
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 13);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(PublicationTest,
+     seedWriterRejectsCorruptionWithoutOverwritingAnEarlierSeal) {
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("xudu-seed-" + xanadu::createMutableKeys().publicKey.hex());
+  std::vector<xanadu::TorrentContent> files{{"primedia", "first edition"}};
+  const auto torrent = xanadu::makeTorrent(files, "permascroll");
+  const auto seed    = xanadu::writeTorrentSeed(dir, torrent, files);
+  files.front().data = "wrong edition";
+  EXPECT_THROW((void)xanadu::writeTorrentSeed(dir, torrent, files),
+               std::invalid_argument);
+  std::ifstream saved(seed / "permascroll" / "primedia", std::ios::binary);
+  const std::string bytes{std::istreambuf_iterator<char>(saved),
+                          std::istreambuf_iterator<char>()};
+  EXPECT_EQ(bytes, "first edition");
+  const auto traversal = xanadu::makeTorrent(files, "..");
+  EXPECT_THROW((void)xanadu::writeTorrentSeed(dir, traversal, files),
+               std::invalid_argument);
+  std::filesystem::remove_all(dir);
+}
+
+TEST(PublicationSequenceTest, anUnknownCounterVersionCannotResetTheSequence) {
+  const auto keys = xanadu::createMutableKeys();
+  const auto dir  = std::filesystem::temp_directory_path() /
+                    ("xudu-sequences-" + keys.publicKey.hex());
+  EXPECT_EQ(
+      xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
+  {
+    MDB_env *rawEnv = nullptr;
+    ASSERT_EQ(mdb_env_create(&rawEnv), MDB_SUCCESS);
+    const std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(rawEnv,
+                                                                 mdb_env_close);
+    ASSERT_EQ(mdb_env_open(env.get(), dir.string().c_str(), 0, 0600),
+              MDB_SUCCESS);
+    MDB_txn *rawTxn = nullptr;
+    ASSERT_EQ(mdb_txn_begin(env.get(), nullptr, 0, &rawTxn), MDB_SUCCESS);
+    std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> txn(rawTxn,
+                                                           mdb_txn_abort);
+    MDB_dbi db;
+    ASSERT_EQ(mdb_dbi_open(txn.get(), nullptr, 0, &db), MDB_SUCCESS);
+    auto name = keys.publicKey.hex() + ":doc:ideas";
+    MDB_val key{name.size(), name.data()}, value{};
+    ASSERT_EQ(mdb_get(txn.get(), db, &key, &value), MDB_SUCCESS);
+    std::string record(static_cast<const char *>(value.mv_data), value.mv_size);
+    ASSERT_GE(record.size(), 4U);
+    record[3] = '2';
+    value     = MDB_val{record.size(), record.data()};
+    ASSERT_EQ(mdb_put(txn.get(), db, &key, &value, 0), MDB_SUCCESS);
+    ASSERT_EQ(mdb_txn_commit(txn.release()), MDB_SUCCESS);
+  }
+  EXPECT_THROW((void)xanadu::reservePublicationSequence(dir, keys.publicKey,
+                                                        "doc:ideas"),
+               xanadu::PublicationSequenceUnreadable);
+  std::filesystem::remove_all(dir);
+}

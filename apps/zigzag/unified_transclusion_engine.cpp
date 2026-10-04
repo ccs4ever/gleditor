@@ -444,7 +444,8 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
           *errorOut = std::format(
               "cell {} posward on dimension {} names {}, whose negward is {}",
               slot.birthOp, link.dim, link.pos,
-              manifold_.linked(link.pos, link.dim, DimVector::NEG));
+              manifold_.linked(link.pos, link.dim, DimVector::NEG)
+                  .value_or(noCell));
         }
         return false;
       }
@@ -455,7 +456,8 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
           *errorOut = std::format(
               "cell {} negward on dimension {} names {}, whose posward is {}",
               slot.birthOp, link.dim, link.neg,
-              manifold_.linked(link.neg, link.dim, DimVector::POS));
+              manifold_.linked(link.neg, link.dim, DimVector::POS)
+                  .value_or(noCell));
         }
         return false;
       }

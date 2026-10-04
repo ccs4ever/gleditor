@@ -4,6 +4,8 @@
  */
 #include "swarm_telescope_overlay.hpp"
 
+#include <gleditor/utf8.hpp>
+
 #include <glm/ext/matrix_clip_space.hpp>
 
 #include <algorithm>
@@ -51,35 +53,55 @@ void SwarmTelescopeOverlay::deviceReady(render::RenderDevice &device,
 bool SwarmTelescopeOverlay::busy() const { return false; }
 
 void SwarmTelescopeOverlay::setVisible(const bool visible) {
-  visible_ = visible;
+  const std::scoped_lock lock(guard_);
+  visible_       = visible;
+  searchFocused_ = true;
+  ++revision_;
   if (visible_) {
     refreshSearch();
   }
 }
 
-void SwarmTelescopeOverlay::toggle() { setVisible(!visible_); }
+void SwarmTelescopeOverlay::toggle() {
+  const std::scoped_lock lock(guard_);
+  setVisible(!visible_);
+}
 
-bool SwarmTelescopeOverlay::isVisible() const noexcept { return visible_; }
+bool SwarmTelescopeOverlay::isVisible() const noexcept {
+  const std::scoped_lock lock(guard_);
+  return visible_;
+}
 
 void SwarmTelescopeOverlay::setSearchQuery(std::string_view query) {
+  const std::scoped_lock lock(guard_);
   searchQuery_ = query;
+  searchCaret_ = searchQuery_.size();
   refreshSearch();
 }
 
-std::string SwarmTelescopeOverlay::searchQuery() const { return searchQuery_; }
+std::string SwarmTelescopeOverlay::searchQuery() const {
+  const std::scoped_lock lock(guard_);
+  return searchQuery_;
+}
 
 void SwarmTelescopeOverlay::selectCategory(const CatalogCategory cat) {
+  const std::scoped_lock lock(guard_);
   activeCategory_ = cat;
+  ++revision_;
   refreshSearch();
 }
 
 void SwarmTelescopeOverlay::selectItem(const std::size_t index) {
+  const std::scoped_lock lock(guard_);
   if (index < currentResults_.size()) {
     selectedResultIndex_ = index;
+    ++revision_;
   }
 }
 
 void SwarmTelescopeOverlay::refreshSearch() {
+  const std::scoped_lock lock(guard_);
+  ++revision_;
   currentResults_ = catalog_.search(searchQuery_, std::nullopt, 20);
   if (selectedResultIndex_ >= currentResults_.size()) {
     selectedResultIndex_ =
@@ -88,6 +110,7 @@ void SwarmTelescopeOverlay::refreshSearch() {
 }
 
 void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const std::scoped_lock lock(guard_);
   if (!visible_ || !canvas_) {
     return;
   }
@@ -139,7 +162,13 @@ void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->addLine(deckX + 16.0F, searchY, deckX + 16.0F + searchW, searchY,
                    1.0F, 0x38BDF888);
 
-  std::string searchDisplay = "Search:  " + searchQuery_ + "_";
+  inputArea_ =
+      gleditor::InputArea{.x      = static_cast<int>(deckX + 16.0F),
+                          .y      = static_cast<int>(screenH - searchY - 34.0F),
+                          .width  = static_cast<int>(searchW),
+                          .height = 34};
+  std::string searchDisplay = "Search:  " + searchQuery_;
+  if (searchFocused_) searchDisplay.insert(9 + searchCaret_, "|");
   canvas_->addText(ctx.state, deckX + 26.0F, searchY + 11.0F, searchDisplay,
                    0xF1F5F9FF, 0);
 
@@ -365,11 +394,18 @@ void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
 bool SwarmTelescopeOverlay::picked(const render::PickingResult &pick,
                                    RenderState & /*state*/) {
+  const std::scoped_lock lock(guard_);
   if (!visible_ || pick.tag.kind != render::tagKindOverlay) {
     return false;
   }
 
   const auto tag = pick.tag.clusterIndex;
+  if (tag == kTagSearchBar) {
+    searchFocused_ = true;
+    searchCaret_   = searchQuery_.size();
+    ++revision_;
+    return true;
+  }
   if (tag == kTagTelescopeClose) {
     setVisible(false);
     return true;
@@ -388,6 +424,7 @@ bool SwarmTelescopeOverlay::picked(const render::PickingResult &pick,
   }
   if (tag >= kTagPublicationBase && tag < kTagPublicationBase + 100) {
     const auto idx = static_cast<std::size_t>(tag - kTagPublicationBase);
+    searchFocused_ = false;
     selectItem(idx);
     return true;
   }
@@ -399,6 +436,190 @@ bool SwarmTelescopeOverlay::picked(const render::PickingResult &pick,
     return true;
   }
 
+  return false;
+}
+
+void SwarmTelescopeOverlay::setOnSummon(SummonHandler handler) {
+  const std::scoped_lock lock(guard_);
+  onSummon_ = std::move(handler);
+}
+
+void SwarmTelescopeOverlay::setSampleForceVisible(const bool force) {
+  const std::scoped_lock lock(guard_);
+  sampleForceVisible_ = force;
+  if (force) setVisible(true);
+}
+
+bool SwarmTelescopeOverlay::grabbing() const { return isVisible(); }
+
+bool SwarmTelescopeOverlay::keyPressed(const gleditor::Key key,
+                                       const gleditor::KeyMods mods) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
+  using gleditor::Key;
+  if (key == Key::Escape) {
+    setVisible(false);
+    return true;
+  }
+  if (key == Key::Tab) {
+    searchFocused_ = !searchFocused_;
+  } else if (key == Key::Return) {
+    if (searchFocused_) {
+      refreshSearch();
+      searchFocused_ = false;
+    } else if (selectedResultIndex_ < currentResults_.size() && onSummon_) {
+      onSummon_(currentResults_[selectedResultIndex_].entry);
+      setVisible(false);
+    }
+  } else if (key == Key::Up || key == Key::Down) {
+    searchFocused_ = false;
+    if (!currentResults_.empty()) {
+      if (key == Key::Up && selectedResultIndex_ > 0) --selectedResultIndex_;
+      if (key == Key::Down && selectedResultIndex_ + 1 < currentResults_.size())
+        ++selectedResultIndex_;
+    }
+  } else if (searchFocused_) {
+    const auto before = [&] {
+      return searchCaret_ == 0
+                 ? 0U
+                 : gleditor::alignToCharacterStart(
+                       searchQuery_,
+                       static_cast<std::uint32_t>(searchCaret_ - 1));
+    };
+    const auto after = [&] {
+      return searchCaret_ >= searchQuery_.size()
+                 ? searchQuery_.size()
+                 : static_cast<std::size_t>(gleditor::alignToCharacterEnd(
+                       searchQuery_,
+                       static_cast<std::uint32_t>(searchCaret_ + 1)));
+    };
+    switch (key) {
+    case Key::Backspace:
+      if (gleditor::held(mods, gleditor::KeyMods::Ctrl)) {
+        searchQuery_.clear();
+        searchCaret_ = 0;
+      } else {
+        const auto from = before();
+        searchQuery_.erase(from, searchCaret_ - from);
+        searchCaret_ = from;
+      }
+      refreshSearch();
+      break;
+    case Key::Delete:
+      searchQuery_.erase(searchCaret_, after() - searchCaret_);
+      refreshSearch();
+      break;
+    case Key::Left:
+      searchCaret_ = before();
+      break;
+    case Key::Right:
+      searchCaret_ = after();
+      break;
+    case Key::Home:
+      searchCaret_ = 0;
+      break;
+    case Key::End:
+      searchCaret_ = searchQuery_.size();
+      break;
+    default:
+      return false;
+    }
+  }
+  ++revision_;
+  return true;
+}
+
+void SwarmTelescopeOverlay::textTyped(const std::string &utf8) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || !searchFocused_) return;
+  searchQuery_.insert(searchCaret_, utf8);
+  searchCaret_ += utf8.size();
+  selectedResultIndex_ = 0;
+  refreshSearch();
+}
+
+std::optional<gleditor::InputArea> SwarmTelescopeOverlay::textArea() const {
+  const std::scoped_lock lock(guard_);
+  return visible_ && searchFocused_ ? inputArea_ : std::nullopt;
+}
+
+std::uint64_t SwarmTelescopeOverlay::accessibilityRevision() const {
+  const std::scoped_lock lock(guard_);
+  return revision_;
+}
+
+void SwarmTelescopeOverlay::describe(gleditor::a11y::Builder &into) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return;
+  using namespace gleditor::a11y;
+  auto &dialog    = into.add(1, Role::Dialog);
+  dialog.label    = "Swarm Telescope";
+  dialog.children = {into.id(kTagSearchBar), into.id(kTagTelescopeClose),
+                     into.id(kTagSummonButton)};
+  for (std::size_t i = 0; i < currentResults_.size(); ++i)
+    dialog.children.push_back(into.id(kTagPublicationBase + i));
+  into.contribute(into.id(1));
+  auto &search     = into.add(kTagSearchBar, Role::TextInput);
+  search.label     = "Search publications";
+  search.value     = searchQuery_;
+  search.focusable = true;
+  search.actions   = bit(Action::Focus) | bit(Action::SetValue);
+  if (inputArea_)
+    search.bounds = Rect{
+        static_cast<double>(inputArea_->x), static_cast<double>(inputArea_->y),
+        static_cast<double>(inputArea_->x + inputArea_->width),
+        static_cast<double>(inputArea_->y + inputArea_->height)};
+  if (searchFocused_) into.takeFocus(into.id(kTagSearchBar));
+  auto &close      = into.add(kTagTelescopeClose, Role::Button);
+  close.label      = "Close Swarm Telescope";
+  close.focusable  = true;
+  close.actions    = bit(Action::Click);
+  auto &summon     = into.add(kTagSummonButton, Role::Button);
+  summon.label     = "Open selected publication";
+  summon.focusable = true;
+  summon.actions   = bit(Action::Click);
+  for (std::size_t i = 0; i < currentResults_.size(); ++i) {
+    auto &result       = into.add(kTagPublicationBase + i, Role::ListItem);
+    result.label       = currentResults_[i].entry.title;
+    result.description = currentResults_[i].entry.authorName;
+    result.focusable   = true;
+    result.actions     = bit(Action::Focus) | bit(Action::Click);
+    if (!searchFocused_ && i == selectedResultIndex_)
+      into.takeFocus(into.id(kTagPublicationBase + i));
+  }
+}
+
+bool SwarmTelescopeOverlay::performAction(const std::uint64_t nodeId,
+                                          const gleditor::a11y::Action action,
+                                          const std::string_view value) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
+  using gleditor::a11y::Action;
+  const auto tag = gleditor::a11y::Ids::localOf(nodeId);
+  if (tag == kTagSearchBar) {
+    if (action == Action::SetValue)
+      setSearchQuery(value);
+    else if (action != Action::Focus)
+      return false;
+    searchFocused_ = true;
+    ++revision_;
+    return true;
+  }
+  if (action == Action::Click && tag == kTagTelescopeClose) {
+    setVisible(false);
+    return true;
+  }
+  if (action == Action::Click && tag == kTagSummonButton) {
+    searchFocused_ = false;
+    return keyPressed(gleditor::Key::Return, gleditor::KeyMods::None);
+  }
+  if ((action == Action::Click || action == Action::Focus) &&
+      tag >= kTagPublicationBase &&
+      tag - kTagPublicationBase < currentResults_.size()) {
+    searchFocused_ = false;
+    selectItem(tag - kTagPublicationBase);
+    return true;
+  }
   return false;
 }
 

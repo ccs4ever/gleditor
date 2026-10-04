@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <exception>
+#include <filesystem>
+#include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -113,6 +116,50 @@ MadeTorrent makeTorrent(const std::span<const TorrentContent> files,
        bencode::Value::integer(static_cast<std::int64_t>(pieceLength))},
       {"pieces", bencode::Value::string(pieceHashesOf(stream, pieceLength))},
   }));
+}
+
+std::filesystem::path
+writeTorrentSeed(const std::filesystem::path &directory,
+                 const MadeTorrent &torrent,
+                 const std::span<const TorrentContent> files) {
+  const auto meta      = Metainfo::parse(torrent.file);
+  const auto plainName = [](const std::string &name) {
+    return !name.empty() && name != "." && name != ".." &&
+           name.find_first_of("/\\") == std::string::npos &&
+           name.find('\0') == std::string::npos &&
+           !std::filesystem::path(name).has_root_path();
+  };
+  if (directory.empty() || meta.hash() != torrent.hash ||
+      !plainName(meta.name()) || files.size() != meta.files().size()) {
+    throw std::invalid_argument("invalid torrent seed layout");
+  }
+  std::set<std::string> names;
+  for (std::size_t i = 0; i < files.size(); ++i) {
+    if (!names.insert(files[i].path).second || !plainName(files[i].path) ||
+        files[i].path != meta.files()[i].path ||
+        files[i].data.size() != meta.files()[i].length) {
+      throw std::invalid_argument("torrent seed files do not match metainfo");
+    }
+  }
+  if (makeTorrent(files, meta.name(), meta.pieceLength()).hash !=
+      torrent.hash) {
+    throw std::invalid_argument(
+        "torrent seed content fails piece verification");
+  }
+  const auto root = directory / torrent.hash.hex();
+  std::filesystem::create_directories(root / meta.name());
+  const auto write = [](const std::filesystem::path &path,
+                        const std::string &bytes) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    out.close();
+    if (!out)
+      throw std::runtime_error("cannot write torrent seed: " + path.string());
+  };
+  for (const auto &file : files)
+    write(root / meta.name() / file.path, file.data);
+  write(root / "metainfo.torrent", torrent.file);
+  return root;
 }
 
 std::array<std::uint8_t, 20> sha1(const std::string_view data) {

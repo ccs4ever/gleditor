@@ -1,0 +1,27 @@
+# Allow only build inputs. User stores, identities and host build caches must
+# never become image layers, including stores created beside the source tree.
+**
+!Makefile
+!VERSION
+!LICENSE
+!include/
+!include/**
+!src/
+!src/**
+!apps/
+!apps/**
+!assets/
+!assets/**
+!tools/
+!tools/**
+!tests/
+!tests/**
+!thirdparty/
+!thirdparty/**
+**/.git
+**/build
+**/__pycache__
+**/*.pyc
+**/gnupg
+**/.gnupg
+**/private-keys-v1.d

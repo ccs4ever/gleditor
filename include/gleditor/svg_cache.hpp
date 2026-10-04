@@ -85,7 +85,7 @@ private:
   std::optional<ImageResource> rasterize(std::span<const std::uint8_t> bytes,
                                          float width, float height);
 
-  render::RenderDevice *device_{nullptr};
+  [[maybe_unused]] render::RenderDevice *device_{nullptr};
   std::unordered_map<std::string, ImageResource> cache_;
   mutable std::mutex mutex_;
 };

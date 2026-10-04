@@ -95,6 +95,7 @@ TEST(HolefiladeBenchmarkTest, ScaledSpanDecompositionSpeedup) {
             << "  Holefilade O(log N + K)   : " << filadeElapsedUs << " us\n"
             << "  Speedup factor            : " << speedup << "x\n";
 
+  EXPECT_GT(static_cast<std::size_t>(sink), 0U);
   EXPECT_GT(speedup, 2.0);
 }
 

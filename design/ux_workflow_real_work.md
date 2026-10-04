@@ -25,6 +25,10 @@ validator's hands, standing in for a person's; they are not part of the product.
 
 ## Journeys
 
+Publication, local-swarm discovery, commentary updates and third-party link layers have a separate
+seven-journey contract in [publication journeys](ux_workflow_publication.md), with temporary user
+keys and an explicit mock Oracle boundary.
+
 Each journey lists its steps, the evidence a pass needs, and the failures to look for. "Evidence"
 means artefacts a reviewer can inspect without rerunning: captured frames and accessibility dumps
 for graphical steps, a terminal transcript for REPL steps, and `xudu-dump` of saved stores.

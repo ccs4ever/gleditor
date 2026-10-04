@@ -36,6 +36,7 @@
 #include <array>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <span>
@@ -262,6 +263,18 @@ struct TorrentContent {
 [[nodiscard]] MadeTorrent
 makeTorrent(std::span<const TorrentContent> files, std::string name,
             std::uint64_t pieceLength = 256ULL * 1024ULL);
+
+/**
+ * @brief Write a generated multi-file torrent into an immutable hash directory.
+ *
+ * Returns the save directory a seeder uses. Files live under its torrent name;
+ * metainfo.torrent is written last. A write failure throws before callers mark
+ * any bytes sealed. Different editions never overwrite earlier seed payloads.
+ */
+[[nodiscard]] std::filesystem::path
+writeTorrentSeed(const std::filesystem::path &directory,
+                 const MadeTorrent &torrent,
+                 std::span<const TorrentContent> files);
 
 /// SHA-1 of @p data, which is the hash BitTorrent v1 is built on.
 [[nodiscard]] std::array<std::uint8_t, 20> sha1(std::string_view data);

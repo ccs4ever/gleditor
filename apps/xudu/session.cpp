@@ -614,6 +614,27 @@ std::string Session::publishDocument(const MicroversionId &version,
         "or for this store alone with --author-name and --author-email.");
   }
 
+  std::int64_t observedFloor = 0;
+  for (const auto &loaded : stores) {
+    const auto priorPath = std::filesystem::path(loaded.path) / "published" /
+                           (request.salt + ".xanadoc");
+    if (std::ifstream in(priorPath, std::ios::binary); in) {
+      const std::string bytes{std::istreambuf_iterator<char>(in),
+                              std::istreambuf_iterator<char>()};
+      const auto prior = decodePublication(bytes);
+      if (!prior || prior->publisher != mine.publicKey ||
+          prior->salt != request.salt) {
+        throw std::runtime_error(
+            "cannot advance an invalid prior publication: " +
+            priorPath.string());
+      }
+      observedFloor = std::max(observedFloor, prior->sequence);
+    }
+  }
+  const auto sequence = reservePublicationSequence(
+      std::filesystem::path(path(0)) / "publication-sequences", mine.publicKey,
+      request.salt, observedFloor);
+
   Provenance record;
   record.author    = who;
   record.salt      = request.salt;
@@ -682,9 +703,8 @@ std::string Session::publishDocument(const MicroversionId &version,
   if (sealed.opsSegment.has_value()) {
     opsSegments.push_back(*sealed.opsSegment);
   }
-  const auto pub =
-      publish(st, version, mine, request.salt, request.title,
-              static_cast<std::int64_t>(now), now, &sealed.scroll, opsSegments);
+  const auto pub = publish(st, version, mine, request.salt, request.title,
+                           sequence, now, &sealed.scroll, opsSegments);
 
   SealState nextState;
   nextState.scroll           = sealed.scroll;
@@ -697,6 +717,8 @@ std::string Session::publishDocument(const MicroversionId &version,
       (std::filesystem::path(into) / (request.salt + ".xanadoc")).string();
   std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
   out << encodePublication(pub);
+  out.close();
+  if (!out) throw std::runtime_error("cannot write publication: " + outPath);
   return outPath;
 }
 

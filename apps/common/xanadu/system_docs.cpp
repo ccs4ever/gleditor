@@ -1098,6 +1098,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to start a new ZigZag slice in a new store",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Alt+N"}}}}},
+        {.name    = std::string(settings::kKeymapNewSliceInStore),
+         .notes   = "Add a ZigZag slice to the current document's store",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+N"}}}}},
         {.name    = std::string(settings::kKeymapPouchDrop),
          .notes   = "Drop the selection into the notes pouch",
          .schemas = {{.expectedTypes = {"string"},
@@ -1736,12 +1740,12 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   }
 
   // Schemas and defaults
-  const auto schemasToBuild =
-      spec.schemas.empty()
-          ? std::vector<SettingSchemaShape>{{.expectedTypes = {"string"},
-                                             .defaultValues = {std::string{
-                                                 ""}}}}
-          : spec.schemas;
+  auto schemasToBuild = spec.schemas;
+  if (schemasToBuild.empty()) {
+    auto &shape = schemasToBuild.emplace_back();
+    shape.expectedTypes.emplace_back("string");
+    shape.defaultValues.emplace_back(std::string{});
+  }
 
   zigzag::CellRef prevBlank = zigzag::noCell;
   for (std::size_t s = 0; s < schemasToBuild.size(); ++s) {

@@ -1118,6 +1118,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(radialMenu.get());
   state->accessibility->addSource(&pouchDrawer);
   state->accessibility->addSource(&storeObjectManager);
+  state->accessibility->addSource(&swarmTelescope);
   state->accessibility->setToolkit("xuzz", TOSTRING(GLEDITOR_VERSION));
 
   const auto showMapVersion = [&views, &map, &renderer, &session,
@@ -1308,8 +1309,9 @@ int XuzzApp::run(const int argc, char **argv) {
         });
   });
 
-  gleditor::CompositeModalInput compositeModal(
-      {&publishForm, zigzagPresentation.get(), &quotationOverlay});
+  gleditor::CompositeModalInput compositeModal({zigzagPresentation.get(),
+                                                &swarmTelescope, &publishForm,
+                                                &quotationOverlay});
   state->modal = &compositeModal;
 
   renderer->addPickObserver(docSwitcher.get());
@@ -1941,7 +1943,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-        };
+    };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,
@@ -2320,35 +2322,54 @@ int XuzzApp::run(const int argc, char **argv) {
              showZigzagFocus();
            }});
 
+  const auto startSlice =
+      [&views, &session, &keyboardPane, &bindZigzag, &state,
+       zigzagPresentation](RenderState &rState, const std::size_t storeIndex,
+                           const xanadu::MicroversionId &parent) {
+        auto &store = session->store(storeIndex);
+        if (store.homeCell() != zigzag::noCell) {
+          state->showDialog(render::DiagnosticSeverity::Info,
+                            "Store already has a slice",
+                            "Open its existing slice to continue editing it.");
+          return;
+        }
+        const auto version = store.sliceGenesis(parent);
+        session->save(storeIndex);
+        bindZigzag(rState, storeIndex, version);
+        keyboardPane.enterZigzag();
+        views.placeCameraWhenReady(
+            [&views, &state, zigzagPresentation, placedFrames = 0]() mutable {
+              if (!views.presentationTransform() || ++placedFrames < 2)
+                return false;
+              if (const auto centre = zigzagPresentation->focusCentre()) {
+                std::scoped_lock locker(state->view);
+                state->view.pos.x = centre->x;
+                state->view.pos.y = centre->y;
+              }
+              return true;
+            });
+        std::cout << "xuzz: started a new slice (store " << storeIndex << ")\n";
+      };
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapNewSlice),
       "start a new ZigZag slice, in a new xanadoc of its own",
-      [&views, &session, &renderer, &keyboardPane, &bindZigzag, &state,
-       zigzagPresentation] {
+      [&views, &session, &renderer, startSlice] {
         const auto storeIndex = views.newDocument();
-        renderer->runWithState([&views, &session, &keyboardPane, &bindZigzag,
-                                &state, zigzagPresentation,
-                                storeIndex](RenderState &rState) {
-          auto &store = session->store(storeIndex);
-          const auto version =
-              store.sliceGenesis(store.primaryCurrentVersion());
-          session->save(storeIndex);
-          bindZigzag(rState, storeIndex, version);
-          keyboardPane.enterZigzag();
-          views.placeCameraWhenReady(
-              [&views, &state, zigzagPresentation, placedFrames = 0]() mutable {
-                if (!views.presentationTransform() || ++placedFrames < 2) {
-                  return false;
-                }
-                if (const auto centre = zigzagPresentation->focusCentre()) {
-                  std::scoped_lock locker(state->view);
-                  state->view.pos.x = centre->x;
-                  state->view.pos.y = centre->y;
-                }
-                return true;
-              });
-          std::cout << "xuzz: started a new slice (store " << storeIndex
-                    << ")\n";
+        renderer->runWithState(
+            [&session, startSlice, storeIndex](RenderState &rState) {
+              startSlice(rState, storeIndex,
+                         session->store(storeIndex).primaryCurrentVersion());
+            });
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapNewSliceInStore),
+      "add a ZigZag slice to the current document's store",
+      [&views, &session, startSlice] {
+        views.withCaret([&session, startSlice](RenderState &rState,
+                                               const xudu::Views::Where &where,
+                                               Caret *) {
+          startSlice(rState, session->storeIndexOf(where.doc),
+                     session->versionOf(where.doc));
         });
       });
 
