@@ -5,12 +5,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/identity/identity_layout.hpp>
-#include <xudu/core/identity/identity_network_controller.hpp>
-#include <xudu/core/identity/identity_serialization.hpp>
-#include <xudu/core/identity/identity_validation.hpp>
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/identity/identity_network_controller.hpp"
+#include "common/xanadu/identity/identity_serialization.hpp"
+#include "common/xanadu/identity/identity_validation.hpp"
+#include "common/xanadu/lt_compat.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 #include "pgp_fixture.hpp"
 
@@ -348,10 +349,8 @@ TEST(IdentityBEP10Test, ExtendedMessageEnvelopeEncoding) {
 TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
   libtorrent::entry h(libtorrent::entry::dictionary_t);
   IdentityNetworkController controller;
-  IdentityPeerPlugin plugin(
-      libtorrent::peer_connection_handle(
-          std::weak_ptr<libtorrent::aux::peer_connection>{}),
-      InfoHash{}, &controller);
+  IdentityPeerPlugin plugin(lt_compat::nullPeerConnection(), InfoHash{},
+                            &controller);
 
   plugin.add_handshake(h);
   ASSERT_THAT(h.type(), Eq(libtorrent::entry::dictionary_t));
@@ -375,9 +374,7 @@ namespace {
 std::shared_ptr<IdentityPeerPlugin>
 challengedPlugin(IdentityNetworkController &controller) {
   auto plugin = std::make_shared<IdentityPeerPlugin>(
-      libtorrent::peer_connection_handle(
-          std::weak_ptr<libtorrent::aux::peer_connection>{}),
-      InfoHash{}, &controller);
+      lt_compat::nullPeerConnection(), InfoHash{}, &controller);
 
   const std::string handshake =
       "d1:md20:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
@@ -392,12 +389,12 @@ challengedPlugin(IdentityNetworkController &controller) {
 }
 
 /// The fixed device keypair the checked-in delegation attests to.
-xudu::MutableKeys testDeviceKeys() {
-  xudu::MutableKeys keys;
+xanadu::MutableKeys testDeviceKeys() {
+  xanadu::MutableKeys keys;
   keys.publicKey =
-      xudu::PublicKey::fromHex(xudu::testing::kTestDevicePublicKeyHex);
+      xanadu::PublicKey::fromHex(xanadu::testing::kTestDevicePublicKeyHex);
   keys.secretKey =
-      xudu::SecretKey::fromHex(xudu::testing::kTestDeviceSecretKeyHex);
+      xanadu::SecretKey::fromHex(xanadu::testing::kTestDeviceSecretKeyHex);
   return keys;
 }
 
@@ -405,23 +402,23 @@ xudu::MutableKeys testDeviceKeys() {
 /// key -- the state a peer must reach before any of its signatures count.
 [[nodiscard]] bool
 trustFixtureDelegation(IdentityNetworkController &controller) {
-  xudu::DeviceDelegation cert;
+  xanadu::DeviceDelegation cert;
   cert.masterFingerprint =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   cert.devicePublicKey = testDeviceKeys().publicKey;
   cert.deviceName      = "peer-under-test";
   cert.issuedTimestamp = 1700000000;
   cert.gpgSignatureArmored =
-      std::string(xudu::testing::kDelegationForTestDeviceKey);
-  return controller.trustDelegation(cert, xudu::testing::kAuthorPublicKey);
+      std::string(xanadu::testing::kDelegationForTestDeviceKey);
+  return controller.trustDelegation(cert, xanadu::testing::kAuthorPublicKey);
 }
 
 /// Signs a challenge nonce the way a well-behaved peer does.
-Signature64 signNonce(const Hash32 &nonce, const xudu::MutableKeys &keys) {
+Signature64 signNonce(const Hash32 &nonce, const xanadu::MutableKeys &keys) {
   std::string buffer = "xudu-peer-auth-v1:";
   buffer.append(reinterpret_cast<const char *>(nonce.bytes.data()),
                 nonce.bytes.size());
-  const auto sig = xudu::signMutableItem(buffer, keys);
+  const auto sig = xanadu::signMutableItem(buffer, keys);
   Signature64 out;
   std::memcpy(out.bytes.data(), sig.bytes.data(), out.bytes.size());
   return out;
@@ -450,7 +447,7 @@ TEST(IdentityBEP10Test, AuthenticatesAPeerWithADelegatedDeviceKey) {
   PeerChallengeResponse resp;
   resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature       = signNonce(resp.nonce, testDeviceKeys());
 
@@ -459,7 +456,7 @@ TEST(IdentityBEP10Test, AuthenticatesAPeerWithADelegatedDeviceKey) {
   EXPECT_TRUE(plugin->isAuthenticated());
   ASSERT_TRUE(plugin->authenticatedIdentity().has_value());
   EXPECT_THAT(plugin->authenticatedIdentity()->toString(),
-              Eq(std::string(xudu::testing::kAuthorFingerprint)));
+              Eq(std::string(xanadu::testing::kAuthorFingerprint)));
 }
 
 // The bypass, in the form it actually shipped. The check was "the signature
@@ -475,7 +472,7 @@ TEST(IdentityBEP10Test, RejectsAuthResponseWithAnUnverifiableSignature) {
   PeerChallengeResponse resp;
   resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature.bytes.fill(0x55); // not a signature, merely not zero
 
@@ -494,12 +491,12 @@ TEST(IdentityBEP10Test, RejectsAValidSignatureByAnUndelegatedKey) {
   ASSERT_TRUE(trustFixtureDelegation(controller));
 
   auto plugin        = challengedPlugin(controller);
-  const auto ownKeys = xudu::createMutableKeys();
+  const auto ownKeys = xanadu::createMutableKeys();
 
   PeerChallengeResponse resp;
   resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = ownKeys.publicKey.bytes;
   resp.signature       = signNonce(resp.nonce, ownKeys);
 
@@ -518,7 +515,7 @@ TEST(IdentityBEP10Test, RejectsAnIdentityWithNoDelegationOnFile) {
   PeerChallengeResponse resp;
   resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature       = signNonce(resp.nonce, testDeviceKeys());
 
@@ -540,7 +537,7 @@ TEST(IdentityBEP10Test, RejectsASignatureOverAStaleNonce) {
   PeerChallengeResponse resp;
   resp.nonce = otherNonce;
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature       = signNonce(otherNonce, testDeviceKeys());
 
@@ -595,7 +592,7 @@ TEST(IdentityBEP10Test, RejectsAVoteCastUnderAnotherIdentity) {
   PeerChallengeResponse resp;
   resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
   resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature       = signNonce(resp.nonce, testDeviceKeys());
   deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));

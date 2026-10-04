@@ -20,10 +20,11 @@
 #include <gleditor/renderer.hpp>
 
 #include "clasp_link_forge.hpp"
-#include "core/pouch_zone.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class PouchDrawer
@@ -119,10 +120,11 @@ public:
                        float screenY, std::uint32_t docIndex = 0,
                        std::uint32_t charStart = 0, std::uint32_t charEnd = 0);
 
-  bool handleCellDrop(const PrimediaSpan &span, const std::string &preview,
-                      std::uint32_t cellRef, std::string_view rankCoord,
-                      float screenX, float screenY,
-                      std::uint32_t sliceIndex = 0);
+  bool
+  handleCellDrop(const PrimediaSpan &span, const std::string &preview,
+                 std::uint32_t cellRef, std::string_view rankCoord,
+                 float screenX, float screenY, std::uint32_t sliceIndex = 0,
+                 const std::optional<GlobalOpRef> &originOpRef = std::nullopt);
 
   [[nodiscard]] float currentWidth() const noexcept {
     return currentSlideWidth_;

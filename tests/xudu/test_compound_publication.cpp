@@ -5,11 +5,11 @@
  */
 #include <gtest/gtest.h>
 
+#include "common/xanadu/media_manager.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
 #include <filesystem>
 #include <fstream>
-#include <xudu/core/media_manager.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
 
 namespace {
 
@@ -35,27 +35,27 @@ TEST(CompoundPublicationTest, StageAndSealCompoundTorrents) {
   }
 
   // 2. Stage with MediaManager
-  xudu::MediaManager mediaMgr(tempDir / "staged");
+  xanadu::MediaManager mediaMgr(tempDir / "staged");
   const auto staged = mediaMgr.stageMediaFile(imageFile);
   EXPECT_EQ(staged.suggestedName, "diagram.png");
   EXPECT_EQ(staged.mimeType, "image/png");
   EXPECT_EQ(mediaMgr.stagedAssets().size(), 1U);
 
   // 3. Create Store and populate text
-  xudu::Store store;
-  store.insert(xudu::MicroversionId{}, 0,
+  xanadu::Store store;
+  store.insert(xanadu::MicroversionId{}, 0,
                "Quoting diagram from external source.");
 
-  const auto keys = xudu::createMutableKeys();
-  xudu::SignedProvenance prov{
+  const auto keys = xanadu::createMutableKeys();
+  xanadu::SignedProvenance prov{
       .tsv       = "author\tTest Author\n",
       .signature = std::string(64, '0'),
   };
 
   // 4. Seal Compound
   const auto compound =
-      xudu::sealCompound(store, keys, "test_salt", (tempDir / "pub").string(),
-                         prov, {staged.localPath});
+      xanadu::sealCompound(store, keys, "test_salt", (tempDir / "pub").string(),
+                           prov, {staged.localPath});
 
   EXPECT_FALSE(compound.mainSeal.hash.isZero());
   ASSERT_EQ(compound.mediaTorrents.size(), 1U);
@@ -71,12 +71,12 @@ TEST(CompoundPublicationTest, StageAndSealCompoundTorrents) {
   EXPECT_TRUE(
       std::filesystem::exists(tempDir / "pub" / "diagram.png" / "diagram.png"));
   EXPECT_TRUE(std::filesystem::exists(tempDir / "pub" / "diagram.png" /
-                                      xudu::provenanceFileName));
+                                      xanadu::provenanceFileName));
   EXPECT_TRUE(std::filesystem::exists(tempDir / "pub" / "diagram.png" /
-                                      xudu::provenanceSigName));
+                                      xanadu::provenanceSigName));
 
   // 5. Test AuthorCatalog for transcopyright & published body of work tracking
-  xudu::AuthorCatalog catalog;
+  xanadu::AuthorCatalog catalog;
   catalog.recordWork(compound.mainSeal.hash.hex(),
                      compound.mainSeal.provenance);
   catalog.recordWork(compound.mediaTorrents[0].hash.hex(),

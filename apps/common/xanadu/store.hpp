@@ -43,6 +43,7 @@
 #include "binary_ops.hpp"
 #include "common/xanadu/enfilade/chronofilade.hpp"
 #include "common/xanadu/extern_ref.hpp"
+#include "common/xanadu/quoted_structure.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "link_views.hpp"
@@ -845,6 +846,103 @@ public:
   placeholderForExtern(const ExternOpRef &ref) const noexcept {
     return scrollRegistry_.placeholderForExtern(ref);
   }
+
+  struct AppendedPouchItem {
+    MicroversionId version;
+    zigzag::CellRef itemCell{zigzag::noCell};
+  };
+
+  /**
+   * @brief Append a pouch item cell with @p content onto @p zone's d.items rank
+   * (§5.8).
+   */
+  [[nodiscard]] AppendedPouchItem
+  appendPouchItemWithRef(const MicroversionId &parent, zigzag::CellRef zone,
+                         const PrimediaSpan &content,
+                         const PouchOrigin &origin     = {},
+                         const zigzag::Manifold *known = nullptr);
+
+  [[nodiscard]] MicroversionId
+  appendPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
+                  const PrimediaSpan &content, const PouchOrigin &origin = {},
+                  const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Dismiss a pouch item from @p zone's d.items onto d.dismissed (§5.8).
+   */
+  [[nodiscard]] MicroversionId
+  dismissPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
+                   zigzag::CellRef item,
+                   const zigzag::Manifold *known = nullptr);
+
+  struct AppendedAnthologyEntry {
+    MicroversionId version;
+    zigzag::CellRef entryCell{zigzag::noCell};
+    zigzag::CellRef placeholderCell{zigzag::noCell};
+    zigzag::CellRef stateCell{zigzag::noCell};
+  };
+
+  /**
+   * @brief Append a foreign member entry onto an anthology rank (§5.9).
+   *
+   * Interns a placeholder for @p memberRef, mints an entry cell linking on
+   * d.member to the placeholder and on d.member-state to @p pinnedState
+   * descriptor, then appends the entry cell onto @p root's d.anthology rank
+   * posward.
+   */
+  [[nodiscard]] AppendedAnthologyEntry appendAnthologyEntry(
+      const MicroversionId &parent, zigzag::CellRef root,
+      const ExternOpRef &memberRef, const GlobalDocumentState &pinnedState,
+      std::string_view label = {}, const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Append a local member cell onto an anthology rank (§5.9).
+   *
+   * Appends @p localCell onto @p root's d.anthology rank posward.
+   */
+  [[nodiscard]] MicroversionId
+  appendAnthologyLocalMember(const MicroversionId &parent, zigzag::CellRef root,
+                             zigzag::CellRef localCell,
+                             const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Refresh an anthology entry's pinned state (§5.9 §3).
+   *
+   * Repoints @p entryCell's d.member-state to a newly minted descriptor for
+   * @p newPinnedState, and optionally repoints d.member if @p optNewMemberRef
+   * is provided. Both mutations are recorded in @p entryCell's R7 chain.
+   */
+  [[nodiscard]] MicroversionId refreshAnthologyEntry(
+      const MicroversionId &parent, zigzag::CellRef entryCell,
+      const GlobalDocumentState &newPinnedState,
+      std::optional<ExternOpRef> optNewMemberRef = std::nullopt,
+      const zigzag::Manifold *known              = nullptr);
+
+  /**
+   * @brief Authored quotation adopting a foreign structure or rank (§5.10).
+   *
+   * Authors Q, links to foreign root placeholder, snapshot state descriptor,
+   * selector cell (and carried dimensions or rank dimension if needed), and
+   * splices Q into local rank at localRankTail preserving any local successor.
+   */
+  [[nodiscard]] AppendedQuotation
+  quote(const MicroversionId &parent, zigzag::CellRef localRankTail,
+        zigzag::DimRef localRankDim, std::string_view label,
+        const GlobalDocumentState &pinnedState, const SelectorSpec &selector,
+        const zigzag::Manifold *known = nullptr);
+
+  /**
+   * @brief Author an override cell shadowing a foreign cell in a quotation
+   * (§5.10 §4).
+   *
+   * Interns placeholder for target, mints override cell O with overrideContent,
+   * links O on d.shadows to the placeholder, and appends O to quotationCell's
+   * d.overrides rank.
+   */
+  [[nodiscard]] MicroversionId overrideQuotedCell(
+      const MicroversionId &parent, zigzag::CellRef quotationCell,
+      const ExternOpRef &foreignTargetRef, std::string_view overrideContent,
+      const zigzag::Manifold *known = nullptr);
 
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);

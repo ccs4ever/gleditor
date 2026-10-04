@@ -21,8 +21,8 @@
 #include <string>
 #include <thread>
 
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace {
 
@@ -70,7 +70,7 @@ int main(const int argc, char **argv) {
   std::signal(SIGTERM, stop);
 
   try {
-    xudu::SwarmContentSource::Options options;
+    xanadu::SwarmContentSource::Options options;
     // Nothing that would find a peer without being asked. The swarm is meant
     // to contain exactly the two peers that were introduced to each other, so
     // that a successful transfer says something about this code rather than
@@ -101,16 +101,16 @@ int main(const int argc, char **argv) {
                                                                : "0.0.0.0";
     options.listenInterfaces = address + ":0";
 
-    xudu::SwarmContentSource peer(options);
+    xanadu::SwarmContentSource peer(options);
     const auto torrent = readWholeFile(argv[1]);
     // Not seed_mode: libtorrent checks the files against the piece hashes on
     // the way in, so this only claims to be a seed once it has been shown to
     // be one.
     const auto hash = peer.addTorrent(torrent, argv[2], false);
 
-    xudu::MutableKeys keys;
+    xanadu::MutableKeys keys;
     if (publish) {
-      keys = xudu::createMutableKeys();
+      keys = xanadu::createMutableKeys();
     }
 
     // Flushed, because the caller is reading this to know where to connect and

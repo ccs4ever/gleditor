@@ -20,8 +20,13 @@ jobs:
     - name: packages
       run: |
         sudo apt-get update -q
+        # clang-format is pinned to the major the tree is formatted to:
+        # unversioned `clang-format` follows the runner image and every major
+        # reflows continuation indents differently, so an image bump alone
+        # turns this job red. The Makefile prefers clang-format-19 and errors
+        # on anything older.
         sudo apt-get install -y -q --no-install-recommends \
-          clang-format shfmt shellcheck yamllint markdownlint
+          clang-format-19 shfmt shellcheck yamllint markdownlint
         # yamlfmt and mdformat aren't apt packages; go and pip are already on
         # this image. GOPATH/bin is where `go install` puts the binary, and
         # has to be on PATH for the make targets that call it by name.
@@ -145,6 +150,23 @@ jobs:
         sudo cp -f /var/cache/apt/archives/*.deb ~/apt-archives/ 2>/dev/null || true
         sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
         echo "cached $(ls ~/apt-archives | wc -l) packages, $(du -sh ~/apt-archives | cut -f1)"
+    # AccessKit's Linux backend is AT-SPI, so the screen-reader path is as
+    # real here as it is in the Windows and macOS packaging jobs -- and it is
+    # the only job that compiles src/a11y/platform_accesskit.cpp on Linux at
+    # all. No distribution packages accesskit-c; the release archive already
+    # holds lib/linux/<arch>/shared, so unpacking it is the whole install.
+    # Pinned to the version packaging.yml pins, so all three platforms link
+    # the same bindings.
+    - name: fetch accesskit-c
+      run: |
+        set -eu
+        version=0.22.3
+        curl -sSfL -o accesskit-c.zip \
+          "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
+        unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
+        echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
+        echo "GLEDITOR_ENABLE_A11Y=1" >> "$GITHUB_ENV"
+        ls "$RUNNER_TEMP/accesskit-c-$version/lib/linux/x86_64/shared"
     # GLEDITOR_SDL is set explicitly rather than left to the Makefile's probe:
     # "whichever is installed" would silently make both jobs build the same
     # thing if a runner image ever gained the other one.

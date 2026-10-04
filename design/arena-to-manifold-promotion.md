@@ -326,7 +326,7 @@ Implemented in [`VPLCompiler::exportToStore`](../apps/common/xanadu/vpl/compiler
 MicroversionId VPLCompiler::exportToStore(Store &store, const MicroversionId &parent) const;
 ```
 
-### Steps in Whole-Program Export:
+### Steps in Whole-Program Export
 
 1. **Dimension Reconciliation**: Iterates through all cells in the arena identifying dimension names
    (`d.*`). If the persistent store already possesses a dimension by that name, it maps to it;

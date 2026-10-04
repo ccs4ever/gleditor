@@ -119,14 +119,14 @@ std::vector<xanadu::Visit> LinkContext::forwardChoices() const {
 
 xanadu::ReadingPosition LinkContext::reading() const {
   xanadu::ReadingPosition position;
-  const auto current = navigator.currentVisit();
-  const auto visit   = current
-                           ? activity.find(*current)
-                           : gleditor::cpp26::optional<const xanadu::Visit &>{};
+  const auto current  = navigator.currentVisit();
+  const auto visit    = current
+                            ? activity.find(*current)
+                            : gleditor::cpp26::optional<const xanadu::Visit &>{};
   const auto selected = navigator.selection();
   position.entered    = visit && selected &&
-                        xanadu::Arrival::EnteredEndpoint == visit->arrival &&
-                        visit->link && visit->link->key == selected->key;
+                     xanadu::Arrival::EnteredEndpoint == visit->arrival &&
+                     visit->link && visit->link->key == selected->key;
   const bool inCell =
       visit && std::holds_alternative<xanadu::CellSite>(visit->target);
   position.here =

@@ -107,16 +107,20 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 class Store;
 
 // Standardized dimensional constants for system store cell geometry:
-inline constexpr std::string_view kDimDims       = "d.dims";
-inline constexpr std::string_view kDimVars       = "d.vars";
-inline constexpr std::string_view kDimValues     = "d.values";
-inline constexpr std::string_view kDimGroups     = "d.groups";
-inline constexpr std::string_view kDimSubgroups  = "d.subgroups";
-inline constexpr std::string_view kDimClone      = "d.clone";
-inline constexpr std::string_view kDimNotes      = "d.notes";
-inline constexpr std::string_view kDimSchemas    = "d.schemas";
-inline constexpr std::string_view kDimAlternates = "d.alternates";
-inline constexpr std::string_view kDimDefault    = "d.default";
+inline constexpr std::string_view kDimDims           = "d.dims";
+inline constexpr std::string_view kDimVars           = "d.vars";
+inline constexpr std::string_view kDimValues         = "d.values";
+inline constexpr std::string_view kDimGroups         = "d.groups";
+inline constexpr std::string_view kDimSubgroups      = "d.subgroups";
+inline constexpr std::string_view kDimClone          = "d.clone";
+inline constexpr std::string_view kDimNotes          = "d.notes";
+inline constexpr std::string_view kDimAlias          = "d.alias";
+inline constexpr std::string_view kDimVocab          = "d.vocab";
+inline constexpr std::string_view kDimOverlayTargets = "d.overlay-targets";
+inline constexpr std::string_view kDimOverlayClaims  = "d.overlay-claims";
+inline constexpr std::string_view kDimSchemas        = "d.schemas";
+inline constexpr std::string_view kDimAlternates     = "d.alternates";
+inline constexpr std::string_view kDimDefault        = "d.default";
 
 namespace settings {
 // Layout
@@ -314,6 +318,10 @@ inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
+inline constexpr std::string_view kKeymapQuotationToggle =
+    "std:xudu/quotation_toggle";
+inline constexpr std::string_view kKeymapQuotationToggleF9 =
+    "std:xudu/quotation_toggle_f9";
 
 // Keymap - Zigzag Visualizer & Pure Vortex Actions
 inline constexpr std::string_view kKeymapViewModeContent1 =
@@ -688,8 +696,9 @@ public:
   [[nodiscard]] static SystemStoreModel
   fromStore(const Store &store, const MicroversionId &version = {});
 
+  template <typename ManifoldT>
   [[nodiscard]] static SystemStoreModel
-  fromManifold(const zigzag::Manifold &manifold,
+  fromManifold(const ManifoldT &manifold,
                zigzag::CellRef homeCell = zigzag::noCell,
                const SpanReader *reader = nullptr);
 
@@ -1033,6 +1042,7 @@ struct UIConfig {
 };
 
 struct DropZoneSpec {
+  zigzag::CellRef cell{zigzag::noCell};
   std::string id;
   std::string label{"Notes"};
   std::uint32_t auraColor{0x06B6D4FFU};
@@ -1044,6 +1054,13 @@ struct PouchConfig {
 
   [[nodiscard]] static PouchConfig fromStore(const Store &store);
 };
+
+/**
+ * @brief Add or ensure a drop zone setting on d.vars in a system store (§5.8).
+ */
+MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
+                            const DropZoneSpec &spec,
+                            zigzag::CellRef *cellOut = nullptr);
 
 } // namespace xanadu
 

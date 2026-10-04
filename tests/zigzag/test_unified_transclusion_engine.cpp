@@ -11,15 +11,15 @@
 #include <filesystem>
 
 #include "../lib/mocks/device.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/compact_zzcell.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/font.hpp"
-#include "xudu/core/format.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/user_permascroll.hpp"
-#include "zigzag/core/compact_zzcell.hpp"
-#include "zigzag/core/unified_transclusion_engine.hpp"
+#include "zigzag/unified_transclusion_engine.hpp"
 
 using namespace zigzag;
 
@@ -80,7 +80,7 @@ TEST(CompactZZCellTest, LinkPairsAndDynamicDimensions) {
 }
 
 TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
   EXPECT_EQ(engine.cellCount(), 0U);
 
@@ -89,15 +89,15 @@ TEST(UnifiedTransclusionEngineTest, TextOperationsMintNoCells) {
   // A CellRef is the index of the operation that *minted* a cell, so typing
   // into a document mints nothing: a xanadoc's pieces become cells when
   // something says they are cells, which is sliceToStore() or the verbs below.
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "Everything is");
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, "Everything is");
   static_cast<void>(store.insert(v1, 13, " deeply intertwingled."));
   engine.syncIncremental();
   EXPECT_EQ(engine.cellCount(), 0U);
 }
 
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
-  xudu::Store store;
-  const auto genesis   = store.sliceGenesis(xudu::MicroversionId{});
+  xanadu::Store store;
+  const auto genesis   = store.sliceGenesis(xanadu::MicroversionId{});
   const auto common    = store.makeCell(genesis, "common");
   const auto left      = store.makeCell(common, "left");
   const auto leftCell  = store.cellRefOf(left);
@@ -119,13 +119,13 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncKeepsSiblingBranchesApart) {
 }
 
 TEST(UnifiedTransclusionEngineTest, NewCellCanReuseExactSourceSpans) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
   const auto source   = engine.addCell("quoted cell content");
   const auto original = engine.manifold().contentOf(source);
   ASSERT_EQ(original.size(), 1U);
-  const std::vector<xudu::PrimediaSpan> quoted(original.begin(),
-                                               original.end());
+  const std::vector<xanadu::PrimediaSpan> quoted(original.begin(),
+                                                 original.end());
 
   const auto target = engine.addCellFromSpans(quoted);
   ASSERT_NE(source, target);
@@ -142,12 +142,12 @@ TEST(UnifiedTransclusionEngineTest,
   const auto dir =
       std::filesystem::temp_directory_path() / "zigzag_slice_edit_resume";
   std::filesystem::remove_all(dir);
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   CellRef first    = noCell;
   CellRef second   = noCell;
-  xudu::MicroversionId edited;
+  xanadu::MicroversionId edited;
   {
-    xudu::Store store(perma);
+    xanadu::Store store(perma);
     UnifiedTransclusionEngine engine(store);
     first  = engine.addCell("first");
     second = engine.addCell("New Cell");
@@ -158,7 +158,7 @@ TEST(UnifiedTransclusionEngineTest,
     store.save(dir.string());
   }
 
-  xudu::Store reopened(perma);
+  xanadu::Store reopened(perma);
   reopened.load(dir.string());
   const auto current = reopened.primaryCurrentVersion();
   const auto folded  = reopened.rebuildManifold(current);
@@ -172,7 +172,7 @@ TEST(UnifiedTransclusionEngineTest,
 }
 
 TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
 
   const auto first  = engine.addCell("Everything is deeply intertwingled.");
@@ -206,7 +206,7 @@ TEST(UnifiedTransclusionEngineTest, AsymmetryCanNoLongerBeConstructed) {
   // impossible: a CellSlot exposes no setter, and the only way to make a link
   // is an operation whose fold maintains both ends. So what is left to assert
   // is that the invariant holds through the operations that used to break it.
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
 
   const auto one   = engine.addCell("one");
@@ -231,7 +231,7 @@ TEST(UnifiedTransclusionEngineTest, AsymmetryCanNoLongerBeConstructed) {
 }
 
 TEST(UnifiedTransclusionEngineTest, StageVisibleCellsForRender) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
 
   const auto c1Id = engine.addCell("Cell One Content");
@@ -270,20 +270,20 @@ TEST(UnifiedTransclusionEngineTest, StageVisibleCellsForRender) {
 TEST(CompactZZCellTest, WithheldAndTranscopyrightHoles) {
   CompactZZCell withheldCell;
   withheldCell.id               = 10;
-  withheldCell.resolutionStatus = xudu::ResolutionStatus::WithheldRedacted;
+  withheldCell.resolutionStatus = xanadu::ResolutionStatus::WithheldRedacted;
   EXPECT_TRUE(withheldCell.isWithheld());
   EXPECT_FALSE(withheldCell.isTranscopyrightLocked());
 
-  xudu::PrimediaSpool primedia;
-  xudu::Resolver resolver;
-  std::vector<xudu::Scroll> externals;
+  xanadu::PrimediaSpool primedia;
+  xanadu::Resolver resolver;
+  std::vector<xanadu::Scroll> externals;
   EXPECT_EQ(withheldCell.readText(primedia, resolver, externals),
             "[Redacted - Withheld]");
 
   CompactZZCell tcCell;
   tcCell.id                 = 11;
-  tcCell.resolutionStatus   = xudu::ResolutionStatus::TranscopyrightLocked;
-  tcCell.transcopyrightInfo = xudu::TranscopyrightDescriptor{
+  tcCell.resolutionStatus   = xanadu::ResolutionStatus::TranscopyrightLocked;
+  tcCell.transcopyrightInfo = xanadu::TranscopyrightDescriptor{
       .priceAtomicUnits = 50,
       .currencySymbol   = "XU",
   };
@@ -293,22 +293,23 @@ TEST(CompactZZCellTest, WithheldAndTranscopyrightHoles) {
 }
 
 TEST(UnifiedTransclusionEngineTest, StageWithheldAndTranscopyrightCells) {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine(store);
 
   // Why a cell is not showing its content is render-side, so it goes in the
   // cold table rather than into the cell: the span is the same address whether
   // or not this reader holds the key.
   const auto withheld = engine.addCell("secret");
-  engine.setCold(
-      withheld, {.resolutionStatus = xudu::ResolutionStatus::WithheldRedacted});
+  engine.setCold(withheld, {.resolutionStatus =
+                                xanadu::ResolutionStatus::WithheldRedacted});
   const auto locked = engine.addCell("for sale");
   engine.setCold(
-      locked, {.resolutionStatus = xudu::ResolutionStatus::TranscopyrightLocked,
-               .transcopyrightInfo = xudu::TranscopyrightDescriptor{
-                   .priceAtomicUnits = 25,
-                   .currencySymbol   = "XU",
-               }});
+      locked,
+      {.resolutionStatus   = xanadu::ResolutionStatus::TranscopyrightLocked,
+       .transcopyrightInfo = xanadu::TranscopyrightDescriptor{
+           .priceAtomicUnits = 25,
+           .currencySymbol   = "XU",
+       }});
 
   engine.linkCells(withheld, locked, DimOrdinal::D1);
 
@@ -347,9 +348,9 @@ namespace {
 /// costs this test is about on the per-operation path: resolving a source
 /// version, finding the master cell for a span, and joining a d.transclude
 /// rank.
-xudu::MicroversionId buildMixedStore(xudu::Store &store, const int ops) {
+xanadu::MicroversionId buildMixedStore(xanadu::Store &store, const int ops) {
   const auto seed =
-      store.insert(xudu::MicroversionId{}, 0,
+      store.insert(xanadu::MicroversionId{}, 0,
                    "Everything is deeply intertwingled. No boundaries.");
   auto version = seed;
   for (int i = 1; i < ops; i++) {
@@ -365,7 +366,7 @@ xudu::MicroversionId buildMixedStore(xudu::Store &store, const int ops) {
 
 /// Microseconds per operation to sync a store of @p ops operations.
 double syncCostPerOp(const int ops) {
-  xudu::Store store;
+  xanadu::Store store;
   buildMixedStore(store, ops);
   UnifiedTransclusionEngine engine(store);
   const auto before = std::chrono::steady_clock::now();
@@ -406,7 +407,7 @@ namespace {
 
 /// The staging fixture the tests above build by hand, in one place.
 struct StagingRig {
-  xudu::Store store;
+  xanadu::Store store;
   UnifiedTransclusionEngine engine{store};
   gleditor::text::FontFacePtr font;
   testing::NiceMock<MockRenderDevice> device;
@@ -493,7 +494,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // not share an entry.
   const auto first = rig.engine.addCell("Alpha content x");
   const auto req   = UnifiedTransclusionEngine::RenderSliceRequest{
-      .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+        .focusCellId = first, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
 
   static_cast<void>(
       rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache));
@@ -502,7 +503,7 @@ TEST(ShapingCacheTest, ChangedTextIsNotServedFromCache) {
   // A second cell whose text differs only in its last character.
   const auto second = rig.engine.addCell("Alpha content y");
   const auto req2   = UnifiedTransclusionEngine::RenderSliceRequest{
-      .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+        .focusCellId = second, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
   static_cast<void>(
       rig.engine.stageVisibleCells(req2, rig.font, *rig.glyphCache));
   const auto afterSecond = rig.engine.shapingCacheStats();
@@ -603,12 +604,12 @@ TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
   const auto spans    = rig.engine.manifold().contentOf(boldCell);
   ASSERT_FALSE(spans.empty());
 
-  xudu::Link boldLink;
-  boldLink.type = xudu::LinkType::Format;
-  boldLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  xanadu::Link boldLink;
+  boldLink.type = xanadu::LinkType::Format;
+  boldLink.left = std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
   boldLink.right.push_back(
-      xudu::vocabularySpanFor(xudu::FormatAttribute::Bold));
-  rig.store.addLink(xudu::MicroversionId{}, boldLink);
+      xanadu::vocabularySpanFor(xanadu::FormatAttribute::Bold));
+  rig.store.addLink(xanadu::MicroversionId{}, boldLink);
 
   // Update format flags
   rig.engine.updateFormatFlags();
@@ -616,7 +617,7 @@ TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
   const auto slot2 = rig.engine.manifold().slot(boldCell);
   ASSERT_TRUE(slot2.has_value());
   const auto boldBit =
-      1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Bold);
+      1U << static_cast<std::uint8_t>(xanadu::FormatAttribute::Bold);
   EXPECT_EQ(slot2->formatFlags, boldBit);
 
   // 3) Stage visible cells and verify glyph staging
@@ -639,11 +640,12 @@ TEST(UnifiedTransclusionEngineTest,
   const auto spans      = rig.engine.manifold().contentOf(italicCell);
   ASSERT_FALSE(spans.empty());
 
-  xudu::Link italicLink;
-  italicLink.type = xudu::LinkType::Format;
-  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  xanadu::Link italicLink;
+  italicLink.type = xanadu::LinkType::Format;
+  italicLink.left =
+      std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
   italicLink.right.push_back(
-      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
+      xanadu::vocabularySpanFor(xanadu::FormatAttribute::Italic));
   rig.store.addLink(rig.engine.head(), italicLink);
 
   rig.engine.syncIncremental();
@@ -652,7 +654,7 @@ TEST(UnifiedTransclusionEngineTest,
   const auto slot1 = rig.engine.manifold().slot(italicCell);
   ASSERT_TRUE(slot1.has_value());
   const auto italicBit =
-      1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Italic);
+      1U << static_cast<std::uint8_t>(xanadu::FormatAttribute::Italic);
   EXPECT_EQ(slot1->formatFlags, italicBit);
 
   // 2) Perform unrelated edits: add unformatted cells, link on d.1, insert
@@ -685,11 +687,11 @@ TEST(UnifiedTransclusionEngineTest,
   EXPECT_GT(batchPlain.instanceCount, 0U);
 
   // 4) Adding a new format link properly triggers full format rescan
-  xudu::Link boldLink;
-  boldLink.type = xudu::LinkType::Format;
-  boldLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  xanadu::Link boldLink;
+  boldLink.type = xanadu::LinkType::Format;
+  boldLink.left = std::vector<xanadu::PrimediaSpan>(spans.begin(), spans.end());
   boldLink.right.push_back(
-      xudu::vocabularySpanFor(xudu::FormatAttribute::Bold));
+      xanadu::vocabularySpanFor(xanadu::FormatAttribute::Bold));
   rig.store.addLink(rig.engine.head(), boldLink);
 
   rig.engine.syncIncremental();

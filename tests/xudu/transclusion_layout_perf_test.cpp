@@ -8,12 +8,14 @@
 #include <chrono>
 #include <vector>
 
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/version.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/version.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {

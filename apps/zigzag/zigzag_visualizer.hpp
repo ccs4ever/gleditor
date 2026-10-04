@@ -6,15 +6,16 @@
 #define ZIGZAG_VISUALIZER_HPP
 
 #include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/quoted_structure.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vortex/vortex_host.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "core/manifold.hpp"
-#include "core/unified_transclusion_engine.hpp"
-#include "core/zz_xudu_projector.hpp"
-#include "core/zzcore.hpp"
-#include "core/zzstructure.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+#include "zigzag/unified_transclusion_engine.hpp"
 
 #include <array>
 #include <atomic>
@@ -53,6 +54,11 @@ struct RenderStateCell {
   bool is_image{false};
   bool is_clone{false};
   CellID clone_master_id{0};
+  bool is_quote{false};
+  std::string quote_label;
+  std::string quote_target;
+  bool is_vocab{false};
+  std::string vocab_target;
 
   glm::vec3 current_pos{0.0F, 0.0F, 0.0F};
   glm::vec3 target_pos{0.0F, 0.0F, 0.0F};
@@ -151,6 +157,11 @@ public:
                       const std::vector<xanadu::MicroversionId> &versions);
   void bindXuduStore(xanadu::Store &store,
                      const xanadu::MicroversionId &version);
+  void reloadStoreVersion(const xanadu::MicroversionId &version,
+                          zigzag::CellRef newFocus = zigzag::noCell);
+  void setOnOpenQuoteBuilder(std::function<void()> cb) {
+    onOpenQuoteBuilder_ = std::move(cb);
+  }
   void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
                      const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
@@ -505,7 +516,6 @@ public:
     return visible_cells_;
   }
 
-private:
   struct CellInfo {
     CellRef id{0};
     std::string text;
@@ -515,8 +525,22 @@ private:
     bool is_image{false};
     bool is_clone{false};
     CellRef clone_master_id{0};
+    bool is_quote{false};
+    std::string quote_label;
+    std::string quote_target;
+    bool is_vocab{false};
+    std::string vocab_target;
   };
 
+  [[nodiscard]] CellInfo inspectCell(CellRef id) const;
+  [[nodiscard]] std::string cellBadge(CellRef id, std::string_view role) const;
+  [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
+  [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
+                                                    bool isFocus) const;
+  [[nodiscard]] const CellLayoutMetrics &
+  cellLayout(CellID id, const RenderStateCell &cell, bool isFocus) const;
+
+private:
   void rebuildActiveViewTopology();
   void updateCellPositions(float deltaTime);
   void invalidateAccessibility() {
@@ -526,13 +550,6 @@ private:
     }
   }
 
-  [[nodiscard]] CellInfo inspectCell(CellRef id) const;
-  [[nodiscard]] std::string cellBadge(CellRef id, std::string_view role) const;
-  [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
-  [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
-                                                    bool isFocus) const;
-  [[nodiscard]] const CellLayoutMetrics &
-  cellLayout(CellID id, const RenderStateCell &cell, bool isFocus) const;
   void refreshCellLayouts();
 
   std::string fontName_;
@@ -617,6 +634,7 @@ private:
   std::string commandBarText_;
   std::string commandBarFeedback_;
   bool commandBarFeedbackIsError_{false};
+  std::function<void()> onOpenQuoteBuilder_;
 };
 
 } // namespace zigzag

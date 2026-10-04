@@ -6,12 +6,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/format_resolver.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/format_resolver.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 

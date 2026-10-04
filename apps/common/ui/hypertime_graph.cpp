@@ -927,9 +927,9 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
   sliderNode.value = current_.str();
 
   if (selectedOperation_ && annotateHandler_) {
-    auto &annotate   = into.add(2001U, gleditor::a11y::Role::Button);
-    annotate.label   = "Annotate operation " + selectedOperation_->str() +
-                       " and place handle on d.1";
+    auto &annotate = into.add(2001U, gleditor::a11y::Role::Button);
+    annotate.label = "Annotate operation " + selectedOperation_->str() +
+                     " and place handle on d.1";
     annotate.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
   }
   if (selectedOperation_) {
@@ -937,9 +937,9 @@ void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
     const bool included =
         std::ranges::find(comparedVersions_, *selectedOperation_) !=
         comparedVersions_.end();
-    compare.label   = std::string(included ? "Remove " : "Add ") +
-                      selectedOperation_->str() +
-                      (included ? " from comparison" : " to comparison");
+    compare.label = std::string(included ? "Remove " : "Add ") +
+                    selectedOperation_->str() +
+                    (included ? " from comparison" : " to comparison");
     compare.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
   }
 

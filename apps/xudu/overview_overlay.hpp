@@ -27,8 +27,8 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/xanadu/framing.hpp"
 #include "common/xanadu/system_docs.hpp"
-#include "xudu/core/framing.hpp"
 
 namespace xudu {
 

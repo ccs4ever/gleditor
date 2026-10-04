@@ -8,22 +8,22 @@
 #include <filesystem>
 #include <string>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::formatAttributeName;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::readVocabulary;
-using xudu::Store;
-using xudu::vocabularySpanFor;
+using xanadu::FormatAttribute;
+using xanadu::formatAttributeName;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::readVocabulary;
+using xanadu::Store;
+using xanadu::vocabularySpanFor;
 
 TEST(FormatAttributeTest, everyAttributeHasAName) {
   EXPECT_STREQ(formatAttributeName(FormatAttribute::Italic), "italic");
@@ -70,7 +70,7 @@ TEST(FormatAttributeTest, readingAVocabularySpanReturnsItsWord) {
 }
 
 TEST(FormatAttributeTest, readVocabularyIgnoresSpansIntoOtherScrolls) {
-  EXPECT_FALSE(readVocabulary(PrimediaSpan{xudu::localScroll, 0, 6}));
+  EXPECT_FALSE(readVocabulary(PrimediaSpan{xanadu::localScroll, 0, 6}));
 }
 
 TEST(StoreFormatTest, vocabularyTextIsNotVisibleInAnyDocument) {

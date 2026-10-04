@@ -454,9 +454,28 @@ Manifold::dimensionNamed(const std::string_view name,
       return fast;
     }
   }
-  auto named = dimensions() | std::views::filter([&](const DimRef dim) {
-                 return textOf(dim, reader) == name;
-               });
+  std::optional<DimRef> dimAlias;
+  if (name != "d.alias") {
+    for (const auto dim : dimensions()) {
+      if (textOf(dim, reader) == "d.alias") {
+        dimAlias = dim;
+        break;
+      }
+    }
+  }
+  auto named =
+      dimensions() | std::views::filter([&](const DimRef dim) {
+        if (textOf(dim, reader) == name) {
+          return true;
+        }
+        if (dimAlias.has_value() && *dimAlias != dim) {
+          const auto aliasCell = linked(dim, *dimAlias, DimVector::POS);
+          if (aliasCell != noCell && textOf(aliasCell, reader) == name) {
+            return true;
+          }
+        }
+        return false;
+      });
   return firstOf(named).transform([&](const DimRef dim) {
     if (nullptr != store_) {
       DimensionRegistry::instance().registerDim(*store_, name, dim);
@@ -1162,14 +1181,14 @@ Manifold::links(const xanadu::SpanReader &reader) const {
               });
     };
 
-    link.left    = readEndpoint(dimFrom);
-    link.right   = readEndpoint(dimTo);
-    link.type    = readProp(dimType)
-                       .transform(xanadu::linkTypeFromName)
-                       .value_or(xanadu::LinkType::Comment);
-    link.tier    = readProp(dimTier)
-                       .transform(xanadu::prominenceTierFromName)
-                       .value_or(xanadu::ProminenceTier::Author);
+    link.left  = readEndpoint(dimFrom);
+    link.right = readEndpoint(dimTo);
+    link.type  = readProp(dimType)
+                    .transform(xanadu::linkTypeFromName)
+                    .value_or(xanadu::LinkType::Comment);
+    link.tier = readProp(dimTier)
+                    .transform(xanadu::prominenceTierFromName)
+                    .value_or(xanadu::ProminenceTier::Author);
     link.owner   = readProp(dimOwner).value_or("");
     link.curator = readProp(dimCurator).value_or("");
 

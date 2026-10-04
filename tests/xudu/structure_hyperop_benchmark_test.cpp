@@ -16,8 +16,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <xudu/core/store.hpp>
-#include <zigzag/core/arena_manifold.hpp>
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
 

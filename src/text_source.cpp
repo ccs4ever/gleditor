@@ -27,6 +27,7 @@
 #include <PDFDoc.h>
 #include <Stream.h>
 #include <goo/GooString.h>
+#include <poppler-version.h>
 
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
 #if GLEDITOR_SDL_MAJOR == 3
@@ -39,6 +40,49 @@
 #include <gleditor/text_source.hpp>
 
 namespace {
+
+/// The three places the core-poppler interface moved under us between the
+/// 24.02 distributions still ship and the 25.02+ this file was written
+/// against. Spelled out here rather than in the call sites so the churn the
+/// include block above warns about stays in one block: each is a rename or a
+/// change of ownership, not a behaviour difference.
+namespace poppler_compat {
+
+/// 25.02 renamed `ImageStream::reset()` to `rewind()` and gave it a bool
+/// result; the older one cannot report failure, so treat it as success.
+bool rewind([[maybe_unused]] ImageStream &stream) {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return stream.rewind();
+#else
+  stream.reset();
+  return true;
+#endif
+}
+
+/// `Object::null()` is 25.02's spelling of the null-object constructor.
+Object nullObject() {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return Object::null();
+#else
+  return Object(objNull);
+#endif
+}
+
+/// 25.02 moved PDFDoc's stream parameter to `unique_ptr`; before that it took
+/// a raw `BaseStream *` and took ownership of it all the same, so releasing
+/// into it hands over the same stream with the same lifetime.
+std::unique_ptr<PDFDoc> openDoc(std::unique_ptr<BaseStream> stream) {
+#if POPPLER_VERSION_MAJOR > 25 ||                                              \
+    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
+  return std::make_unique<PDFDoc>(std::move(stream));
+#else
+  return std::make_unique<PDFDoc>(stream.release());
+#endif
+}
+
+} // namespace poppler_compat
 
 /// Byte at @p index widened through unsigned char. `char` is signed on most
 /// targets, so comparing a raw one against 0xEF or 0xFF is never true and
@@ -321,7 +365,7 @@ private:
                                              GfxImageColorMap *colorMap) {
     ImageStream imgStr(str, width, colorMap->getNumPixelComps(),
                        colorMap->getBits());
-    if (!imgStr.rewind()) {
+    if (!poppler_compat::rewind(imgStr)) {
       return {};
     }
     std::vector<unsigned char> rgb(static_cast<std::size_t>(width) *
@@ -505,9 +549,9 @@ std::expected<void, SourceError> FileTextSource::load() const {
     const MagicMimeDetector magic;
     const auto mime = magic.identifyBuffer(content.data(), content.size());
     piecesCache     = {ContentPiece{
-        .bytes    = content,
-        .mimeType = MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
-        .pageBreakAfter = false}};
+            .bytes    = content,
+            .mimeType = MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
+            .pageBreakAfter = false}};
   }
   loaded = true;
   return {};
@@ -574,8 +618,8 @@ void PdfTextSource::loadPdfData(const char *data, const std::size_t size) {
   numPages = static_cast<std::size_t>(doc->pages());
 
   auto memStream = std::make_unique<MemStream>(
-      data, 0, static_cast<Goffset>(size), Object::null());
-  auto coreDoc = std::make_unique<PDFDoc>(std::move(memStream));
+      data, 0, static_cast<Goffset>(size), poppler_compat::nullObject());
+  auto coreDoc = poppler_compat::openDoc(std::move(memStream));
   extractPdfDocument(*doc, coreDoc->isOk() ? coreDoc.get() : nullptr, buffer,
                      breaks, piecesOf);
 }

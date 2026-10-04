@@ -11,20 +11,20 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/framing.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
+#include "common/xanadu/framing.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 
 namespace {
 
-using xudu::HalfLink;
-using xudu::Link;
-using xudu::LinkedPair;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::Store;
-using xudu::Version;
+using xanadu::HalfLink;
+using xanadu::Link;
+using xanadu::LinkedPair;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::Store;
+using xanadu::Version;
 
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {
   std::vector<const Version *> out;
@@ -116,7 +116,7 @@ TEST(PdfBeamsTest, linksBetweenMultiPageSpansCreateBeams) {
                                       store.rebuild(quotedVersion)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].type, LinkType::Comment);

@@ -20,25 +20,25 @@
 #include <string>
 #include <string_view>
 
-#include <xudu/core/bencode.hpp>
-#include <xudu/core/resolver.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/store_tables.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/torrent.hpp"
 
 #include "torrent_data.hpp"
 
 namespace {
 
-using xudu::DirectoryContentSource;
-using xudu::InfoHash;
-using xudu::Metainfo;
-using xudu::MicroversionId;
-using xudu::PrimediaSpan;
-using xudu::Resolver;
-using xudu::Scroll;
-using xudu::Store;
+using xanadu::DirectoryContentSource;
+using xanadu::InfoHash;
+using xanadu::Metainfo;
+using xanadu::MicroversionId;
+using xanadu::PrimediaSpan;
+using xanadu::Resolver;
+using xanadu::Scroll;
+using xanadu::Store;
 
 /// A directory holding the torrents' data, laid out as the torrents describe.
 struct TorrentDataTest : testing::Test {
@@ -328,7 +328,7 @@ struct PieceCachePerfTest : testing::Test {
     for (std::size_t i = 0; i < content.size(); i++) {
       content[i] = static_cast<char>('a' + (i % 26));
     }
-    const auto made = xudu::makeTorrent(content, "big.dat", 64ULL * 1024ULL);
+    const auto made = xanadu::makeTorrent(content, "big.dat", 64ULL * 1024ULL);
     std::ofstream out(dir / "big.dat", std::ios::binary | std::ios::trunc);
     out << content;
     out.close();
@@ -417,7 +417,7 @@ TEST_F(TorrentDataTest, twoDocumentsQuotingOneTorrentShareThatContent) {
 
   const auto shared = store.rebuild(left).pieces().front();
   EXPECT_THAT(store.rebuild(quoted).occurrencesOf(shared),
-              testing::ElementsAre(xudu::Extent{10, 15}));
+              testing::ElementsAre(xanadu::Extent{10, 15}));
 }
 
 TEST_F(TorrentDataTest, oneScrollIsRecordedOnceHoweverOftenItIsQuoted) {
@@ -453,7 +453,7 @@ TEST_F(TorrentStoreRoundTripTest, aTorrentBackedQuotationSurvivesAReload) {
   // One permascroll across the reload: the "Nelson wrote: " half is local, and
   // a store keeps no copy of local primedia. The quoted half is external and
   // comes from the torrent either way, which is the point of the test.
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   MicroversionId quoted;
   {
     Store store(perma);
@@ -505,7 +505,7 @@ TEST_F(TorrentDataTest, aStoreWhoseSideTablesArePlaintextIsRefused) {
     try {
       loaded.load(storeDir);
       FAIL() << superseded << " must not be opened as though it were empty";
-    } catch (const xudu::StoreTablesUnreadable &e) {
+    } catch (const xanadu::StoreTablesUnreadable &e) {
       EXPECT_THAT(std::string{e.what()}, testing::HasSubstr(superseded));
     }
   }
@@ -521,7 +521,7 @@ TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
   write(std::filesystem::path(storeDir) / "scrolls.spool", "stale\n");
   write(std::filesystem::path(storeDir) / "links.spool", "stale\n");
 
-  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  const auto perma = std::make_shared<xanadu::UserPermascroll>();
   Store store(perma);
   static_cast<void>(store.insert(MicroversionId{}, 0, "hello"));
   store.save(storeDir);
@@ -551,11 +551,11 @@ TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
                                     const std::uint64_t pieceLength) {
   std::string pieces;
   for (std::size_t at = 0; at < text.size(); at += pieceLength) {
-    const auto hash = xudu::sha1(std::string_view{text}.substr(
+    const auto hash = xanadu::sha1(std::string_view{text}.substr(
         at, static_cast<std::size_t>(pieceLength)));
     pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
   }
-  using xudu::bencode::Value;
+  using xanadu::bencode::Value;
   const auto info = Value::dict({
       {"length", Value::integer(static_cast<std::int64_t>(text.size()))},
       {"name", Value::string(name)},
@@ -571,10 +571,10 @@ struct SealedScrollTest : TorrentDataTest {
   /// it has been sealed twice.
   [[nodiscard]] Scroll twoSegments() const {
     Scroll scroll;
-    scroll.addSegment(xudu::ScrollSegment{
+    scroll.addSegment(xanadu::ScrollSegment{
         0, xudu_test::multiFileFirst.size(),
         InfoHash::fromHex(xudu_test::multiFileHash), 0, 0, "one.txt"});
-    scroll.addSegment(xudu::ScrollSegment{
+    scroll.addSegment(xanadu::ScrollSegment{
         xudu_test::multiFileFirst.size(), xudu_test::singleFileText.size(),
         InfoHash::fromHex(xudu_test::singleFileHash), 0, 0, "fox.txt"});
     return scroll;
@@ -616,9 +616,9 @@ TEST_F(SealedScrollTest, aStretchNobodyHasSealedReadsAsNothing) {
   // the parts either side of it would be presenting two passages as one.
   const Resolver resolver(&source);
   Scroll gapped;
-  gapped.addSegment(xudu::ScrollSegment{
+  gapped.addSegment(xanadu::ScrollSegment{
       0, 10, InfoHash::fromHex(xudu_test::multiFileHash), 0, 0, "one.txt"});
-  gapped.addSegment(xudu::ScrollSegment{
+  gapped.addSegment(xanadu::ScrollSegment{
       20, 10, InfoHash::fromHex(xudu_test::multiFileHash), 20, 0, "one.txt"});
 
   EXPECT_EQ(resolver.read(gapped, PrimediaSpan{1, 0, 10}),
@@ -672,8 +672,9 @@ TEST_F(SealedScrollTest, resealingDoesNotDisturbAnAddressAlreadyHandedOut) {
   ASSERT_NE(resealed.hex(), std::string{xudu_test::singleFileHash})
       << "the two packagings have to be genuinely different torrents";
 
-  store.addSegment(id, xudu::ScrollSegment{0, xudu_test::singleFileText.size(),
-                                           resealed, 0, 0, "resealed.txt"});
+  store.addSegment(id,
+                   xanadu::ScrollSegment{0, xudu_test::singleFileText.size(),
+                                         resealed, 0, 0, "resealed.txt"});
 
   // The carrier moved...
   ASSERT_EQ(store.scroll(id)->segments.size(), 1U);
@@ -689,13 +690,13 @@ TEST_F(SealedScrollTest, aNamedScrollIsItselfWhicheverTorrentCarriesIt) {
   // which is transclusion silently coming apart.
   Store store;
   Scroll first;
-  first.publisher = xudu::PublicKey::fromHex(std::string(64, 'a'));
-  first.addSegment(xudu::ScrollSegment{
+  first.publisher = xanadu::PublicKey::fromHex(std::string(64, 'a'));
+  first.addSegment(xanadu::ScrollSegment{
       0, 27, InfoHash::fromHex(xudu_test::multiFileHash), 0, 0, "one.txt"});
 
   Scroll later;
   later.publisher = first.publisher;
-  later.addSegment(xudu::ScrollSegment{
+  later.addSegment(xanadu::ScrollSegment{
       27, 10, InfoHash::fromHex(xudu_test::singleFileHash), 0, 0, "fox.txt"});
 
   const auto id = store.addScroll(first);
@@ -737,11 +738,11 @@ TEST_F(TorrentDataTest, aMultiFileTorrentIsFoundFromEitherDirectory) {
 TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
   const std::string content = "the content that was sealed";
   const std::string record  = "author\tsomebody\n";
-  const std::array<xudu::TorrentContent, 2> files{
-      xudu::TorrentContent{"spool", content},
-      xudu::TorrentContent{"AUTHORSHIP.tsv", record},
+  const std::array<xanadu::TorrentContent, 2> files{
+      xanadu::TorrentContent{"spool", content},
+      xanadu::TorrentContent{"AUTHORSHIP.tsv", record},
   };
-  const auto made = xudu::makeTorrent(files, "spool");
+  const auto made = xanadu::makeTorrent(files, "spool");
 
   const auto laid = dir / "sealed";
   std::filesystem::create_directories(laid / "spool");
@@ -762,16 +763,16 @@ TEST_F(TorrentDataTest, resolverFallsBackToLocalFileWhenSourceUnset) {
   const auto samplePath = dir / "fallback_sample.txt";
   write(samplePath, content);
 
-  const auto made   = xudu::makeTorrent(content, "fallback_sample.txt");
-  const auto scroll = xudu::Scroll::ofTorrentFile(
+  const auto made   = xanadu::makeTorrent(content, "fallback_sample.txt");
+  const auto scroll = xanadu::Scroll::ofTorrentFile(
       made.hash, 0, samplePath.string(), 0, content.size());
 
-  xudu::Resolver resolver; // No source attached!
+  xanadu::Resolver resolver; // No source attached!
   EXPECT_TRUE(resolver.available(scroll));
 
-  const xudu::PrimediaSpan span{1, 7, 10}; // "local file"
+  const xanadu::PrimediaSpan span{1, 7, 10}; // "local file"
   const auto res = resolver.resolve(scroll, span);
-  EXPECT_EQ(res.status, xudu::ResolutionStatus::VerifiedBytes);
+  EXPECT_EQ(res.status, xanadu::ResolutionStatus::VerifiedBytes);
   EXPECT_EQ(res.text, "local file");
   EXPECT_EQ(resolver.read(scroll, span), "local file");
 }

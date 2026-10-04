@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/swarm_catalog_index.hpp"
+#include "common/xanadu/swarm_catalog_index.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 using ::testing::Eq;

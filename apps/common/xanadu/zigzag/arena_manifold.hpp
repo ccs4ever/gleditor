@@ -83,6 +83,7 @@ namespace zigzag {
  */
 struct Space {
   const Manifold *manifold{nullptr};
+  std::shared_ptr<const Manifold> ownedManifold{nullptr};
   const xanadu::Store *store{nullptr};
   const xanadu::Scroll *sealedAs{
       nullptr}; ///< opRefOf() needs it; may be null locally
@@ -255,12 +256,20 @@ public:
       : ArenaManifold(base, &store) {}
 
   [[nodiscard]] const Manifold *base() const noexcept { return base_; }
+  [[nodiscard]] const xanadu::Store *store() const noexcept {
+    return store_ != nullptr ? store_
+                             : (base_ != nullptr ? base_->store() : nullptr);
+  }
   [[nodiscard]] CellRef home() const noexcept;
   [[nodiscard]] CellRef homeCell() const noexcept { return home(); }
+
+  [[nodiscard]] std::vector<DimRef> dimensions() const;
 
   [[nodiscard]] DimRef
   dimensionNamed(std::string_view name,
                  const xanadu::SpanReader *reader = nullptr) const;
+  [[nodiscard]] std::optional<DimRef>
+  dimensionNamed(std::string_view name, const xanadu::SpanReader &reader) const;
   DimRef ensureDimension(std::string_view name);
 
   [[nodiscard]] CellRef authorshipRoot() const noexcept {
@@ -318,10 +327,22 @@ public:
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
 
+  /// Resolves the arena dimension bound to @p foreignDim in @p space.
+  [[nodiscard]] DimRef arenaDimFor(std::uint32_t space,
+                                   DimRef foreignDim) const noexcept;
+
   /// Explicitly bind @p arenaDim to @p foreignDim in @p space.
   void
   bindDimension(DimRef arenaDim, std::uint32_t space, DimRef foreignDim,
                 DimensionBindingMode mode = DimensionBindingMode::Explicit);
+
+  /// Groups dimensions across attached spaces sharing the same published
+  /// GlobalOpRef into BoundDimensionSet with SharedIdentity mode (§5.11 §5).
+  void bindSharedIdentities();
+
+  /// Groups dimensions across attached spaces sharing matching labels
+  /// into BoundDimensionSet with NameMatch mode (§5.11 §5).
+  void bindDimensionsByNameMatch();
 
   [[nodiscard]] gleditor::cpp26::optional<const BoundDimensionSet &>
   boundDimensionSet(DimRef dim) const noexcept;
@@ -429,6 +450,10 @@ public:
   /// buffer; any other span needs @p reader, and is skipped when it is null.
   [[nodiscard]] std::string
   textOf(CellRef ref, const xanadu::SpanReader *reader = nullptr) const;
+  [[nodiscard]] std::string textOf(CellRef ref,
+                                   const xanadu::SpanReader &reader) const {
+    return textOf(ref, &reader);
+  }
 
   /// The bytes @p span names, when it is a scratch span this arena holds.
   [[nodiscard]] std::string_view

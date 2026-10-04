@@ -10,10 +10,10 @@
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 
-#include "xudu/core/framing.hpp"
-#include "xudu/core/link_layout.hpp"
+#include "common/xanadu/framing.hpp"
+#include "common/xanadu/link_layout.hpp"
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(MorphicBeamTest, MorphicRouteGeometricContinuity) {
   const glm::vec3 docEdge(12.0F, 50.0F, 0.0F);

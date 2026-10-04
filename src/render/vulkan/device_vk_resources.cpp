@@ -345,14 +345,14 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = record.image;
-  barrier.subresourceRange = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
-                              .baseMipLevel = 0,
-                              .levelCount =
-                                  static_cast<std::uint32_t>(record.levels),
-                              .baseArrayLayer = 0,
-                              .layerCount = static_cast<std::uint32_t>(layers)};
-  barrier.srcAccessMask    = 0;
-  barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
+  barrier.subresourceRange    = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .baseMipLevel = 0,
+                                 .levelCount =
+                                     static_cast<std::uint32_t>(record.levels),
+                                 .baseArrayLayer = 0,
+                                 .layerCount = static_cast<std::uint32_t>(layers)};
+  barrier.srcAccessMask       = 0;
+  barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);

@@ -22,6 +22,7 @@
 #include "common/xanadu/version.hpp"
 #include <gleditor/ranges.hpp>
 
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -1185,6 +1186,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to invoke radial menu",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+M"}}}}},
+        {.name    = std::string(settings::kKeymapQuotationToggle),
+         .notes   = "Shortcut to toggle quotation builder overlay",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+Q"}}}}},
+        {.name    = std::string(settings::kKeymapQuotationToggleF9),
+         .notes   = "Shortcut to toggle quotation builder overlay (F9)",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"F9"}}}}},
 
         // Zigzag Visualizer & Pure Vortex Actions
         {.name    = std::string(settings::kKeymapViewModeContent1),
@@ -1556,9 +1565,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                             = store.makeCell(cur, storeNoteText);
-    const auto noteRef              = store.cellRefOf(cur);
-    manifold                        = store.rebuildManifold(cur);
+    cur                = store.makeCell(cur, storeNoteText);
+    const auto noteRef = store.cellRefOf(cur);
+    manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
                         noteRef, &manifold);
     manifold = store.rebuildManifold(cur);
@@ -1571,9 +1580,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur      = store.setLink(cur, store.homeCell(), groupsDim,
-                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
-    manifold = store.rebuildManifold(cur);
+    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
+                                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
+    manifold                 = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -1938,8 +1947,9 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
 namespace {
 /// A cell's value as settings read it: its typed bits when it carries them
 /// (R6), its text otherwise. Never parses the text.
-CellValue cellValueOf(const zigzag::Manifold &manifold,
-                      const zigzag::CellRef cell, const SpanReader &reader) {
+template <typename ManifoldT>
+CellValue cellValueOf(const ManifoldT &manifold, const zigzag::CellRef cell,
+                      const SpanReader &reader) {
   const auto asValue = [](const auto bits) { return CellValue{bits}; };
   const auto typed =
       manifold.asDouble(cell)
@@ -1956,10 +1966,10 @@ struct NullSpanReader final : public SpanReader {
 };
 } // namespace
 
-SystemStoreModel
-SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
-                               zigzag::CellRef homeCell,
-                               const SpanReader *reader) {
+template <typename ManifoldT>
+SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
+                                                zigzag::CellRef homeCell,
+                                                const SpanReader *reader) {
   SystemStoreModel model;
   if (reader == nullptr && manifold.store() != nullptr) {
     reader = manifold.store();
@@ -1970,14 +1980,15 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
   }
 
   if (homeCell == zigzag::noCell) {
-    if (manifold.contains(1)) {
-      homeCell = 1;
-    } else if (!manifold.cells().empty()) {
-      homeCell = manifold.cells().front().birthOp;
-    } else {
-      model.isValid_ = false;
-      model.error_   = "Manifold has no cells";
-      return model;
+    homeCell = manifold.home();
+    if (homeCell == zigzag::noCell) {
+      if (manifold.contains(1)) {
+        homeCell = 1;
+      } else {
+        model.isValid_ = false;
+        model.error_   = "Manifold has no cells";
+        return model;
+      }
     }
   } else if (!manifold.contains(homeCell)) {
     model.isValid_ = false;
@@ -2078,9 +2089,9 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements   = entry.value.valueCells |
-                             std::views::transform(valueOf) |
-                             std::ranges::to<std::vector>();
+    entry.value.elements = entry.value.valueCells |
+                           std::views::transform(valueOf) |
+                           std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -2098,6 +2109,11 @@ SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
 
   return model;
 }
+
+template SystemStoreModel SystemStoreModel::fromManifold<zigzag::Manifold>(
+    const zigzag::Manifold &, zigzag::CellRef, const SpanReader *);
+template SystemStoreModel SystemStoreModel::fromManifold<zigzag::ArenaManifold>(
+    const zigzag::ArenaManifold &, zigzag::CellRef, const SpanReader *);
 
 gleditor::cpp26::optional<const SettingEntry &>
 SystemStoreModel::find(const std::string_view name) const noexcept {
@@ -2727,7 +2743,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                      static_cast<double>(cfg.physics.maxVelocity)));
+                                  static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 
@@ -2944,6 +2960,7 @@ PouchConfig PouchConfig::fromStore(const Store &store) {
     if (s.name.starts_with("zone.")) {
       DropZoneSpec spec;
       spec.id    = s.name.substr(5);
+      spec.cell  = s.nameCell;
       spec.label = s.value.asString(0, spec.id);
       if (s.value.elements.size() > 1) {
         spec.auraColor = static_cast<std::uint32_t>(s.value.asInt64(1));
@@ -2956,25 +2973,60 @@ PouchConfig PouchConfig::fromStore(const Store &store) {
   }
   if (cfg.zones.empty()) {
     cfg.zones = {
-        DropZoneSpec{.id           = "to_link_left",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "to_link_left",
                      .label        = "To Link (Left)",
                      .auraColor    = 0x06B6D4FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "to_link_right",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "to_link_right",
                      .label        = "To Link (Right)",
                      .auraColor    = 0xEC4899FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "notes",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "notes",
                      .label        = "Notes",
                      .auraColor    = 0xEAB308FFU,
                      .heightWeight = 1.0F},
-        DropZoneSpec{.id           = "scratch",
+        DropZoneSpec{.cell         = zigzag::noCell,
+                     .id           = "scratch",
                      .label        = "Scratch",
                      .auraColor    = 0x10B981FFU,
                      .heightWeight = 1.0F},
     };
   }
   return cfg;
+}
+
+MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
+                            const DropZoneSpec &spec,
+                            zigzag::CellRef *const cellOut) {
+  auto cur = parent.isZero() ? store.primaryCurrentVersion() : parent;
+  if (store.homeCell() == zigzag::noCell) {
+    cur = store.sliceGenesis(cur);
+  }
+  SettingSpec sspec{
+      .name    = "zone." + spec.id,
+      .notes   = spec.label + " drop zone",
+      .schemas = {{.expectedTypes = {"string", "integer", "float"},
+                   .defaultValues = {spec.label,
+                                     static_cast<std::int64_t>(spec.auraColor),
+                                     static_cast<double>(spec.heightWeight)}}},
+  };
+  cur = ensureSetting(store, cur, sspec, nullptr);
+  if (cellOut != nullptr) {
+    const auto m       = store.rebuildManifold(cur);
+    const auto &reader = static_cast<const SpanReader &>(store);
+    const auto varsDim = m.dimensionNamed(kDimVars, reader);
+    if (varsDim) {
+      if (const auto c =
+              cellNamed(zigzag::rankAfter(m, store.homeCell(), *varsDim), m,
+                        sspec.name, reader)) {
+        *cellOut = *c;
+      }
+    }
+  }
+  return cur;
 }
 
 } // namespace xanadu

@@ -571,9 +571,13 @@ TEST(TextLayoutTest, InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs) {
 
   // Monospace, so B's own advance over A is exactly one character's width;
   // C should sit that same distance past B, plus the inline box's own
-  // width in between.
+  // width in between. Within a rounding of the advance: hinting quantises
+  // advances to a fraction of a pixel (1/64 in FreeType's 26.6 fixed
+  // point), so the sum of two hinted advances need not equal twice one of
+  // them to the last bit, and by how much depends on the installed font.
   const float charWidth = bGlyph->clusterLeft - aGlyph->clusterLeft;
-  EXPECT_FLOAT_EQ(cGlyph->clusterLeft, bGlyph->clusterLeft + charWidth + 50.0F);
+  EXPECT_NEAR(cGlyph->clusterLeft, bGlyph->clusterLeft + charWidth + 50.0F,
+              0.5F);
 }
 
 TEST(TextLayoutTest,

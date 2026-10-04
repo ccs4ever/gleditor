@@ -841,10 +841,10 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
       if (states.empty()) states.resize(versions.size());
       const auto links = manifold.dimensionsOf(slot.birthOp);
       states[vIdx]     = CellState{
-          .text  = manifold.textOf(slot.birthOp, *this),
-          .kind  = slot.valueKind,
-          .bits  = slot.valueBits,
-          .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
+              .text  = manifold.textOf(slot.birthOp, *this),
+              .kind  = slot.valueKind,
+              .bits  = slot.valueBits,
+              .links = std::vector<zigzag::DimLink>(links.begin(), links.end())};
     }
   }
   for (const auto &[ref, states] : cells) {
@@ -2006,6 +2006,636 @@ Store::externTarget(const zigzag::CellRef placeholder,
 std::optional<ExternOpRef>
 Store::externTarget(const zigzag::CellRef placeholder) const {
   return externTarget(placeholder, *this);
+}
+
+Store::AppendedPouchItem Store::appendPouchItemWithRef(
+    const MicroversionId &parent, const zigzag::CellRef zone,
+    const PrimediaSpan &content, const PouchOrigin &origin,
+    const zigzag::Manifold *const known) {
+  if (zigzag::noCell == zone) {
+    throw std::invalid_argument("cannot append pouch item to noCell zone");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimItems = ensureDim("d.items");
+
+  // Mint the item cell with content
+  curHead             = makeCell(curHead, content);
+  const auto itemCell = cellRefOf(curHead);
+  folded              = rebuildManifold(curHead);
+  currentFold         = &folded.value();
+
+  // Append itemCell to zone's d.items rank posward
+  const auto tail =
+      zigzag::rankTail(*currentFold, zone, dimItems, zigzag::DimVector::POS);
+  curHead = setLink(curHead, tail, dimItems, zigzag::DimVector::POS, itemCell,
+                    currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // Add origin links if provided
+  if (origin.cell && !origin.cell->scroll.empty()) {
+    // Intern extern ref for foreign cell (§5.5)
+    curHead     = registerScroll(curHead, origin.cell->scroll, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    const auto scrollIdOpt =
+        currentFold->scrollRegistry(*this).scrollIdForKey(origin.cell->scroll);
+    if (scrollIdOpt) {
+      const ExternOpRef extRef{
+          .scroll   = *scrollIdOpt,
+          .produces = origin.cell->produces,
+      };
+      curHead     = makeExternRef(curHead, extRef, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+
+      const auto placeholder =
+          currentFold->scrollRegistry(*this).placeholderForExtern(extRef);
+      if (placeholder && *placeholder != zigzag::noCell) {
+        const auto dimOriginCell = ensureDim("d.origin-cell");
+        curHead                  = setLink(curHead, itemCell, dimOriginCell,
+                                           zigzag::DimVector::POS, *placeholder, currentFold);
+        folded                   = rebuildManifold(curHead);
+        currentFold              = &folded.value();
+      }
+    }
+  }
+
+  if (origin.document && (!origin.document->scroll.empty() ||
+                          !origin.document->version.isZero())) {
+    const auto descText = writeGlobalDocumentState(*origin.document);
+    curHead             = makeCell(curHead, descText);
+    const auto descCell = cellRefOf(curHead);
+    folded              = rebuildManifold(curHead);
+    currentFold         = &folded.value();
+
+    const auto dimOriginState = ensureDim("d.origin-state");
+    curHead = setLink(curHead, itemCell, dimOriginState, zigzag::DimVector::POS,
+                      descCell, currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  return AppendedPouchItem{
+      .version  = curHead,
+      .itemCell = itemCell,
+  };
+}
+
+MicroversionId Store::appendPouchItem(const MicroversionId &parent,
+                                      const zigzag::CellRef zone,
+                                      const PrimediaSpan &content,
+                                      const PouchOrigin &origin,
+                                      const zigzag::Manifold *const known) {
+  return appendPouchItemWithRef(parent, zone, content, origin, known).version;
+}
+
+MicroversionId Store::dismissPouchItem(const MicroversionId &parent,
+                                       const zigzag::CellRef zone,
+                                       const zigzag::CellRef item,
+                                       const zigzag::Manifold *const known) {
+  if (zigzag::noCell == item) {
+    return parent;
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  const auto dimItemsOpt = currentFold->dimensionNamed("d.items", *this);
+  if (!dimItemsOpt) {
+    return parent;
+  }
+  const auto dimItems = *dimItemsOpt;
+
+  auto curHead = parent;
+
+  // Unlink item from d.items
+  const auto prev = currentFold->linked(item, dimItems, zigzag::DimVector::NEG);
+  const auto next = currentFold->linked(item, dimItems, zigzag::DimVector::POS);
+
+  if (zigzag::noCell != prev) {
+    curHead     = setLink(curHead, prev, dimItems, zigzag::DimVector::POS, next,
+                          currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else if (zigzag::noCell != next) {
+    curHead     = setLink(curHead, next, dimItems, zigzag::DimVector::NEG,
+                          zigzag::noCell, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  // Append item to d.dismissed rank
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimDismissed = ensureDim("d.dismissed");
+  const auto anchor       = (zigzag::noCell != zone) ? zone : homeCell_;
+  if (zigzag::noCell != anchor) {
+    const auto tail = zigzag::rankTail(*currentFold, anchor, dimDismissed,
+                                       zigzag::DimVector::POS);
+    curHead = setLink(curHead, tail, dimDismissed, zigzag::DimVector::POS, item,
+                      currentFold);
+  }
+
+  return curHead;
+}
+
+Store::AppendedAnthologyEntry Store::appendAnthologyEntry(
+    const MicroversionId &parent, const zigzag::CellRef root,
+    const ExternOpRef &memberRef, const GlobalDocumentState &pinnedState,
+    const std::string_view label, const zigzag::Manifold *const known) {
+  if (zigzag::noCell == root) {
+    throw std::invalid_argument("cannot append anthology entry to noCell root");
+  }
+
+  // Validate ancestry (§5.9 §6.1, §3)
+  if (memberRef.produces != pinnedState.version &&
+      !memberRef.produces.isAncestorOf(pinnedState.version)) {
+    throw std::invalid_argument("anthology member birth (" +
+                                memberRef.produces.str() +
+                                ") is not an ancestor of pinned state (" +
+                                pinnedState.version.str() + ")");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  const auto registry  = currentFold->scrollRegistry(*this);
+  const auto scrollRec = registry.findRecord(memberRef.scroll);
+  if (!scrollRec || zigzag::noCell == scrollRec->cell) {
+    throw std::invalid_argument("scroll " + std::to_string(memberRef.scroll) +
+                                " is not registered in scroll registry");
+  }
+
+  GlobalDocumentState effectiveState = pinnedState;
+  if (effectiveState.scroll.empty()) {
+    effectiveState.scroll = scrollRec->globalKey;
+  } else if (!scrollRec->globalKey.empty() &&
+             effectiveState.scroll != scrollRec->globalKey) {
+    throw std::invalid_argument("pinnedState scroll (" + effectiveState.scroll +
+                                ") does not match registered scroll (" +
+                                scrollRec->globalKey + ")");
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimAnthology   = ensureDim("d.anthology");
+  const auto dimMember      = ensureDim("d.member");
+  const auto dimMemberState = ensureDim("d.member-state");
+
+  // 1. Intern placeholder for foreign cell (§5.5)
+  curHead     = makeExternRef(curHead, memberRef, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  const auto placeholder =
+      currentFold->scrollRegistry(*this).placeholderForExtern(memberRef);
+  if (!placeholder || *placeholder == zigzag::noCell) {
+    throw std::runtime_error("failed to intern placeholder for extern ref");
+  }
+
+  // 2. Mint the descriptor cell for pinnedState
+  const auto descText  = writeGlobalDocumentState(effectiveState);
+  curHead              = makeCell(curHead, descText);
+  const auto stateCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 3. Mint the entry cell
+  curHead              = makeCell(curHead, label);
+  const auto entryCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 4. Link entryCell on d.member towards placeholder (or tail of placeholder's
+  // negward rank)
+  const auto memberTail = zigzag::rankTail(*currentFold, *placeholder,
+                                           dimMember, zigzag::DimVector::NEG);
+  curHead     = setLink(curHead, entryCell, dimMember, zigzag::DimVector::POS,
+                        memberTail, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 5. Link entryCell on d.member-state to stateCell
+  curHead = setLink(curHead, entryCell, dimMemberState, zigzag::DimVector::POS,
+                    stateCell, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 6. Link entryCell onto root's d.anthology rank posward
+  const auto tail = zigzag::rankTail(*currentFold, root, dimAnthology,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimAnthology, zigzag::DimVector::POS,
+                            entryCell, currentFold);
+  folded          = rebuildManifold(curHead);
+  currentFold     = &folded.value();
+
+  return AppendedAnthologyEntry{
+      .version         = curHead,
+      .entryCell       = entryCell,
+      .placeholderCell = *placeholder,
+      .stateCell       = stateCell,
+  };
+}
+
+MicroversionId Store::appendAnthologyLocalMember(
+    const MicroversionId &parent, const zigzag::CellRef root,
+    const zigzag::CellRef localCell, const zigzag::Manifold *const known) {
+  if (zigzag::noCell == root) {
+    throw std::invalid_argument("cannot append local member to noCell root");
+  }
+  if (zigzag::noCell == localCell) {
+    throw std::invalid_argument("cannot append noCell as local member");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimAnthology = ensureDim("d.anthology");
+
+  const auto tail = zigzag::rankTail(*currentFold, root, dimAnthology,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimAnthology, zigzag::DimVector::POS,
+                            localCell, currentFold);
+  return curHead;
+}
+
+MicroversionId
+Store::refreshAnthologyEntry(const MicroversionId &parent,
+                             const zigzag::CellRef entryCell,
+                             const GlobalDocumentState &newPinnedState,
+                             const std::optional<ExternOpRef> optNewMemberRef,
+                             const zigzag::Manifold *const known) {
+  if (zigzag::noCell == entryCell) {
+    throw std::invalid_argument("cannot refresh noCell entry");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimMember      = ensureDim("d.member");
+  const auto dimMemberState = ensureDim("d.member-state");
+
+  if (optNewMemberRef.has_value()) {
+    const auto &memberRef = *optNewMemberRef;
+    if (memberRef.produces != newPinnedState.version &&
+        !memberRef.produces.isAncestorOf(newPinnedState.version)) {
+      throw std::invalid_argument(
+          "refreshed member birth is not an ancestor of new pinned state");
+    }
+
+    curHead     = makeExternRef(curHead, memberRef, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    const auto placeholder =
+        currentFold->scrollRegistry(*this).placeholderForExtern(memberRef);
+    if (!placeholder || *placeholder == zigzag::noCell) {
+      throw std::runtime_error(
+          "failed to intern placeholder for refreshed extern ref");
+    }
+
+    curHead     = setLink(curHead, entryCell, dimMember, zigzag::DimVector::POS,
+                          *placeholder, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else {
+    const auto placeholderOpt =
+        zigzag::step(*currentFold, entryCell, dimMember);
+    if (placeholderOpt.has_value()) {
+      const auto extTarget = externTarget(*placeholderOpt);
+      if (extTarget.has_value()) {
+        if (extTarget->produces != newPinnedState.version &&
+            !extTarget->produces.isAncestorOf(newPinnedState.version)) {
+          throw std::invalid_argument(
+              "existing member birth is not an ancestor of new pinned state");
+        }
+      }
+    }
+  }
+
+  const auto descText     = writeGlobalDocumentState(newPinnedState);
+  curHead                 = makeCell(curHead, descText);
+  const auto newStateCell = cellRefOf(curHead);
+  folded                  = rebuildManifold(curHead);
+  currentFold             = &folded.value();
+
+  curHead = setLink(curHead, entryCell, dimMemberState, zigzag::DimVector::POS,
+                    newStateCell, currentFold);
+  return curHead;
+}
+
+AppendedQuotation Store::quote(const MicroversionId &parent,
+                               const zigzag::CellRef localRankTail,
+                               const zigzag::DimRef localRankDim,
+                               const std::string_view label,
+                               const GlobalDocumentState &pinnedState,
+                               const SelectorSpec &selector,
+                               const zigzag::Manifold *const known) {
+  if (selector.rootRef.produces != pinnedState.version &&
+      !selector.rootRef.produces.isAncestorOf(pinnedState.version)) {
+    throw std::invalid_argument(
+        "quoted root birth is not an ancestor of pinned state");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimQuotes      = ensureDim(kDimQuotes);
+  const auto dimQuotesState = ensureDim(kDimQuotesState);
+  const auto dimQuotesSel   = ensureDim(kDimQuotesSel);
+
+  // 1. Intern placeholder for foreign root cell
+  curHead     = makeExternRef(curHead, selector.rootRef, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  const auto placeholder =
+      currentFold->scrollRegistry(*this).placeholderForExtern(selector.rootRef);
+  if (!placeholder || *placeholder == zigzag::noCell) {
+    throw std::runtime_error(
+        "failed to intern placeholder for quoted root ref");
+  }
+
+  // 2. Mint the descriptor cell for pinnedState
+  const auto descText  = writeGlobalDocumentState(pinnedState);
+  curHead              = makeCell(curHead, descText);
+  const auto stateCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 3. Mint the selector descriptor cell
+  const auto selText      = writeSelectorDescriptor(selector);
+  curHead                 = makeCell(curHead, selText);
+  const auto selectorCell = cellRefOf(curHead);
+  folded                  = rebuildManifold(curHead);
+  currentFold             = &folded.value();
+
+  if (selector.kind == Selector::Kind::Rank &&
+      selector.rankDimRef.has_value()) {
+    curHead     = makeExternRef(curHead, *selector.rankDimRef, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    const auto dimPh = currentFold->scrollRegistry(*this).placeholderForExtern(
+        *selector.rankDimRef);
+    if (dimPh && *dimPh != zigzag::noCell) {
+      curHead     = setLink(curHead, selectorCell, dimQuotes,
+                            zigzag::DimVector::POS, *dimPh, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+  } else if (selector.kind == Selector::Kind::Closure) {
+    const auto dimQuotesCarry = ensureDim(kDimQuotesCarry);
+    auto prevCarry            = selectorCell;
+    for (const auto &cRef : selector.carryRefs) {
+      curHead     = makeExternRef(curHead, cRef, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+
+      const auto cPh =
+          currentFold->scrollRegistry(*this).placeholderForExtern(cRef);
+      if (cPh && *cPh != zigzag::noCell) {
+        curHead     = setLink(curHead, prevCarry, dimQuotesCarry,
+                              zigzag::DimVector::POS, *cPh, currentFold);
+        folded      = rebuildManifold(curHead);
+        currentFold = &folded.value();
+        prevCarry   = *cPh;
+      }
+    }
+  }
+
+  // 4. Mint quotation cell Q
+  curHead              = makeCell(curHead, label);
+  const auto entryCell = cellRefOf(curHead);
+  folded               = rebuildManifold(curHead);
+  currentFold          = &folded.value();
+
+  // 5. Link Q to root placeholder, stateCell, and selectorCell
+  const auto existingNeg =
+      currentFold->linked(*placeholder, dimQuotes, zigzag::DimVector::NEG);
+  if (existingNeg == zigzag::noCell) {
+    curHead     = setLink(curHead, entryCell, dimQuotes, zigzag::DimVector::POS,
+                          *placeholder, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  } else {
+    curHead = setLink(curHead, existingNeg, dimQuotes, zigzag::DimVector::POS,
+                      entryCell, currentFold);
+    folded  = rebuildManifold(curHead);
+    currentFold = &folded.value();
+
+    curHead     = setLink(curHead, entryCell, dimQuotes, zigzag::DimVector::POS,
+                          *placeholder, currentFold);
+    folded      = rebuildManifold(curHead);
+    currentFold = &folded.value();
+  }
+
+  curHead = setLink(curHead, entryCell, dimQuotesState, zigzag::DimVector::POS,
+                    stateCell, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  curHead = setLink(curHead, entryCell, dimQuotesSel, zigzag::DimVector::POS,
+                    selectorCell, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 6. Splice Q into local rank at localRankTail on localRankDim
+  if (localRankTail != zigzag::noCell && localRankDim != zigzag::noCell) {
+    const auto succ = currentFold->linked(localRankTail, localRankDim,
+                                          zigzag::DimVector::POS);
+    curHead         = setLink(curHead, localRankTail, localRankDim,
+                              zigzag::DimVector::POS, entryCell, currentFold);
+    folded          = rebuildManifold(curHead);
+    currentFold     = &folded.value();
+
+    if (succ != zigzag::noCell) {
+      curHead     = setLink(curHead, entryCell, localRankDim,
+                            zigzag::DimVector::POS, succ, currentFold);
+      folded      = rebuildManifold(curHead);
+      currentFold = &folded.value();
+    }
+  }
+
+  return AppendedQuotation{
+      .version         = curHead,
+      .quotationCell   = entryCell,
+      .placeholderCell = *placeholder,
+      .stateCell       = stateCell,
+      .selectorCell    = selectorCell,
+  };
+}
+
+MicroversionId Store::overrideQuotedCell(const MicroversionId &parent,
+                                         const zigzag::CellRef quotationCell,
+                                         const ExternOpRef &foreignTargetRef,
+                                         const std::string_view overrideContent,
+                                         const zigzag::Manifold *const known) {
+  if (zigzag::noCell == quotationCell) {
+    throw std::invalid_argument("cannot override on noCell quotation");
+  }
+
+  std::optional<zigzag::Manifold> folded;
+  auto currentFold = known;
+  if (nullptr == currentFold) {
+    folded      = rebuildManifold(parent);
+    currentFold = &folded.value();
+  }
+
+  auto curHead = parent;
+
+  auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
+    auto dim = currentFold->dimensionNamed(name, *this);
+    if (!dim) {
+      const auto minted = makeDimension(curHead, name, currentFold);
+      curHead           = minted.version;
+      folded            = rebuildManifold(curHead);
+      currentFold       = &folded.value();
+      return minted.dim;
+    }
+    return *dim;
+  };
+
+  const auto dimOverrides = ensureDim(kDimOverrides);
+  const auto dimShadows   = ensureDim(kDimShadows);
+
+  // 1. makeExternRef(target)
+  curHead     = makeExternRef(curHead, foreignTargetRef, currentFold);
+  folded      = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  const auto placeholder =
+      currentFold->scrollRegistry(*this).placeholderForExtern(foreignTargetRef);
+  if (!placeholder || *placeholder == zigzag::noCell) {
+    throw std::runtime_error(
+        "failed to intern placeholder for override target");
+  }
+
+  // 2. makeCell(content)
+  curHead                 = makeCell(curHead, overrideContent);
+  const auto overrideCell = cellRefOf(curHead);
+  folded                  = rebuildManifold(curHead);
+  currentFold             = &folded.value();
+
+  // 3. setLink(O, d.shadows, POS, P_target)
+  curHead = setLink(curHead, overrideCell, dimShadows, zigzag::DimVector::POS,
+                    *placeholder, currentFold);
+  folded  = rebuildManifold(curHead);
+  currentFold = &folded.value();
+
+  // 4. setLink(tail, d.overrides, POS, O)
+  const auto tail = zigzag::rankTail(*currentFold, quotationCell, dimOverrides,
+                                     zigzag::DimVector::POS);
+  curHead         = setLink(curHead, tail, dimOverrides, zigzag::DimVector::POS,
+                            overrideCell, currentFold);
+  return curHead;
 }
 
 std::vector<Store::EditionInfo>

@@ -6,15 +6,15 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/kinetic_tether.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/transcopyright_crypto.hpp"
 #include "common/xanadu/transcopyright_logic.hpp"
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/pouch_zone.hpp"
-#include "xudu/core/store.hpp"
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(CrossDomainClaspTest, PouchItemDualCardRepresentation) {
   // 1. Document card defaults
@@ -47,7 +47,7 @@ TEST(CrossDomainClaspTest, PouchManagerDropCell) {
 
   const auto item =
       pm.dropCell("to_link_right", span, preview, 77, "d.concept: #3", 1);
-  EXPECT_EQ(item.itemId, 1U);
+  EXPECT_NE(item.itemId, 0U);
   EXPECT_EQ(item.originKind, PouchOriginKind::ZigzagCell);
   EXPECT_EQ(item.originCell, 77U);
   EXPECT_EQ(item.originSliceIndex, 1U);

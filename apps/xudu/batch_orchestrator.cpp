@@ -17,9 +17,9 @@
 
 #include <gleditor/text_source.hpp>
 
-#include "xudu/core/format.hpp"
-#include "xudu/core/system_docs.hpp"
-#include "xudu/core/torrent.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace xudu {
 
@@ -281,7 +281,7 @@ BatchOrchestrator::execute(Session &session,
           }
           const auto sId = session.store(0).addScroll(scroll);
           span           = PrimediaSpan{
-              .scroll = sId, .start = 0, .length = piece.bytes.size()};
+                        .scroll = sId, .start = 0, .length = piece.bytes.size()};
           Op op;
           op.kind  = OpKind::Transclude;
           op.at    = at;

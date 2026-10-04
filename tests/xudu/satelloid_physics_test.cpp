@@ -12,12 +12,14 @@
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 
+#include "common/xanadu/tension_layout.hpp"
 #include "common/xanadu/universal_link_endpoint.hpp"
-#include "xudu/core/tension_layout.hpp"
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 using ::testing::DoubleNear;

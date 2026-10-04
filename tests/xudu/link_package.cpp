@@ -10,49 +10,49 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/blessing.hpp>
-#include <xudu/core/link_discovery.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/swarm.hpp>
+#include "common/xanadu/blessing.hpp"
+#include "common/xanadu/link_discovery.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/swarm.hpp"
 
 namespace {
 
-using xudu::adopt;
-using xudu::adoptLinkPackage;
-using xudu::Blessing;
-using xudu::createBlessing;
-using xudu::createMutableKeys;
-using xudu::decodeBlessing;
-using xudu::decodeLinkPackage;
-using xudu::encodeBlessing;
-using xudu::encodeLinkPackage;
-using xudu::GlobalLink;
-using xudu::GlobalSpan;
-using xudu::HalfLink;
-using xudu::linkColour;
-using xudu::LinkDiscoveryEngine;
-using xudu::LinkedPair;
-using xudu::LinkPackage;
-using xudu::linkPackageRendezvousTarget;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::MutableKeys;
-using xudu::placeLinks;
-using xudu::ProminenceTier;
-using xudu::Publication;
-using xudu::PublicKey;
-using xudu::publish;
-using xudu::publishLinkPackage;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::Store;
-using xudu::verifyBlessing;
-using xudu::verifyLinkPackage;
-using xudu::Version;
+using xanadu::adopt;
+using xanadu::adoptLinkPackage;
+using xanadu::Blessing;
+using xanadu::createBlessing;
+using xanadu::createMutableKeys;
+using xanadu::decodeBlessing;
+using xanadu::decodeLinkPackage;
+using xanadu::encodeBlessing;
+using xanadu::encodeLinkPackage;
+using xanadu::GlobalLink;
+using xanadu::GlobalSpan;
+using xanadu::HalfLink;
+using xanadu::linkColour;
+using xanadu::LinkDiscoveryEngine;
+using xanadu::LinkedPair;
+using xanadu::LinkPackage;
+using xanadu::linkPackageRendezvousTarget;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::MutableKeys;
+using xanadu::placeLinks;
+using xanadu::ProminenceTier;
+using xanadu::Publication;
+using xanadu::PublicKey;
+using xanadu::publish;
+using xanadu::publishLinkPackage;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::Store;
+using xanadu::verifyBlessing;
+using xanadu::verifyLinkPackage;
+using xanadu::Version;
 
 Scroll makeNamedScroll(const PublicKey &key, std::string salt,
                        const std::uint64_t length) {
@@ -337,7 +337,7 @@ TEST(LinkPackageInteractionTest, multiTierCoexistenceAcrossDocuments) {
   Store storeA;
   auto verA = storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 0, 100);
   const auto spansA = storeA.rebuild(verA);
-  xudu::Link authorLink;
+  xanadu::Link authorLink;
   authorLink.type  = LinkType::Authorship;
   authorLink.tier  = ProminenceTier::Author;
   authorLink.left  = spansA.spansFor(0, 10);

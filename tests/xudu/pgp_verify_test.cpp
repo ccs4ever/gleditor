@@ -11,7 +11,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/identity/pgp_verify.hpp>
+#include "common/xanadu/identity/pgp_verify.hpp"
 
 #include "pgp_fixture.hpp"
 
@@ -19,7 +19,7 @@ namespace xanadu::identity::pgp {
 namespace {
 
 using ::testing::Eq;
-using namespace xudu::testing;
+using namespace xanadu::testing;
 
 TEST(PgpVerifyTest, ReadsTheFingerprintOutOfARealKey) {
   const auto fp = fingerprintOf(kAuthorPublicKey);

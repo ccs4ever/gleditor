@@ -54,6 +54,33 @@ struct GlobalDocumentState {
 };
 
 /**
+ * @brief Global identity of an operation across the docuverse (§5.5, §5.8).
+ *
+ * Names an operation by the authorial scroll key and the exact microversion it
+ * produced.
+ */
+struct GlobalOpRef {
+  /// The document's scroll key, spelled as GlobalSpan::scroll is.
+  std::string scroll;
+  /// The state this operation produced, verbatim.
+  MicroversionId produces;
+
+  /// Whether this names nothing.
+  [[nodiscard]] bool empty() const noexcept { return scroll.empty(); }
+
+  bool operator==(const GlobalOpRef &) const  = default;
+  auto operator<=>(const GlobalOpRef &) const = default;
+};
+
+/**
+ * @brief Provenance descriptor for pouch items (§5.8).
+ */
+struct PouchOrigin {
+  std::optional<GlobalDocumentState> document;
+  std::optional<GlobalOpRef> cell;
+};
+
+/**
  * @brief Versioned, length-prefixed serialization for GlobalDocumentState.
  *
  * Codec for descriptor content stored in cells.

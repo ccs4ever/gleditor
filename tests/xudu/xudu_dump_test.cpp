@@ -19,19 +19,19 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/compact_op.hpp>
-#include <xudu/core/segmented_ops_spool.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
-using xudu::CompactOpNode;
-using xudu::MicroversionId;
-using xudu::Store;
+using xanadu::CompactOpNode;
+using xanadu::MicroversionId;
+using xanadu::Store;
 using zigzag::DimVector;
 
 struct Run {
@@ -76,10 +76,10 @@ struct Sample {
   [[nodiscard]] std::string args() const {
     return "--permascroll=" + permascroll.string() + " " + store.string();
   }
-  [[nodiscard]] std::shared_ptr<xudu::UserPermascroll> scroll() const {
-    xudu::UserPermascroll::Config config;
+  [[nodiscard]] std::shared_ptr<xanadu::UserPermascroll> scroll() const {
+    xanadu::UserPermascroll::Config config;
     config.storageDir = permascroll;
-    return std::make_shared<xudu::UserPermascroll>(std::move(config));
+    return std::make_shared<xanadu::UserPermascroll>(std::move(config));
   }
 };
 
@@ -180,17 +180,17 @@ TEST_F(XuduDumpTest, aStoreTheLoaderRefusesIsStillReadable) {
     const std::string held{std::istreambuf_iterator<char>(in),
                            std::istreambuf_iterator<char>()};
     in.close();
-    ASSERT_GT(held.size(), xudu::opsSegmentHeaderBytes);
+    ASSERT_GT(held.size(), xanadu::opsSegmentHeaderBytes);
     std::ofstream out(dir / "ops.nodes", std::ios::binary | std::ios::trunc);
-    out.write(held.data() + xudu::opsSegmentHeaderBytes,
+    out.write(held.data() + xanadu::opsSegmentHeaderBytes,
               static_cast<std::streamsize>(held.size() -
-                                           xudu::opsSegmentHeaderBytes));
+                                           xanadu::opsSegmentHeaderBytes));
   }
 
   // The loader refuses it, which is step 8 working.
   {
     Store reopened;
-    EXPECT_THROW(reopened.load(dir.string()), xudu::OpsSegmentUnreadable);
+    EXPECT_THROW(reopened.load(dir.string()), xanadu::OpsSegmentUnreadable);
   }
 
   // The tool does not.
@@ -236,16 +236,16 @@ TEST_F(XuduDumpTest, sectionsAreAddressableSoAFormatChangeCanBeDiffed) {
 void roundTripThroughTheWireFormat(const Sample &sample) {
   Store original(sample.scroll());
   original.load(sample.store.string());
-  std::vector<xudu::OpRecord> records;
+  std::vector<xanadu::OpRecord> records;
   for (const auto &id : original.allVersions()) {
-    records.push_back(xudu::OpRecord{id, *original.getOp(id)});
+    records.push_back(xanadu::OpRecord{id, *original.getOp(id)});
   }
   // Into the operations export, which holds either encoding -- readOpsSpool()
   // tells them apart by magic. Not `ops.spool`: a directory holding one of
   // those is a store from before ops.nodes, and load() refuses it as such.
   std::ofstream out(sample.store / "ops.export",
                     std::ios::binary | std::ios::trunc);
-  xudu::writeBinaryOpsSpool(out, records);
+  xanadu::writeBinaryOpsSpool(out, records);
   out.close();
   fs::remove(sample.store / "ops.nodes");
 }

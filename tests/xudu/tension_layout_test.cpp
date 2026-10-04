@@ -11,10 +11,12 @@
 
 #include <glm/geometric.hpp>
 
-#include "xudu/core/tension_layout.hpp"
+#include "common/xanadu/tension_layout.hpp"
 #include "xudu/tenuous_tether.hpp"
 
 namespace xudu {
+using namespace ::xanadu;
+
 namespace {
 
 using ::testing::Eq;

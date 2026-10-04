@@ -28,31 +28,31 @@ ______________________________________________________________________
 
 ## Contents
 
-- [1. Architectural Foundations & Operational Invariants](#1-architectural-foundations--operational-invariants)
+- [1. Architectural Foundations & Operational Invariants][toc-01]
   - [Fundamental Invariants](#fundamental-invariants)
-- [2. Syntactic Token & Structural Shorthand Matrix](#2-syntactic-token--structural-shorthand-matrix)
+- [2. Syntactic Token & Structural Shorthand Matrix][toc-02]
 - [3. Formal EBNF Grammar](#3-formal-ebnf-grammar)
 - [4. Evaluation Semantics & Compilation Rules](#4-evaluation-semantics--compilation-rules)
   - [4.1 Lazy Rank-Streaming Engine](#41-lazy-rank-streaming-engine)
   - [4.2 Slicing Semantics](#42-slicing-semantics)
   - [4.3 Extended Truthiness Rules](#43-extended-truthiness-rules)
-    - [The quantifier that form hides, and the three that name it](#the-quantifier-that-form-hides-and-the-three-that-name-it)
-  - [4.4 Result Materialization: Topological Return Weaving](#44-result-materialization-topological-return-weaving)
+    - [The quantifier that form hides, and the three that name it][toc-03]
+  - [4.4 Result Materialization: Topological Return Weaving][toc-04]
   - [4.5 Cell Creation Sugar (`%`)](#45-cell-creation-sugar-)
   - [4.6 Clone Sugar (`><`)](#46-clone-sugar-)
   - [4.7 Existing-Target Fan-Out](#47-existing-target-fan-out)
-    - [Which cell the first attachment gets, and why it stopped being obvious](#which-cell-the-first-attachment-gets-and-why-it-stopped-being-obvious)
-- [5. Memory Management & Topological Garbage Collection](#5-memory-management--topological-garbage-collection)
+    - [Which cell the first attachment gets, and why it stopped being obvious][toc-05]
+- [5. Memory Management & Topological Garbage Collection][toc-06]
 - [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
-  - [6.1 Deep Structural Navigation with Zero-Copy Slice](#61-deep-structural-navigation-with-zero-copy-slice)
-  - [6.2 Topological Regex Compilation with Star-Pivot Caching](#62-topological-regex-compilation-with-star-pivot-caching)
+  - [6.1 Deep Structural Navigation with Zero-Copy Slice][toc-07]
+  - [6.2 Topological Regex Compilation with Star-Pivot Caching][toc-08]
   - [6.3 Shared Identity via a Clone Rank](#63-shared-identity-via-a-clone-rank)
-  - [6.4 In-Place Graph Rewriting & Edge Re-Targeting](#64-in-place-graph-rewriting--edge-re-targeting)
+  - [6.4 In-Place Graph Rewriting & Edge Re-Targeting][toc-09]
 - [7. Reconciliation with the Unified Store/Slice](#7-reconciliation-with-the-unified-storeslice)
   - [7.1 Two regimes, and a query can be in either](#71-two-regimes-and-a-query-can-be-in-either)
-  - [7.2 `##` is the origin cell, but the origin is not cell zero](#72--is-the-origin-cell-but-the-origin-is-not-cell-zero)
-  - [7.3 `><` links along `d.clone`, and the master is the leftmost operand](#73--links-along-dclone-and-the-master-is-the-leftmost-operand)
-  - [7.4 `value(replacement, offset, length)` is one operation on a persistent cell](#74-valuereplacement-offset-length-is-one-operation-on-a-persistent-cell)
+  - [7.2 `##` is the origin cell, but the origin is not cell zero][toc-10]
+  - [7.3 `><` links along `d.clone`, and the master is the leftmost operand][toc-11]
+  - [7.4 `value(replacement, offset, length)` is one operation on a persistent cell][toc-12]
   - [7.5 `d.cache` is a pinned island](#75-dcache-is-a-pinned-island)
   - [7.6 `.` is the context cell, and `@` is retired](#76--is-the-context-cell-and--is-retired)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
@@ -1033,3 +1033,16 @@ table.
 | 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                      |
 | 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                              |
 | 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                      |
+
+[toc-01]: #1-architectural-foundations--operational-invariants
+[toc-02]: #2-syntactic-token--structural-shorthand-matrix
+[toc-03]: #the-quantifier-that-form-hides-and-the-three-that-name-it
+[toc-04]: #44-result-materialization-topological-return-weaving
+[toc-05]: #which-cell-the-first-attachment-gets-and-why-it-stopped-being-obvious
+[toc-06]: #5-memory-management--topological-garbage-collection
+[toc-07]: #61-deep-structural-navigation-with-zero-copy-slice
+[toc-08]: #62-topological-regex-compilation-with-star-pivot-caching
+[toc-09]: #64-in-place-graph-rewriting--edge-re-targeting
+[toc-10]: #72--is-the-origin-cell-but-the-origin-is-not-cell-zero
+[toc-11]: #73--links-along-dclone-and-the-master-is-the-leftmost-operand
+[toc-12]: #74-valuereplacement-offset-length-is-one-operation-on-a-persistent-cell

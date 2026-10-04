@@ -255,6 +255,38 @@ rankEnd(const M &m, const CellRef ref, const DimRef dim,
   return m.linked(last, dim, dir) == ref ? ref : last;
 }
 
+/**
+ * @brief Traverses a rank from @p start along @p dim in @p dir, invoking @p fn
+ * on each cell.
+ *
+ * If @p fn returns a boolean, stops early when @p fn returns false.
+ */
+template <CellGraph M, typename F>
+constexpr void walkRank(const M &m, const CellRef start, const DimRef dim,
+                        const DimVector dir, F &&fn) {
+  for (const CellRef c : rank(m, start, dim, dir)) {
+    if constexpr (std::is_invocable_r_v<bool, F, CellRef>) {
+      if (!fn(c)) {
+        break;
+      }
+    } else {
+      fn(c);
+    }
+  }
+}
+
+template <CellGraph M, typename F>
+constexpr void walkRank(const M &m, const CellRef start, const DimRef dim,
+                        F &&fn) {
+  walkRank(m, start, dim, DimVector::POS, std::forward<F>(fn));
+}
+
+template <CellGraph M, typename F>
+constexpr void walkRank(const M &m, const CellRef start,
+                        const DirectedDim target, F &&fn) {
+  walkRank(m, start, target.dim, target.dir, std::forward<F>(fn));
+}
+
 /// One neighbour of a cell: the dimension it lies along and the cell there.
 struct Hop {
   DimRef dim{noCell};

@@ -11,11 +11,11 @@
 #include <fstream>
 #include <unistd.h>
 
-#include <xudu/core/virtual_memory_arena.hpp>
+#include "common/xanadu/virtual_memory_arena.hpp"
 
 namespace {
 
-using xudu::VirtualMemoryArena;
+using xanadu::VirtualMemoryArena;
 
 TEST(VirtualMemoryArenaTest, pageAlignmentAndPageSize) {
   const auto ps = VirtualMemoryArena::pageSize();

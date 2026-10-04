@@ -5,9 +5,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/merkle_ledger.hpp>
-#include <zigzag/core/zz_xudu_projector.hpp>
-#include <zigzag/core/zzstructure.hpp>
+#include "common/xanadu/merkle_ledger.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace zigzag {
 namespace {
@@ -15,9 +15,9 @@ namespace {
 using ::testing::Eq;
 
 TEST(ZzMerkleTest, VerifySliceAuthorAgainstLedgerRoot) {
-  xudu::MerkleLedger ledger;
+  xanadu::MerkleLedger ledger;
 
-  xudu::GpgKeyLink authorLink;
+  xanadu::GpgKeyLink authorLink;
   authorLink.fingerprint = "E2B1A4D89C3F0174A55280BCFE491370D6A284E1";
   authorLink.identity    = "Ted Nelson <ted@xanadu.net>";
   authorLink.email       = "ted@xanadu.net";
@@ -49,9 +49,9 @@ TEST(ZzMerkleTest, VerifySliceAuthorAgainstLedgerRoot) {
 }
 
 TEST(ZzMerkleTest, RevokedAuthorVerificationFails) {
-  xudu::MerkleLedger ledger;
+  xanadu::MerkleLedger ledger;
 
-  xudu::GpgKeyLink authorLink;
+  xanadu::GpgKeyLink authorLink;
   authorLink.fingerprint = "1111222233334444555566667777888899990000";
   authorLink.identity    = "Revoked Author <revoked@example.com>";
   authorLink.email       = "revoked@example.com";

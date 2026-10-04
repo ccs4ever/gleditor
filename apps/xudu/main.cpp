@@ -58,28 +58,29 @@
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "common/ui/quotation_builder_overlay.hpp"
+#include "common/xanadu/config.hpp"
 #include "common/xanadu/extern_ref.hpp"
+#include "common/xanadu/framing.hpp"
+#include "common/xanadu/kinetic_tether.hpp"
 #include "common/xanadu/link_occurrences.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_ledger.hpp"
 #include "common/xanadu/reading_place.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/store_stream.hpp"
+#include "common/xanadu/swarm_catalog.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/transcopyright_crypto.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
 #include "xudu/batch_orchestrator.hpp"
 #include "xudu/beams.hpp"
 #include "xudu/collaborator_overlay.hpp"
-#include "xudu/core/config.hpp"
-#include "xudu/core/framing.hpp"
-#include "xudu/core/kinetic_tether.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/provenance.hpp"
-#include "xudu/core/publication.hpp"
-#include "xudu/core/publication_ledger.hpp"
-#include "xudu/core/resolver.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/swarm_catalog.hpp"
-#include "xudu/core/system_docs.hpp"
-#include "xudu/core/torrent.hpp"
-#include "xudu/core/transcopyright_crypto.hpp"
-#include "xudu/core/transcopyright_logic.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/link_context.hpp"
 #include "xudu/link_panel_overlay.hpp"
@@ -127,6 +128,7 @@ namespace crypto = xudu::crypto;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
+using xudu::QuotationBuilderOverlay;
 using xudu::SatelloidOverlay;
 using xudu::Session;
 using xudu::SwarmCatalog;
@@ -1077,11 +1079,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      auto *const caret   = renderer->editCaret();
+      const auto which    = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : 0U;
+                                ? caret->documentIndex()
+                                : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -1454,10 +1456,10 @@ public:
     const auto len = payload.originCharEnd - payload.originCharStart;
     // In the store the text was carried from: its version names that store's
     // history, and store 0's would quote whatever happened to be there.
-    const auto sIdx = PouchOriginKind::Document == payload.originKind &&
+    const auto sIdx       = PouchOriginKind::Document == payload.originKind &&
                               payload.originDocIndex < session.views().size()
-                          ? session.storeIndexOf(payload.originDocIndex)
-                          : std::size_t{0};
+                                ? session.storeIndexOf(payload.originDocIndex)
+                                : std::size_t{0};
     const auto spawnedVer = session.store(sIdx).transclude(
         MicroversionId{}, 0, payload.originVersion, payload.originCharStart,
         len);
@@ -1589,7 +1591,7 @@ public:
       }
       auto *const caret   = renderer->editCaret();
       const auto which    = (nullptr != caret && caret->active() &&
-                             caret->documentIndex() < session.views().size())
+                          caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto storeIdx = session.storeIndexOf(which);
@@ -1613,11 +1615,11 @@ public:
                               std::istreambuf_iterator<char>());
       auto *const caret   = renderer->editCaret();
       const auto docIdx   = (nullptr != caret && caret->active() &&
-                             caret->documentIndex() < session.views().size())
+                           caret->documentIndex() < session.views().size())
                                 ? caret->documentIndex()
                                 : 0U;
       const auto at       = (nullptr != caret && caret->active() &&
-                             caret->documentIndex() == docIdx)
+                       caret->documentIndex() == docIdx)
                                 ? caret->byteOffset()
                                 : 0U;
       const auto detected = gleditor::MimeDetector::detectFile(filePath);
@@ -2022,6 +2024,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
                   const RendererRef &renderer, PouchDrawer &pouchDrawer,
                   SwarmTelescopeOverlay &swarmTelescope,
+                  QuotationBuilderOverlay &quotationOverlay,
                   const std::string &publishAs) {
   app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
                                 "save and close", [state, &session] {
@@ -2115,6 +2118,14 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       std::string(xanadu::settings::kKeymapTelescopeToggleF3),
       "toggle decentralized swarm telescope overlay",
       [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggle),
+      "toggle quoted structure builder overlay",
+      [&quotationOverlay] { quotationOverlay.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapQuotationToggleF9),
+      "toggle quoted structure builder overlay (F9)",
+      [&quotationOverlay] { quotationOverlay.toggle(); });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTensionPhysicsToggle),
       "toggle 3-way tension spring layout simulation",
@@ -3075,6 +3086,26 @@ int main(const int argc, char **argv) {
       swarmTelescope.setVisible(true);
     }
 
+    QuotationBuilderOverlay quotationOverlay(
+        session->store(),
+        session->views().empty() ? MicroversionId{} : session->versionOf(0),
+        renderer, &swarmCatalog, "Sans 10",
+        [&session] {
+          std::vector<xanadu::Store *> openStores;
+          for (std::size_t i = 0; i < session->storeCount(); ++i) {
+            openStores.push_back(&session->store(i));
+          }
+          return openStores;
+        },
+        [&session](const MicroversionId newVersion,
+                   const zigzag::CellRef /*quotationCell*/) {
+          if (!session->views().empty()) {
+            auto &view   = session->views()[0];
+            view.version = newVersion;
+            view.pieces  = session->store().rebuild(newVersion);
+          }
+        });
+
     state->wheelHandler = [&views, &map, &renderer, state](
                               float wx, float wy, std::uint16_t mods) -> bool {
       if (map.isVisible()) {
@@ -3172,7 +3203,7 @@ int main(const int argc, char **argv) {
     }
 
     radialMenu->setActionHandler(
-        [&session, &views,
+        [&session, &views, &quotationOverlay,
          state](const std::string &id, const std::string &action,
                 const std::uint32_t docIndex, const std::uint32_t charOffset,
                 const std::uint32_t charLength) {
@@ -3221,6 +3252,8 @@ int main(const int argc, char **argv) {
             session->insertBreak(docIndex, charOffset);
           } else if (id == "op:transclude") {
             views.transcludeSelection();
+          } else if (id == "op:quote") {
+            quotationOverlay.toggle();
           } else if (id == "info:author") {
             std::string authorStr = "Local Sovereign Author";
             if (const auto ps = session->userPermascroll()) {
@@ -3695,6 +3728,7 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&links);
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
+    state->accessibility->addSource(&quotationOverlay);
     state->accessibility->addSource(radialMenu.get());
     state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
@@ -3770,7 +3804,7 @@ int main(const int argc, char **argv) {
                                    ? *freshCell
                                    : changedCells.front();
       const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                               changedCell != zigzag::noCell;
+                              changedCell != zigzag::noCell;
 #endif
       renderer->runWithState([&views, &renderer, viewIndex, changeAt
 #ifdef XUZZ_BUILD
@@ -3900,8 +3934,8 @@ int main(const int argc, char **argv) {
                                     *handle, &folded);
                   if (next != zigzag::noCell && next != *handle) {
                     folded = store.rebuildManifold(head);
-                    head = store.setLink(head, *handle, *dim,
-                                         zigzag::DimVector::POS, next, &folded);
+                    head   = store.setLink(head, *handle, *dim,
+                                           zigzag::DimVector::POS, next, &folded);
                   }
                   bindZigzag(rState, index, head);
                   zigzagPresentation->focusCell(*handle);
@@ -3914,19 +3948,22 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&publishForm);
     renderer->addFrameContributor(&pouchDrawer);
     renderer->addFrameContributor(&swarmTelescope);
+    renderer->addFrameContributor(&quotationOverlay);
 #ifdef XUZZ_BUILD
     gleditor::CompositeModalInput compositeModal(
-        {&publishForm, zigzagPresentation.get()});
-    state->modal = &compositeModal;
+        {&publishForm, zigzagPresentation.get(), &quotationOverlay});
 #else
-    state->modal = &publishForm;
+    gleditor::CompositeModalInput compositeModal(
+        {&publishForm, &quotationOverlay});
 #endif
+    state->modal = &compositeModal;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
     renderer->addPickObserver(&map);
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
+    renderer->addPickObserver(&quotationOverlay);
 
     // A press inside the selection picks it up -- the renderer asks once the
     // press's pick says where it landed -- and the drop decides what becomes
@@ -4060,10 +4097,10 @@ int main(const int argc, char **argv) {
           if (hitZone || hitLeft || hitRight) {
             const auto &payload = kineticTetherEngine.payload();
             if (payload.originKind == PouchOriginKind::ZigzagCell) {
-              pouchDrawer.handleCellDrop(payload.span, payload.previewText,
-                                         payload.originCell,
-                                         payload.originRankCoord, screenX,
-                                         screenY, payload.originSliceIndex);
+              pouchDrawer.handleCellDrop(
+                  payload.span, payload.previewText, payload.originCell,
+                  payload.originRankCoord, screenX, screenY,
+                  payload.originSliceIndex, payload.originOpRef);
             } else {
               pouchDrawer.handleGhostDrop(
                   payload.span, payload.previewText, payload.originVersion,
@@ -4349,6 +4386,7 @@ int main(const int argc, char **argv) {
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, linkContext, *session,
                  radialMenu, renderer, pouchDrawer, swarmTelescope,
+                 quotationOverlay,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     app.commands().registerAction(
         std::string(xanadu::settings::kKeymapOverviewToggle),

@@ -11,8 +11,8 @@
 #include <unistd.h>
 
 #include "common/xanadu/reading_place.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace xanadu {
 // Field by field, so a mismatch says which field rather than dumping bytes.
@@ -48,14 +48,14 @@ protected:
             ::testing::UnitTest::GetInstance()->current_test_info()->name());
     fs::remove_all(root);
     fs::create_directories(root);
-    xudu::UserPermascroll::Config config;
+    xanadu::UserPermascroll::Config config;
     config.storageDir = root / "permascroll";
-    perma = std::make_shared<xudu::UserPermascroll>(std::move(config));
+    perma = std::make_shared<xanadu::UserPermascroll>(std::move(config));
   }
   void TearDown() override { fs::remove_all(root); }
 
   fs::path root;
-  std::shared_ptr<xudu::UserPermascroll> perma;
+  std::shared_ptr<xanadu::UserPermascroll> perma;
 };
 
 xanadu::ReadingPlace twoDocuments() {
@@ -72,12 +72,12 @@ xanadu::ReadingPlace twoDocuments() {
 }
 
 TEST_F(ReadingPlaceTest, anEmptyStoreHasNoPlace) {
-  const xudu::Store store(perma);
+  const xanadu::Store store(perma);
   EXPECT_FALSE(xanadu::latestPlace(store).has_value());
 }
 
 TEST_F(ReadingPlaceTest, thePlaceRecordedIsThePlaceReadBack) {
-  xudu::Store store(perma);
+  xanadu::Store store(perma);
   static_cast<void>(xanadu::recordPlace(store, twoDocuments()));
   EXPECT_EQ(xanadu::latestPlace(store), twoDocuments());
 }
@@ -85,7 +85,7 @@ TEST_F(ReadingPlaceTest, thePlaceRecordedIsThePlaceReadBack) {
 // Append-only: a later place is read, and the earlier one is still there to
 // be walked, which is what the activity store keeps visits for.
 TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
-  xudu::Store store(perma);
+  xanadu::Store store(perma);
   auto first = twoDocuments();
   first.documents.pop_back();
   first.active = 0;
@@ -102,7 +102,7 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
   EXPECT_GT(store.opCount(), opsAfterFirst);
   store.save((root / "activity").string());
 
-  xudu::Store reopened(perma);
+  xanadu::Store reopened(perma);
   reopened.load((root / "activity").string());
   EXPECT_EQ(xanadu::latestPlace(reopened), twoDocuments());
 }

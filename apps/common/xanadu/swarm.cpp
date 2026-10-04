@@ -1,5 +1,7 @@
 #include "swarm.hpp"
 
+#include "lt_compat.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -988,8 +990,10 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
   LiveOpBroadcast b;
   // A peer's bytes: a hash that is not hex makes the message malformed, which
   // this decoder answers with nullopt rather than an exception it never
-  // promised to throw.
-  const auto hStr = node.dict_find_string_value("h");
+  // promised to throw. Every one of bdecode's strings goes through
+  // lt_compat::sv() because before libtorrent 2.1 they are boost's
+  // string_view, which this tree's own parsers do not take.
+  const auto hStr = lt_compat::sv(node.dict_find_string_value("h"));
   if (!hStr.empty()) {
     const auto hash = InfoHash::parseHex(hStr);
     if (!hash) {
@@ -997,12 +1001,12 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
     }
     b.swarmHash = *hash;
   }
-  const auto vStr = node.dict_find_string_value("v");
+  const auto vStr = lt_compat::sv(node.dict_find_string_value("v"));
   if (!vStr.empty()) {
     b.version = MicroversionId::parse(vStr);
   }
   b.op.kind       = static_cast<OpKind>(node.dict_find_int_value("k", 0));
-  const auto pStr = node.dict_find_string_value("p");
+  const auto pStr = lt_compat::sv(node.dict_find_string_value("p"));
   if (!pStr.empty()) {
     b.op.parent = MicroversionId::parse(pStr);
   }
@@ -1014,7 +1018,7 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
       static_cast<std::uint64_t>(node.dict_find_int_value("so", 0));
   b.op.span.length =
       static_cast<std::uint64_t>(node.dict_find_int_value("sl", 0));
-  const auto srcStr = node.dict_find_string_value("src");
+  const auto srcStr = lt_compat::sv(node.dict_find_string_value("src"));
   if (!srcStr.empty()) {
     b.op.source = MicroversionId::parse(srcStr);
   }
@@ -1078,7 +1082,7 @@ SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
   InfoHash h;
   const std::string key = "xudu:collab:" + std::string(hostFingerprint) + ":" +
                           std::string(roomName);
-  h.bytes               = sha1(key);
+  h.bytes = sha1(key);
   return h;
 }
 
@@ -1120,7 +1124,7 @@ SwarmContentSource::decodeScrollSealed(const std::string_view body) {
 
   ScrollSealedBroadcast b;
   // A peer's bytes: see decodeLiveOp().
-  const auto hStr = node.dict_find_string_value("h");
+  const auto hStr = lt_compat::sv(node.dict_find_string_value("h"));
   if (!hStr.empty()) {
     const auto hash = InfoHash::parseHex(hStr);
     if (!hash) {
@@ -1130,7 +1134,7 @@ SwarmContentSource::decodeScrollSealed(const std::string_view body) {
   }
   b.authorScrollKey = std::string(node.dict_find_string_value("sk"));
   b.sealedUpTo = static_cast<std::uint64_t>(node.dict_find_int_value("up", 0));
-  const auto phStr = node.dict_find_string_value("ph");
+  const auto phStr = lt_compat::sv(node.dict_find_string_value("ph"));
   if (!phStr.empty()) {
     const auto pieceHash = InfoHash::parseHex(phStr);
     if (!pieceHash) {

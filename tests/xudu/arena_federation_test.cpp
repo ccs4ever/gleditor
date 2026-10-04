@@ -14,16 +14,16 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/extern_ref.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include <gleditor/cpp26.hpp>
 #include <gleditor/ranges.hpp>
-#include <xudu/core/extern_ref.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/arena_manifold.hpp>
-#include <zigzag/core/manifold.hpp>
 
 namespace {
 

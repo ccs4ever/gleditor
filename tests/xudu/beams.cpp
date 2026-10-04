@@ -20,36 +20,36 @@
 #include <glm/ext/vector_float3.hpp>
 #include <glm/trigonometric.hpp>
 
+#include "common/xanadu/anchor_lanes.hpp"
+#include "common/xanadu/framing.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 #include <gleditor/doc.hpp>
-#include <xudu/core/anchor_lanes.hpp>
-#include <xudu/core/framing.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
 
 namespace {
 
-using xudu::AnchorExtent;
-using xudu::assignAnchorLanes;
-using xudu::bandStrandCount;
-using xudu::bypassRoute;
-using xudu::centroidAlignmentDeltaY;
-using xudu::centroidY;
-using xudu::framingDistance;
-using xudu::framingFov;
-using xudu::HalfLink;
-using xudu::Link;
-using xudu::LinkedPair;
-using xudu::LinkType;
-using xudu::marginLane;
-using xudu::marginLaneLimit;
-using xudu::MicroversionId;
-using xudu::pageStackExtent;
-using xudu::PageStackExtent;
-using xudu::placeTransclusions;
-using xudu::Store;
-using xudu::TransclusionPair;
-using xudu::Version;
+using xanadu::AnchorExtent;
+using xanadu::assignAnchorLanes;
+using xanadu::bandStrandCount;
+using xanadu::bypassRoute;
+using xanadu::centroidAlignmentDeltaY;
+using xanadu::centroidY;
+using xanadu::framingDistance;
+using xanadu::framingFov;
+using xanadu::HalfLink;
+using xanadu::Link;
+using xanadu::LinkedPair;
+using xanadu::LinkType;
+using xanadu::marginLane;
+using xanadu::marginLaneLimit;
+using xanadu::MicroversionId;
+using xanadu::pageStackExtent;
+using xanadu::PageStackExtent;
+using xanadu::placeTransclusions;
+using xanadu::Store;
+using xanadu::TransclusionPair;
+using xanadu::Version;
 
 constexpr const char *sentence   = "alpha beta gamma delta";
 constexpr std::uint32_t alphaAt  = 0;
@@ -95,7 +95,7 @@ TEST(LinkLayout, aQuotationTurnsALinkIntoABeamBetweenTwoDocuments) {
                                       store.rebuild(quoted)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].type, LinkType::Comment);
@@ -120,7 +120,7 @@ TEST(LinkLayout, aLinkWithinOneDocumentDrawsNothing) {
   const std::vector<Version> versions{store.rebuild(linked)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   EXPECT_TRUE(placed.empty());
   // And it is not waiting for a document either: both of its ends are here.
@@ -141,7 +141,7 @@ TEST(LinkLayout, anEndInNoOpenDocumentIsReportedWithSomethingToLookFor) {
   const std::vector<Version> versions{store.rebuild(quoted)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   EXPECT_TRUE(placed.empty());
   ASSERT_EQ(unplaced.size(), 1U);
@@ -165,7 +165,7 @@ TEST(LinkLayout, aDocumentThatMerelyReadsTheSameIsNotAnEnd) {
   const std::vector<Version> versions{store.rebuild(retyped)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   EXPECT_TRUE(placed.empty());
   EXPECT_TRUE(unplaced.empty());
@@ -187,7 +187,7 @@ TEST(LinkLayout, anEndQuotedTwiceIntoOneDocumentIsStillOneBeam) {
                                       store.rebuild(twice)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   // And it covers both quotations, so the beam lands somewhere within what it
@@ -204,7 +204,7 @@ TEST(LinkLayout, everyLinkTypeHasAColourOfItsOwn) {
       LinkType::Authorship, LinkType::Quotation,    LinkType::Other};
   std::map<std::uint32_t, LinkType> seen;
   for (const auto type : types) {
-    const auto colour = xudu::linkColour(type);
+    const auto colour = xanadu::linkColour(type);
     EXPECT_TRUE(seen.emplace(colour, type).second)
         << "two link types share a colour";
     // Visible, and not opaque: a beam crosses the space between two documents
@@ -408,7 +408,7 @@ TEST(LinkLayout, multipleOneToOneLinksOfDifferentTypesAcrossFullPage) {
   const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 4U);
   EXPECT_TRUE(unplaced.empty());
@@ -457,7 +457,7 @@ TEST(LinkLayout, oneToManyLinkAcrossFullPage) {
   const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].from.doc, 0U);
@@ -508,7 +508,7 @@ TEST(LinkLayout, manyToOneLinkAcrossFullPage) {
   const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].from.doc, 0U);
@@ -557,7 +557,7 @@ TEST(LinkLayout, manyToManyLinkAcrossFullPage) {
   const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing(versions), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].from.doc, 0U);
@@ -634,8 +634,8 @@ TEST(LinkLayout, symmetricMultiPageFramingZoomScaling) {
   for (const auto pages : pageCounts) {
     const float totalH = (static_cast<float>(pages) * singlePageH) +
                          (static_cast<float>(pages - 1) * pageGapH);
-    const float spanW  = (4.0F * docHalfW) + docGap + 8.0F;
-    const float spanH  = totalH + 12.0F;
+    const float spanW = (4.0F * docHalfW) + docGap + 8.0F;
+    const float spanH = totalH + 12.0F;
 
     const float zFit = std::max(spanH / (2.0F * tanHalfFov),
                                 spanW / (2.0F * aspect * tanHalfFov));
@@ -825,8 +825,8 @@ TEST(PageFraming, asymmetricPageHeightsShiftTheCentroidByTheHeightDifference) {
 TEST(PageFraming, framingDistanceAtNinetyDegreesIsHalfTheHeight) {
   constexpr float aspect = 1.0F; // width term must not dominate here
   const auto distance    = framingDistance(/*worldWidth=*/10.0F,
-                                           /*worldHeight=*/200.0F,
-                                           /*fovYDegrees=*/90.0F, aspect);
+                                        /*worldHeight=*/200.0F,
+                                        /*fovYDegrees=*/90.0F, aspect);
   EXPECT_NEAR(distance, 100.0F, 1e-2F);
 }
 
@@ -984,8 +984,8 @@ TEST(TransclusionLayout,
   // 1. Relational links must be empty
   std::vector<LinkedPair> placedLinks;
   std::vector<HalfLink> unplacedLinks;
-  xudu::placeLinks(store.links(), viewing(versions), placedLinks,
-                   unplacedLinks);
+  xanadu::placeLinks(store.links(), viewing(versions), placedLinks,
+                     unplacedLinks);
   EXPECT_TRUE(placedLinks.empty());
   EXPECT_TRUE(unplacedLinks.empty());
 
@@ -1039,8 +1039,8 @@ TEST(TransclusionLayout, simultaneousRelationalLinkAndTransclusionCoexist) {
   // 1. Relational link
   std::vector<LinkedPair> placedLinks;
   std::vector<HalfLink> unplacedLinks;
-  xudu::placeLinks(store.links(), viewing(versions), placedLinks,
-                   unplacedLinks);
+  xanadu::placeLinks(store.links(), viewing(versions), placedLinks,
+                     unplacedLinks);
   ASSERT_EQ(placedLinks.size(), 1U);
   EXPECT_EQ(placedLinks[0].type, LinkType::Comment);
 
@@ -1153,7 +1153,7 @@ TEST(MarginLanes, oneLaneFillsTheMarginFlushWithBothEdges) {
 TEST(MarginLanes, lanesTileTheMarginWithoutOverhangingThePage) {
   constexpr float margin = 4.0F;
   constexpr float kerf   = 0.1F;
-  std::vector<xudu::MarginLane> slices;
+  std::vector<xanadu::MarginLane> slices;
   for (int lane = 0; lane < marginLaneLimit; lane++) {
     slices.push_back(marginLane(margin, lane, marginLaneLimit, kerf));
   }
@@ -1185,25 +1185,26 @@ TEST(MarginLanes, aPageWithNoMarginHasNoLaneToDrawIn) {
 
 TEST(FramingTest, ReadableDistanceDrawsTextAtTheAskedHeight) {
   // A 16 px line of page text is 16/18 of a world unit.
-  const float line    = 16.0F / 18.0F;
-  const auto distance = xudu::readableCameraDistance(line, 600.0F, 5.0F, 16.0F);
+  const float line = 16.0F / 18.0F;
+  const auto distance =
+      xanadu::readableCameraDistance(line, 600.0F, 5.0F, 16.0F);
   ASSERT_TRUE(distance.has_value());
   // Back through the projection: the line's height on screen.
   const float onScreen =
       line * 600.0F / (2.0F * *distance * std::tan(glm::radians(2.5F)));
   EXPECT_NEAR(onScreen, 16.0F, 1e-3F);
   // Half the height needs twice the distance.
-  EXPECT_NEAR(*xudu::readableCameraDistance(line, 600.0F, 5.0F, 8.0F),
+  EXPECT_NEAR(*xanadu::readableCameraDistance(line, 600.0F, 5.0F, 8.0F),
               2.0F * *distance, 1e-2F);
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 0.0F, 5.0F, 16.0F));
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 600.0F, 5.0F, 0.0F));
-  EXPECT_FALSE(xudu::readableCameraDistance(line, 600.0F, 180.0F, 16.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 0.0F, 5.0F, 16.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 600.0F, 5.0F, 0.0F));
+  EXPECT_FALSE(xanadu::readableCameraDistance(line, 600.0F, 180.0F, 16.0F));
 }
 
 TEST(FramingTest, OverviewFitKeepsAspectAndRoundTrips) {
   // A scene twice as wide as tall into a square panel: width decides.
-  const auto fit = xudu::OverviewFit::fit({0.0F, 0.0F}, {100.0F, 50.0F},
-                                          {10.0F, 20.0F}, {200.0F, 200.0F});
+  const auto fit = xanadu::OverviewFit::fit({0.0F, 0.0F}, {100.0F, 50.0F},
+                                            {10.0F, 20.0F}, {200.0F, 200.0F});
   EXPECT_FLOAT_EQ(fit.scale, 2.0F);
   const auto corner = fit.toPanel({0.0F, 0.0F});
   EXPECT_FLOAT_EQ(corner.x, 10.0F);
@@ -1214,7 +1215,7 @@ TEST(FramingTest, OverviewFitKeepsAspectAndRoundTrips) {
   EXPECT_FLOAT_EQ(back.y, 12.0F);
 
   // One point: centred, and no division by zero.
-  const auto point = xudu::OverviewFit::fit({5.0F, 5.0F}, {5.0F, 5.0F},
-                                            {0.0F, 0.0F}, {100.0F, 100.0F});
+  const auto point = xanadu::OverviewFit::fit({5.0F, 5.0F}, {5.0F, 5.0F},
+                                              {0.0F, 0.0F}, {100.0F, 100.0F});
   EXPECT_FLOAT_EQ(point.toPanel({5.0F, 5.0F}).x, 50.0F);
 }

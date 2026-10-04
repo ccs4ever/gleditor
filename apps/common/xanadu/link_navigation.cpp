@@ -377,13 +377,13 @@ NavigationResult LinkNavigator::enter() {
   const auto &target = member.occurrences[*cursor.occurrence].site;
   current            = activity.append(
       Visit{.parent  = current,
-            .target  = target,
-            .arrival = Arrival::EnteredEndpoint,
-            .link    = LinkVisitContext{.key    = selection.key,
-                                        .active = selection.active,
-                                        .left   = selection.left,
-                                        .right  = selection.right,
-                                        .origin = selection.origin}});
+                       .target  = target,
+                       .arrival = Arrival::EnteredEndpoint,
+                       .link    = LinkVisitContext{.key    = selection.key,
+                                                   .active = selection.active,
+                                                   .left   = selection.left,
+                                                   .right  = selection.right,
+                                                   .origin = selection.origin}});
   return NavigationEffect{.focus = target, .visit = current};
 }
 

@@ -10,12 +10,12 @@
 #include <fstream>
 #include <string>
 
-#include <xudu/core/segmented_primedia_spool.hpp>
+#include "common/xanadu/segmented_primedia_spool.hpp"
 
 namespace {
 
-using xudu::PrimediaSpan;
-using xudu::SegmentedPrimediaSpool;
+using xanadu::PrimediaSpan;
+using xanadu::SegmentedPrimediaSpool;
 
 TEST(SegmentedPrimediaSpoolTest, appendAndReadLocalSpans) {
   SegmentedPrimediaSpool spool;
@@ -34,7 +34,7 @@ TEST(SegmentedPrimediaSpoolTest, appendAndReadLocalSpans) {
   EXPECT_EQ(spool.readView(span2), "World!");
   EXPECT_EQ(spool.bytes(), "Hello, World!");
 
-  const auto combined = PrimediaSpan{xudu::localScroll, 0, 13};
+  const auto combined = PrimediaSpan{xanadu::localScroll, 0, 13};
   EXPECT_EQ(spool.read(combined), "Hello, World!");
 }
 
@@ -65,7 +65,7 @@ TEST(SegmentedPrimediaSpoolTest, multiSegmentContinuityAcrossSeals) {
 
   // Verify full span reading across segment boundaries
   const auto fullSpan =
-      PrimediaSpan{xudu::localScroll, 0, text1.size() + text2.size()};
+      PrimediaSpan{xanadu::localScroll, 0, text1.size() + text2.size()};
   EXPECT_EQ(spool.read(fullSpan), text1 + text2);
   EXPECT_EQ(spool.readView(fullSpan), text1 + text2);
 
@@ -123,12 +123,12 @@ TEST(SegmentedPrimediaSpoolTest, ErrorsAndBounds) {
   EXPECT_TRUE(spool.readView(nonLocal).empty());
 
   // Empty span
-  PrimediaSpan emptySpan{xudu::localScroll, 0, 0};
+  PrimediaSpan emptySpan{xanadu::localScroll, 0, 0};
   EXPECT_EQ(spool.read(emptySpan), "");
   EXPECT_EQ(spool.readView(emptySpan), "");
 
   // Out of bounds span
-  PrimediaSpan oobSpan{xudu::localScroll, 1000, 50};
+  PrimediaSpan oobSpan{xanadu::localScroll, 1000, 50};
   EXPECT_EQ(spool.read(oobSpan), "");
   EXPECT_EQ(spool.readView(oobSpan), "");
 

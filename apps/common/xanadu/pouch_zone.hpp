@@ -50,9 +50,9 @@ struct PouchItem {
   std::uint32_t originSliceIndex{0}; ///< Manifold or slice index
   std::string originRankCoord;       ///< e.g. "d.sequence: #4"
 
-  /// The cell holding this item in the backing store, whose content is the
-  /// span itself: what keeps it across sessions (see PouchManager).
-  std::uint32_t cell{0};
+  // Section 5.8:
+  std::optional<GlobalOpRef> originOpRef;
+  std::optional<GlobalDocumentState> originDocState;
 };
 
 /**
@@ -62,6 +62,7 @@ struct PouchItem {
  */
 struct DropZoneConfig {
   std::string id;
+  zigzag::CellRef cell{zigzag::noCell};
   std::string label{"Notes"};
   glm::vec4 backgroundColor{0.12F, 0.15F, 0.20F, 0.85F};
   std::uint32_t auraColor{0xFFEAB308U};
@@ -81,6 +82,9 @@ public:
     return config_.label;
   }
   void setLabel(std::string label) { config_.label = std::move(label); }
+
+  [[nodiscard]] zigzag::CellRef cell() const noexcept { return config_.cell; }
+  void setCell(const zigzag::CellRef cell) noexcept { config_.cell = cell; }
 
   [[nodiscard]] const glm::vec4 &backgroundColor() const noexcept {
     return config_.backgroundColor;
@@ -170,20 +174,33 @@ public:
   /// zoneById(), or the first zone when there is none by that name.
   DropZone &zoneOrDefault(std::string_view id);
 
-  /// Drop a span into a zone, recording OpKind::Transclude in the backing
-  /// store.
+  /// Ensure backing zone cell exists on d.vars in the store.
+  void ensureZoneCell(DropZone &zone);
+
+  /// Drop a span into a zone, recording item cell on d.items in backing store
+  /// (§5.8).
+  PouchItem dropSpan(std::string_view zoneId, const PrimediaSpan &span,
+                     std::string previewText, const PouchOrigin &origin = {});
+
   PouchItem dropSpan(std::string_view zoneId, const PrimediaSpan &span,
                      std::string previewText, const MicroversionId &sourceVer,
                      std::uint32_t docIndex = 0, std::uint32_t charStart = 0,
                      std::uint32_t charEnd = 0);
 
-  /// Drop a cell's span into a zone, recording OpKind::Transclude in the
-  /// backing store with cell origin metadata.
+  /// Drop a cell's span into a zone, recording item cell on d.items in backing
+  /// store with cell origin metadata (§5.8).
   PouchItem dropCell(std::string_view zoneId, const PrimediaSpan &span,
-                     std::string previewText, std::uint32_t cellRef,
-                     std::string_view rankCoord, std::uint32_t sliceIndex = 0);
+                     std::string previewText, const GlobalOpRef &cellOrigin,
+                     std::string_view rankCoord = {});
 
-  /// Dismiss an item, moving it to non-destructive limbo in the backing store.
+  PouchItem
+  dropCell(std::string_view zoneId, const PrimediaSpan &span,
+           std::string previewText, std::uint32_t cellRef,
+           std::string_view rankCoord = {}, std::uint32_t sliceIndex = 0,
+           const std::optional<GlobalOpRef> &cellOrigin = std::nullopt);
+
+  /// Dismiss an item, moving it from d.items to d.dismissed in backing store
+  /// (§5.8).
   bool dismissItem(std::uint64_t itemId);
 
   [[nodiscard]] Store &store() noexcept {
@@ -198,29 +215,13 @@ public:
 
   /// Serialization of drop zone manifest into root microversion metadata.
   void saveManifest();
-  /// Zones, then the items that were in them when the store was last saved.
   void loadManifest();
 
 private:
-  void loadZones();
-  /**
-   * @brief Read back every item the store holds, into its zone.
-   *
-   * An item is a cell on the home cell's d.pouch rank whose content is the
-   * dropped span -- a transclusion, sharing the source's addresses -- with
-   * its zone along d.zone and where it came from along d.origin. Dismissing
-   * one takes it off the rank; the cell stays, as everything does.
-   */
-  void loadItems();
-  /// Mint @p item's cell and hang it on the rank; sets PouchItem::cell.
-  void persistItem(PouchItem &item, std::string_view zoneId);
-  /// @p name's dimension in the backing store, minted if it has none.
-  zigzag::DimRef dimension(std::string_view name);
   Store *systemStore_{nullptr};
   std::unique_ptr<Store> store_;
   MicroversionId currentVersion_;
   std::vector<std::unique_ptr<DropZone>> zones_;
-  std::uint64_t nextItemId_{1};
 };
 
 } // namespace xanadu

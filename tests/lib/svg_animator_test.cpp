@@ -9,6 +9,18 @@
 namespace gleditor {
 namespace {
 
+// Animation is ThorVG's to detect and ThorVG's to play: without thorvg-1 the
+// answer to every input is "no codec", which is what the always-compiled
+// tests below assert, the way svg_cache_test.cpp's peekSize() pair does.
+// The rasterizing tests need real ThorVG output to mean anything.
+#ifdef GLEDITOR_HAVE_SVG_THORVG
+constexpr bool kDetectsAnimation = true;
+constexpr auto kStaticReason     = DecodeError::NotAnimated;
+#else
+constexpr bool kDetectsAnimation = false;
+constexpr auto kStaticReason     = DecodeError::NoCodec;
+#endif
+
 TEST(SvgAnimatorTest, IsAnimatedDetection) {
   const std::string_view staticSvg =
       R"(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
@@ -24,9 +36,10 @@ TEST(SvgAnimatorTest, IsAnimatedDetection) {
              <animate attributeName="x" from="0" to="50" dur="2s" repeatCount="indefinite"/>
            </rect>
          </svg>)";
-  EXPECT_TRUE(SvgAnimator::isAnimated(
-      {reinterpret_cast<const std::uint8_t *>(animatedSvg.data()),
-       animatedSvg.size()}));
+  EXPECT_EQ(SvgAnimator::isAnimated(
+                {reinterpret_cast<const std::uint8_t *>(animatedSvg.data()),
+                 animatedSvg.size()}),
+            kDetectsAnimation);
 
   const std::string_view transformSvg =
       R"(<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
@@ -34,9 +47,10 @@ TEST(SvgAnimatorTest, IsAnimatedDetection) {
              <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="4s"/>
            </rect>
          </svg>)";
-  EXPECT_TRUE(SvgAnimator::isAnimated(
-      {reinterpret_cast<const std::uint8_t *>(transformSvg.data()),
-       transformSvg.size()}));
+  EXPECT_EQ(SvgAnimator::isAnimated(
+                {reinterpret_cast<const std::uint8_t *>(transformSvg.data()),
+                 transformSvg.size()}),
+            kDetectsAnimation);
 
   EXPECT_FALSE(SvgAnimator::isAnimated({}));
 }
@@ -51,8 +65,10 @@ TEST(SvgAnimatorTest, StaticSvgReturnsNullOnLoad) {
        staticSvg.size()});
   // A valid document with nothing to animate is told apart from a broken one.
   ASSERT_FALSE(animator.has_value());
-  EXPECT_EQ(animator.error(), DecodeError::NotAnimated);
+  EXPECT_EQ(animator.error(), kStaticReason);
 }
+
+#ifdef GLEDITOR_HAVE_SVG_THORVG
 
 TEST(SvgAnimatorTest, RenderAnimatedRectMovement) {
   const std::string_view animatedSvg =
@@ -132,6 +148,8 @@ TEST(SvgAnimatorTest, DetectLottieViaThorvgAnimationContext) {
   EXPECT_EQ(animator->width(), 100);
   EXPECT_EQ(animator->height(), 100);
 }
+
+#endif // GLEDITOR_HAVE_SVG_THORVG
 
 } // namespace
 } // namespace gleditor
