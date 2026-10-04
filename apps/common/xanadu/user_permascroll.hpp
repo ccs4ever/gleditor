@@ -13,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -68,6 +69,11 @@ struct DeviceDelegation {
   fromTsv(std::string_view tsv);
 
   bool operator==(const DeviceDelegation &) const = default;
+};
+
+class PermascrollStateUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
 };
 
 /**

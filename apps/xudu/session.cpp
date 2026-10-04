@@ -480,30 +480,35 @@ std::string authorPath(const std::string &storePath) {
 }
 
 /// Where a store's SealState lives -- what makes the next publishDocument()
-/// know what the last one already sealed, across separate runs of the
-/// program. One file per store rather than per document: the local spool is
-/// one scroll shared by every document the store holds, sealed under one
-/// name ("primedia") regardless of which document's salt is being published.
+/// know which operations the last publication sealed across separate runs.
+/// Primedia sealing belongs to the shared author's UserPermascroll; each store
+/// retains its own operations segments here.
 std::string sealStatePath(const std::string &storePath) {
   return (std::filesystem::path(storePath) / "seal-state").string();
 }
 
 SealState loadSealState(const std::string &storePath) {
-  if (std::ifstream in(sealStatePath(storePath), std::ios::binary); in) {
-    const std::string text{std::istreambuf_iterator<char>(in),
-                           std::istreambuf_iterator<char>()};
-    if (auto state = decodeSealState(text); state) {
-      return std::move(*state);
-    }
-  }
-  return {};
+  const auto path = sealStatePath(storePath);
+  if (!std::filesystem::exists(path)) return {};
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    throw std::runtime_error("cannot read publication seal state: " + path);
+  const std::string text{std::istreambuf_iterator<char>(in),
+                         std::istreambuf_iterator<char>()};
+  const auto state = decodeSealState(text);
+  if (!state || in.bad())
+    throw std::runtime_error("unreadable publication seal state: " + path);
+  return *state;
 }
 
 void saveSealState(const std::string &storePath, const SealState &state) {
   std::filesystem::create_directories(storePath);
-  std::ofstream out(sealStatePath(storePath),
-                    std::ios::binary | std::ios::trunc);
+  const auto path = sealStatePath(storePath);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out << encodeSealState(state);
+  out.close();
+  if (!out)
+    throw std::runtime_error("cannot write publication seal state: " + path);
 }
 
 } // namespace
@@ -644,19 +649,20 @@ std::string Session::publishDocument(const MicroversionId &version,
   if (st.userPermascrollPtr()) {
     record.permascroll = st.userPermascroll().globalScrollKey();
   }
-  record.version       = version.str();
-  record.published     = now;
-  record.contentLength = st.primedia().bytes().size();
-  record.contentDigest = sha256Hex(st.primedia().bytes());
+  record.version   = version.str();
+  record.published = now;
+  // Primedia travels in its author's separate incremental seal; this record
+  // describes the history torrent, which contains no primedia payload.
+  record.contentLength = 0;
+  record.contentDigest = sha256Hex({});
 
   const auto priorState = loadSealState(path(storeIndex));
-  // The history is sealed beside the content and vouched for beside it. This
-  // has to be the same bytes sealLocalSpool() puts in the torrent, so it asks
-  // the store the same way rather than describing them a second time -- only
-  // what is new since the last seal, exactly as sealLocalSpool() will seal.
-  const auto sealedOps = sealableOps(st, priorState.opsAlreadySealed);
+  // Sign exactly the incremental operations file sealLocalSpool() will write.
+  const auto sealedOps = priorState.opsAlreadySealed < st.opCount()
+                             ? sealableOps(st, priorState.opsAlreadySealed)
+                             : std::string{};
   record.opsLength     = sealedOps.size();
-  record.opsDigest     = sha256Hex(sealedOps);
+  if (!sealedOps.empty()) record.opsDigest = sha256Hex(sealedOps);
 
   for (const auto &piece : st.rebuild(version).pieces()) {
     if (piece.isLocal()) {
@@ -670,13 +676,28 @@ std::string Session::publishDocument(const MicroversionId &version,
       }
     }
   }
-  const auto provenance =
-      signProvenance(record, settings().signing(request.passphrase));
-
   const auto withheldHoles = collectWithheldHoles();
+  const auto signing       = settings().signing(request.passphrase);
+  const auto provenance    = signProvenance(record, signing);
   if (st.userPermascrollPtr()) {
+    const auto from     = st.userPermascroll().currentScroll().length();
+    const auto allBytes = st.userPermascroll().bytes();
+    if (from > allBytes.size())
+      throw std::runtime_error("sealed permascroll exceeds local bytes");
+    SignedProvenance primediaProvenance;
+    if (from < allBytes.size()) {
+      auto primediaRecord = record;
+      const auto wireBytes =
+          publicationPrimedia(allBytes.substr(from), from, withheldHoles);
+      primediaRecord.contentLength = wireBytes.size();
+      primediaRecord.contentDigest = sha256Hex(wireBytes);
+      primediaRecord.opsLength     = 0;
+      primediaRecord.opsDigest.clear();
+      primediaRecord.extra.emplace_back("permascroll_at", std::to_string(from));
+      primediaProvenance = signProvenance(primediaRecord, signing);
+    }
     const auto newlySealed = st.userPermascrollPtr()->sealIncremental(
-        into, provenance, withheldHoles);
+        into, primediaProvenance, withheldHoles);
     if (newlySealed.has_value() && swarmSource) {
       if (localAuthorScrollKey_.empty()) {
         localAuthorScrollKey_ = st.userPermascroll().globalScrollKey();
@@ -695,16 +716,22 @@ std::string Session::publishDocument(const MicroversionId &version,
     }
   }
 
+  const auto sharedScroll = st.userPermascrollPtr()
+                                ? st.userPermascroll().currentScroll()
+                                : priorState.scroll;
+  const auto &scrollKeys =
+      st.userPermascrollPtr() ? st.userPermascroll().config().deviceKeys : mine;
   const auto sealed =
-      sealLocalSpool(st, mine, "primedia", into, provenance, priorState.scroll,
-                     priorState.opsAlreadySealed, withheldHoles);
+      sealLocalSpool(st, scrollKeys, sharedScroll.salt, into, provenance,
+                     sharedScroll, priorState.opsAlreadySealed, withheldHoles);
 
   auto opsSegments = priorState.opsSegments;
   if (sealed.opsSegment.has_value()) {
     opsSegments.push_back(*sealed.opsSegment);
   }
-  const auto pub = publish(st, version, mine, request.salt, request.title,
-                           sequence, now, &sealed.scroll, opsSegments);
+  const auto pub =
+      publish(st, version, mine, request.salt, request.title, sequence, now,
+              &sealed.scroll, opsSegments, withheldHoles);
 
   SealState nextState;
   nextState.scroll           = sealed.scroll;
@@ -1287,7 +1314,7 @@ std::vector<PublishedHoleRecord> Session::collectWithheldHoles() const {
       continue;
     }
     const auto opCount = entry.store->opCount();
-    for (std::uint32_t i = 0; i < opCount; ++i) {
+    for (std::uint32_t i = 1; i <= opCount; ++i) {
       const auto *node = entry.store->getCompactOp(i);
       if (node && node->scrollId == localScroll && node->spanLength > 0) {
         holes.push_back(PublishedHoleRecord{

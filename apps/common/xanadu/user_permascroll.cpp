@@ -4,6 +4,8 @@
  */
 #include "user_permascroll.hpp" // IWYU pragma: associated
 
+#include <lmdb.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +13,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "bencode.hpp"
 #include "common/tsv.hpp"
 #include "identity/pgp_verify.hpp"
 #include "publication.hpp"
@@ -40,6 +43,126 @@ std::filesystem::path resolveDefaultStorageDir(std::string_view subDir) {
     }
   }
   return base / subDir;
+}
+
+// One LMDB handle per path per process; closing overlapping handles would
+// release the process locks of the other handle. Transactions also serialize
+// distinct processes opening the same author's state.
+std::optional<Scroll> permascrollState(UserPermascroll::Config &config,
+                                       const Scroll *next = nullptr) {
+  if (config.storageDir.empty()) return std::nullopt;
+  static std::mutex mutex;
+  const std::scoped_lock lock(mutex);
+  const auto directory = config.storageDir / "publication-state";
+  std::filesystem::create_directories(directory);
+  const auto check = [](const int rc) {
+    if (rc != MDB_SUCCESS)
+      throw std::runtime_error("permascroll state: " +
+                               std::string(mdb_strerror(rc)));
+  };
+  MDB_env *rawEnv = nullptr;
+  check(mdb_env_create(&rawEnv));
+  const std::unique_ptr<MDB_env, decltype(&mdb_env_close)> env(rawEnv,
+                                                               mdb_env_close);
+  check(mdb_env_open(env.get(), directory.string().c_str(), 0, 0600));
+  MDB_txn *rawTxn = nullptr;
+  check(mdb_txn_begin(env.get(), nullptr, 0, &rawTxn));
+  std::unique_ptr<MDB_txn, decltype(&mdb_txn_abort)> txn(rawTxn, mdb_txn_abort);
+  MDB_dbi db;
+  check(mdb_dbi_open(txn.get(), nullptr, 0, &db));
+  std::string name = "state";
+  MDB_val key{name.size(), name.data()};
+  MDB_val value{};
+  const auto found = mdb_get(txn.get(), db, &key, &value);
+  std::optional<Scroll> restored;
+  if (found == MDB_SUCCESS) {
+    const std::string_view bytes(static_cast<const char *>(value.mv_data),
+                                 value.mv_size);
+    if (bytes.size() < 4 || !bytes.starts_with("XUP"))
+      throw PermascrollStateUnreadable(
+          "permascroll state format 1: XUP signature missing");
+    if (bytes[3] != '1')
+      throw PermascrollStateUnreadable(
+          "permascroll state version 1 expected (byte 49), got byte " +
+          std::to_string(static_cast<unsigned char>(bytes[3])));
+    try {
+      const auto root   = bencode::decode(bytes.substr(4));
+      const auto pub    = root.find("public");
+      const auto secret = root.find("secret");
+      const auto master = root.find("master");
+      const auto device = root.find("device");
+      const auto seal   = root.find("seal");
+      if (!pub || !secret || !master || !device || !seal || !pub->isString() ||
+          !secret->isString() || !master->isString() || !device->isString() ||
+          !seal->isString())
+        throw PermascrollStateUnreadable(
+            "permascroll state format 1: missing fields");
+      MutableKeys keys{PublicKey::fromHex(pub->asString()),
+                       SecretKey::fromHex(secret->asString())};
+      if (keys.publicKey.isZero() ||
+          !verifyMutableItem("permascroll-state-v1",
+                             signMutableItem("permascroll-state-v1", keys),
+                             keys.publicKey))
+        throw PermascrollStateUnreadable(
+            "permascroll state format 1: invalid key pair");
+      if (master->asString() != config.masterIdentity.toString() ||
+          device->asString() != config.deviceId ||
+          (!config.deviceKeys.publicKey.isZero() &&
+           (config.deviceKeys.publicKey != keys.publicKey ||
+            config.deviceKeys.secretKey.bytes != keys.secretKey.bytes)))
+        throw PermascrollStateUnreadable(
+            "permascroll state format 1: identity mismatch");
+      const auto state = decodeSealState(seal->asString());
+      const auto salt  = config.deviceId == "main"
+                             ? "permascroll"
+                             : "permascroll/" + config.deviceId;
+      if (!state || state->opsAlreadySealed != 0 ||
+          !state->opsSegments.empty() ||
+          state->scroll.publisher != keys.publicKey ||
+          state->scroll.salt != salt)
+        throw PermascrollStateUnreadable(
+            "permascroll state format 1: invalid scroll");
+      std::uint64_t end = 0;
+      for (const auto &segment : state->scroll.segments) {
+        if (segment.at != end || segment.length == 0 || segment.end() < end)
+          throw PermascrollStateUnreadable(
+              "permascroll state format 1: noncontiguous segments");
+        end = segment.end();
+      }
+      config.deviceKeys = keys;
+      restored          = state->scroll;
+    } catch (const PermascrollStateUnreadable &) {
+      throw;
+    } catch (const std::exception &) {
+      // A parse error can contain source bytes; never expose private keys.
+      throw PermascrollStateUnreadable(
+          "permascroll state format 1: malformed record");
+    }
+  } else if (found != MDB_NOTFOUND) {
+    check(found);
+  }
+  if (next) {
+    SealState state;
+    state.scroll = *next;
+    auto bytes =
+        "XUP1" +
+        bencode::Value::dict(
+            {
+                {"public",
+                 bencode::Value::string(config.deviceKeys.publicKey.hex())},
+                {"secret",
+                 bencode::Value::string(config.deviceKeys.secretKey.hex())},
+                {"master",
+                 bencode::Value::string(config.masterIdentity.toString())},
+                {"device", bencode::Value::string(config.deviceId)},
+                {"seal", bencode::Value::string(encodeSealState(state))},
+            })
+            .encode();
+    value = MDB_val{bytes.size(), bytes.data()};
+    check(mdb_put(txn.get(), db, &key, &value, 0));
+    check(mdb_txn_commit(txn.release()));
+  }
+  return restored;
 }
 
 } // namespace
@@ -139,12 +262,10 @@ UserPermascroll::UserPermascroll() {
 }
 
 UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
-  if (config_.deviceKeys.publicKey.isZero()) {
+  if (config_.deviceId.empty()) config_.deviceId = "main";
+  const auto restored = permascrollState(config_);
+  if (config_.deviceKeys.publicKey.isZero())
     config_.deviceKeys = createMutableKeys();
-  }
-  if (config_.deviceId.empty()) {
-    config_.deviceId = "main";
-  }
 
   currentScroll_.publisher = config_.deviceKeys.publicKey;
   currentScroll_.salt      = (config_.deviceId == "main")
@@ -162,6 +283,15 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
     // session with nowhere to write, and the author's first document reopened
     // empty. openActiveSegment() creates the file.
     spool_.openActiveSegment(config_.storageDir / "active.primedia");
+    if (restored) {
+      if (restored->length() > spool_.size())
+        throw PermascrollStateUnreadable(
+            "permascroll state format 1: sealed bytes exceed active primedia");
+      currentScroll_ = *restored;
+      sealedBytes_   = restored->length();
+    } else {
+      (void)permascrollState(config_, &currentScroll_);
+    }
   }
 }
 
@@ -223,6 +353,11 @@ void UserPermascroll::clear() {
   spool_.clear();
   sealedBytes_ = 0;
   currentScroll_.segments.clear();
+  if (!config_.storageDir.empty()) {
+    std::filesystem::resize_file(config_.storageDir / "active.primedia", 0);
+    spool_.openActiveSegment(config_.storageDir / "active.primedia");
+    (void)permascrollState(config_, &currentScroll_);
+  }
 }
 
 Scroll UserPermascroll::currentScroll() const {
@@ -250,33 +385,7 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
     return std::nullopt;
   }
 
-  // Construct wire payload: zero-fill withheld ranges to preserve piece
-  // alignment
-  std::string wirePayload{unsealedSlice};
-  const auto sliceStart = sealedBytes_;
-  const auto sliceEnd   = sealedBytes_ + unsealedSlice.size();
-
-  for (const auto &hole : holes) {
-    const auto holeStart = hole.at;
-    const auto holeEnd   = hole.at + hole.length;
-    if (holeEnd <= sliceStart || holeStart >= sliceEnd) {
-      continue;
-    }
-
-    const auto overlapStart = std::max(holeStart, sliceStart);
-    const auto overlapEnd   = std::min(holeEnd, sliceEnd);
-    const auto relStart     = overlapStart - sliceStart;
-    const auto relLength    = overlapEnd - overlapStart;
-
-    if (hole.reason == HoleReason::Withheld ||
-        hole.reason == HoleReason::Revoked ||
-        hole.reason == HoleReason::Takedown) {
-      std::fill(wirePayload.begin() + static_cast<std::ptrdiff_t>(relStart),
-                wirePayload.begin() +
-                    static_cast<std::ptrdiff_t>(relStart + relLength),
-                '\0');
-    }
-  }
+  auto wirePayload = publicationPrimedia(unsealedSlice, sealedBytes_, holes);
 
   std::vector<TorrentContent> files;
   files.push_back(
@@ -304,7 +413,13 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
   segment.fileIndex    = 0;
   segment.path         = sealedContentName;
 
-  currentScroll_.addSegment(segment);
+  auto next = currentScroll_;
+  next.addSegment(segment);
+  // Persist the bytes before committing a descriptor that promises they exist.
+  if (!spool_.flush())
+    throw std::runtime_error("cannot flush permascroll before sealing");
+  (void)permascrollState(config_, &next);
+  currentScroll_ = std::move(next);
   sealedBytes_ += unsealedSlice.size();
 
   return segment;

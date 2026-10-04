@@ -68,12 +68,46 @@ inspected. Internal accessibility descriptions passed; platform assistive-techno
 not tested because AccessKit is absent from this build. Network tests establish payload transfer and
 mutable-name retrieval, not authenticated remote catalog ingestion or whole-store reconstruction.
 
+## Restart and provenance fixes
+
+The next batch persists the permascroll's device key and complete sealed-segment map in a private
+LMDB transaction under `<permascroll>/publication-state` (`XUP1`, format version 1). Reopening
+restores the same global name and incremental boundary. Identity mismatches, unknown versions,
+noncontiguous segments and a checkpoint beyond the backing primedia are refused with
+`PermascrollStateUnreadable`. Bytes are flushed before the descriptor transaction commits. Failed
+seed output leaves the previous boundary intact. This local key persistence is a prerequisite;
+OpenPGP delegation, mock enrollment and eventual revocation remain separate work.
+
+Session publication now globalizes local spans against the author's shared permascroll rather than
+sealing a second store-specific copy. Operations remain incremental per store. Invalid existing
+store checkpoints and write failures are reported instead of silently restarting their history.
+Withheld settings spans include the final operation, and their ranges are included before the
+publication manifest is signed.
+
+Signing and sealing share one redaction routine. Session signs separate primedia and history
+records: the primedia digest covers exactly the new zero-filled wire payload, with its absolute
+`permascroll_at`; the history digest covers exactly the new operations file. An unchanged history
+claims no new operations file. Earlier publication artifacts retain their hashes and descriptors.
+
+Run `make -j$(nproc) test/publication-local` to repeat the three-process Publish form journey. It
+creates a fresh evidence directory under `build/publication-local/`, retains captures/logs, and
+removes temporary private keys even when a check fails. The 98 focused engine tests and four
+UI/keyboard tests also passed, as did repository formatting and lint.
+
+Evidence from implementation validation is under `build/publication-restart-fixes/`. The form
+journey checks sequences 1, 2 and 3, one permascroll key, reuse of all prior segment descriptors and
+unchanged history reuse. The third process adds eight document bytes. Private settings/activity
+updates also append primedia, so an unchanged document can still require a new author-scroll
+segment. Seed payloads are checked against provenance digests and private ranges, and GPG verifies
+the actual records before temporary signing keys are removed. These are local form and integrity
+checks; DHT catalog ingestion and the complete P1–P7 acceptance run remain pending.
+
 ## Remaining work
 
 1. Implement one background publication coordinator for dependency review/sealing, seeding, mutable
    pointer publication and completion/retry state. Add topic fields and the mock verification
-   boundary. Reconcile Session's per-store seal with the author's shared permascroll identity and
-   validate incremental seals after restart.
+   boundary. The local shared-permascroll and restart prerequisites are now implemented; the
+   coordinator must also find and seed earlier segments stored by other publications.
 1. Carry the complete store inventory, designated versions and annotations in the publication
    format, and reconstruct every advertised document/slice from an empty remote cache.
 1. Add signed author catalog publication/ingestion and topic rendezvous exchange, author-key

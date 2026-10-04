@@ -262,6 +262,7 @@ SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
 make -j$(nproc) test                 # four gtest binaries, then rootless swarm tests
 make test TEST_FILTER='MediaTest.*'  # focused gtest filter
 make test/e2e-orchestration          # whole-program xudu orchestration
+make -j$(nproc) test/publication-local # three local UI publications with disposable signing keys
 make -j$(nproc) format-check lint    # formatting and text lint gates
 make -j$(nproc) shaders              # shader validation
 make profile                         # library test coverage

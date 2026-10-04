@@ -1070,6 +1070,10 @@ sample-xanadocs: $(OBJDIR)/xudu
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 	tools/swarm-netns-test.sh
 
+.PHONY: test/publication-local
+test/publication-local: $(OBJDIR)/xuzz
+	python3 tools/publication-local-test.py --binary $(OBJDIR)/xuzz --output $(OBJDIR)/publication-local
+
 # Network namespace suites that require two peers on separate network stacks.
 # Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
 SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*

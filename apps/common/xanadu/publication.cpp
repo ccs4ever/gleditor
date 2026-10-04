@@ -423,6 +423,29 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
   return pub;
 }
 
+std::string publicationPrimedia(const std::string_view bytes,
+                                const std::uint64_t at,
+                                const std::vector<PublishedHoleRecord> &holes) {
+  if (bytes.size() > std::numeric_limits<std::uint64_t>::max() - at)
+    throw std::invalid_argument("publication primedia range overflows");
+  const auto end = at + bytes.size();
+  std::string payload{bytes};
+  for (const auto &hole : holes) {
+    if (hole.length > std::numeric_limits<std::uint64_t>::max() - hole.at)
+      throw std::invalid_argument("publication hole range overflows");
+    if (hole.reason != HoleReason::Withheld &&
+        hole.reason != HoleReason::Revoked &&
+        hole.reason != HoleReason::Takedown)
+      continue;
+    const auto first = std::max(at, hole.at);
+    const auto last  = std::min(end, hole.end());
+    if (first >= last) continue;
+    std::fill(payload.begin() + static_cast<std::ptrdiff_t>(first - at),
+              payload.begin() + static_cast<std::ptrdiff_t>(last - at), '\0');
+  }
+  return payload;
+}
+
 SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
                             const std::string &salt, const std::string &into,
                             const SignedProvenance &provenance,
@@ -449,36 +472,16 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   const auto newPrimedia    = allBytes.substr(primediaAlreadySealed);
   const bool hasNewPrimedia = !newPrimedia.empty();
 
-  const auto opsTotal  = static_cast<std::uint32_t>(store.opCount());
+  const auto opsTotal = static_cast<std::uint32_t>(store.opCount());
+  if (opsAlreadySealed > opsTotal)
+    throw std::runtime_error(
+        "cannot seal: prior operations exceed this store's history");
   const bool hasNewOps = opsAlreadySealed < opsTotal;
   const auto newOps =
       hasNewOps ? sealableOps(store, opsAlreadySealed) : std::string{};
 
-  std::string wirePayload{newPrimedia};
-  const auto sliceStart = primediaAlreadySealed;
-  const auto sliceEnd   = primediaAlreadySealed + newPrimedia.size();
-
-  for (const auto &hole : holes) {
-    const auto holeStart = hole.at;
-    const auto holeEnd   = hole.at + hole.length;
-    if (holeEnd <= sliceStart || holeStart >= sliceEnd) {
-      continue;
-    }
-
-    const auto overlapStart = std::max(holeStart, sliceStart);
-    const auto overlapEnd   = std::min(holeEnd, sliceEnd);
-    const auto relStart     = overlapStart - sliceStart;
-    const auto relLength    = overlapEnd - overlapStart;
-
-    if (hole.reason == HoleReason::Withheld ||
-        hole.reason == HoleReason::Revoked ||
-        hole.reason == HoleReason::Takedown) {
-      std::fill(wirePayload.begin() + static_cast<std::ptrdiff_t>(relStart),
-                wirePayload.begin() +
-                    static_cast<std::ptrdiff_t>(relStart + relLength),
-                '\0');
-    }
-  }
+  auto wirePayload =
+      publicationPrimedia(newPrimedia, primediaAlreadySealed, holes);
 
   // The content first, so a fresh segment's bytes begin at offset zero of its
   // own piece stream -- what keeps every address already handed out pointing
@@ -1044,7 +1047,8 @@ Publication publish(const Store &store, const MicroversionId &version,
                     std::string title, const std::int64_t sequence,
                     const std::uint64_t published,
                     const Scroll *const localSealedAs,
-                    const std::vector<ScrollSegment> &opsSegments) {
+                    const std::vector<ScrollSegment> &opsSegments,
+                    const std::vector<PublishedHoleRecord> &holes) {
   Publication pub;
   pub.publisher   = keys.publicKey;
   pub.salt        = std::move(salt);
@@ -1052,6 +1056,7 @@ Publication publish(const Store &store, const MicroversionId &version,
   pub.version     = version;
   pub.sequence    = sequence;
   pub.opsSegments = opsSegments;
+  pub.holes       = holes;
   pub.published   = published;
 
   const auto document  = store.rebuild(version);
@@ -1318,7 +1323,8 @@ Publication publishDocument(Store &store, const MicroversionId &version,
   std::vector<ScrollSegment> ops;
   if (history.opsSegment) ops.push_back(*history.opsSegment);
   return publish(store, version, documentKeys, std::move(salt),
-                 std::move(title), sequence, published, &userScroll, ops);
+                 std::move(title), sequence, published, &userScroll, ops,
+                 holes);
 }
 
 } // namespace xanadu

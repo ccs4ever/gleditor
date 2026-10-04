@@ -393,6 +393,43 @@ TEST(PublicationTest, publicationWithWithheldHolesRoundTripsAndVerifies) {
 }
 
 TEST(PublicationTest,
+     PrimediaRedactionKeepsOffsetsAcrossIncrementalBoundaries) {
+  const xanadu::PublishedHoleRecord withheld{
+      .at = 102, .length = 6, .reason = xanadu::HoleReason::Withheld};
+  const std::vector holes{withheld};
+  const auto first  = xanadu::publicationPrimedia("abcdef", 100, holes);
+  const auto second = xanadu::publicationPrimedia("ghijkl", 106, holes);
+  EXPECT_EQ(first + second,
+            xanadu::publicationPrimedia("abcdefghijkl", 100, holes));
+  EXPECT_EQ(first, std::string("ab\0\0\0\0", 6));
+  EXPECT_EQ(second, std::string("\0\0ijkl", 6));
+  EXPECT_THROW((void)xanadu::publicationPrimedia(
+                   "a", std::numeric_limits<std::uint64_t>::max(), {}),
+               std::invalid_argument);
+  const xanadu::PublishedHoleRecord overflow{
+      .at = std::numeric_limits<std::uint64_t>::max(), .length = 1};
+  EXPECT_THROW((void)xanadu::publicationPrimedia("a", 0, {overflow}),
+               std::invalid_argument);
+}
+
+TEST(PublicationTest, WithheldRangesAreIncludedBeforeTheManifestIsSigned) {
+  const auto keys   = xanadu::createMutableKeys();
+  const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);
+  xanadu::Store store;
+  const auto version = quoting(store, scroll, 0, 1000);
+  const xanadu::PublishedHoleRecord hole{
+      .at = 1000, .length = 200, .reason = xanadu::HoleReason::Withheld};
+  auto pub = xanadu::publish(store, version, keys, "essay", "Ideas", 1,
+                             1700000000, nullptr, {}, {hole});
+  const auto decoded =
+      xanadu::decodePublication(xanadu::encodePublication(pub));
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->holes, std::vector{xanadu::PublishedHoleRecord{hole}});
+  pub.holes.front().length++;
+  EXPECT_FALSE(xanadu::verifyPublication(pub));
+}
+
+TEST(PublicationTest,
      publicationWithTranscopyrightPaywallRoundTripsAndVerifies) {
   const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);

@@ -6,6 +6,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <lmdb.h>
+
 #include <atomic>
 #include <cstddef>
 #include <filesystem>
@@ -142,6 +144,129 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   EXPECT_EQ(current.segments[1].length, 24U);
 
   std::filesystem::remove_all(tempDir);
+}
+
+class PersistentPermascrollTest : public testing::Test {
+protected:
+  std::filesystem::path root = std::filesystem::temp_directory_path() /
+                               ("xudu-permascroll-restart-" +
+                                xanadu::createMutableKeys().publicKey.hex());
+  ~PersistentPermascrollTest() override { std::filesystem::remove_all(root); }
+  UserPermascroll::Config config() const {
+    UserPermascroll::Config result;
+    result.storageDir = root / "author";
+    return result;
+  }
+};
+
+TEST_F(PersistentPermascrollTest,
+       IdentityAndIncrementalSegmentsSurviveRestart) {
+  PublicKey publisher;
+  std::string name;
+  xanadu::ScrollSegment first;
+  const SignedProvenance provenance;
+  {
+    UserPermascroll scroll(config());
+    publisher = scroll.config().deviceKeys.publicKey;
+    name      = scroll.globalScrollKey();
+    scroll.append("Story Ideas");
+    first = *scroll.sealIncremental(root / "published", provenance);
+    scroll.append(" - revised");
+  }
+  {
+    UserPermascroll scroll(config());
+    EXPECT_EQ(scroll.config().deviceKeys.publicKey, publisher);
+    EXPECT_EQ(scroll.globalScrollKey(), name);
+    EXPECT_EQ(scroll.bytes(), "Story Ideas - revised");
+    ASSERT_EQ(scroll.currentScroll().segments.size(), 1U);
+    EXPECT_EQ(scroll.currentScroll().segments.front(), first);
+    const auto second = scroll.sealIncremental(root / "published", provenance);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->at, 11U);
+    EXPECT_EQ(second->length, 10U);
+    EXPECT_NE(second->torrent, first.torrent);
+    EXPECT_FALSE(scroll.sealIncremental(root / "published", provenance));
+  }
+  UserPermascroll reopened(config());
+  ASSERT_EQ(reopened.currentScroll().segments.size(), 2U);
+  EXPECT_EQ(reopened.currentScroll().segments.front(), first);
+  EXPECT_EQ(reopened.currentScroll().length(), reopened.size());
+  EXPECT_FALSE(reopened.sealIncremental(root / "published", provenance));
+  const auto permissions =
+      std::filesystem::status(root / "author/publication-state/data.mdb")
+          .permissions();
+  EXPECT_EQ(permissions & (std::filesystem::perms::group_all |
+                           std::filesystem::perms::others_all),
+            std::filesystem::perms::none);
+}
+
+TEST_F(PersistentPermascrollTest, FailedOutputDoesNotCommitASeal) {
+  {
+    UserPermascroll scroll(config());
+    scroll.append("Ideas");
+    EXPECT_THROW(scroll.sealIncremental(root / "author/active.primedia", {}),
+                 std::filesystem::filesystem_error);
+    EXPECT_TRUE(scroll.currentScroll().segments.empty());
+  }
+  UserPermascroll reopened(config());
+  EXPECT_TRUE(reopened.currentScroll().segments.empty());
+  const auto first = reopened.sealIncremental(root / "published", {});
+  ASSERT_TRUE(first);
+  EXPECT_EQ(first->at, 0U);
+  EXPECT_EQ(first->length, 5U);
+}
+
+TEST_F(PersistentPermascrollTest, AConflictingIdentityIsRefused) {
+  {
+    UserPermascroll scroll(config());
+  }
+  auto other       = config();
+  other.deviceKeys = xanadu::createMutableKeys();
+  EXPECT_THROW(UserPermascroll{other}, xanadu::PermascrollStateUnreadable);
+  other          = config();
+  other.deviceId = "laptop";
+  EXPECT_THROW(UserPermascroll{other}, xanadu::PermascrollStateUnreadable);
+}
+
+TEST_F(PersistentPermascrollTest, MissingSealedBytesAreRefused) {
+  {
+    UserPermascroll scroll(config());
+    scroll.append("Ideas");
+    ASSERT_TRUE(scroll.sealIncremental(root / "published", {}));
+  }
+  std::filesystem::resize_file(root / "author/active.primedia", 2);
+  EXPECT_THROW(UserPermascroll{config()}, xanadu::PermascrollStateUnreadable);
+}
+
+TEST_F(PersistentPermascrollTest, AnUnknownStateVersionIsRefusedByNumber) {
+  {
+    UserPermascroll scroll(config());
+  }
+  MDB_env *env = nullptr;
+  ASSERT_EQ(mdb_env_create(&env), MDB_SUCCESS);
+  std::unique_ptr<MDB_env, decltype(&mdb_env_close)> owned(env, mdb_env_close);
+  ASSERT_EQ(
+      mdb_env_open(env, (root / "author/publication-state").c_str(), 0, 0600),
+      MDB_SUCCESS);
+  MDB_txn *txn = nullptr;
+  ASSERT_EQ(mdb_txn_begin(env, nullptr, 0, &txn), MDB_SUCCESS);
+  MDB_dbi db;
+  ASSERT_EQ(mdb_dbi_open(txn, nullptr, 0, &db), MDB_SUCCESS);
+  std::string name = "state";
+  MDB_val key{name.size(), name.data()}, value{};
+  ASSERT_EQ(mdb_get(txn, db, &key, &value), MDB_SUCCESS);
+  std::string bytes(static_cast<const char *>(value.mv_data), value.mv_size);
+  bytes[3] = '2';
+  value    = MDB_val{bytes.size(), bytes.data()};
+  ASSERT_EQ(mdb_put(txn, db, &key, &value, 0), MDB_SUCCESS);
+  ASSERT_EQ(mdb_txn_commit(txn), MDB_SUCCESS);
+  owned.reset();
+  try {
+    UserPermascroll scroll(config());
+    FAIL() << "unknown state version was accepted";
+  } catch (const xanadu::PermascrollStateUnreadable &error) {
+    EXPECT_THAT(error.what(), testing::HasSubstr("got byte 50"));
+  }
 }
 
 TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {

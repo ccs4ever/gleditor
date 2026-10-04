@@ -219,6 +219,13 @@ decodePublication(std::string_view encoded);
 /// Whether @p pub's signature really is its publisher's.
 [[nodiscard]] bool verifyPublication(const Publication &pub);
 
+/// Zero-fill withheld, revoked and takedown ranges in a primedia slice while
+/// retaining its absolute scroll coordinates. Signing and sealing use these
+/// same bytes so the provenance digest describes what a reader receives.
+[[nodiscard]] std::string
+publicationPrimedia(std::string_view bytes, std::uint64_t at,
+                    const std::vector<PublishedHoleRecord> &holes);
+
 /**
  * @brief Seal what this machine has written into a scroll anybody can fetch.
  *
@@ -354,7 +361,8 @@ publish(const Store &store, const MicroversionId &version,
         const MutableKeys &keys, std::string salt, std::string title,
         std::int64_t sequence, std::uint64_t published,
         const Scroll *localSealedAs                   = nullptr,
-        const std::vector<ScrollSegment> &opsSegments = {});
+        const std::vector<ScrollSegment> &opsSegments = {},
+        const std::vector<PublishedHoleRecord> &holes = {});
 
 class PublicationSequenceUnreadable : public std::runtime_error {
 public:
