@@ -1525,8 +1525,12 @@ $(OBJDIR)/%.dep: %.cpp Makefile
 	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
-$(OBJDIR)/%.j: %.cpp
-	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
+# Clang tooling chooses its own frontend action. Keep preprocessing cheap
+# when emitting metadata, but remove that action from the recorded command.
+$(OBJDIR)/%.j: %.cpp Makefile
+	$(REAL_CXX) -MJ $@.tmp $(CXXFLAGS) -E $< > /dev/null
+	$(SED) 's/, "-E"//' $@.tmp > $@
+	$(RM) -f $@.tmp
 
 # Same three rules as above, for the one vendored C source this tree
 # compiles (thirdparty/zstd/contrib/seekable_format, see LIB_SRCS_C). Uses
@@ -1543,8 +1547,10 @@ $(OBJDIR)/%.dep: %.c Makefile
 	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
-$(OBJDIR)/%.j: %.c
-	$(CC) -MJ $@ $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
+$(OBJDIR)/%.j: %.c Makefile
+	$(CC) -MJ $@.tmp $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
+	$(SED) 's/, "-E"//' $@.tmp > $@
+	$(RM) -f $@.tmp
 
 # clang -MJ emits one trailing-comma-terminated object per file, so the comma on
 # the final entry has to go: JSON has no trailing commas and clangd rejects the
