@@ -21,6 +21,7 @@
 #include <compare>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <optional>
 #include <string_view>
 #include <variant>
@@ -221,6 +222,7 @@ enum class NavigationError : std::uint8_t {
   NoOccurrenceChosen,
   /// The chosen member has no occurrence in the views resolved against.
   MemberNotInView,
+  TargetUnavailable,
   /// Occurrences supplied for a selection that has since been replaced.
   StaleGeneration,
   LinkNotFound,
@@ -291,6 +293,12 @@ public:
   explicit LinkNavigator(ActivityLog &activity) noexcept
       : activity(activity), current(activity.current()) {}
 
+  /// The host confirms it can focus a cached occurrence before a visit is
+  /// appended or selected. A closed view must not earn a completed transition.
+  void setTargetReady(std::function<bool(const OccurrenceSite &)> ready) {
+    targetReady = std::move(ready);
+  }
+
   NavigationResult dispatch(const NavigationCommand &command);
 
   /// Rebuild the saved link context after the host has reopened its views.
@@ -357,6 +365,7 @@ private:
   std::optional<VisitId> current;
   std::vector<LinkKey> candidates;
   std::uint64_t generations{};
+  std::function<bool(const OccurrenceSite &)> targetReady;
 };
 
 // -- input adapters --------------------------------------------------------

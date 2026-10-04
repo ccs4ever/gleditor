@@ -29,8 +29,10 @@
 #include "common/xanadu/link_package.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -858,6 +860,94 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_TRUE(
       gleditor::hasDecoration(resultFormat.decoratedRanges.front().decorations,
                               gleditor::Decoration::Underline));
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     closedReadingContextSurvivesDismissAndRestart) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_closed_context";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path    = root / "notes";
+  const auto command = "XDG_CONFIG_HOME=" + (root / "config").string() +
+                       " XDG_DATA_HOME=" + (root / "data").string() +
+                       " timeout 120 " + binary.string() +
+                       permascrollFlag(root / "permascroll") + " --backend " +
+                       activeBackend() + " --headless --profile ";
+  const auto opening =
+      " --chord Ctrl+O --key tab --type " + path.string() + " --key enter";
+  const auto first = executeProcess(
+      command + path.string() +
+      " --type 'alpha bravo charlie delta echo.' --select 0,5 --chord "
+      "Ctrl+Alt+["
+      " --select 12,19 --chord Ctrl+Alt+[ --select 6,11 --chord Ctrl+Alt+]"
+      " --select 20,25 --chord Ctrl+Alt+] --select 26,30 --chord Ctrl+Alt+]"
+      " --chord Ctrl+Alt+L --select 2,10 --chord Alt+Shift+N"
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Alt+Shift+X"
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Ctrl+W"
+      " --chord Alt+Shift+D" +
+      opening +
+      " --dump-a11y"
+      " --chord Ctrl+W --chord Alt+Shift+D");
+  ASSERT_EQ(first.exitCode, 0) << first.output;
+  EXPECT_THAT(first.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(first.output, testing::HasSubstr("[caret 10 from 2]"));
+  Store source(permascrollAt(root / "permascroll"));
+  source.load(path.string());
+  const auto count  = source.opCount();
+  const auto second = executeProcess(command + opening + " --dump-a11y");
+  ASSERT_EQ(second.exitCode, 0) << second.output;
+  EXPECT_THAT(second.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(second.output, testing::HasSubstr("[caret 10 from 2]"));
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  EXPECT_EQ(reopened.opCount(), count);
+  Store activity(permascrollAt(root / "permascroll"));
+  activity.load((root / "data/xudu/activity").string());
+  const auto closed  = xanadu::closedPlaceFor(activity, path.string());
+  const auto resumed = xanadu::latestPlace(activity);
+  ASSERT_TRUE(closed && resumed && closed->link);
+  EXPECT_EQ(resumed->documents.size(), 1U);
+  EXPECT_EQ(closed->link->left.member, 1U);
+  EXPECT_EQ(closed->link->right.member, 1U);
+  EXPECT_EQ(closed->link->active, xanadu::LinkSide::Right);
+  EXPECT_EQ(resumed->link, closed->link);
+}
+
+TEST(E2EBinaryOrchestrationTest, enteringAClosedEndpointRecordsNoVisit) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_closed_endpoint";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto command = "XDG_CONFIG_HOME=" + (root / "config").string() +
+                       " XDG_DATA_HOME=" + (root / "data").string() +
+                       " timeout 120 " + binary.string() +
+                       permascrollFlag(root / "permascroll") + " --backend " +
+                       activeBackend() + " --headless --profile ";
+  const auto result = executeProcess(
+      command + (root / "notes").string() +
+      " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+      " --chord Ctrl+N --type 'one two' --select 0,3 --chord Ctrl+Alt+]"
+      " --chord Ctrl+1 --chord Ctrl+Alt+L --chord Alt+Shift+N"
+      " --chord Alt+Shift+X --chord Ctrl+2 --chord Ctrl+W"
+      " --select 2,2 --chord Alt+Shift+Return --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(result.output, testing::HasSubstr("target unavailable"));
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 2]"));
+  Store activity(permascrollAt(root / "permascroll"));
+  const auto directory = root / "data/xudu/activity";
+  activity.load(directory.string());
+  xanadu::StoreActivityLog log(&activity, directory);
+  std::size_t entered = 0;
+  for (std::uint64_t id = 1; const auto visit = log.find({id}); ++id) {
+    entered += visit->arrival == xanadu::Arrival::EnteredEndpoint;
+  }
+  EXPECT_EQ(entered, 0U);
 }
 
 TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {

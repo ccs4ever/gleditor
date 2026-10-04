@@ -493,6 +493,9 @@ public:
    * over it would lose that. Said once, on stderr.
    */
   void rememberPlace(const xanadu::ReadingPlace &place);
+  void rememberClosedPlace(const xanadu::ReadingPlace &place);
+  [[nodiscard]] std::optional<xanadu::ReadingPlace>
+  closedPlace(const std::string &path);
 
   /// The reader-owned store shared by places and branching navigation visits.
   Store *activityForNavigation() { return activity(); }

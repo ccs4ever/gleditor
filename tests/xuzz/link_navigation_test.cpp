@@ -418,6 +418,54 @@ TEST(LinkNavigationTest, ActivityForwardChoosesEitherExistingBranch) {
   EXPECT_EQ(h.log.size(), 3U);
 }
 
+TEST(LinkNavigationTest, UnavailableTargetsLeaveTheWalkAndSelectionUntouched) {
+  Harness h;
+  const auto origin = arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto selected = h.navigator.selectionContext();
+  bool ready          = false;
+  h.navigator.setTargetReady([&](const auto &) { return ready; });
+  const auto refused = h.run(nav::Enter{});
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), NavigationError::TargetUnavailable);
+  EXPECT_EQ(h.navigator.selectionContext(), selected);
+  EXPECT_EQ(h.navigator.currentVisit(), origin);
+  EXPECT_EQ(h.log.size(), 1U);
+
+  ready              = true;
+  const auto entered = h.run(nav::Enter{});
+  ASSERT_TRUE(entered && entered->visit);
+  EXPECT_EQ(h.log.size(), 2U);
+  ready           = false;
+  const auto back = h.run(nav::ActivityBack{});
+  ASSERT_FALSE(back);
+  EXPECT_EQ(back.error(), NavigationError::TargetUnavailable);
+  const auto returned = h.run(nav::ReturnToOrigin{});
+  ASSERT_FALSE(returned);
+  EXPECT_EQ(returned.error(), NavigationError::TargetUnavailable);
+  EXPECT_EQ(h.navigator.currentVisit(), entered->visit);
+  EXPECT_EQ(h.navigator.selectionContext(), selected);
+
+  xanadu::LinkNavigator reopened{h.log};
+  reopened.setTargetReady([](const auto &) { return false; });
+  const auto restored = reopened.restoreCurrentSelection();
+  ASSERT_TRUE(restored && restored->resolve);
+  EXPECT_FALSE(restored->focus);
+  EXPECT_FALSE(restored->visit);
+
+  ready = true;
+  ASSERT_TRUE(h.run(nav::ActivityBack{}));
+  ready              = false;
+  const auto forward = h.run(nav::ActivityForward{.child = *entered->visit});
+  ASSERT_FALSE(forward);
+  EXPECT_EQ(forward.error(), NavigationError::TargetUnavailable);
+  EXPECT_EQ(h.navigator.currentVisit(), origin);
+  EXPECT_EQ(h.log.size(), 2U);
+}
+
 TEST(LinkNavigationTest, AuthoredManyToManyLinkSurvivesStoreReopen) {
   auto fixture = xuzz_test::makeTwoByThree();
   const auto directory =

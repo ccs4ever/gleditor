@@ -149,4 +149,37 @@ TEST_F(ReadingPlaceTest, theSelectedLinkComesBackWithItsCursors) {
   EXPECT_EQ(xanadu::latestPlace(reopened), twoDocuments());
 }
 
+TEST_F(ReadingPlaceTest,
+       closedDocumentsKeepIndependentCheckpointsAcrossRestart) {
+  xanadu::Store store(perma);
+  const auto session = twoDocuments();
+  std::ignore        = xanadu::recordPlace(store, session);
+  auto closed        = session;
+  closed.documents   = {session.documents[1]};
+  closed.active      = 0;
+  closed.link =
+      xanadu::LinkVisitContext{.key    = {xanadu::DocumentId{}, 42},
+                               .active = xanadu::LinkSide::Right,
+                               .left   = {.member = 1, .occurrence = 0},
+                               .right  = {.member = 2, .occurrence = 1},
+                               .origin = xanadu::VisitId{3}};
+  std::ignore = xanadu::recordClosedPlace(store, closed);
+  EXPECT_EQ(xanadu::latestPlace(store), session);
+  auto another                        = closed;
+  another.documents.front().storePath = "/data/c";
+  another.documents.front().caret     = 5;
+  std::ignore = xanadu::recordClosedPlace(store, another);
+  store.save((root / "activity").string());
+  xanadu::Store reopened(perma);
+  reopened.load((root / "activity").string());
+  EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/b"), closed);
+  EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/c"), another);
+  EXPECT_FALSE(xanadu::closedPlaceFor(reopened, "/data/missing"));
+  EXPECT_EQ(xanadu::latestPlace(reopened), session);
+  closed.documents.front().caret = 20;
+  std::ignore                    = xanadu::recordClosedPlace(reopened, closed);
+  EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/b"), closed);
+  EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/c"), another);
+}
+
 } // namespace

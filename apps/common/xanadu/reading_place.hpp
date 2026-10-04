@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "link_navigation.hpp"
@@ -76,6 +77,12 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place);
 
 /// The newest place in @p store, or nothing for a store with none.
 [[nodiscard]] std::optional<ReadingPlace> latestPlace(const Store &store);
+
+/// A closed document's checkpoint, separate from the open session's d.places.
+/// Earlier checkpoints survive; only the latest for this path is restored.
+MicroversionId recordClosedPlace(Store &store, const ReadingPlace &place);
+[[nodiscard]] std::optional<ReadingPlace> closedPlaceFor(const Store &store,
+                                                         std::string_view path);
 
 /**
  * @brief Where the reader's activity store lives:

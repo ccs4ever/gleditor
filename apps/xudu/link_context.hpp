@@ -67,6 +67,8 @@ public:
   explicit LinkContext(Session &session)
       : session(session),
         activity(session.activityForNavigation(), xanadu::activityDirectory()) {
+    navigator.setTargetReady(
+        [this](const auto &site) { return canFocus(site); });
   }
 
   void setFocusDocument(FocusDocument handler) {
@@ -147,6 +149,10 @@ public:
 
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
+  [[nodiscard]] std::optional<xanadu::NavigationError>
+  refusal() const noexcept {
+    return refused;
+  }
 
 private:
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
@@ -157,6 +163,7 @@ private:
   cellSite(zigzag::CellRef cell) const;
   void apply(xanadu::NavigationEffect effect);
   void focus(const xanadu::OccurrenceSite &site);
+  [[nodiscard]] bool canFocus(const xanadu::OccurrenceSite &site) const;
 
   Session &session;
   const zigzag::Manifold *manifold{};
@@ -170,6 +177,7 @@ private:
   CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;
   std::uint64_t changes{};
+  std::optional<xanadu::NavigationError> refused;
 };
 
 } // namespace xudu

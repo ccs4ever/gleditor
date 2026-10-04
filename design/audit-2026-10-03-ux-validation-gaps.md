@@ -13,6 +13,10 @@ in-session reopening resets the caret, and repeating overline leaves it enabled.
 has no Close action. Camera restoration, locally cross-store link navigation, and the additional
 backend checks pass within the scope below.
 
+The subsequent [resume and navigation follow-up](audit-2026-10-04-ux-resume-navigation-followup.md)
+checks closed-document context across restart, unavailable targets, overlapping pointer targets,
+branch futures, and the limits of unloaded-authority formatting and native accessibility.
+
 ## Fix follow-up, 2026-10-04
 
 The three confirmed failures are fixed in this worktree. File now also offers Close document through

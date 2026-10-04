@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -147,6 +148,13 @@ public:
   void closeActive();
   void activateNewest();
   void activateReopened(std::size_t storeIndex);
+  void setLinkPlaceCallbacks(
+      std::function<std::optional<xanadu::LinkVisitContext>()> query,
+      std::function<void(const std::optional<xanadu::LinkVisitContext> &)>
+          restore) {
+    linkPlaceQuery_   = std::move(query);
+    linkPlaceRestore_ = std::move(restore);
+  }
   void activateDocument(RenderState &rState, std::uint32_t index);
   std::size_t newDocument();
 
@@ -226,11 +234,14 @@ private:
   std::weak_ptr<Doc> primaryDocument_;
   float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
   bool readingFramed_{false};
+  bool formattingPending_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
   std::function<bool()> pendingCamera_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
-  std::vector<xanadu::ReadingPlace> closedPlaces_;
+  std::function<std::optional<xanadu::LinkVisitContext>()> linkPlaceQuery_;
+  std::function<void(const std::optional<xanadu::LinkVisitContext> &)>
+      linkPlaceRestore_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};

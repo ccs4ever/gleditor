@@ -164,10 +164,13 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
 
   auto result = navigator.dispatch(command);
   if (!result) {
+    refused = result.error();
+    ++changes;
     GLEDITOR_LOG_DEBUG("xudu.links", "link command '{}' refused: {}",
                        xanadu::name(command), xanadu::name(result.error()));
     return result;
   }
+  refused.reset();
   apply(*result);
   return result;
 }
@@ -202,6 +205,7 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
 }
 
 void LinkContext::restoreSelection(const xanadu::LinkVisitContext &saved) {
+  refused.reset();
   if (auto effect = navigator.restoreSelection(saved)) apply(*effect);
 }
 
@@ -240,6 +244,21 @@ std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
           return "a closed version, " + bytes;
         } else {
           return "cell " + std::to_string(at.cell) + ", " + bytes;
+        }
+      },
+      site);
+}
+
+bool LinkContext::canFocus(const xanadu::OccurrenceSite &site) const {
+  return std::visit(
+      [this]<typename Site>(const Site &at) {
+        if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
+          return static_cast<bool>(focusDocument) &&
+                 viewIndexOf(at).has_value();
+        } else {
+          return static_cast<bool>(focusCell) && manifold &&
+                 at.store == session.store(manifoldStoreIndex).documentId() &&
+                 manifold->contains(at.cell);
         }
       },
       site);

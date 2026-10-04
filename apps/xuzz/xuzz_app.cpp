@@ -778,6 +778,15 @@ int XuzzApp::run(const int argc, char **argv) {
   links.setReadableTextPx(readablePx(xudu::LayoutConfig{}.readableTextPx));
 
   xudu::LinkContext linkContext(*session);
+  views.setLinkPlaceCallbacks(
+      [&linkContext] { return linkContext.selectionContext(); },
+      [&linkContext](const std::optional<xanadu::LinkVisitContext> &saved) {
+        if (saved) {
+          linkContext.restoreSelection(*saved);
+        } else {
+          std::ignore = linkContext.execute(xanadu::nav::Dismiss{});
+        }
+      });
   KeyboardPane keyboardPane(state);
   renderer->addPickObserver(&keyboardPane);
 
@@ -1680,7 +1689,9 @@ int XuzzApp::run(const int argc, char **argv) {
       resumedLengths.push_back(
           static_cast<std::uint32_t>(store.textOf(version).size()));
     }
-    if (0 == next) {
+    // An intentionally empty session keeps every document closed. Only an
+    // unsuccessful attempt to reopen saved documents needs the fallback view.
+    if (0 == next && !resuming->documents.empty()) {
       resuming.reset();
     }
   }

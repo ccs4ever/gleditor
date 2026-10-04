@@ -979,6 +979,26 @@ void Session::rememberPlace(const xanadu::ReadingPlace &place) {
   store->save(dir.string());
 }
 
+void Session::rememberClosedPlace(const xanadu::ReadingPlace &place) {
+  auto *const st = activity();
+  if (!st) return;
+  std::ignore = xanadu::recordClosedPlace(*st, place);
+  st->save(xanadu::activityDirectory().string());
+}
+
+std::optional<xanadu::ReadingPlace>
+Session::closedPlace(const std::string &path) {
+  auto *const st = activity();
+  if (!st) return std::nullopt;
+  try {
+    return xanadu::closedPlaceFor(*st, path);
+  } catch (const std::exception &err) {
+    GLEDITOR_LOG_WARN("xudu.activity", "cannot read closed document place: {}",
+                      err.what());
+    return std::nullopt;
+  }
+}
+
 void Session::saveAll() const {
   const_cast<Session *>(this)->flushUncommitted();
   for (std::size_t i = 0; i < stores.size(); ++i) {

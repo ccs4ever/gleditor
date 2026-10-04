@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -20,15 +21,16 @@ namespace xanadu {
 namespace {
 
 // The rank a place hangs from home on, and the ranks hanging from a place.
-constexpr std::string_view kPlaces    = "d.places";
-constexpr std::string_view kDocuments = "d.documents";
-constexpr std::string_view kVersion   = "d.version";
-constexpr std::string_view kCaret     = "d.caret";
-constexpr std::string_view kAnchor    = "d.anchor";
-constexpr std::string_view kCamera    = "d.camera";
-constexpr std::string_view kZigzag    = "d.zigzag";
-constexpr std::string_view kActive    = "d.active";
-constexpr std::string_view kLink      = "d.selected-link";
+constexpr std::string_view kPlaces       = "d.places";
+constexpr std::string_view kClosedPlaces = "d.closed-places";
+constexpr std::string_view kDocuments    = "d.documents";
+constexpr std::string_view kVersion      = "d.version";
+constexpr std::string_view kCaret        = "d.caret";
+constexpr std::string_view kAnchor       = "d.anchor";
+constexpr std::string_view kCamera       = "d.camera";
+constexpr std::string_view kZigzag       = "d.zigzag";
+constexpr std::string_view kActive       = "d.active";
+constexpr std::string_view kLink         = "d.selected-link";
 
 // A cursor with nothing chosen is kept as -1, which no index can be.
 std::int64_t cursorValue(const std::optional<std::uint32_t> index) {
@@ -135,9 +137,12 @@ std::optional<LinkVisitContext> linkOf(const zigzag::Manifold &manifold,
 
 } // namespace
 
-MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
+namespace {
+
+MicroversionId writePlace(Store &store, const ReadingPlace &place,
+                          const std::string_view rank) {
   Writer out(store);
-  const auto places    = out.dimension(kPlaces);
+  const auto places    = out.dimension(rank);
   const auto documents = out.dimension(kDocuments);
   const auto version   = out.dimension(kVersion);
   const auto caret     = out.dimension(kCaret);
@@ -202,28 +207,11 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
   return out.at;
 }
 
-std::optional<ReadingPlace> latestPlace(const Store &store) {
-  const auto head = store.latest();
-  if (head.isZero() || zigzag::noCell == store.homeCell()) {
-    return std::nullopt;
-  }
-  const auto manifold = store.rebuildManifold(head);
-  const auto dim      = [&](const std::string_view name) {
+ReadingPlace readPlace(const Store &store, const zigzag::Manifold &manifold,
+                       const zigzag::CellRef here) {
+  const auto dim = [&](const std::string_view name) {
     return manifold.dimensionNamed(name, store);
   };
-  const auto places = dim(kPlaces);
-  if (!places) {
-    return std::nullopt;
-  }
-  auto here = store.homeCell();
-  for (auto next = manifold.linked(here, *places); zigzag::noCell != next;
-       next      = manifold.linked(here, *places)) {
-    here = next;
-  }
-  if (here == store.homeCell()) {
-    return std::nullopt;
-  }
-
   ReadingPlace place;
   const auto documents = dim(kDocuments);
   const auto version   = dim(kVersion);
@@ -294,6 +282,57 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
         linkOf(manifold, store, manifold.linked(here, *linkDim), *linkDim);
   }
   return place;
+}
+
+} // namespace
+
+MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
+  return writePlace(store, place, kPlaces);
+}
+
+MicroversionId recordClosedPlace(Store &store, const ReadingPlace &place) {
+  if (place.documents.size() != 1 || place.active != 0) {
+    throw std::invalid_argument(
+        "a closed place needs exactly one active document");
+  }
+  return writePlace(store, place, kClosedPlaces);
+}
+
+std::optional<ReadingPlace> latestPlace(const Store &store) {
+  if (store.latest().isZero() || zigzag::noCell == store.homeCell())
+    return std::nullopt;
+  const auto manifold = store.rebuildManifold(store.latest());
+  const auto places   = manifold.dimensionNamed(kPlaces, store);
+  if (!places) return std::nullopt;
+  auto here = store.homeCell();
+  for (auto next = manifold.linked(here, *places); next != zigzag::noCell;
+       next      = manifold.linked(here, *places)) {
+    here = next;
+  }
+  if (here == store.homeCell()) return std::nullopt;
+  return readPlace(store, manifold, here);
+}
+
+std::optional<ReadingPlace> closedPlaceFor(const Store &store,
+                                           const std::string_view path) {
+  if (store.latest().isZero() || zigzag::noCell == store.homeCell())
+    return std::nullopt;
+  const auto manifold  = store.rebuildManifold(store.latest());
+  const auto places    = manifold.dimensionNamed(kClosedPlaces, store);
+  const auto documents = manifold.dimensionNamed(kDocuments, store);
+  if (!places || !documents) return std::nullopt;
+  std::optional<ReadingPlace> found;
+  auto here = manifold.linked(store.homeCell(), *places);
+  for (std::size_t left = manifold.cellCount();
+       here != zigzag::noCell && left > 0; --left) {
+    const auto document = manifold.linked(here, *documents);
+    if (document != zigzag::noCell &&
+        manifold.textOf(document, store) == path) {
+      found = readPlace(store, manifold, here);
+    }
+    here = manifold.linked(here, *places);
+  }
+  return found;
 }
 
 std::filesystem::path activityDirectory() {

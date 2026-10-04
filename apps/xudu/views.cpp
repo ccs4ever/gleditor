@@ -68,6 +68,15 @@ void Views::deviceReady(render::RenderDevice &device,
 }
 
 void Views::drawFrame(gleditor::FrameContext &ctx) {
+  // Renderer::openDoc builds pages asynchronously. A load() must not replace
+  // that document's text and layout while its initial builder still runs.
+  if (formattingPending_ &&
+      std::ranges::all_of(ctx.state.docs, [](const auto &doc) {
+        return doc && doc->isFullyLoaded();
+      })) {
+    formattingPending_ = false;
+    reloadFormatting(ctx.state);
+  }
   if (ctx.state.documentsVisible) frameForReading(ctx);
   if (pendingCamera_ && pendingCamera_()) {
     pendingCamera_ = {};
@@ -235,7 +244,7 @@ void Views::showAlongside(const MicroversionId &version, const float depthZ,
         rState.docs.back()->addObserver(&session);
         session.viewOpened(version, storeIndex, focusedBirth);
         map.setCurrent(session.views().front().version);
-        reloadFormatting(rState);
+        formattingPending_ = true;
         syncMediaWidgets(rState);
       });
 }
@@ -853,11 +862,7 @@ void Views::closeDocument(const std::uint32_t docIndex) {
     auto closed      = place;
     closed.documents = {place.documents[docIndex]};
     closed.active    = 0;
-    std::erase_if(closedPlaces_, [&closed](const auto &saved) {
-      return saved.documents.front().storePath ==
-             closed.documents.front().storePath;
-    });
-    closedPlaces_.push_back(std::move(closed));
+    session.rememberClosedPlace(closed);
   }
   renderer->push(RenderItemCloseDoc(docIndex));
   renderer->runWithState([this, docIndex](RenderState &rState) {
@@ -896,11 +901,8 @@ void Views::activateNewest() {
 }
 
 void Views::activateReopened(const std::size_t storeIndex) {
-  const auto saved = std::ranges::find_if(
-      closedPlaces_, [this, storeIndex](const auto &place) {
-        return place.documents.front().storePath == session.path(storeIndex);
-      });
-  if (saved == closedPlaces_.end()) {
+  const auto saved = session.closedPlace(session.path(storeIndex));
+  if (!saved) {
     activateNewest();
     return;
   }
@@ -954,6 +956,7 @@ xanadu::ReadingPlace Views::currentPlace() const {
     }
     place.documents.push_back(std::move(document));
   }
+  if (linkPlaceQuery_) place.link = linkPlaceQuery_();
   std::scoped_lock locker(state->view);
   place.camera = std::array<double, 4>{state->view.pos.x, state->view.pos.y,
                                        state->view.pos.z, state->view.fov};
@@ -996,6 +999,7 @@ void Views::restorePlace(const xanadu::ReadingPlace &place,
         caret->extendTo(std::min(saved.caret, length));
       }
     }
+    if (linkPlaceRestore_) linkPlaceRestore_(place.link);
   });
 }
 
@@ -1108,7 +1112,12 @@ void Views::reloadDocument(RenderState &rState, const std::uint32_t docIndex) {
 
 void Views::reloadFormatting(RenderState &rState) {
   for (std::uint32_t i = 0; i < session.views().size(); ++i) {
-    reloadDocument(rState, i);
+    if (i < rState.docs.size() && rState.docs[i] &&
+        rState.docs[i]->isFullyLoaded()) {
+      reloadDocument(rState, i);
+    } else {
+      formattingPending_ = true;
+    }
   }
 }
 
@@ -1353,15 +1362,18 @@ void Views::openDocumentFromPath(const std::string &chosen) {
   if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
       fs::is_directory(p)) {
     try {
-      const auto sIdx = session.loadAuxiliaryStore(chosen);
-      auto &st        = session.store(sIdx);
-      auto head       = st.primaryCurrentVersion();
-      const auto saved =
-          std::ranges::find_if(closedPlaces_, [this, sIdx](const auto &place) {
-            return place.documents.front().storePath == session.path(sIdx);
-          });
-      if (saved != closedPlaces_.end()) {
-        head = MicroversionId::parse(saved->documents.front().version);
+      const auto sIdx  = session.loadAuxiliaryStore(chosen);
+      auto &st         = session.store(sIdx);
+      auto head        = st.primaryCurrentVersion();
+      const auto saved = session.closedPlace(session.path(sIdx));
+      if (saved) {
+        const auto bookmarked =
+            MicroversionId::parse(saved->documents.front().version);
+        if (!bookmarked.isZero() && !st.getOp(bookmarked)) {
+          throw std::runtime_error(
+              "the closed document's saved version is unavailable");
+        }
+        head = bookmarked;
       }
       showAlongside(head, 0.0F, sIdx);
       activateReopened(sIdx);

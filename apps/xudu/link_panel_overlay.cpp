@@ -125,11 +125,15 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     return;
   }
   const auto origin = context.originSite();
-  const auto lines =
+  auto lines =
       xanadu::linkPanelLines(*selected, origin, context.reading(),
                              [this](const xanadu::OccurrenceSite &site) {
                                return context.describe(site);
                              });
+  if (const auto error = context.refusal()) {
+    lines.push_back({.text = std::string(xanadu::name(*error)),
+                     .tone = xanadu::PanelLine::Tone::Muted});
+  }
   buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
 
   // The active side's marker sits in a gutter as wide as itself, so both
@@ -318,11 +322,15 @@ void LinkPanelOverlay::describe(gleditor::a11y::Builder &into) {
     return;
   }
   const auto origin = context.originSite();
-  const auto lines =
+  auto lines =
       xanadu::linkPanelLines(*selected, origin, context.reading(),
                              [this](const xanadu::OccurrenceSite &site) {
                                return context.describe(site);
                              });
+  if (const auto error = context.refusal()) {
+    lines.push_back({.text = std::string(xanadu::name(*error)),
+                     .tone = xanadu::PanelLine::Tone::Muted});
+  }
   const auto controls = xanadu::linkPanelButtons(*selected, origin.has_value());
 
   // A parent is added after its children: add() may move every node already
