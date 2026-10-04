@@ -378,6 +378,8 @@ void DeviceVK::createLogicalDevice() {
 }
 
 void DeviceVK::createSwapchain(const int width, const int height) {
+  renderExtent = {.width  = static_cast<std::uint32_t>(std::max(width, 1)),
+                  .height = static_cast<std::uint32_t>(std::max(height, 1))};
   // A pure query-output struct the driver call below fills in; Vulkan's
   // bitmask-style flag enums have no declared zero enumerator even though 0
   // ("no flags") is a valid value for one, which this check can't tell apart
@@ -543,15 +545,15 @@ void createImage(const VkDevice device,
 void DeviceVK::createRenderTargets() {
   destroyRenderTargets();
 
-  createImage(device, memoryProperties, swapchainExtent, colourFormat,
+  createImage(device, memoryProperties, renderExtent, colourFormat,
               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
               VK_IMAGE_ASPECT_COLOR_BIT, colourImage, colourMemory, colourView);
-  createImage(device, memoryProperties, swapchainExtent, tagFormat,
+  createImage(device, memoryProperties, renderExtent, tagFormat,
               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
               VK_IMAGE_ASPECT_COLOR_BIT, tagImage, tagMemory, tagView);
-  createImage(device, memoryProperties, swapchainExtent, depthFormat,
+  createImage(device, memoryProperties, renderExtent, depthFormat,
               VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
               VK_IMAGE_ASPECT_DEPTH_BIT, depthImage, depthMemory, depthView);
 }
@@ -663,8 +665,8 @@ void DeviceVK::createFramebuffers() {
   info.renderPass      = renderPass;
   info.attachmentCount = views.size();
   info.pAttachments    = views.data();
-  info.width           = swapchainExtent.width;
-  info.height          = swapchainExtent.height;
+  info.width           = renderExtent.width;
+  info.height          = renderExtent.height;
   info.layers          = 1;
   check(vkCreateFramebuffer(device, &info, nullptr, &framebuffer),
         "vkCreateFramebuffer");
@@ -822,6 +824,9 @@ void DeviceVK::shutdown() {
   // Safe unconditionally: the vkDeviceWaitIdle() above already confirmed
   // nothing on the device is still executing, regardless of frameActive.
   drainPendingTextureDestroys();
+  for (auto &frame : frames) {
+    drainRetiredBuffers(frame);
+  }
 
   for (auto &[id, record] : buffers) {
     destroyBufferRecord(record);
@@ -922,6 +927,9 @@ void DeviceVK::waitIdle() {
     // once it is actually safe to.
     if (!frameActive) {
       drainPendingTextureDestroys();
+      for (auto &frame : frames) {
+        drainRetiredBuffers(frame);
+      }
     }
   }
 }

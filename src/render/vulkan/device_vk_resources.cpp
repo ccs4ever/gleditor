@@ -141,6 +141,22 @@ void DeviceVK::destroyBufferRecord(BufferRecord &record) const {
   }
 }
 
+void DeviceVK::retireBufferRecord(BufferRecord &record) {
+  if (frameActive) {
+    frames[frameIndex].retiredBuffers.push_back(record);
+    record = {};
+  } else {
+    destroyBufferRecord(record);
+  }
+}
+
+void DeviceVK::drainRetiredBuffers(FrameContext &frame) {
+  for (auto &record : frame.retiredBuffers) {
+    destroyBufferRecord(record);
+  }
+  frame.retiredBuffers.clear();
+}
+
 BufferHandle DeviceVK::createBuffer(const BufferKind kind,
                                     const std::size_t bytes) {
   // Host-visible coherent memory keeps updates to a memcpy. The data here is
@@ -162,7 +178,7 @@ void DeviceVK::destroyBuffer(const BufferHandle buffer) {
     return;
   }
   ensureIdleForMutation();
-  destroyBufferRecord(it->second);
+  retireBufferRecord(it->second);
   buffers.erase(it);
 }
 
@@ -228,7 +244,7 @@ BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
   // no longer fits, which the caller has said nothing is using.
   std::memcpy(grown.mapped, it->second.mapped,
               std::min(static_cast<VkDeviceSize>(bytes), it->second.bytes));
-  destroyBufferRecord(it->second);
+  retireBufferRecord(it->second);
   it->second = grown;
   return buffer;
 }

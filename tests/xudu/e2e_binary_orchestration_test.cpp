@@ -12,6 +12,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <gleditor/state.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -743,6 +745,14 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
       " --profile --version-id 1 --alongside a1 --screenshot " +
       ppmPath.string() + " " + (testRoot / "store").string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
+
+  // Pointer coordinates are drawable pixels, even if Vulkan presentation
+  // forces a different swapchain extent (SwiftShader offscreen does).
+  const AppState::ViewPerspective view;
+  const auto image = inspectPpm(ppmPath);
+  ASSERT_TRUE(image.valid) << image.errorMessage;
+  EXPECT_EQ(image.width, view.screenWidth);
+  EXPECT_EQ(image.height, view.screenHeight);
 
   const auto pitch = medianLinePitch(ppmPath);
   EXPECT_GE(pitch, 14) << "lines too close together to read";

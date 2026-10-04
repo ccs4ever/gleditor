@@ -42,7 +42,7 @@ The previous formatting refresh could replace a newly opened document's pages wh
 initial page builder was still running. Refresh is now deferred until those pages are fully loaded;
 the reopened document renders its text and selection correctly.
 
-## Verification
+## Initial verification
 
 - Full `make -j$(nproc)` passed.
 - All 57 Xuzz tests passed, including refusal, unchanged walk/selection, retry and unavailable
@@ -67,7 +67,68 @@ the reopened document renders its text and selection correctly.
   `/tmp/ux-next-swiftshader.log`. No claim is made that it predates this branch.
 
 This verification does not constitute native accessibility, remote-authority discovery,
-full-coincidence pointer disambiguation, or a complete J16 pass. The next implementation work first
-addresses the Vulkan buffer lifetime defect, then authority discovery for unopened quotations and
-usable visit annotation/reference controls, followed by native accessibility validation in an
-AccessKit-enabled build.
+full-coincidence pointer disambiguation, or a complete J16 pass. The renderer follow-up below
+addresses the Vulkan defect. The remaining implementation work is authority discovery for unopened
+quotations and usable visit annotation/reference controls, followed by native accessibility
+validation in an AccessKit-enabled build.
+
+## Renderer follow-up
+
+The Vulkan lifetime defect is fixed after `d8560b1`. Both `resizeBuffer()` and `destroyBuffer()` now
+retain old allocations while a frame is being recorded. Submitted work is still idled before
+mutation; the old allocation then belongs to the current frame's retirement list until its fence
+confirms completion. Device-idle and shutdown paths also drain these lists. This avoids invalidating
+recorded secondary command buffers and bounds retention by frame completion rather than by a later
+document or atlas allocation.
+
+Software-driver validation exposed a second defect: SwiftShader's offscreen presentation surface
+forces 1280×720 while SDL's drawable is 800×600. Using the swapchain extent for rendering made
+pointer coordinates and captures disagree with the window. Vulkan now keeps an independent
+drawable-sized render target, viewport, picking attachment and capture; only the final presentation
+blit scales to the surface extent. The readable-view regression also checks capture width and height
+against the application's default view. Reading framing uses the resting document transform so the
+arrival animation cannot determine the final camera position.
+
+The backend comparison's background and glyph-boundary probes were moved to measured interior
+pixels. Identity comparisons remain exact and fractional-position tolerance remains 0.005.
+SwiftShader's default one-channel-level color allowance measured 1.2115% differing overlay pixels,
+above the existing 1% limit. The supported `VK_CHANNEL_TOLERANCE=2` override measured 0.5858%; the
+1% pixel limit and all other comparison limits remain unchanged. The default allowance in the tool
+remains one. This configured software-driver result must not be presented as a pass with the default
+color allowance.
+
+The orchestration runner now gives each backend its own XDG configuration, data and cache folders.
+Reusing system xanadocs after rebuilding the addressed permascroll changed the chrome and caused
+about 6.3% OpenGL/OpenGL ES frame differences. The isolated core replay measured 0–0.17% for the
+five affected frames (`/tmp/ux-vk-isolated-core/`).
+
+The compiler metadata producer now removes its preprocessing-only action from the emitted command,
+allowing clang-tidy to choose its syntax/analysis action. Make regenerates all 368 entries; none
+retain `-E`. The database is generated through Make, not edited by hand. Strict focused
+`clang-analyzer-*` checks pass on the three Vulkan translation units and `apps/xudu/views.cpp`.
+
+The final isolated comparison passes: all 30 orchestration cases complete on each of OpenGL, OpenGL
+ES and SwiftShader Vulkan, and the resulting frames pass their existing parity limits with the
+explicit two-level SwiftShader color allowance. Full build, formatting, lint and focused analyzer
+checks pass. The small threaded comparison sample has too few page draws to exercise parallel
+recording; matching those frames is not evidence of that path.
+
+Verification artifacts:
+
+- `/tmp/ux-vk-lifetime-build.log`: full build.
+- `/tmp/ux-vk-lifetime-lib-tests.log`: 44 buffer, canvas, glyph-batch and device-capability tests.
+- `/tmp/ux-vk-lifetime-final-e2e.log`: all 30 orchestration cases pass on SwiftShader with
+  `VK_DRIVER_FILES=/usr/lib/claude-desktop/vk_swiftshader_icd.json`, including drag transclusion,
+  closed endpoint refusal, independent restart and extreme multipage framing.
+- `/tmp/ux-vk-lifetime-focused.log`: the three focused lifetime, drag and drawable-size cases pass.
+- `/tmp/ux-vk-drag-probe/`: captured evidence distinguishing the drawable/surface mismatch.
+- `/tmp/ux-vk-pick-probe/` and `/tmp/ux-vk-pick-background/`: the measured picking probes.
+- `/tmp/ux-vk-lifetime-verified.log`: final complete comparison with backend isolation, the explicit
+  software driver and `VK_CHANNEL_TOLERANCE=2`; frames under the corresponding directory.
+- `/tmp/ux-vk-lifetime-analysis.log`: focused analyzer pass.
+- `/tmp/ux-vk-lifetime-format.log` and `/tmp/ux-vk-lifetime-lint.log`: full formatting and lint
+  gates.
+
+The unopened-authority formatting, visit annotation/reference and native accessibility findings
+above remain open. This follow-up changes renderer resource ownership and coordinate handling; it
+does not establish remote authority discovery or native assistive-technology delivery.

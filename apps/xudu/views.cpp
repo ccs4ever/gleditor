@@ -93,11 +93,15 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
   }
   const auto &doc      = *target;
   const auto frame     = doc.pageFrame(0);
+  const auto page      = doc.page(0);
   const auto firstLine = doc.anchorFor(0);
-  if (!frame || !firstLine) {
+  if (!frame || !page || !firstLine) {
     return;
   }
-  const float toWorld = glm::length(glm::vec3(frame->localToWorld[1]));
+  // Arrival changes the displayed depth while pages load. Framing that
+  // transient position makes the final reading scale depend on driver speed.
+  const auto localToWorld = doc.getModel() * page->getModel();
+  const float toWorld     = glm::length(glm::vec3(localToWorld[1]));
   std::scoped_lock locker(state->view);
   auto &view          = state->view;
   const auto distance = xanadu::readableCameraDistance(
@@ -106,9 +110,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
   if (!distance || view.screenWidth <= 0) {
     return;
   }
-  const glm::vec3 topLeft(frame->localToWorld *
+  const glm::vec3 topLeft(localToWorld *
                           glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
-  const glm::vec3 topRight(frame->localToWorld *
+  const glm::vec3 topRight(localToWorld *
                            glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
   const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
   const float halfW = halfH * static_cast<float>(view.screenWidth) /

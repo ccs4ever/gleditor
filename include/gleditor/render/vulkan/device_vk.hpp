@@ -326,6 +326,10 @@ private:
     std::vector<VkCommandBuffer> secondaries;
     /// The buffer draws issued one at a time are currently appending to.
     VkCommandBuffer openSecondary{VK_NULL_HANDLE};
+    // Submitted frames are idled before buffer replacement, but this frame
+    // may still be recording references to the old allocation. Its fence is
+    // the earliest point at which those allocations can be freed.
+    std::vector<BufferRecord> retiredBuffers;
   };
 
   // -- setup steps
@@ -348,6 +352,10 @@ private:
   BufferRecord allocateBuffer(VkDeviceSize bytes, VkBufferUsageFlags usage,
                               VkMemoryPropertyFlags props) const;
   void destroyBufferRecord(BufferRecord &record) const;
+  /// Submitted frames must be idle before retiring an allocation.
+  void retireBufferRecord(BufferRecord &record);
+  /// Only after this frame's fence or device idle confirms completion.
+  void drainRetiredBuffers(FrameContext &frame);
   /// Begin a throwaway command buffer for a transfer, and submit + wait on it.
   [[nodiscard]] VkCommandBuffer beginOneShot() const;
   void endOneShot(VkCommandBuffer commands) const;
@@ -397,6 +405,9 @@ private:
   VkSwapchainKHR swapchain{VK_NULL_HANDLE};
   VkFormat swapchainFormat{VK_FORMAT_UNDEFINED};
   VkExtent2D swapchainExtent{};
+  // Picking and capture use SDL drawable pixels even when the presentation
+  // surface forces a different extent. Only the final blit changes scale.
+  VkExtent2D renderExtent{};
   std::vector<VkImage> swapchainImages;
 
   /// Offscreen colour target the glyphs are drawn into, mirroring the OpenGL

@@ -47,17 +47,12 @@ else
   exit 1
 fi
 
-# Pixels the picking query is compared at. The first is page background, the
-# rest land on glyphs, so agreement covers both tag kinds. Chosen by scanning
-# the actual rendered frame rather than guessed -- the previous coordinates
-# had drifted off both the page and the text entirely (three landed on kind
-# 0, empty space, and the other two on kind 2, page background, so this
-# check had stopped exercising glyph picking at all), and were verified
-# stable across repeated runs before being picked: a pixel merely inside a
-# glyph's bounding box can still land just outside its ink on some runs, as
-# the camera's settled sub-pixel position is not perfectly identical between
-# separate process invocations (see the cluster-field tolerance below).
-PICK_PIXELS="500,300 175,320 295,340 185,350 215,360"
+# One page-background pixel and four glyph interiors exercise both tag kinds.
+# Measured in the captured frames for GL, GLES and software Vulkan: the former
+# 500,300 page probe differed by one quantisation unit on SwiftShader, and
+# 295,340 sat at a glyph boundary. These interiors retain the exact identity
+# comparison and the existing fractional-position tolerance below.
+PICK_PIXELS="400,390 175,320 296,340 185,350 215,360"
 
 # The notification overlay is drawn in window pixels through an orthographic
 # projection rather than the document camera, so it exercises a transform the
@@ -523,7 +518,12 @@ if [ -x "$XUDU_TEST_BIN" ]; then
 
   for backend in $backends; do
     mkdir -p "$OUT/xudu_$backend"
-    XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
+    # System xanadocs address the test permascroll. Reusing them after the
+    # next backend rebuilds that permascroll changes settings and keymaps.
+    XDG_DATA_HOME="$OUT/xdg_$backend/data" \
+      XDG_CONFIG_HOME="$OUT/xdg_$backend/config" \
+      XDG_CACHE_HOME="$OUT/xdg_$backend/cache" \
+      XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
       "$XUDU_TEST_BIN" --gtest_filter='*E2EBinaryOrchestration*' \
       >"$OUT/xudu_$backend.log" 2>&1 ||
       {
