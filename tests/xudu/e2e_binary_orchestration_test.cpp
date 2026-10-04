@@ -1899,6 +1899,72 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
 }
 
 TEST(E2EBinaryOrchestrationTest,
+     unopenedLocalFormattingAuthorityRendersAndCanBeEditedThroughQuote) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build" /
+                    "integration_workspace_unopened_formatting";
+  fs::remove_all(root);
+  const auto documents = root / "data/xudu/xanadocs";
+  fs::create_directories(documents);
+  const auto sourcePath = documents / "source";
+  const auto quotePath  = documents / "quote";
+  const auto perma      = permascrollAt(root / "permascroll");
+  Store source(perma);
+  auto version     = source.insert({}, 0, "Bold shared passage");
+  const auto spans = source.rebuild(version).pieces();
+  version =
+      source.setFormat(version, spans, xanadu::FormatAttribute::Bold, true);
+  source.save(sourcePath.string());
+  Store quote(perma);
+  auto quoted = quote.makeXanadoc({}, "quote");
+  for (const auto &span : spans) {
+    quoted = quote.insertSpan(quoted, quote.textOf(quoted).size(), span);
+  }
+  quote.save(quotePath.string());
+  const auto originalOps = source.opCount();
+  const auto originalTablesTime =
+      fs::last_write_time(sourcePath / "store.tables");
+  const auto render = [&](const std::string &name,
+                          const std::string &gestures) {
+    const auto capture = root / (name + ".ppm");
+    const auto result  = executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --headless --backend " + activeBackend() + " --profile " +
+        quotePath.string() + " --chord Ctrl+Home " + gestures + " --capture " +
+        capture.string() + " --dump-a11y --chord Ctrl+Q");
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_TRUE(inspectPpm(capture).valid) << result.output;
+    return countInkOnPaper(capture);
+  };
+  const auto inheritedInk = render("inherited", "");
+  EXPECT_EQ(fs::last_write_time(sourcePath / "store.tables"),
+            originalTablesTime)
+      << "Reading the quotation must not save the authority";
+  fs::rename(sourcePath, root / "unavailable-source");
+  const auto plainInk = render("unavailable", "");
+  EXPECT_GT(plainInk, 0U);
+  EXPECT_NE(inheritedInk, plainInk)
+      << "The unopened authority's bold glyphs must be visible";
+  fs::rename(root / "unavailable-source", sourcePath);
+  const auto toggledInk =
+      render("removed", "--select 0,19 --chord Ctrl+Alt+B --chord Ctrl+Home");
+  EXPECT_NE(toggledInk, inheritedInk);
+  // Rebuilding after a selection changes caret rasterization slightly.
+  EXPECT_NEAR(static_cast<double>(toggledInk), static_cast<double>(plainInk),
+              static_cast<double>(plainInk) * 0.1);
+  Store changed(perma);
+  changed.load(sourcePath.string());
+  EXPECT_GT(changed.opCount(), originalOps);
+  EXPECT_TRUE(xanadu::FormatResolver(changed)
+                  .resolveSpans(spans)
+                  .decoratedRanges.empty());
+  EXPECT_EQ(render("restarted", ""), plainInk);
+}
+
+TEST(E2EBinaryOrchestrationTest,
      scriptedPouchClaspAutomationForgesBilateralLink) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;

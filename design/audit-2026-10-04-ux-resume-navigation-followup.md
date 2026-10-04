@@ -132,3 +132,38 @@ Verification artifacts:
 The unopened-authority formatting, visit annotation/reference and native accessibility findings
 above remain open. This follow-up changes renderer resource ownership and coordinate handling; it
 does not establish remote authority discovery or native assistive-technology delivery.
+
+## Unopened local formatting follow-up
+
+The original J17 quotation now inherits bold and italic with only its destination opened. Session
+discovers native stores directly under the user's default xanadoc directory, keeps unopened
+authorities in a separate read cache, and uses live stores in preference to disk snapshots. A
+changed `store.tables` refreshes the snapshot on the next text-source resolution. Reading these
+authorities does not add tabs, reader visits, operations, or saves. Explicitly toggling formatting
+through a quotation loads matching authorities into the editing session and persists the removal
+there.
+
+| Journey | Step                                             | Affordance used                                      | Outcome                                                                     | Evidence                                                                                        |
+| ------- | ------------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| J17     | Open only the saved quotation                    | Open destination; Ctrl+Home                          | Pass within default local document directory; alpha retains bold and italic | `/tmp/ux-local-authority-ui/inherited.png`, `inherited.log`                                     |
+| J17     | Read without changing the source                 | Open quotation, capture, Ctrl+Q                      | Pass; source `ops.nodes` and `store.tables` hashes remain identical         | `/tmp/ux-local-authority-ui.py`                                                                 |
+| J17     | Remove inherited bold and resume                 | Select alpha, Ctrl+Alt+B, Ctrl+Q; reopen destination | Pass; alpha remains italic and loses bold after restart                     | `/tmp/ux-local-authority-ui/toggle-off.png`, `restarted.png`, `source.ops.txt`, `quote.ops.txt` |
+| J17     | Unopened authority outside the default directory | No discovery affordance added                        | Remaining gap                                                               | Directory discovery is deliberately bounded                                                     |
+| J17     | Remote formatting authority                      | Not exercised                                        | Unvalidated                                                                 | No remote discovery implemented                                                                 |
+
+The UI reproduction reuses stores authored through typing, selection, formatting chords and drag
+transclusion in the earlier audit, in independent XDG directories with copied activity removed.
+Captured frames were inspected. The permanent binary regression separately contrasts the rendered
+quote with and without its saved bold authority, checks that reading leaves the authority's tables
+untouched, and removes inherited bold through the quote before restarting. It uses engine-authored
+fixtures and is regression evidence rather than another UI authoring journey.
+
+Full build, repository formatting and lint gates, and focused `clang-analyzer-*` checks on
+`apps/xudu/session.cpp` pass. Seventeen focused formatting tests pass on OpenGL; the new binary
+regression also passes on GLES and software Vulkan (SwiftShader). Logs:
+`/tmp/ux-local-authority-{full-build,format,lint,analysis,tests,gles,vulkan}.log`. The binary
+regression frames live in `build/integration_workspace_unopened_formatting/`; subsequent backend
+runs overwrite those frames. The separately retained UI captures above use OpenGL.
+
+Visit annotation/reference controls, fully coincident link choice, and native assistive-technology
+delivery remain open.

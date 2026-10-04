@@ -842,6 +842,15 @@ private:
     std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
+  struct FormattingAuthority {
+    std::filesystem::file_time_type modified;
+    std::unique_ptr<Store> store;
+  };
+  // Disk authorities never join saveAll() just because a quote is rendered.
+  mutable std::map<std::filesystem::path, FormattingAuthority>
+      formattingAuthorities_;
+  [[nodiscard]] std::vector<std::pair<std::string, const Store *>>
+  localFormattingAuthorities() const;
   /// See setAutoSave(); the settings' own default until they are read.
   std::chrono::seconds idleFlushTimeout{
       xanadu::SettingsConfig{}.autoSaveSeconds};

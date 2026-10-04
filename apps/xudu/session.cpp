@@ -878,6 +878,64 @@ std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
   return addStore(std::move(newStore), aPath, false);
 }
 
+std::vector<std::pair<std::string, const Store *>>
+Session::localFormattingAuthorities() const {
+  namespace fs = std::filesystem;
+  std::vector<std::pair<std::string, const Store *>> result;
+  if (stores.empty() || !stores[0].store) return result;
+  std::error_code error;
+  const auto directory = xanadocsDirectory();
+  fs::directory_iterator entries(directory, error);
+  if (error) return result;
+  std::set<fs::path> present;
+  for (const auto &entry : entries) {
+    // Only native documents in the user's own document directory are
+    // discoverable here; arbitrary siblings and remote stores are not scanned.
+    if (entry.is_symlink(error) || error || !entry.is_directory(error) || error)
+      continue;
+    const auto nativePath = fs::weakly_canonical(entry.path(), error);
+    if (error) continue;
+    const auto tables = nativePath / "store.tables";
+    if (!fs::is_regular_file(tables, error) || error) continue;
+    const auto modified = fs::last_write_time(tables, error);
+    if (error) continue;
+    present.insert(nativePath);
+    if (std::ranges::any_of(stores, [&](const auto &loaded) {
+          return !loaded.path.empty() &&
+                 fs::weakly_canonical(loaded.path) == nativePath;
+        })) {
+      formattingAuthorities_.erase(nativePath);
+      continue;
+    }
+    auto found = formattingAuthorities_.find(nativePath);
+    if (found == formattingAuthorities_.end() ||
+        found->second.modified != modified) {
+      auto authority =
+          std::make_unique<Store>(stores[0].store->userPermascrollPtr());
+      try {
+        authority->load(nativePath.string());
+      } catch (const std::exception &failure) {
+        GLEDITOR_LOG_WARN("xudu.links", "Formatting authority refused: {}",
+                          failure.what());
+        authority.reset();
+      }
+      found = formattingAuthorities_
+                  .insert_or_assign(
+                      nativePath,
+                      FormattingAuthority{.modified = modified,
+                                          .store    = std::move(authority)})
+                  .first;
+    }
+    if (found->second.store) {
+      result.emplace_back(nativePath.string(), found->second.store.get());
+    }
+  }
+  std::erase_if(formattingAuthorities_, [&](const auto &entry) {
+    return !present.contains(entry.first);
+  });
+  return result;
+}
+
 std::size_t Session::createNewStore(const std::string &aPath) {
   namespace fs          = std::filesystem;
   std::string targetDir = aPath;
@@ -1696,6 +1754,9 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
   for (std::size_t i = 0; i < stores.size(); ++i) {
     if (i != storeIndex) formatResolver.include(store(i), st);
   }
+  for (const auto &[authorityPath, authority] : localFormattingAuthorities()) {
+    formatResolver.include(*authority, st);
+  }
   auto formattingResult = formatResolver.resolveVersion(rebuilt);
   std::vector<gleditor::DecoratedRange> decoratedRanges =
       std::move(formattingResult.decoratedRanges);
@@ -2166,6 +2227,22 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
       st.rebuild(open[docIndex].version).spansFor(start, effLen);
   if (content.empty()) {
     return;
+  }
+  // A formatting edit must reach the saved authority as well as its quote.
+  // Rendering alone keeps these stores out of the session's save lifecycle.
+  for (const auto &[authorityPath, authority] : localFormattingAuthorities()) {
+    auto formats       = authority->formatLinks();
+    const bool touches = std::ranges::any_of(formats, [&](const auto &format) {
+      return std::ranges::any_of(format.first.left, [&](const auto &span) {
+        const auto mapped = FormatResolver::spanIn(*authority, st, span);
+        return mapped && std::ranges::any_of(content, [&](const auto &run) {
+                 return !run.intersect(*mapped).empty();
+               });
+      });
+    });
+    if (touches) {
+      loadAuxiliaryStore(authorityPath);
+    }
   }
   auto version = open[docIndex].version;
   FormatResolver resolver(st);
