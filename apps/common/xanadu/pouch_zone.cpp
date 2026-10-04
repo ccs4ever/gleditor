@@ -239,7 +239,7 @@ PouchManager *PouchManager::ensureZoneCell(DropZone &zone) {
                                           .label        = zone.label(),
                                           .auraColor    = zone.auraColor(),
                                           .heightWeight = zone.heightWeight(),
-                                      },
+                                 },
                                       &cell);
   if (zigzag::noCell != cell) {
     zone.setCell(cell);

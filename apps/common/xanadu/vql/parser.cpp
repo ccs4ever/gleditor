@@ -753,7 +753,7 @@ BooleanFactor Parser::parseBooleanFactor() {
     return BooleanFactor{
         .negated = negated,
         .test    = PredicateTest{
-            .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
+               .kind = std::get<std::shared_ptr<PathExpression>>(left.kind)}};
   }
 
   return BooleanFactor{

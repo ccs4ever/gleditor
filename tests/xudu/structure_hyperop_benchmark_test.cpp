@@ -38,8 +38,8 @@ template <typename Hop>
     auto cursor = startCell;
     for (std::size_t i = 0; i < hopCount; ++i) {
       const auto next = hop(cursor);
-      cursor = (next == zigzag::noCell) ? startCell
-                                        : static_cast<zigzag::CellRef>(next);
+      cursor          = (next == zigzag::noCell) ? startCell
+                                                 : static_cast<zigzag::CellRef>(next);
     }
     sink ^= cursor;
   }

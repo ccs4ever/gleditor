@@ -288,11 +288,11 @@ void placeTransclusions(const UniversalViewContext &ctx,
 
       const auto startU = pU.textOffset + static_cast<std::uint32_t>(
                                               sharedStart - pU.span.start);
-      const auto endU   = startU + static_cast<std::uint32_t>(sharedLen);
+      const auto endU = startU + static_cast<std::uint32_t>(sharedLen);
 
       const auto startV = pV.textOffset + static_cast<std::uint32_t>(
                                               sharedStart - pV.span.start);
-      const auto endV   = startV + static_cast<std::uint32_t>(sharedLen);
+      const auto endV = startV + static_cast<std::uint32_t>(sharedLen);
 
       const auto endPtU =
           (pU.kind == LinkTargetKind::Document)

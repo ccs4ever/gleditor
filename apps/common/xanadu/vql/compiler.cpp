@@ -720,17 +720,17 @@ CellRef VQLCompiler::compileBooleanExpr(const BooleanExpr &expr,
             [this, ctxCell](const auto &t) -> CellRef {
               using T = std::decay_t<decltype(t)>;
               if constexpr (std::is_same_v<T,
-                                           std::shared_ptr<PathExpression>>) {
+                                                 std::shared_ptr<PathExpression>>) {
                 if (t) return compilePathExpression(*t, ctxCell);
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, bool>) {
                 return ctxCell;
               } else if constexpr (std::is_same_v<T,
-                                                  std::shared_ptr<ValueExpr>>) {
+                                                        std::shared_ptr<ValueExpr>>) {
                 if (t) return compileValueExpr(*t, ctxCell);
                 return emitConstant(false);
               } else if constexpr (std::is_same_v<T, std::shared_ptr<
-                                                         FunctionInvocation>>) {
+                                                               FunctionInvocation>>) {
                 if (t) {
                   CellRef callOp = emitOp(OpcodeKind::Call, "#CALL " + t->name);
                   CellRef outC   = core_.arena().makeCell();
