@@ -1350,7 +1350,9 @@ int Application::run() {
   // What each input event does, shared by the platform's events and a
   // script's (AppState::SyntheticInput), so that automation exercises the
   // path a person's input takes rather than a side door.
+  Mod lastKeyDownMods  = Mod::None;
   const auto onKeyDown = [&](const int scancode, const Mod mods) {
+    lastKeyDownMods = mods;
     // A modal has the keyboard while it is up, and gets first refusal on
     // every key: a question on screen is not answered by editing the
     // document behind it. A key it does not use falls through, so that
@@ -1646,6 +1648,14 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_TEXT_INPUT: {
+        // SDL still reports text for a chorded key (Alt+Shift+N and the like);
+        // that keystroke was a command, not typing, so nothing is appended.
+        const auto chorded = static_cast<std::uint16_t>(lastKeyDownMods) &
+                             (static_cast<std::uint16_t>(Mod::Ctrl) |
+                              static_cast<std::uint16_t>(Mod::Alt));
+        if (0 != chorded) {
+          break;
+        }
         if (nullptr != state->modal && state->modal->grabbing()) {
           state->modal->textTyped(evt.text.text);
           break;

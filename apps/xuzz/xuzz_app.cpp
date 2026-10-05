@@ -1709,8 +1709,13 @@ int XuzzApp::run(const int argc, char **argv) {
           if (session->path(i) != place.zigzagStore) {
             continue;
           }
-          const auto version =
-              xanadu::MicroversionId::parse(place.zigzagVersion);
+          auto version = xanadu::MicroversionId::parse(place.zigzagVersion);
+          // A remembered version can name an op this store never saw (the
+          // id space is shared across stores); fold from the live head
+          // rather than bind a version whose parent is unknown here.
+          if (!version.isZero() && !session->store(i).getOp(version)) {
+            version = session->store(i).primaryCurrentVersion();
+          }
           bindZigzag(rState, i,
                      version.isZero()
                          ? session->store(i).primaryCurrentVersion()

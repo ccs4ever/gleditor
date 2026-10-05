@@ -2352,7 +2352,10 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
       }
       return true;
     default:
-      return false;
+      // Editing a cell owns the keyboard: a key that is not Return, Escape or
+      // Backspace still must not fall through to the document's command table
+      // (a bare letter would run the command it is bound to).
+      return true;
     }
   }
   if (commandBarVisible_) {
