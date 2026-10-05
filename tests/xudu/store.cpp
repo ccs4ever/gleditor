@@ -803,7 +803,7 @@ TEST(StoreTest, versionAnnotationsAndAliases) {
   EXPECT_EQ(ann->alias, "v1.0");
   EXPECT_EQ(ann->description, "First stable release");
   EXPECT_EQ(ann->tag, "release");
-  EXPECT_EQ(ann->timestamp, "2026-09-05T20:00:00Z");
+  EXPECT_EQ(ann->timestamp, "2026-09-05T20:00:00.000000000Z");
 }
 
 TEST_F(StoreRoundTripTest,

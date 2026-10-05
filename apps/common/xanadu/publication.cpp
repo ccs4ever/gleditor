@@ -187,6 +187,68 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   return link;
 }
 
+std::vector<MicroversionId> historyHeads(const Store &store) {
+  std::vector<MicroversionId> heads;
+  for (std::uint32_t i = 1; i <= store.opCount(); ++i)
+    if (store.segmentedOps().childrenOf(i).empty())
+      heads.push_back(store.segmentedOps().idOf(i));
+  std::ranges::sort(heads);
+  return heads;
+}
+
+std::vector<PublishedStructure>
+structureInventory(const Store &store,
+                   const std::vector<MicroversionId> &heads) {
+  std::vector<PublishedStructure> inventory;
+  for (const auto &birth : store.discoverStructureBirths()) {
+    PublishedStructure item;
+    item.kind  = birth.kind;
+    item.birth = store.segmentedOps().idOf(birth.opIndex);
+    for (const auto &head : heads) {
+      const auto path = store.opsFor(head);
+      if (std::ranges::find(path, item.birth) == path.end()) continue;
+      auto name = store.resolveStructureName(head, birth.opIndex);
+      if (name.empty())
+        name =
+            std::string(item.kind == StructureKind::Slice ? "Slice " : "Doc ") +
+            item.birth.str();
+      item.views.push_back({head, std::move(name)});
+    }
+    inventory.push_back(std::move(item));
+  }
+  PublishedStructure implicit;
+  for (const auto &head : heads) {
+    for (const auto &id : store.opsFor(head)) {
+      const auto *node = store.getCompactOp(id);
+      if (node->kind != OpKind::Structure &&
+          store.activeXanadocOnBranch(id) == 0) {
+        implicit.views.push_back({head, "Document"});
+        break;
+      }
+    }
+  }
+  if (!implicit.views.empty()) inventory.push_back(std::move(implicit));
+  std::ranges::sort(inventory, {}, &PublishedStructure::birth);
+  return inventory;
+}
+
+bencode::Value encodeInventory(const Publication &pub) {
+  bencode::List inventory;
+  for (const auto &item : pub.inventory) {
+    bencode::List views;
+    for (const auto &view : item.views)
+      views.push_back(bencode::Value::dict(
+          {{"head", bencode::Value::string(view.head.str())},
+           {"name", bencode::Value::string(view.name)}}));
+    inventory.push_back(bencode::Value::dict(
+        {{"birth", bencode::Value::string(item.birth.str())},
+         {"kind",
+          bencode::Value::integer(static_cast<std::int64_t>(item.kind))},
+         {"views", bencode::Value::list(std::move(views))}}));
+  }
+  return bencode::Value::list(std::move(inventory));
+}
+
 /// The manifest as a dictionary, with or without the signature. The signing
 /// buffer is this without it, so the two cannot drift.
 bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
@@ -216,7 +278,18 @@ bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
   bencode::List topics;
   for (const auto &topic : pub.topics)
     topics.push_back(bencode::Value::string(topic));
+  bencode::List heads;
+  for (const auto &head : pub.heads)
+    heads.push_back(bencode::Value::string(head.str()));
+  const auto &idBytes = pub.storeId.bytes();
   bencode::Dict manifest{
+      {"store",
+       bencode::Value::string(std::string(
+           reinterpret_cast<const char *>(idBytes.data()), idBytes.size()))},
+      {"history_scroll", bencode::Value::string(pub.historyScroll)},
+      {"heads", bencode::Value::list(std::move(heads))},
+      {"inventory", encodeInventory(pub)},
+      {"selected_birth", bencode::Value::string(pub.selectedBirth.str())},
       {"format", bencode::Value::integer(publicationFormatVersion)},
       {"topics", bencode::Value::list(std::move(topics))},
       {keyHoles, bencode::Value::list(std::move(holesList))},
@@ -362,7 +435,7 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
   const auto format = root.find("format");
   if (!format || !format->isInteger() ||
       format->asInteger() != publicationFormatVersion)
-    throw PublicationUnreadable("publication format version 1 expected, got " +
+    throw PublicationUnreadable("publication format version 2 expected, got " +
                                 (format && format->isInteger()
                                      ? std::to_string(format->asInteger())
                                      : std::string{"0 (unversioned)"}));
@@ -372,7 +445,7 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
   if (!topics || !topics->isList() || !opsSegs || !opsSegs->isList() ||
       !holesVal || !holesVal->isList())
     throw PublicationUnreadable(
-        "publication format 1: required topics/history/holes table missing");
+        "publication format 2: required topics/history/holes table missing");
   const auto publisher = root.find(keyPublisher);
   const auto salt      = root.find(keySalt);
   const auto title     = root.find(keyTitle);
@@ -393,7 +466,51 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     return std::nullopt;
   }
 
+  const auto storeId       = root.find("store");
+  const auto historyScroll = root.find("history_scroll");
+  const auto heads         = root.find("heads");
+  const auto inventory     = root.find("inventory");
+  const auto selectedBirth = root.find("selected_birth");
+  if (!storeId || !storeId->isString() || !historyScroll ||
+      !historyScroll->isString() || !heads || !heads->isList() || !inventory ||
+      !inventory->isList() || !selectedBirth || !selectedBirth->isString())
+    throw PublicationUnreadable(
+        "publication format 2: required store inventory missing");
   Publication pub;
+  if (!DocumentId::fromBytes(storeId->asString(), pub.storeId))
+    return std::nullopt;
+  pub.historyScroll = historyScroll->asString();
+  try {
+    pub.selectedBirth = MicroversionId::parse(selectedBirth->asString());
+    for (const auto &head : heads->asList()) {
+      if (!head.isString()) return std::nullopt;
+      pub.heads.push_back(MicroversionId::parse(head.asString()));
+    }
+    for (const auto &item : inventory->asList()) {
+      const auto birth = item.find("birth");
+      const auto kind  = item.find("kind");
+      const auto views = item.find("views");
+      if (!birth || !birth->isString() || !kind || !kind->isInteger() ||
+          (kind->asInteger() != static_cast<int>(StructureKind::Slice) &&
+           kind->asInteger() != static_cast<int>(StructureKind::Xanadoc)) ||
+          !views || !views->isList())
+        return std::nullopt;
+      PublishedStructure structure;
+      structure.birth = MicroversionId::parse(birth->asString());
+      structure.kind  = static_cast<StructureKind>(kind->asInteger());
+      for (const auto &view : views->asList()) {
+        const auto head = view.find("head");
+        const auto name = view.find("name");
+        if (!head || !head->isString() || !name || !name->isString())
+          return std::nullopt;
+        structure.views.push_back(
+            {MicroversionId::parse(head->asString()), name->asString()});
+      }
+      pub.inventory.push_back(std::move(structure));
+    }
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
   std::copy(publisher->asString().begin(), publisher->asString().end(),
             pub.publisher.bytes.begin());
   pub.salt  = salt->asString();
@@ -986,6 +1103,86 @@ historyFromSeal(const std::string_view sealed, const Scroll &from,
   return historyFromSeal(std::span<const std::string_view>{one}, from, scrolls);
 }
 
+std::unique_ptr<Store>
+restorePublication(const Publication &pub, const ContentSource &source,
+                   std::shared_ptr<UserPermascroll> readerPermascroll) {
+  const auto refuse = [](const std::string_view reason) {
+    throw PublicationUnreadable("publication history: " + std::string(reason));
+  };
+  if (!verifyPublication(pub)) refuse("signature failed");
+  if (!readerPermascroll) refuse("reader permascroll must be supplied");
+  if (pub.opsSegments.empty()) refuse("no complete history supplied");
+  const auto local = pub.scrolls.find(pub.historyScroll);
+  if (local == pub.scrolls.end()) refuse("global permascroll missing");
+  for (const auto &[key, scroll] : pub.scrolls)
+    if (key != scrollKey(scroll)) refuse("scroll identity mismatch");
+  auto history =
+      std::make_unique<Store>(std::move(readerPermascroll), pub.storeId);
+  history->setContentSource(&source);
+  const auto self = history->addScroll(local->second);
+  history->bindPublishedLocalScroll(self);
+  // Install descriptors before folding metadata: rank names are primedia too.
+  for (const auto &[key, scroll] : pub.scrolls) {
+    (void)key;
+    (void)history->addScroll(scroll);
+  }
+  Resolver resolver(&source);
+  std::uint64_t count = 0;
+  for (const auto &segment : pub.opsSegments) {
+    if (segment.at != count || segment.length == 0)
+      refuse("operation segments have a gap or overlap");
+    const auto meta = source.metainfo(segment.torrent);
+    if (!meta || segment.fileIndex >= meta->files().size())
+      refuse("operation torrent metadata unavailable");
+    const auto &file = meta->files()[segment.fileIndex];
+    if (file.path != segment.path || file.path != sealedOpsName ||
+        file.offset != segment.streamOffset)
+      refuse("operation file coordinates mismatch");
+    const auto scroll =
+        Scroll::ofTorrentFile(segment.torrent, segment.fileIndex, file.path,
+                              file.offset, file.length);
+    const auto bytes =
+        resolver.resolve(scroll, {.start = 0, .length = file.length});
+    if (!bytes.isVerified() || bytes.text.size() != file.length)
+      refuse("operation payload missing or corrupt");
+    try {
+      applyOpsSegment(bytes.text, *history, self, pub.scrolls);
+    } catch (const std::exception &error) {
+      refuse(error.what());
+    }
+    if (history->opCount() - count != segment.length)
+      refuse(std::format(
+          "operation count disagrees with signed segment: expected {}, got {}",
+          segment.length, history->opCount() - count));
+    count = history->opCount();
+  }
+  for (std::uint32_t i = 1; i <= history->opCount(); ++i) {
+    const auto span = history->getCompactOp(i)->span();
+    if (span.empty() || isReservedScroll(span.scroll)) continue;
+    const auto scroll = history->scroll(span.scroll);
+    if (!scroll) refuse("operation scroll descriptor missing");
+    const auto resolved = resolver.resolve(*scroll, span);
+    if (resolved.status == ResolutionStatus::MissingPieces ||
+        resolved.status == ResolutionStatus::UnverifiedHash)
+      refuse("primedia dependency missing or corrupt");
+  }
+  if (pub.heads != historyHeads(*history) ||
+      pub.inventory != structureInventory(*history, pub.heads))
+    refuse("signed inventory disagrees with history");
+  if (!history->getOp(pub.version)) refuse("selected version is absent");
+  const auto selected = history->activeXanadocOnBranch(pub.version);
+  if (history->segmentedOps().idOf(selected) != pub.selectedBirth)
+    refuse("selected document birth disagrees with history");
+  std::vector<GlobalSpan> pieces;
+  for (const auto &span : history->rebuild(pub.version, selected).pieces()) {
+    const auto global = globalise(*history, span);
+    if (!global) refuse("selected content is not globally addressable");
+    pieces.push_back(*global);
+  }
+  if (pieces != pub.pieces) refuse("selected document disagrees with history");
+  return history;
+}
+
 Adopted adopt(Store &store, const Publication &pub) {
   if (!verifyPublication(pub)) {
     throw std::runtime_error(
@@ -1080,7 +1277,22 @@ Publication publish(const Store &store, const MicroversionId &version,
                     const std::vector<ScrollSegment> &opsSegments,
                     const std::vector<PublishedHoleRecord> &holes,
                     const std::vector<std::string> &topics) {
+  if (!opsSegments.empty() && store.hasPendingMetadata())
+    throw PublicationUnreadable(
+        "prepare pending author metadata before signing publication history");
   Publication pub;
+  pub.storeId = store.documentId();
+  pub.selectedBirth =
+      store.segmentedOps().idOf(store.activeXanadocOnBranch(version));
+  if (!opsSegments.empty()) {
+    if (!localSealedAs || scrollKey(*localSealedAs).empty())
+      throw PublicationUnreadable(
+          "publication history has no global permascroll");
+    pub.historyScroll = scrollKey(*localSealedAs);
+    pub.scrolls.emplace(pub.historyScroll, *localSealedAs);
+    pub.heads     = historyHeads(store);
+    pub.inventory = structureInventory(store, pub.heads);
+  }
   pub.publisher   = keys.publicKey;
   pub.salt        = std::move(salt);
   pub.title       = std::move(title);

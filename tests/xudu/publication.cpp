@@ -30,9 +30,11 @@
 #include <tuple>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
@@ -540,6 +542,236 @@ TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
   EXPECT_EQ(withheldSeg->kind, xanadu::SegmentKind::Withheld);
   ASSERT_TRUE(withheldSeg->holeRecord.has_value());
   EXPECT_EQ(withheldSeg->holeRecord->reason, xanadu::HoleReason::Withheld);
+}
+
+class PublicationInventoryTest : public testing::Test {
+protected:
+  xanadu::MutableKeys keys   = xanadu::createMutableKeys();
+  std::filesystem::path root = std::filesystem::temp_directory_path() /
+                               ("xudu-inventory-" + keys.publicKey.hex());
+  xanadu::Store author;
+  std::shared_ptr<xanadu::UserPermascroll> reader =
+      std::make_shared<xanadu::UserPermascroll>();
+  xanadu::DirectoryContentSource source;
+  Publication pub;
+  MicroversionId docA, docB, sliceA, sliceB, textA, head, fork;
+  xanadu::SignedProvenance provenance{.tsv       = "test record",
+                                      .signature = "test signature"};
+
+  void SetUp() override {
+    docA   = author.makeXanadoc(author.sliceGenesis({}), "Story Ideas");
+    textA  = author.insert(docA, 0, "Alice's ideas", docA);
+    docB   = author.makeXanadoc(textA, "Research Notes");
+    head   = author.insert(docB, 0, "More ideas", docB);
+    sliceA = author.makeSlice(head, "Idea board");
+    head   = author.makeCell(sliceA, "idea one", sliceA);
+    sliceB = author.makeSlice(head, "Second board");
+    head   = author.makeCell(sliceB, "idea two", sliceB);
+    const std::vector<xanadu::TorrentContent> files{
+        {.path = "research", .data = "Reference"}};
+    const auto made = xanadu::makeTorrent(files, "research");
+    const auto seed = xanadu::writeTorrentSeed(root, made, files);
+    (void)source.add(made.file, seed.string());
+    const auto research = Scroll::ofTorrentFile(made.hash, 0, "research", 0, 9);
+    head                = author.insertSpan(
+        head, 13,
+        {.scroll = author.addScroll(research), .start = 0, .length = 9}, docA);
+    // Recorded late, sorts before later births when restored.
+    fork = author.insert(textA, 13, " alternate", docA);
+    author.setCurrentVersions({head});
+    author.setVersionAnnotation(textA, {.alias       = "draft",
+                                        .description = "First ideas",
+                                        .tag         = "review",
+                                        .timestamp   = "2026-10-04T00:00:00Z"});
+    author.sealMetadata();
+    head = author.designateEdition(author.structureHead(), "release", docB);
+    seal();
+  }
+  void seal() {
+    const auto sealed = xanadu::sealLocalSpool(author, keys, "permascroll",
+                                               root.string(), provenance);
+    pub = xanadu::publish(author, textA, keys, "doc:ideas", "Story Ideas", 1, 1,
+                          &sealed.scroll, {*sealed.opsSegment});
+    for (const auto &seed : xanadu::reviewPublicationDependencies(pub, {root}))
+      (void)source.add(seed.metainfo, seed.savePath.string());
+  }
+  void sign() {
+    pub.signature =
+        xanadu::signMutableItem(xanadu::publicationSigningBuffer(pub), keys);
+  }
+  ~PublicationInventoryTest() override { std::filesystem::remove_all(root); }
+};
+
+TEST_F(PublicationInventoryTest,
+       RestoresEveryDocumentSliceBranchEditionAndAnnotation) {
+  const auto decoded =
+      xanadu::decodePublication(xanadu::encodePublication(pub));
+  ASSERT_TRUE(decoded);
+  EXPECT_EQ(decoded->inventory, pub.inventory);
+  ASSERT_EQ(pub.inventory.size(), 5U);
+  const auto restored = xanadu::restorePublication(*decoded, source, reader);
+  EXPECT_EQ(restored->documentId(), author.documentId());
+  EXPECT_EQ(restored->opCount(), author.opCount());
+  EXPECT_EQ(restored->currentVersions(), author.currentVersions());
+  const auto annotation = restored->versionAnnotation(textA);
+  ASSERT_TRUE(annotation);
+  EXPECT_EQ(annotation->alias, "draft");
+  EXPECT_EQ(annotation->description, "First ideas");
+  EXPECT_EQ(annotation->tag, "review");
+  EXPECT_EQ(annotation->timestamp, "2026-10-04T00:00:00.000000000Z");
+  EXPECT_EQ(restored->editionNamed(head, "release")->targetVersion, docB);
+  EXPECT_EQ(restored->textOf(fork), "Alice's ideas alternate");
+  EXPECT_NE(restored->segmentedOps().indexOf(docB),
+            author.segmentedOps().indexOf(docB));
+  EXPECT_EQ(restored->textOf(head, restored->segmentedOps().indexOf(docA)),
+            "Alice's ideasReference");
+  EXPECT_EQ(restored->textOf(head, restored->segmentedOps().indexOf(docB)),
+            "More ideas");
+  const auto folded = restored->rebuildManifold(head);
+  EXPECT_EQ(folded.refusedOps(), 0U);
+  EXPECT_EQ(restored->resolveStructureName(
+                head, restored->segmentedOps().indexOf(sliceA)),
+            "Idea board");
+  EXPECT_EQ(restored->resolveStructureName(
+                head, restored->segmentedOps().indexOf(sliceB)),
+            "Second board");
+  EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest,
+       RepointingAfterReopenDoesNotInventAnAnnotation) {
+  author.save((root / "native").string());
+  xanadu::Store reopened(author.userPermascrollPtr());
+  reopened.setContentSource(&source);
+  reopened.load((root / "native").string());
+  const auto release =
+      reopened.editionNamed(reopened.structureHead(), "release");
+  ASSERT_TRUE(release);
+  const auto changed = reopened.repointEdition(
+      reopened.structureHead(), reopened.segmentedOps().idOf(release->cell),
+      fork);
+  reopened.sealMetadata();
+  const auto folded = reopened.rebuildManifold(reopened.structureHead());
+  EXPECT_FALSE(folded.versionAnnotation(reopened.segmentedOps().indexOf(docB),
+                                        reopened));
+  EXPECT_EQ(reopened.editionNamed(changed, "release")->targetVersion, fork);
+}
+
+TEST_F(PublicationInventoryTest,
+       PendingAuthorDecisionsCannotBeOmittedFromAHistoryPublication) {
+  author.setCurrentVersions({fork});
+  EXPECT_THROW((void)xanadu::publish(author, textA, keys, pub.salt, pub.title,
+                                     2, 2, &pub.scrolls.at(pub.historyScroll),
+                                     pub.opsSegments),
+               xanadu::PublicationUnreadable);
+}
+
+TEST_F(PublicationInventoryTest, MetadataPreparationIsIdempotent) {
+  author.sealMetadata();
+  const auto count   = author.opCount();
+  const auto size    = author.primedia().bytes().size();
+  const auto current = author.currentVersions();
+  author.sealMetadata();
+  EXPECT_EQ(author.opCount(), count);
+  EXPECT_EQ(author.primedia().bytes().size(), size);
+  EXPECT_EQ(author.currentVersions(), current);
+}
+
+TEST_F(PublicationInventoryTest,
+       ReadingOtherBranchesDoesNotRepointCurrentEditions) {
+  const auto designated = author.currentVersions();
+  for (const auto &version : pub.heads) (void)author.rebuildManifold(version);
+  EXPECT_EQ(author.currentVersions(), designated);
+  (void)reader->append("Bob's private notes");
+  const auto before   = std::string(reader->bytes());
+  const auto restored = xanadu::restorePublication(pub, source, reader);
+  EXPECT_EQ(restored->textOf(textA), "Alice's ideas");
+  EXPECT_EQ(reader->bytes(), before);
+}
+
+TEST_F(PublicationInventoryTest,
+       RestoresIncrementalHistoryAndRetainsEarlierAddresses) {
+  const auto first   = pub;
+  const auto count   = static_cast<std::uint32_t>(author.opCount());
+  const auto changed = author.insert(head, 13, " revised", docA);
+  const auto sealed  = xanadu::sealLocalSpool(
+      author, keys, "permascroll", root.string(), provenance,
+      first.scrolls.at(first.historyScroll), count);
+  auto ops = first.opsSegments;
+  ASSERT_TRUE(sealed.opsSegment);
+  ops.push_back(*sealed.opsSegment);
+  const auto next = xanadu::publish(author, changed, keys, pub.salt, pub.title,
+                                    2, 2, &sealed.scroll, ops);
+  for (const auto &seed : xanadu::reviewPublicationDependencies(next, {root}))
+    (void)source.add(seed.metainfo, seed.savePath.string());
+  const auto restored = xanadu::restorePublication(next, source, reader);
+  EXPECT_EQ(restored->textOf(textA), "Alice's ideas");
+  EXPECT_EQ(restored->textOf(changed, restored->segmentedOps().indexOf(docA)),
+            "Alice's ideas revisedReference");
+  EXPECT_EQ(next.historyScroll, first.historyScroll);
+  EXPECT_EQ(next.opsSegments.front(), first.opsSegments.front());
+  EXPECT_TRUE(reader->bytes().empty());
+}
+
+TEST_F(PublicationInventoryTest, RejectsSignedOmittedBirthOrInventedView) {
+  pub.inventory.pop_back();
+  sign();
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+  seal();
+  pub.inventory.front().views.front().head = MicroversionId::parse("99999");
+  sign();
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+  EXPECT_TRUE(reader->bytes().empty());
+}
+
+TEST_F(PublicationInventoryTest, RejectsMissingPrimediaAndCorruptHistory) {
+  xanadu::DirectoryContentSource empty;
+  EXPECT_THROW((void)xanadu::restorePublication(pub, empty, reader),
+               xanadu::PublicationUnreadable);
+  const auto path = root / pub.opsSegments.front().torrent.hex() /
+                    "permascroll" / xanadu::sealedOpsName;
+  {
+    std::fstream file(path, std::ios::in | std::ios::out | std::ios::binary);
+    file.put('!');
+  }
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+  EXPECT_TRUE(reader->bytes().empty());
+}
+
+TEST_F(PublicationInventoryTest,
+       RejectsSignedSegmentGapsWrongCountsAndSelectedEdl) {
+  pub.opsSegments.front().at = 1;
+  sign();
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+  pub.opsSegments.front().at = 0;
+  ++pub.opsSegments.front().length;
+  sign();
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+  --pub.opsSegments.front().length;
+  ++pub.pieces.front().start;
+  sign();
+  EXPECT_THROW((void)xanadu::restorePublication(pub, source, reader),
+               xanadu::PublicationUnreadable);
+}
+
+TEST_F(PublicationInventoryTest,
+       AuthorCanRepointOneEditionWithoutChangingTheOthers) {
+  const auto oldCurrent = author.currentVersions();
+  const auto release    = author.editionNamed(head, "release");
+  ASSERT_TRUE(release);
+  head = author.repointEdition(author.structureHead(),
+                               author.segmentedOps().idOf(release->cell), fork);
+  EXPECT_EQ(author.editionNamed(head, "release")->targetVersion, fork);
+  EXPECT_EQ(author.currentVersions(), oldCurrent);
+  seal();
+  const auto restored = xanadu::restorePublication(pub, source, reader);
+  EXPECT_EQ(restored->editionNamed(head, "release")->targetVersion, fork);
+  EXPECT_EQ(restored->currentVersions(), oldCurrent);
 }
 
 } // namespace

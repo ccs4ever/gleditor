@@ -628,7 +628,18 @@ std::string Session::publishDocument(const MicroversionId &version,
     throw std::runtime_error(
         "test swarm publication requires mock verification configuration");
   flushUncommitted();
-  auto &st         = store(storeIndex);
+  auto &st = store(storeIndex);
+  st.sealMetadata();
+  if (request.editionToRepoint && !request.newEditionName.empty())
+    throw std::invalid_argument("choose repointing or a new edition");
+  auto metadataHead = st.structureHead();
+  if (metadataHead.isZero()) metadataHead = st.latest();
+  if (request.editionToRepoint)
+    (void)st.repointEdition(metadataHead, *request.editionToRepoint, version);
+  else if (!request.newEditionName.empty())
+    (void)st.designateEdition(metadataHead, request.newEditionName, version,
+                              /*allowDuplicateName=*/true);
+  st.sealMetadata();
   const auto &mine = identity();
   const auto into  = publishedDir(storeIndex);
   const auto now   = static_cast<std::uint64_t>(

@@ -132,11 +132,12 @@ does not implement Oracle election, user enrollment or revocation. Ordinary loca
 requires no mock enrollment. Signed topics are metadata at this stage; they do not yet make a
 publication discoverable through a topic swarm or author catalog.
 
-Publication manifests now declare format version 1 and carry topics. Unversioned manifests and
-unsupported versions are refused by number with `PublicationUnreadable`; regenerate owned test
-publications. Native store and operation formats have not changed. Imported media now retains a
-multi-file torrent seed alongside its store, and Session reloads its metainfo on reopen. Publication
-no longer depends on the imported file remaining at its original path.
+The outbox batch introduced publication format version 1 and topics. The inventory batch below
+replaces it with version 2. Unversioned manifests and unsupported versions are refused by number
+with `PublicationUnreadable`; regenerate owned test publications. Native store and operation formats
+have not changed. Imported media now retains a multi-file torrent seed alongside its store, and
+Session reloads its metainfo on reopen. Publication no longer depends on the imported file remaining
+at its original path.
 
 Validation evidence is under `build/publication-outbox-fixes/`. The engine and selected import
 checks cover 114 publication/history/keymap/persistence, seed-escape and imported-media tests. The
@@ -164,13 +165,54 @@ dependency verification and network operations to the worker; moving snapshot cr
 signing off that path requires a safely captured immutable store snapshot. These checks remain
 prerequisites, not end-to-end passes for P1–P7.
 
+## Whole-store inventory and author edition review
+
+Publication format 2 signs the stable store ID, the global permascroll replacing author-local slot
+zero, all terminal branch heads, every explicit xanadoc/slice birth and its branch-local names, and
+the selected document birth. Births and heads use microversion names within the signed publication,
+so changed operation indices on the reader do not change their identities. Editions and annotations
+remain authoritative Structure operations; the inventory is a checked discovery index, not another
+metadata writer. Version 1 and unversioned manifests are refused by number. Regenerate owned test
+publications and their outbox records. Native store, node and binary-operation layouts are
+unchanged.
+
+`restorePublication()` creates a fresh store using the supplied reader permascroll, verifies torrent
+pieces and history segment ordering/counts, remaps every global scroll descriptor and operation
+reference, and checks the recovered inventory and selected EDL against the signed manifest. Missing
+or corrupt dependencies, absent births and inconsistent inventories are refused. It appends no
+primedia to the reader's scroll. The signed author's original slot zero explicitly roots imported
+registry metadata, and registry scroll IDs follow global identity after deployment remapping. The
+outbox now requires this full restoration check before reporting local readiness.
+
+Current versions and editions are author decisions. Folding another branch does not overwrite a
+pending designation. Explicit `setCurrentVersions()` choices seal as current editions even when
+named editions already exist. Metadata preparation happens before the snapshot is signed;
+serialization and sealing then read that prepared snapshot. Canonical timestamp text makes repeated
+preparation idempotent. Creating a named edition does not invent a separate version annotation.
+
+The Publish form defaults to **Keep all existing editions**. Its edition selector shows names and
+current targets, offers repointing one selected edition to the version being published, and offers
+adding a named edition. Repointing uses that edition's birth identity, including when multiple
+editions share a name. These changes require explicit form choices and do not infer newer targets.
+
+The swarm peer has a diagnostic `--restore-publication HASH HOST PORT CACHE` mode. It fetches the
+signed manifest and every dependency through the named BitTorrent peer, using separate directories
+for each immutable hash. The namespace runner supplies an opposite-namespace reader, rather than
+having the publisher and final reader share a loopback. This diagnostic is not a remote-opening UI
+affordance. The legacy `Session::readPublication()` still adopts the selected EDL; wiring full-store
+restoration and durable reader deployment bindings into the catalog/open UI is the next batch.
+
+Validation evidence for this batch is under `build/publication-inventory-fixes/`; final outcomes are
+recorded in the validation report. Docker smoke filters now include the inventory suite.
+
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
-1. Carry the complete store inventory, designated versions and annotations in the publication
-   format, and reconstruct every advertised document/slice from an empty remote cache.
+1. Integrate complete-store restoration into remote opening and persist reader deployment bindings
+   for offline reopening. Format 2 inventory, authored metadata restoration and verified dependency
+   reconstruction are implemented; manifest-only adoption still opens the selected EDL.
 1. Add signed author catalog publication/ingestion and topic rendezvous exchange, author-key
    following and remote opening. An empty catalog now honestly stays empty until data is learned.
 1. Add persisted update subscriptions, sequence polling, dependency verification, retry and

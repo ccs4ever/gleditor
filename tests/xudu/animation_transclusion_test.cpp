@@ -256,7 +256,7 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + textVer.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering transcluded animated GIF failed: " << res.output;
@@ -297,7 +297,7 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedSvgRendersAsMediaCard) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + textVer.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering transcluded animated SVG failed: " << res.output;
@@ -339,7 +339,7 @@ TEST_F(AnimationTransclusionTest, TranscludePartialFragmentOfAnimation) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + textVer.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering partial fragment of animation failed: " << res.output;

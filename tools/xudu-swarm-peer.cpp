@@ -15,15 +15,20 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <set>
 #include <string>
 #include <thread>
 #include <tuple>
 
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
@@ -39,13 +44,66 @@ std::string readWholeFile(const std::string &path) {
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
+int restoreRemote(const int argc, char **argv) {
+  if (argc != 6)
+    throw std::invalid_argument(
+        "usage: xudu-swarm-peer --restore-publication HASH HOST PORT CACHE");
+  xanadu::SwarmContentSource::Options options;
+  options.enableDht                      = false;
+  options.enableTrackers                 = false;
+  options.enableLocalDiscovery           = false;
+  options.allowManyConnectionsPerAddress = true;
+  xanadu::SwarmContentSource source(options);
+  const auto port = std::stoul(argv[4]);
+  if (port == 0 || port > UINT16_MAX)
+    throw std::invalid_argument("invalid peer port");
+  const auto fetch = [&](const xanadu::InfoHash &hash) {
+    const auto cache = std::filesystem::path(argv[5]) / hash.hex();
+    (void)source.addMagnet("magnet:?xt=urn:btih:" + hash.hex(), cache.string());
+    source.connectPeer(hash, argv[3], static_cast<std::uint16_t>(port));
+    if (!source.waitForMetadata(hash, std::chrono::seconds{30}))
+      throw std::runtime_error("publication metadata unavailable: " +
+                               hash.hex());
+  };
+  const auto hash = xanadu::InfoHash::fromHex(argv[2]);
+  fetch(hash);
+  const auto meta  = source.metainfo(hash);
+  const auto bytes = source.readStream(hash, 0, meta->totalLength());
+  const auto pub   = xanadu::decodePublication(bytes);
+  if (!pub) throw std::runtime_error("publication signature failed");
+  std::set<xanadu::InfoHash> dependencies;
+  for (const auto &[key, scroll] : pub->scrolls) {
+    (void)key;
+    for (const auto &segment : scroll.segments)
+      dependencies.insert(segment.torrent);
+  }
+  for (const auto &segment : pub->opsSegments)
+    dependencies.insert(segment.torrent);
+  for (const auto &dependency : dependencies) fetch(dependency);
+  const auto reader   = std::make_shared<xanadu::UserPermascroll>();
+  const auto restored = xanadu::restorePublication(*pub, source, reader);
+  std::cout << "restored " << pub->publisher.hex() << " " << pub->sequence
+            << " " << restored->opCount() << " " << pub->inventory.size() << " "
+            << reader->bytes().size() << "\n";
+  return 0;
+}
+
 } // namespace
 
 int main(const int argc, char **argv) {
+  if (argc > 1 && std::string_view(argv[1]) == "--restore-publication") {
+    try {
+      return restoreRemote(argc, argv);
+    } catch (const std::exception &error) {
+      std::cerr << "xudu-swarm-peer: " << error.what() << "\n";
+      return 1;
+    }
+  }
   if (argc < 3) {
     std::cerr
         << "usage: xudu-swarm-peer <torrent> <data-dir> [listen-address] "
            "[--discoverable] [--publish]\n"
+           "       xudu-swarm-peer --restore-publication HASH HOST PORT CACHE\n"
            "\n"
            "Offers the torrent's content to whoever connects, and prints\n"
            "the port it is listening on. Runs until interrupted.\n"

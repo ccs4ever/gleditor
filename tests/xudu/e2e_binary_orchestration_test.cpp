@@ -459,8 +459,8 @@ TEST(E2EBinaryOrchestrationTest,
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
-      " --version-id " + v1.str() + " --alongside " + v2.str() +
-      " --screenshot " + step1Ppm.string() + " " + storeStep1.string();
+      " --version-id " + v1.str() + " --alongside " + v2.str() + " --capture " +
+      step1Ppm.string() + " " + storeStep1.string();
 
   const auto res1 = executeProcess(cmd1);
   EXPECT_EQ(res1.exitCode, 0) << "Step 1 process failed: " << res1.output;
@@ -512,7 +512,7 @@ TEST(E2EBinaryOrchestrationTest,
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
       " --read " + pubAPath.string() + " --read " + pubBPath.string() +
-      " --screenshot " + step2Ppm.string() + " " + storeReader.string();
+      " --capture " + step2Ppm.string() + " " + storeReader.string();
 
   const auto res2 = executeProcess(cmd2);
   EXPECT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
@@ -549,7 +549,7 @@ TEST(E2EBinaryOrchestrationTest,
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
       " --version-id " + verLinked.str() + " --alongside " + verB.str() +
-      " --screenshot " + step3Ppm.string() + " " + storeReader.string();
+      " --capture " + step3Ppm.string() + " " + storeReader.string();
 
   const auto res3 = executeProcess(cmd3);
   EXPECT_EQ(res3.exitCode, 0) << "Step 3 process failed: " << res3.output;
@@ -568,13 +568,13 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step4Ppm = screenshotDir / "step4_transclusion.ppm";
   const auto step4Png = screenshotDir / "step4_transclusion.png";
 
-  std::string cmd4 =
-      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() +
-      " --profile --whole-pages --fov 7.5 --coarse-below 0" + torrentArgs +
-      " --version-id " + verLinked.str() + " --alongside " +
-      verBTranscluded.str() + " --screenshot " + step4Ppm.string() + " " +
-      storeReader.string();
+  std::string cmd4 = xuduBin.string() +
+                     permascrollFlag(testRoot / "permascroll") + " --backend " +
+                     activeBackend() +
+                     " --profile --whole-pages --fov 7.5 --coarse-below 0" +
+                     torrentArgs + " --version-id " + verLinked.str() +
+                     " --alongside " + verBTranscluded.str() + " --capture " +
+                     step4Ppm.string() + " " + storeReader.string();
 
   const auto res4 = executeProcess(cmd4);
   EXPECT_EQ(res4.exitCode, 0) << "Step 4 process failed: " << res4.output;
@@ -649,8 +649,8 @@ TEST(E2EBinaryOrchestrationTest,
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 15 --coarse-below 0" + torrentArgs +
       " --read " + pubAPath.string() + " --read " + pubBPath.string() +
-      " --read " + pubCPath.string() + " --screenshot " + step5Ppm.string() +
-      " " + storeReader.string();
+      " --read " + pubCPath.string() + " --capture " + step5Ppm.string() + " " +
+      storeReader.string();
 
   const auto res5 = executeProcess(cmd5);
   EXPECT_EQ(res5.exitCode, 0) << "Step 5 process failed: " << res5.output;
@@ -699,7 +699,7 @@ TEST(E2EBinaryOrchestrationTest, textSurvivesAtWholePageDistance) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --whole-pages --coarse-below 0" +
-      " --version-id 1 --alongside a1 --screenshot " + ppmPath.string() + " " +
+      " --version-id 1 --alongside a1 --capture " + ppmPath.string() + " " +
       (testRoot / "store").string();
 
   const auto res = executeProcess(cmd);
@@ -737,8 +737,8 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
   const auto res     = executeProcess(
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
-      " --profile --version-id 1 --alongside a1 --screenshot " +
-      ppmPath.string() + " " + (testRoot / "store").string());
+      " --profile --version-id 1 --alongside a1 --capture " + ppmPath.string() +
+      " " + (testRoot / "store").string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   const auto pitch = medianLinePitch(ppmPath);
@@ -1011,7 +1011,7 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
-      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      vLinked.str() + " --alongside " + vB.str() + " --capture " +
       ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
@@ -1079,7 +1079,7 @@ TEST(E2EBinaryOrchestrationTest,
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
-      vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+      vLinked.str() + " --alongside " + vB.str() + " --capture " +
       ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
@@ -1136,12 +1136,12 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
   const auto ppmPath = screenshotDir / "full_page_multi_type_links.ppm";
   const auto pngPath = screenshotDir / "full_page_multi_type_links.png";
 
-  std::string cmd =
-      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() +
-      " --profile --whole-pages --fov 15 --coarse-below 0" + " --version-id " +
-      vCur.str() + " --alongside " + vB.str() + " --screenshot " +
-      ppmPath.string() + " " + storePath.string();
+  std::string cmd = xuduBin.string() +
+                    permascrollFlag(testRoot / "permascroll") + " --backend " +
+                    activeBackend() +
+                    " --profile --whole-pages --fov 15 --coarse-below 0" +
+                    " --version-id " + vCur.str() + " --alongside " + vB.str() +
+                    " --capture " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Multi-type test failed: " << res.output;
@@ -1306,13 +1306,13 @@ TEST(E2EBinaryOrchestrationTest,
   const auto ppmPath = screenshotDir / "full_page_three_doc_depth_routing.ppm";
   const auto pngPath = screenshotDir / "full_page_three_doc_depth_routing.png";
 
-  std::string cmd =
-      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
-      " --backend " + activeBackend() +
-      " --profile --whole-pages --fov 18 --coarse-below 0" + torrentArgs +
-      " --read " + pub1Path.string() + " --read " + pub2Path.string() +
-      " --read " + pub3Path.string() + " --screenshot " + ppmPath.string() +
-      " " + storePath.string();
+  std::string cmd = xuduBin.string() +
+                    permascrollFlag(testRoot / "permascroll") + " --backend " +
+                    activeBackend() +
+                    " --profile --whole-pages --fov 18 --coarse-below 0" +
+                    torrentArgs + " --read " + pub1Path.string() + " --read " +
+                    pub2Path.string() + " --read " + pub3Path.string() +
+                    " --capture " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;
@@ -1391,7 +1391,7 @@ TEST(E2EBinaryOrchestrationTest,
         " --backend " + activeBackend() +
         " --profile --whole-pages --fov 15 --coarse-below 0" +
         " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-        " --screenshot " + ppmPath.string() + " " + storePath.string();
+        " --capture " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0)
@@ -1467,7 +1467,7 @@ TEST(E2EBinaryOrchestrationTest,
         " --backend " + activeBackend() +
         " --profile --whole-pages --fov 15 --coarse-below 0" +
         " --version-id " + vLinked.str() + " --alongside " + vB.str() +
-        " --screenshot " + ppmPath.string() + " " + storePath.string();
+        " --capture " + ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     std::cout << "ASYMM (" << pagesA << "x" << pagesB << ") OUTPUT:\n"
@@ -1594,7 +1594,7 @@ TEST(E2EBinaryOrchestrationTest,
       activeBackend() + " --profile --whole-pages --fov 15 --coarse-below 0" +
       " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
       " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
@@ -1618,10 +1618,8 @@ TEST(E2EBinaryOrchestrationTest,
 
   const auto testRoot =
       fs::current_path() / "build" / "integration_workspace_pagebreak";
-  const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
-  fs::create_directories(screenshotDir);
 
   const std::string firstParagraph = "First paragraph, short and plain.\n\n";
   const std::string secondParagraph =
@@ -1640,12 +1638,12 @@ TEST(E2EBinaryOrchestrationTest,
 
   const auto runAndCountPages = [&](const MicroversionId &version,
                                     const std::string &label) {
-    const auto ppmPath = screenshotDir / (label + ".ppm");
     const std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() + " --profile --version-id " +
-        version.str() + " --screenshot " + ppmPath.string() + " " +
-        storePath.string();
+        version.str() + " " + storePath.string();
+    // Capturing exits after the first frame; profiling waits for the full
+    // render to settle and prints the physical page count this check needs.
     const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0) << label << " failed: " << res.output;
     const auto marker = std::string("total pages: ");
@@ -1688,7 +1686,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
       " --backend " + activeBackend() +
       " --profile --whole-pages --fov 15 --version-id " + whole.str() +
       " --select 0,0 --type '[bold,italic]MARKERWORD' "
-      "--do save --screenshot " +
+      "--do save --capture " +
       ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
@@ -1834,7 +1832,7 @@ TEST(E2EBinaryOrchestrationTest,
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + withFragment.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "media fragment test failed: " << res.output;
   EXPECT_EQ(res.output.find("invalid utf-8"), std::string::npos)
@@ -2044,7 +2042,7 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + textVer.str() +
-      " --alongside " + commentVer.str() + " --screenshot " + ppmPath.string() +
+      " --alongside " + commentVer.str() + " --capture " + ppmPath.string() +
       " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
@@ -2126,7 +2124,7 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
       " --profile --strict-diagnostics --version-id " + textVer.str() +
-      " --screenshot " + ppmPath.string() + " " + storePath.string();
+      " --capture " + ppmPath.string() + " " + storePath.string();
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering several distinct transcluded images crashed or hung: "
@@ -2175,7 +2173,7 @@ TEST(E2EBinaryOrchestrationTest, savingADocumentDoesNotRedesignateItsEditions) {
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --strict-diagnostics" +
       " --version-id " + v1.str() + " --alongside " + v2.str() +
-      " --background " + v3.str() + " --screenshot " + ppmPath.string() + " " +
+      " --background " + v3.str() + " --capture " + ppmPath.string() + " " +
       storePath.string();
 
   const auto res = executeProcess(cmd);
@@ -2215,7 +2213,7 @@ TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
   const std::string cmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --strict-diagnostics" +
-      " --alias " + v1.str() + ":original-release" + " --screenshot " +
+      " --alias " + v1.str() + ":original-release" + " --capture " +
       ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);

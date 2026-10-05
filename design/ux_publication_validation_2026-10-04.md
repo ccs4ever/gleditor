@@ -165,3 +165,55 @@ passphrase field. The recorded local publication pass came from `alice/publish-c
 Temporary private signing keys were removed after the initial evidence collection. Its public
 records and captures are no longer available in the current temporary directory; resumed logs remain
 available.
+
+## Complete inventory and edition review batch
+
+This batch implements format 2 whole-store inventory and verified reconstruction, and adds explicit
+edition review, creation and repointing to Publish. Existing designations remain unchanged by
+default. Author annotation edits are kept separately from derived caches, so a reopened edition can
+be repointed without inventing an annotation at its old target. Pending author decisions must be
+sealed before a history publication is signed; branch folds do not override them.
+
+Evidence root: `build/publication-inventory-fixes/`. UI evidence:
+`build/publication-local/run-fo8o_3bc/`. The final form frame was inspected and fits the viewport;
+its accessibility dump names the selected release and its old/new target versions. Platform
+assistive-technology delivery remains untested.
+
+| Scope                | Step and affordance                                                                       | Outcome       | Evidence                                                                    |
+| -------------------- | ----------------------------------------------------------------------------------------- | ------------- | --------------------------------------------------------------------------- |
+| P1 controls          | Add `release` in Publish with Ctrl+Shift+S, Tab and Right                                 | Pass          | `edition-1.log`, `publish-form-1.png` in the UI evidence root               |
+| P1 controls          | Reopen and publish with Keep all existing editions                                        | Pass          | `edition-2.log`, `publish-form-2.png`                                       |
+| P1 controls          | Repoint that release to the edited version in Publish                                     | Pass          | `edition-3.log`, `publish-form-3.png`                                       |
+| P1 controls          | Verify readiness and execute retry with Ctrl+Shift+P                                      | Pass          | `status.log`, `status.ppm`, `results.json`                                  |
+| Engine prerequisite  | Restore documents, slices, branches, editions and annotations; retain reader bytes        | Pass          | `engine-final.log`, ten PublicationInventoryTest cases                      |
+| Network prerequisite | Fresh opposite-namespace process fetches the manifest and every dependency, then restores | Pass          | `swarm-final.log`; explicit mock identity and zero reader-permascroll bytes |
+| P2/P3                | Full-store opening through author/topic discovery controls                                | No affordance | Catalog ingestion and remote-open integration remain the next batch         |
+
+The full engine run executed 1,236 cases: 1,233 passed, one optional video check skipped, and two
+failed. The memoization benchmark missed its fixed throughput threshold while Docker was building;
+it passed without build load at 39,470 hits/second. The page-count check captured the first frame
+and exited before the settled profile summary. That diagnostic now runs in profile mode, and both
+failed cases passed in `broad-recheck.log`. Earlier broad-run failures also exposed obsolete
+`--screenshot` options; capture tests now use `--capture`. One early run overlapped linking and
+produced transient binary-launch failures; final checks ran after the build completed.
+
+All 57 Xuzz and 119 ZigZag checks passed against the final model. The eleven existing namespace
+transport/mutable-name checks passed separately from the full publication restoration check. The
+first opposite-namespace reader attempt timed out on metadata with a wildcard publisher interface;
+the final fixture binds its explicit namespace address and passes. DHT safeguards are unchanged.
+Three UI publications passed signed topics, durable sequence advancement, incremental permascroll
+seals, actual GPG signature/digest verification, zero-filled private ranges, edition controls and
+retry. Temporary signing keys were removed by the driver.
+
+The rebuilt `gleditor-swarm-test:local` image passed 78 build-time smoke checks, including complete
+inventory restoration. Its image ID is
+`sha256:f6769738e65a7e7039b7ebd1ff8ccf244b722d4b8b347f97aa877be1dac11462`. The image contains the
+final application/model changes; the later profile-only pagination harness correction does not
+affect its publication smoke filter. Repository formatting and lint are checked before this batch is
+committed.
+
+None of P1–P7 has passed end to end. Full-store restoration is currently an engine API and
+diagnostic peer mode. The selected-EDL adoption path remains in Session. Durable reader deployment
+bindings, remote-open UI, author catalogs/topic exchange, subscriptions, commentary discovery and
+independent link-package publication/toggles still require implementation. Initial signing/sealing
+also remains synchronous on the Session command path.

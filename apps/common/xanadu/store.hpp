@@ -125,6 +125,14 @@ class Store : public SpanReader {
 public:
   Store();
   explicit Store(std::shared_ptr<UserPermascroll> userPermascroll);
+  Store(std::shared_ptr<UserPermascroll> userPermascroll,
+        const DocumentId &documentId);
+
+  /// Commit pending edition/annotation metadata before signing a snapshot.
+  void sealMetadata() const;
+  [[nodiscard]] bool hasPendingMetadata() const noexcept {
+    return hasExplicitCurrentVersions_ || !pendingVersionAnnotations_.empty();
+  }
   ~Store() override;
 
   /// Stable persisted identity of this document, not of one revision of it.
@@ -825,6 +833,13 @@ public:
   /// Remove a version from the set of current versions.
   void removeCurrentVersion(const MicroversionId &version);
 
+  /// Repoint exactly one author-selected edition, including duplicate names.
+  MicroversionId removeEdition(const MicroversionId &parent,
+                               const MicroversionId &editionBirth);
+  MicroversionId repointEdition(const MicroversionId &parent,
+                                const MicroversionId &editionBirth,
+                                const MicroversionId &target);
+
   // -- Editions Rank (§5.3) -------------------------------------------------
 
   struct EditionInfo {
@@ -1109,6 +1124,12 @@ public:
   segmentsOverlapping(ScrollId scroll, std::uint64_t start,
                       std::uint64_t length) const;
 
+  /// Deployment binding for the author's slot zero in an imported history.
+  /// This is supplied by the signed publication, not minted as author metadata.
+  void bindPublishedLocalScroll(ScrollId id);
+  [[nodiscard]] ScrollId publishedLocalScroll() const noexcept {
+    return publishedLocalScroll_;
+  }
   void setContentSource(const ContentSource *source);
   void hydrateExternalScroll(Scroll &sc) const;
   [[nodiscard]] const Resolver &contentResolver() const { return resolver; }
@@ -1313,7 +1334,7 @@ private:
   /// otherwise kept up to date -- never runs.
   void indexGenesisCells();
 
-  /// Ensure pending versionAnnotations_ and currentVersions_ are sealed as
+  /// Ensure pending author annotations and currentVersions_ are sealed as
   /// structure hyperop cells in ops.nodes before saving (§5.4).
   void sealPendingMetadataAsCells() const;
 
@@ -1323,6 +1344,7 @@ private:
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
   std::vector<Scroll> externals;
+  ScrollId publishedLocalScroll_{localScroll};
   /// Where whole media files insertMedia() has appended to the local spool
   /// began and ended, and what MIME type each was -- the local spool's own
   /// equivalent of a Scroll's segment table, kept separately because scroll
@@ -1356,6 +1378,8 @@ private:
   mutable bool hasExplicitCurrentVersions_{false};
   mutable std::vector<MicroversionId> currentVersionsFallback_;
   mutable std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
+  mutable std::map<MicroversionId, VersionAnnotation>
+      pendingVersionAnnotations_;
   mutable std::map<std::string, MicroversionId> aliasIndex_;
   zigzag::ScrollRegistry scrollRegistry_;
   std::string bootstrapPermascrollKey_;

@@ -448,6 +448,9 @@ public:
     std::string passphrase;
     std::vector<std::string> topics;
     bool announce{};
+    /// Both empty keeps the author's existing editions unchanged.
+    std::optional<MicroversionId> editionToRepoint;
+    std::string newEditionName;
   };
 
   std::string publishDocument(const MicroversionId &version,

@@ -41,6 +41,7 @@
 #include <string_view>
 #include <vector>
 
+#include "document_id.hpp"
 #include "extern_ref.hpp"
 #include "microversion.hpp"
 #include "mutable_link.hpp"
@@ -53,6 +54,8 @@
 namespace xanadu {
 
 class Store;
+class ContentSource;
+class UserPermascroll;
 
 /**
  * @brief The name of a scroll that means the same thing on every machine.
@@ -133,7 +136,7 @@ struct GlobalLink {
   bool operator==(const GlobalLink &) const = default;
 };
 
-inline constexpr std::int64_t publicationFormatVersion = 1;
+inline constexpr std::int64_t publicationFormatVersion = 2;
 
 class PublicationUnreadable : public std::runtime_error {
 public:
@@ -151,8 +154,31 @@ publicationTopics(std::string_view commaSeparated);
  * the name can find the newest publication under it without asking anyone in
  * particular, and can tell that what they found is the publisher's.
  */
+struct PublishedStructureView {
+  MicroversionId head;
+  std::string name;
+  bool operator==(const PublishedStructureView &) const = default;
+};
+
+/// Birth and views are microversion names in this publication's history,
+/// never publisher-local operation indices.
+struct PublishedStructure {
+  StructureKind kind{StructureKind::Xanadoc};
+  MicroversionId birth;
+  std::vector<PublishedStructureView> views;
+  bool operator==(const PublishedStructure &) const = default;
+};
+
 struct Publication {
   PublicKey publisher;
+  DocumentId storeId;
+  /// The global permascroll replacing local slot zero in the history.
+  std::string historyScroll;
+  /// All terminal branches, and every document/slice visible on them.
+  std::vector<MicroversionId> heads;
+  std::vector<PublishedStructure> inventory;
+  /// Explicit document birth for the selected EDL; zero for implicit documents.
+  MicroversionId selectedBirth;
   /// Which document under that key. One person publishes many.
   std::string salt;
   std::string title;
@@ -183,9 +209,8 @@ struct Publication {
   /// the whole of it fetches one torrent per segment, in this order --
   /// segment.at and segment.length are operation counts here, not bytes, and
   /// segment.torrent (with segment.path, always sealedOpsName) is where to
-  /// find the file. Empty in a manifest published before this existed, which
-  /// is not the same as a document with no history -- a reader gets the
-  /// pieces either way and no more.
+  /// find the file. An EDL-only publication has no history segments or
+  /// inventory and can be quoted with adopt(); full restoration requires them.
   std::vector<ScrollSegment> opsSegments;
 
   /// Explicit signed table of withheld and transcopyright-locked ranges.
@@ -227,6 +252,13 @@ struct Publication {
 [[nodiscard]] std::optional<Publication>
 decodePublication(std::string_view encoded);
 
+/// Reconstruct the complete signed history into a new store bound to the
+/// reader's permascroll. Source must outlive the result. Every required payload
+/// is verified before returning; failures leave the reader's scroll untouched.
+[[nodiscard]] std::unique_ptr<Store>
+restorePublication(const Publication &pub, const ContentSource &source,
+                   std::shared_ptr<UserPermascroll> readerPermascroll);
+
 /// Whether @p pub's signature really is its publisher's.
 [[nodiscard]] bool verifyPublication(const Publication &pub);
 
@@ -247,6 +279,10 @@ publicationPrimedia(std::string_view bytes, std::uint64_t at,
  * start is an offset into those same bytes -- so nothing already written has
  * to be rewritten, which is the property that makes sealing safe to do at any
  * time.
+ *
+ * Call Store::sealMetadata() before calculating and signing provenance. Once
+ * signed, these sealing/encoding helpers serialize that prepared snapshot and
+ * append no author metadata.
  *
  * Sealing again later covers what has been written since as a further
  * segment; the address of everything already sealed is untouched. See

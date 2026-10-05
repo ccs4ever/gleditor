@@ -143,6 +143,8 @@ echo "==> running the swarm tests in $TEST_NS"
 set +e
 ip netns exec "$TEST_NS" env \
   XUDU_PEER_HOST="$PEER_IP" \
+  XUDU_TEST_HOST="$TEST_IP" \
+  XUDU_PEER_NAMESPACE="$PEER_NS" \
   XUDU_PEER_PORT="$PEER_PORT" \
   XUDU_PEER_TORRENT="$WORK/sample.torrent" \
   XUDU_PEER_TEXT="$WORK/seed/sample.txt" \

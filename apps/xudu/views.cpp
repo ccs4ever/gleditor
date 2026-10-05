@@ -732,6 +732,34 @@ void Views::publishCurrent(const std::string &salt) {
     fTopics.hint  = "comma-separated discovery tags, e.g. Ideas, Fiction";
     asked.push_back(std::move(fTopics));
 
+    Field editions;
+    editions.label        = "Editions";
+    editions.kind         = Kind::Choice;
+    editions.options      = {"Keep all existing editions"};
+    editions.optionValues = {"keep"};
+    auto editionHead      = session.store(storeIdx).structureHead();
+    if (editionHead.isZero()) editionHead = session.store(storeIdx).latest();
+    std::string review;
+    for (const auto &edition : session.store(storeIdx).editions(editionHead)) {
+      const auto target = edition.targetVersion.str();
+      editions.options.push_back("Repoint " + edition.name + " (" + target +
+                                 ") to " + version.str());
+      editions.optionValues.push_back(
+          session.store(storeIdx).segmentedOps().idOf(edition.cell).str());
+      if (!review.empty()) review += "; ";
+      review += edition.name + " → " + target;
+    }
+    editions.options.push_back("Add a named edition for " + version.str());
+    editions.optionValues.push_back("new");
+    editions.hint = review.empty()
+                        ? "No editions designated; keeping them is allowed"
+                        : "Existing: " + review;
+    asked.push_back(std::move(editions));
+    Field editionName;
+    editionName.label = "New edition";
+    editionName.hint  = "name required only when adding an edition above";
+    asked.push_back(std::move(editionName));
+
     Field destination;
     destination.label         = "Destination";
     destination.kind          = Kind::Choice;
@@ -776,8 +804,21 @@ void Views::publishAnswers(const MicroversionId &version,
 
   if (answers.size() > 9)
     request.topics = publicationTopics(answers[9].answer());
-  if (answers.size() > 10)
-    request.announce = answers[10].answer() == "test-swarm";
+  if (answers.size() > 12) {
+    const auto editionAction = answers[10].answer();
+    if (editionAction == "new") {
+      request.newEditionName = answers[11].answer();
+      if (request.newEditionName.empty()) {
+        state->showDialog(render::DiagnosticSeverity::Error,
+                          "Edition name required",
+                          "Name the new edition before publishing.");
+        return;
+      }
+    } else if (editionAction != "keep") {
+      request.editionToRepoint = MicroversionId::parse(editionAction);
+    }
+    request.announce = answers[12].answer() == "test-swarm";
+  }
 
   renderer->runWithState(
       [this, version, which, storeIdx, request](RenderState &) {

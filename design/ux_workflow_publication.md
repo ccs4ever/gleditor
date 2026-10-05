@@ -306,3 +306,11 @@ remove temporary private keys when the run is finished.
 The contract is complete only when all seven journeys pass through user affordances, their remote
 downloads and format comparisons pass, and the rejection/retry/offline cases above pass. This
 document currently makes no such claim.
+
+## Author edition choices at publication
+
+Current versions and editions are authorial decisions made as the store evolves. The Publish form
+must expose their names and targets for review, keep them unchanged by default, and permit explicit
+creation or repointing before signing. Reading another branch, constructing the inventory or finding
+a higher microversion does not authorize a designation change. Multiple editions with the same name
+remain independently selectable by their birth identities.

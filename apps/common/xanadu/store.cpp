@@ -50,6 +50,15 @@ void requireAddressable(const PrimediaSpan &span, const std::string_view what) {
   }
 }
 
+void canonicalizeAnnotationTimestamp(VersionAnnotation &annotation) {
+  if (annotation.timestamp.empty()) return;
+  TimestampInstant parsed{};
+  if (!parseUtcTimestampIso8601(annotation.timestamp, parsed))
+    throw std::invalid_argument("invalid timestamp in annotation: " +
+                                annotation.timestamp);
+  annotation.timestamp = formatUtcTimestampIso8601(parsed);
+}
+
 /// Names of the files a store is written as.
 constexpr const char *opsNodesFile = "ops.nodes";
 /// An export of the operations, in either encoding: canonical OSMIC text as
@@ -109,6 +118,17 @@ Store::Store(std::shared_ptr<UserPermascroll> userPermascroll)
     : userPermascroll_(userPermascroll ? std::move(userPermascroll)
                                        : std::make_shared<UserPermascroll>()),
       chronofilade_(std::make_unique<enfilade::Chronofilade>()) {}
+
+Store::Store(std::shared_ptr<UserPermascroll> userPermascroll,
+             const DocumentId &documentId)
+    : Store(std::move(userPermascroll)) {
+  documentId_ = documentId;
+}
+
+void Store::sealMetadata() const {
+  sealPendingMetadataAsCells();
+  userPermascroll_->flush();
+}
 
 Store::~Store() {
   while (!activeManifolds_.empty()) {
@@ -460,7 +480,6 @@ Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
   folded.compact();
-  const_cast<Store *>(this)->syncCurrentVersionsFromRank(folded);
   return folded;
 }
 
@@ -1267,6 +1286,13 @@ void Store::addSegment(const ScrollId id, const ScrollSegment &segment) {
   externals[id - 1].addSegment(segment);
 }
 
+void Store::bindPublishedLocalScroll(const ScrollId id) {
+  if (id == localScroll || id > externals.size())
+    throw std::invalid_argument(
+        "published local scroll must name a held foreign scroll");
+  publishedLocalScroll_ = id;
+}
+
 void Store::setContentSource(const ContentSource *source) {
   resolver.setSource(source);
   if (source) {
@@ -1967,6 +1993,7 @@ MicroversionId Store::structureHead() const {
 }
 
 const std::vector<MicroversionId> &Store::currentVersions() const {
+  if (hasExplicitCurrentVersions_) return currentVersions_;
   if (currentVersions_.empty()) {
     const auto sHead  = structureHead();
     const auto target = !sHead.isZero() ? sHead : latest();
@@ -2104,14 +2131,68 @@ MicroversionId Store::designateEdition(const MicroversionId &parent,
   folded = rebuildManifold(curHead);
   syncCurrentVersionsFromRank(folded.value());
   if (name != "current") {
-    aliasIndex_[std::string(name)]    = target;
-    versionAnnotations_[target].alias = std::string(name);
+    aliasIndex_[std::string(name)] = target;
   }
 
   return curHead;
 }
 
+MicroversionId Store::removeEdition(const MicroversionId &parent,
+                                    const MicroversionId &editionBirth) {
+  const auto cell     = opsSpool.indexOf(editionBirth);
+  const auto manifold = rebuildManifold(parent);
+  const auto editions = manifold.editions();
+  const auto edition =
+      std::ranges::find(editions, cell, &zigzag::Manifold::Edition::cell);
+  const auto dim = manifold.dimensionNamed("d.editions", *this);
+  if (edition == editions.end() || !dim)
+    throw std::invalid_argument("edition is absent");
+  const auto prev = manifold.linked(cell, *dim, zigzag::DimVector::NEG);
+  const auto next = manifold.linked(cell, *dim, zigzag::DimVector::POS);
+  if (prev == zigzag::noCell)
+    throw std::invalid_argument("edition rank is unrooted");
+  const auto head = setLink(parent, prev, *dim, zigzag::DimVector::POS, next);
+  currentVersions_.clear();
+  aliasIndex_.erase(edition->name);
+  const auto updated = rebuildManifold(head);
+  syncCurrentVersionsFromRank(updated);
+  syncAliasesFromRank(updated);
+  return head;
+}
+
+MicroversionId Store::repointEdition(const MicroversionId &parent,
+                                     const MicroversionId &editionBirth,
+                                     const MicroversionId &target) {
+  const auto targetOp    = opsSpool.indexOf(target);
+  const auto editionCell = opsSpool.indexOf(editionBirth);
+  const auto manifold    = rebuildManifold(parent);
+  const auto editions    = manifold.editions();
+  const auto edition     = std::ranges::find(editions, editionCell,
+                                             &zigzag::Manifold::Edition::cell);
+  if (targetOp == 0 || editionCell == 0 || edition == editions.end())
+    throw std::invalid_argument("edition or target version is absent");
+  if (edition->targetOp == targetOp) return parent;
+  const auto oldTarget = opsSpool.idOf(edition->targetOp);
+  if (!pendingVersionAnnotations_.contains(oldTarget))
+    versionAnnotations_.erase(oldTarget);
+  const auto dim = manifold.dimensionNamed("d.edition-of", *this);
+  if (!dim)
+    throw std::invalid_argument("edition has no d.edition-of dimension");
+  auto head   = parent;
+  auto handle = manifold.findOpHandle(targetOp);
+  if (!handle) {
+    head   = makeOpHandle(head, targetOp);
+    handle = cellRefOf(head);
+  }
+  head = setLink(head, editionCell, *dim, zigzag::DimVector::POS, *handle);
+  const auto updated = rebuildManifold(head);
+  syncCurrentVersionsFromRank(updated);
+  syncAliasesFromRank(updated);
+  return head;
+}
+
 void Store::syncCurrentVersionsFromRank(const zigzag::Manifold &manifold) {
+  if (hasExplicitCurrentVersions_) return;
   const auto eds = manifold.editions();
   if (eds.empty()) {
     return;
@@ -3303,6 +3384,7 @@ Store::resolveStructureCreated(const MicroversionId &version,
 MicroversionId Store::annotateVersion(const MicroversionId &parent,
                                       const MicroversionId &target,
                                       VersionAnnotation annotation) {
+  canonicalizeAnnotationTimestamp(annotation);
   const auto targetOp = opsSpool.indexOf(target);
   if (0 == targetOp) {
     throw std::invalid_argument("target version does not exist in store");
@@ -3420,10 +3502,12 @@ MicroversionId Store::annotateVersion(const MicroversionId &parent,
 
 void Store::setVersionAnnotation(const MicroversionId &id,
                                  VersionAnnotation annotation) {
+  canonicalizeAnnotationTimestamp(annotation);
   if (!annotation.alias.empty()) {
     aliasIndex_[annotation.alias] = id;
   }
-  versionAnnotations_[id] = std::move(annotation);
+  pendingVersionAnnotations_[id] = annotation;
+  versionAnnotations_[id]        = std::move(annotation);
 }
 
 std::optional<VersionAnnotation>
@@ -3738,7 +3822,7 @@ void Store::sealPendingMetadataAsCells() const {
   if (latest().isZero()) {
     return;
   }
-  if (versionAnnotations_.empty() && !hasExplicitCurrentVersions_ &&
+  if (pendingVersionAnnotations_.empty() && !hasExplicitCurrentVersions_ &&
       (zigzag::noCell == homeCell_ || externals.empty())) {
     return;
   }
@@ -3749,7 +3833,7 @@ void Store::sealPendingMetadataAsCells() const {
   }
   auto manifold = rebuildManifold(curHead);
 
-  const auto pendingAnnotations = versionAnnotations_;
+  const auto pendingAnnotations = pendingVersionAnnotations_;
   for (const auto &[id, ann] : pendingAnnotations) {
     const auto targetOp = opsSpool.indexOf(id);
     if (targetOp > 0) {
@@ -3763,22 +3847,32 @@ void Store::sealPendingMetadataAsCells() const {
     }
   }
 
-  // Only seal currentVersions_ as "current" editions if explicitly set
-  // (§5.3 / §5.4).
-  if (hasExplicitCurrentVersions_ && !currentVersions_.empty()) {
-    const auto existingEds = manifold.editions();
-    if (existingEds.empty()) {
-      const auto headsToSeal = currentVersions_;
-      for (std::size_t i = 0; i < headsToSeal.size(); ++i) {
-        if (opsSpool.indexOf(headsToSeal[i]) > 0) {
-          curHead =
-              mutableStore->designateEdition(curHead, "current", headsToSeal[i],
-                                             /*allowDuplicateName=*/(i > 0));
-          manifold = rebuildManifold(curHead);
-        }
-      }
+  pendingVersionAnnotations_.clear();
+
+  // This cache was set by an author action. Publish that choice even when
+  // named editions already exist; reading a fold must not override it.
+  if (hasExplicitCurrentVersions_) {
+    const auto wanted = currentVersions_;
+    std::vector<zigzag::Manifold::Edition> currents;
+    for (const auto &edition : manifold.editions())
+      if (edition.name == "current") currents.push_back(edition);
+    for (std::size_t i = 0; i < wanted.size(); ++i) {
+      if (opsSpool.indexOf(wanted[i]) == 0)
+        throw std::invalid_argument("current version is absent: " +
+                                    wanted[i].str());
+      if (i < currents.size())
+        curHead = mutableStore->repointEdition(
+            curHead, opsSpool.idOf(currents[i].cell), wanted[i]);
+      else
+        curHead =
+            mutableStore->designateEdition(curHead, "current", wanted[i], true);
     }
+    for (std::size_t i = wanted.size(); i < currents.size(); ++i)
+      curHead =
+          mutableStore->removeEdition(curHead, opsSpool.idOf(currents[i].cell));
+    mutableStore->currentVersions_            = wanted;
     mutableStore->hasExplicitCurrentVersions_ = false;
+    manifold                                  = rebuildManifold(curHead);
   }
 
   // Only seal externals on d.scrolls if this store is a slice (homeCell_ !=
@@ -3964,10 +4058,13 @@ void Store::load(const std::string &directory) {
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
-  scrollRegistry_ = {};
-  localSegments   = Scroll{};
+  publishedLocalScroll_ = localScroll;
+  scrollRegistry_       = {};
+  localSegments         = Scroll{};
   currentVersions_.clear();
   versionAnnotations_.clear();
+  pendingVersionAnnotations_.clear();
+  hasExplicitCurrentVersions_ = false;
   aliasIndex_.clear();
 
   if (userPermascroll_ != nullptr) {

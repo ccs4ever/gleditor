@@ -74,7 +74,7 @@ def run(binary, root):
                 answers += ["--chord", "Backspace"] * 8
             answers += ["--type", value, "--chord", "Tab"]
         answers += ["--chord", "Tab"] * 5
-        answers += ["--type", " Ideas, writing,IDEAS ", "--chord", "Return", "--dump-a11y"]
+        answers += ["--type", " Ideas, writing,IDEAS ", "--chord", "Tab"]
         for edition in range(1, 4):
             script = []
             if edition == 1:
@@ -82,7 +82,16 @@ def run(binary, root):
                           "--chord", "F6"]
             elif edition == 3:
                 script = ["--type", " revised"]
-            command = base + script + answers + [
+            edition_action = []
+            if edition in (1, 3):
+                edition_action += ["--chord", "Right"]
+            edition_action += ["--chord", "Tab"]
+            if edition == 1:
+                edition_action += ["--type", "release"]
+            edition_action += ["--chord", "Tab", "--dump-a11y", "--capture",
+                               str(root / f"publish-form-{edition}.ppm"),
+                               "--chord", "Return"]
+            command = base + script + answers + edition_action + [
                 "--capture", str(root / f"edition-{edition}.ppm")]
             with (root / f"edition-{edition}.log").open("w") as log:
                 subprocess.run(command, env=env, stdout=log, stderr=log,
@@ -102,6 +111,9 @@ def run(binary, root):
         assert "publication retry queued" in status, "Retry did not execute"
         assert "Local ready" in status, "Prepared publication never became ready"
 
+        assert "Add a named edition" in (root / "edition-1.log").read_text()
+        assert "Keep all existing editions" in (root / "edition-2.log").read_text()
+        assert "Repoint release" in (root / "edition-3.log").read_text()
         records = list((root / "store/published").rglob("AUTHORSHIP.tsv"))
         assert records, "No signed seed records were produced"
         for record in records:
@@ -128,7 +140,7 @@ def run(binary, root):
 
 def validate(root):
     pubs = [decode((root / f"edition-{i}.xanadoc").read_bytes()) for i in (1, 2, 3)]
-    assert all(p[b"format"] == 1 and p[b"topics"] == [b"ideas", b"writing"]
+    assert all(p[b"format"] == 2 and p[b"topics"] == [b"ideas", b"writing"]
                for p in pubs), "Topics were not normalized and signed by the form"
     assert len({p[b"publisher"] for p in pubs}) == 1, "Publication identity changed"
     assert [p[b"seq"] for p in pubs] == [1, 2, 3], "Sequence did not advance"
@@ -168,6 +180,7 @@ def validate(root):
     report = {
         "sequences": [p[b"seq"] for p in pubs],
         "topics_signed": True,
+        "edition_creation_review_and_repoint_accessible": True,
         "status_and_retry_accessible": True,
         "same_publisher": True,
         "same_permascroll_key": True,

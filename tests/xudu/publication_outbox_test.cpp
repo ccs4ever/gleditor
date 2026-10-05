@@ -260,9 +260,18 @@ TEST_F(PublicationOutboxTest,
   EXPECT_FALSE(xanadu::verifyPublication(altered));
   auto dictionary =
       xanadu::bencode::decode(xanadu::encodePublication(publication)).asDict();
-  dictionary["format"] = xanadu::bencode::Value::integer(2);
+  dictionary["format"] =
+      xanadu::bencode::Value::integer(xanadu::publicationFormatVersion + 1);
   EXPECT_THROW((void)xanadu::decodePublication(
                    xanadu::bencode::Value::dict(dictionary).encode()),
+               xanadu::PublicationUnreadable);
+}
+
+TEST_F(PublicationOutboxTest, AValidSignatureCannotHideAnIncompleteInventory) {
+  publication.inventory.clear();
+  publication.signature = xanadu::signMutableItem(
+      xanadu::publicationSigningBuffer(publication), keys);
+  EXPECT_THROW((void)xanadu::reviewPublicationDependencies(publication, roots),
                xanadu::PublicationUnreadable);
 }
 
@@ -320,9 +329,11 @@ TEST_F(PublicationOutboxNetworkTest,
        RemoteDhtAcknowledgesAndRetainsTheSignedPointer) {
   const auto host = std::getenv("XUDU_PEER_HOST");
   const auto port = std::getenv("XUDU_PEER_PORT");
-  if (!host || !port)
+  if (!host || !port || !std::getenv("XUDU_TEST_HOST") ||
+      !std::getenv("XUDU_PEER_NAMESPACE"))
     GTEST_SKIP() << "run make test/swarm for separate network stacks";
   xanadu::SwarmContentSource::Options network;
+  network.listenInterfaces = std::string(std::getenv("XUDU_TEST_HOST")) + ":0";
   network.enableLocalDiscovery           = false;
   network.enableTrackers                 = false;
   network.restrictDhtToDistinctNetworks  = false;
@@ -359,7 +370,8 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(status(reopened, id).manifestHash, expected);
   const auto hash = reader.addMagnet("magnet:?xt=urn:btih:" + expected.hex(),
                                      (root / "download").string());
-  reader.connectPeer(hash, "127.0.0.1", reopened.listenPort());
+  reader.connectPeer(hash, std::getenv("XUDU_TEST_HOST"),
+                     reopened.listenPort());
   ASSERT_TRUE(reader.waitForMetadata(hash, 30s));
   const auto meta = reader.metainfo(hash);
   ASSERT_TRUE(meta.has_value());
@@ -370,6 +382,33 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(received->topics, (std::vector<std::string>{"ideas"}));
   EXPECT_EQ(xanadu::encodePublication(*received),
             xanadu::encodePublication(publication));
+  // A fresh process in the other namespace starts with an empty cache. Its
+  // only inputs are the immutable manifest hash and an explicit peer address.
+  const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
+  const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
+  ASSERT_NE(readerNamespace, nullptr);
+  ASSERT_NE(publisherHost, nullptr);
+  const auto cache  = root / "remote-reader";
+  const auto report = root / "remote-reader.txt";
+  const auto quote  = [](const std::string_view value) {
+    std::string quoted{"'"};
+    for (const char ch : value)
+      quoted += ch == '\'' ? "'\\''" : std::string(1, ch);
+    return quoted + "'";
+  };
+  const auto command =
+      std::string("ip netns exec ") + quote(readerNamespace) +
+      " ./build/xudu-swarm-peer --restore-publication " + expected.hex() + " " +
+      quote(publisherHost) + " " + std::to_string(reopened.listenPort()) + " " +
+      quote(cache.string()) + " > " + quote(report.string()) + " 2>&1";
+  ASSERT_EQ(std::system(command.c_str()), 0) << std::ifstream(report).rdbuf();
+  std::ifstream restoredReport(report);
+  std::string line;
+  std::getline(restoredReport, line);
+  EXPECT_EQ(line, "restored " + keys.publicKey.hex() + " 1 " +
+                      std::to_string(publication.opsSegments.front().length) +
+                      " " + std::to_string(publication.inventory.size()) +
+                      " 0");
 }
 
 } // namespace

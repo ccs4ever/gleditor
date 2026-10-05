@@ -1227,13 +1227,20 @@ TEST(ManifoldTest, theEditionsRankAndTheTableCacheAgree) {
   const auto expected = std::vector<MicroversionId>{v1, v2, v3};
   EXPECT_EQ(slice.store.currentVersions(), expected);
 
-  // If table cache is diverged or tampered with:
+  // An explicit author choice remains pending until metadata is sealed.
   slice.store.setCurrentVersions({v3, v1});
   EXPECT_NE(slice.store.currentVersions(), expected);
 
-  // A fold enforces the rank over the cache
   const auto foldAfterDivergence = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(slice.store.currentVersions(), expected);
+  const auto selected            = std::vector<MicroversionId>{v3, v1};
+  EXPECT_EQ(slice.store.currentVersions(), selected);
+  slice.store.sealMetadata();
+  EXPECT_EQ(slice.store.currentVersions(), selected);
+  const auto editions = slice.store.editions(slice.store.structureHead());
+  std::vector<MicroversionId> current;
+  for (const auto &edition : editions)
+    if (edition.name == "current") current.push_back(edition.targetVersion);
+  EXPECT_EQ(current, selected);
 }
 
 TEST(ManifoldTest, aVersionAnnotationBecomesAHandleCell) {
@@ -1284,7 +1291,7 @@ TEST(ManifoldTest, anAnnotationKeepsStateSeparateFromClaimedTime) {
   EXPECT_EQ(ann->alias, "v1.0");
   EXPECT_EQ(ann->description, "First milestone");
   EXPECT_EQ(ann->tag, "milestone");
-  EXPECT_EQ(ann->timestamp, claimedTime);
+  EXPECT_EQ(ann->timestamp, "2026-09-24T03:00:00.000000000Z");
 
   // An annotation without claimed timestamp has an empty timestamp field;
   // it is never synthesized or derived from the MicroversionId

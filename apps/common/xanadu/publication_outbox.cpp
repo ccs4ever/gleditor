@@ -17,6 +17,8 @@
 
 #include "bencode.hpp"
 #include "resolver.hpp"
+#include "store.hpp"
+#include "user_permascroll.hpp"
 
 namespace xanadu {
 namespace {
@@ -288,6 +290,12 @@ reviewPublicationDependencies(const Publication &pub,
   for (const auto &link : pub.links) {
     for (const auto &span : link.left) checkSpan(span);
     for (const auto &span : link.right) checkSpan(span);
+  }
+  if (!pub.opsSegments.empty()) {
+    DirectoryContentSource source;
+    for (const auto &seed : seeds)
+      (void)source.add(seed.metainfo, seed.savePath.string());
+    (void)restorePublication(pub, source, std::make_shared<UserPermascroll>());
   }
   return seeds;
 }

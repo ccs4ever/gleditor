@@ -9,6 +9,7 @@
 
 #include <gleditor/logging.hpp>
 
+#include "common/xanadu/publication.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
@@ -1501,6 +1502,21 @@ Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
   std::unordered_map<CellRef, std::string> cellKeys;
   std::unordered_set<xanadu::ScrollId> resolvedScrollIds;
   resolvedScrollIds.insert(xanadu::localScroll);
+  if (store_) resolvedScrollIds.insert(store_->publishedLocalScroll());
+  const auto deployedId = [this](const std::string &key,
+                                 xanadu::ScrollId ordinal) {
+    if (store_) {
+      const auto &scrolls = store_->scrolls();
+      const auto held =
+          std::ranges::find_if(scrolls, [&](const xanadu::Scroll &scroll) {
+            return xanadu::scrollKey(scroll) == key;
+          });
+      if (held != scrolls.end())
+        return static_cast<xanadu::ScrollId>(
+            std::distance(scrolls.begin(), held) + 1);
+    }
+    return ordinal;
+  };
 
   bool progress = true;
   while (resolved.size() < scrollCells.size() && progress) {
@@ -1529,7 +1545,8 @@ Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
         if (canRead && !key.empty()) {
           resolved.insert(cell);
           cellKeys[cell] = std::move(key);
-          resolvedScrollIds.insert(static_cast<xanadu::ScrollId>(i + 1));
+          resolvedScrollIds.insert(
+              deployedId(cellKeys[cell], static_cast<xanadu::ScrollId>(i + 1)));
           progress = true;
         }
       }
@@ -1555,8 +1572,8 @@ Manifold::scrollRegistry(const xanadu::SpanReader &reader) const {
   registry.scrolls.reserve(scrollCells.size());
   for (std::size_t i = 0; i < scrollCells.size(); ++i) {
     const auto cell = scrollCells[i];
-    const auto id   = static_cast<xanadu::ScrollId>(i + 1);
     const auto &key = cellKeys[cell];
+    const auto id   = deployedId(key, static_cast<xanadu::ScrollId>(i + 1));
     registry.scrolls.push_back(ScrollRecord{
         .id        = id,
         .cell      = cell,

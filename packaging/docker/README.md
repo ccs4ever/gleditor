@@ -19,8 +19,8 @@ enabled; the image does not force a compiler or language standard.
 
 The image includes `xuzz` (and its compatibility aliases), `xudu-dump`, `xudu-swarm-peer`, engine
 tests, GnuPG, Python, iproute2 and software OpenGL. Build-time smoke tests exercise publication, V5
-history, durable outbox and signed link-package primitives. The default container command repeats
-those tests:
+history, complete-store inventory restoration, durable outbox and signed link-package primitives.
+The default container command repeats those tests:
 
 ```sh
 docker run --rm --network none gleditor-swarm-test:local
