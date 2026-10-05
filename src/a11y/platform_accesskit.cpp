@@ -4,7 +4,8 @@
  *
  * AccessKit is the library that turns a description of a user interface into
  * whatever the platform's assistive technologies speak: UI Automation on
- * Windows, AT-SPI on X11 and Wayland, NSAccessibility on macOS. This is the
+ * Windows, AT-SPI on X11 and Wayland, NSAccessibility on macOS, and Android's
+ * AccessibilityNodeProvider. This is the
  * only file in the project that includes its header, and the only one that
  * knows the platforms apart.
  *
@@ -48,6 +49,10 @@
 #include <utility>
 
 #include <accesskit.h>
+
+#ifdef __ANDROID__
+#include <gleditor/sdl_compat.hpp>
+#endif
 
 namespace gleditor::a11y {
 
@@ -193,7 +198,9 @@ accesskit_node *nodeOf(const Node &node) {
     accesskit_node_set_label_with_length(built, node.label.data(),
                                          node.label.size());
   }
-  if (!node.value.empty()) {
+  // AccessKit traverses every text run through its value, including the
+  // empty run that provides a caret position in a new document.
+  if (node.role == Role::TextRun || !node.value.empty()) {
     accesskit_node_set_value_with_length(built, node.value.data(),
                                          node.value.size());
   }
@@ -279,6 +286,8 @@ public:
     accesskit_windows_subclassing_adapter_free(adapter);
 #elif defined(__APPLE__)
     accesskit_macos_subclassing_adapter_free(adapter);
+#elif defined(__ANDROID__)
+    accesskit_android_injecting_adapter_free(adapter);
 #else
     accesskit_unix_adapter_free(adapter);
 #endif
@@ -329,6 +338,36 @@ public:
     // than through a message the window might have missed.
     adapter = accesskit_macos_subclassing_adapter_for_window(
         nativeWindow, supplyTree, this, takeAction, this);
+#elif defined(__ANDROID__)
+    static_cast<void>(nativeWindow);
+    auto *const env = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    auto activity   = static_cast<jobject>(SDL_GetAndroidActivity());
+    if (nullptr == env || nullptr == activity) {
+      return false;
+    }
+    const auto activityClass = env->GetObjectClass(activity);
+    const auto hostMethod    = env->GetMethodID(
+        activityClass, "getAccessibilityHost", "()Landroid/view/View;");
+    if (nullptr == hostMethod) {
+      env->ExceptionClear();
+      env->DeleteLocalRef(activityClass);
+      env->DeleteLocalRef(activity);
+      return false;
+    }
+    const auto host = env->CallObjectMethod(activity, hostMethod);
+    if (nullptr != host && !env->ExceptionCheck()) {
+      // AccessKit installs its maintained Java provider and hover handler on
+      // SDL's surface, posting all view mutations and events to the UI thread.
+      adapter = accesskit_android_injecting_adapter_new(env, host, supplyTree,
+                                                        this, takeAction, this);
+    }
+    env->DeleteLocalRef(host);
+    env->DeleteLocalRef(activityClass);
+    env->DeleteLocalRef(activity);
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      return false;
+    }
 #else
     // The window handle means nothing here: AT-SPI is a bus, and what it wants
     // is a name on that bus rather than a window to hang off.
@@ -365,6 +404,9 @@ public:
         nullptr != events) {
       accesskit_macos_queued_events_raise(events);
     }
+#elif defined(__ANDROID__)
+    accesskit_android_injecting_adapter_update_if_active(adapter, supplyTree,
+                                                         this);
 #else
     accesskit_unix_adapter_update_if_active(adapter, supplyTree, this);
 #endif
@@ -374,9 +416,8 @@ public:
     if (nullptr == adapter) {
       return;
     }
-#if defined(_WIN32)
-    // The subclassing adapter sees the window messages that say so, so there
-    // is nothing to tell it.
+#if defined(_WIN32) || defined(__ANDROID__)
+    // The native adapter reads focus from its host window or Android view.
     static_cast<void>(focused);
 #elif defined(__APPLE__)
     if (auto *const events =
@@ -394,10 +435,8 @@ public:
     if (nullptr == adapter) {
       return;
     }
-#if defined(_WIN32) || defined(__APPLE__)
-    // Both take the window's position from the window itself: NSAccessibility
-    // reads a view's frame from AppKit directly, the same way UI Automation
-    // reads it from the HWND.
+#if defined(_WIN32) || defined(__APPLE__) || defined(__ANDROID__)
+    // These adapters read screen bounds directly from their native hosts.
     static_cast<void>(outer);
     static_cast<void>(inner);
 #else
@@ -492,6 +531,8 @@ private:
   accesskit_windows_subclassing_adapter *adapter{};
 #elif defined(__APPLE__)
   accesskit_macos_subclassing_adapter *adapter{};
+#elif defined(__ANDROID__)
+  accesskit_android_injecting_adapter *adapter{};
 #else
   accesskit_unix_adapter *adapter{};
 #endif

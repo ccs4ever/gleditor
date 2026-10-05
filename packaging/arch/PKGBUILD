@@ -12,7 +12,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/ccs4ever/gleditor"
 license=('GPL-3.0-or-later')
 depends=('freetype2' 'harfbuzz' 'fribidi' 'libunibreak' 'fontconfig' 'poppler' 'file' 'sdl3' 'sdl3_image' 'libglvnd'
-  'openssl' 'lmdb' 'libtorrent-rasterbar' 'rnp' 'spdlog' 'hicolor-icon-theme')
+  'openssl' 'lmdb' 'libtorrent-rasterbar' 'rnp' 'spdlog' 'libvlc' 'sqlite' 'hicolor-icon-theme')
 # The Vulkan backend loads a loader at run time; the other two backends work
 # without one, so this is optional rather than a hard dependency.
 optdepends=('vulkan-icd-loader: Vulkan backend'
@@ -21,18 +21,21 @@ optdepends=('vulkan-icd-loader: Vulkan backend'
 # boost/predef at compile time, and on Arch the headers live in the full
 # 'boost' package -- 'boost-libs', which libtorrent-rasterbar depends on,
 # ships only the shared objects.
-makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers' 'boost')
-source=("$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers' 'boost' 'rust')
+source=("$pkgname-$pkgver.tar.gz"
+  'https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip')
+sha256sums=('SKIP' 'b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177')
 
 build() {
   cd "$pkgname-$pkgver" || exit
+  packaging/accesskit/build-linux.sh "$srcdir/accesskit-c-0.22.3" "$PWD/build/accesskit"
   # GLEDITOR_VERSION is passed because the tarball carries no git history, and
   # SDL3 is stated rather than probed so the package cannot silently change
   # which SDL it links depending on what happened to be installed.
   make \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION="$pkgver" \
     lib gleditor xudu shaders
 }
@@ -46,6 +49,9 @@ package() {
     includedir=/usr/include \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION="$pkgver"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 build/accesskit/LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/accesskit/LICENSE-MIT"
+  install -Dm644 build/accesskit/LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/accesskit/LICENSE-APACHE"
 }

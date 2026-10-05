@@ -1139,8 +1139,8 @@ void Renderer::operator()(AutoSDLWindow &window) {
     // and letting the exception escape would call std::terminate instead of
     // reporting what went wrong. Clearing `alive` also releases the main thread
     // from its event loop.
-    std::cerr << std::format("render thread ({} backend) failed: {}\n",
-                             render::backendName(backendKind), err.what());
+    GLEDITOR_LOG_ERROR("render.scene", "render thread ({} backend) failed: {}",
+                       render::backendName(backendKind), err.what());
     this->state->renderFailed = true;
     this->state->alive        = false;
   }

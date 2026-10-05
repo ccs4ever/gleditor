@@ -3,6 +3,7 @@
  * @brief Unit tests for Section 5.5: Persistent references to cells in other
  * stores.
  */
+#include <gleditor/ranges.hpp>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -394,7 +395,7 @@ TEST(ExternRefTest, twoReferencesToOneForeignStoreShareAScrollCell) {
   const auto scrollCell = store.scrollRegistry().scrolls.front().cell;
   const auto visitedRefs =
       zigzag::rankAfter(manifold, scrollCell, *dimScrollRefs) |
-      std::ranges::to<std::vector>();
+      gleditor::toVector();
   EXPECT_THAT(visitedRefs, testing::ElementsAre(p1, p2));
 
   // Minting the same reference again reuses p1
@@ -433,7 +434,7 @@ TEST(ExternRefTest, manyPlaceholdersDoNotDisplaceTheScrollRegistryRank) {
 
   const auto visitedScrolls =
       zigzag::rankAfter(manifold, manifold.home(), *dimScrolls) |
-      std::ranges::to<std::vector>();
+      gleditor::toVector();
 
   ASSERT_EQ(visitedScrolls.size(), 3U);
   EXPECT_EQ(manifold.textOf(visitedScrolls[0], store), keyA);

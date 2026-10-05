@@ -110,8 +110,9 @@ inline std::optional<Color3> parseHexColor(const std::string_view text,
 
   std::array<std::optional<int>, 6> digits{};
   std::ranges::transform(hex, digits.begin(), hexDigit);
-  if (!std::ranges::all_of(digits | std::views::take(hex.size()),
-                           &std::optional<int>::has_value)) {
+  if (!std::ranges::all_of(
+          digits | std::views::take(hex.size()),
+          [](const auto &digit) { return digit.has_value(); })) {
     return std::nullopt;
   }
   // "#RGB" is "#RRGGBB" with each digit doubled: 0xF is 0xFF, i.e. 15 * 17.
@@ -181,9 +182,9 @@ decodeHex(const std::string_view text) {
   }
   std::string out;
   out.reserve(text.size() / 2);
-  for (const auto pair : text | std::views::chunk(2)) {
-    const auto high = hexDigit(pair[0]);
-    const auto low  = hexDigit(pair[1]);
+  for (std::size_t offset = 0; offset < text.size(); offset += 2) {
+    const auto high = hexDigit(text[offset]);
+    const auto low  = hexDigit(text[offset + 1]);
     if (!high || !low) {
       return std::unexpected{HexError::NonHexDigit};
     }

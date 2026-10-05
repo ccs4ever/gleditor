@@ -8,13 +8,13 @@ name: Android
 on:
   push:
     paths:
-      - "CMakeLists.txt"
-      - "packaging/android/**"
-      - "src/**"
-      - "include/**"
-      - "apps/gleditor/**"
-      - "thirdparty/SDL"
-      - ".github/workflows/android.yml"
+    - "CMakeLists.txt"
+    - "packaging/android/**"
+    - "src/**"
+    - "include/**"
+    - "apps/gleditor/**"
+    - "thirdparty/SDL"
+    - ".github/workflows/android.yml"
   workflow_dispatch:
 
 jobs:
@@ -23,226 +23,230 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          # Plain `git describe --tags` -- what both app/build.gradle's
-          # gitDescribeVersion() and CMakeLists.txt's own copy of the same
-          # logic run -- sees no tags at all against actions/checkout's
-          # default shallow clone, and silently falls back to VERSION
-          # instead of failing. Fetching real history is what lets a build
-          # off a tagged commit actually report that tag.
-          fetch-depth: 0
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        # Plain `git describe --tags` -- what both app/build.gradle's
+        # gitDescribeVersion() and CMakeLists.txt's own copy of the same
+        # logic run -- sees no tags at all against actions/checkout's
+        # default shallow clone, and silently falls back to VERSION
+        # instead of failing. Fetching real history is what lets a build
+        # off a tagged commit actually report that tag.
+        fetch-depth: 0
 
-      - name: pin the NDK version app/build.gradle asks for
-        id: ndk
-        run: echo "version=27.3.13750724" >> "$GITHUB_OUTPUT"
+    - name: pin the NDK version app/build.gradle asks for
+      id: ndk
+      run: echo "version=27.3.13750724" >> "$GITHUB_OUTPUT"
 
-      - uses: android-actions/setup-android@v4
+    - uses: android-actions/setup-android@v4
 
-      - name: install the NDK, platform and build tools
-        run: |
-          set -eu
-          sdkmanager --install \
-            "ndk;${{ steps.ndk.outputs.version }}" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "cmake;3.22.1"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ steps.ndk.outputs.version }}" >> "$GITHUB_ENV"
+    - name: install the NDK, platform and build tools
+      run: |
+        set -eu
+        sdkmanager --install \
+          "ndk;${{ steps.ndk.outputs.version }}" \
+          "platforms;android-35" \
+          "build-tools;35.0.0" \
+          "cmake;3.22.1"
+        echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ steps.ndk.outputs.version }}" >> "$GITHUB_ENV"
 
-      # vcpkg's own build tools -- gperf, needed transitively by the pango
-      # stack, is what actually asks for these -- are expected to already be
-      # on the host, the same as pkg-config or a compiler; vcpkg does not
-      # vendor them. Installed once here rather than left for whichever port
-      # first needs them, since vcpkg's own error for a missing one names the
-      # port, not the workflow step that should have prevented it.
-      - name: host build tools vcpkg's ports need
-        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool jq unzip ccache
+    # Text and media ports expect these host tools rather than vending them.
+    # The shared shader Make target also needs glslangValidator before Gradle
+    # packages the application assets.
+    - name: host build tools vcpkg's ports need
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          autoconf autoconf-archive automake libtool jq unzip ccache glslang-tools
 
-      - name: vulkan validation layers
-        working-directory: packaging/android
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./fetch-validation-layers.sh
+    - name: vulkan validation layers
+      working-directory: packaging/android
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: ./fetch-validation-layers.sh
 
-      # A shallow clone at the exact commit vcpkg.json's builtin-baseline
-      # names, rather than whatever HEAD of the vcpkg repo happens to be on
-      # the day this runs: the baseline is what actually pins port versions,
-      # and cloning a different commit than it names would just be a second,
-      # looser pin fighting the first.
-      - name: vcpkg
-        run: |
-          set -eu
-          git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
-          git -C "$RUNNER_TEMP/vcpkg" checkout f298fb4ef3a7ae09766b6a5beb92ce171a767927
-          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+    # A shallow clone at the exact commit vcpkg.json's builtin-baseline
+    # names, rather than whatever HEAD of the vcpkg repo happens to be on
+    # the day this runs: the baseline is what actually pins port versions,
+    # and cloning a different commit than it names would just be a second,
+    # looser pin fighting the first.
+    - name: vcpkg
+      run: |
+        set -eu
+        git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+        git -C "$RUNNER_TEMP/vcpkg" checkout f298fb4ef3a7ae09766b6a5beb92ce171a767927
+        "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+        echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
 
-      # vcpkg's own binary cache, keyed on the manifest and the pinned vcpkg
-      # commit: text stack dependencies (harfbuzz, freetype, fontconfig,
-      # fribidi, libunibreak) compiling from source for two triplets is
-      # the slow part of this workflow by far, and none of it changes between
-      # runs that touch only this project's own sources.
-      #
-      # restore/save as two separate steps rather than the combined
-      # actions/cache action, with the save on `if: always()`: the combined
-      # action's own post-job save silently did not run after the first
-      # successful vcpkg build here, so the next run paid the full ~18 minute
-      # rebuild again despite nothing in vcpkg.json having changed. An
-      # explicit save that is not conditioned on the rest of the job
-      # succeeding is what actually guarantees a config-step failure below
-      # (which is what this workflow has been hitting) does not throw away a
-      # vcpkg build that already finished.
-      - name: restore vcpkg binary cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
-      - run: echo "VCPKG_BINARY_SOURCES=clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite" >> "$GITHUB_ENV"
+    # vcpkg's own binary cache, keyed on the manifest and the pinned vcpkg
+    # commit: text stack dependencies (harfbuzz, freetype, fontconfig,
+    # fribidi, libunibreak) compiling from source for two triplets is
+    # the slow part of this workflow by far, and none of it changes between
+    # runs that touch only this project's own sources.
+    #
+    # restore/save as two separate steps rather than the combined
+    # actions/cache action, with the save on `if: always()`: the combined
+    # action's own post-job save silently did not run after the first
+    # successful vcpkg build here, so the next run paid the full ~18 minute
+    # rebuild again despite nothing in vcpkg.json having changed. An
+    # explicit save that is not conditioned on the rest of the job
+    # succeeding is what actually guarantees a config-step failure below
+    # (which is what this workflow has been hitting) does not throw away a
+    # vcpkg build that already finished.
+    - name: restore vcpkg binary cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/vcpkg-binary-cache
+        key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4e
+    - run: |
+        echo "VCPKG_BINARY_SOURCES=clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite" \
+          >> "$GITHUB_ENV"
 
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "17"
+    - uses: actions/setup-java@v6
+      with:
+        distribution: temurin
+        java-version: "17"
 
-      # ccache, for this project's own object files and SDL's -- vcpkg's
-      # binary cache above already covers every port it builds, but nothing
-      # was caching the ~140 translation units (most of them SDL's) this
-      # project's own CMake configure compiles directly, so every run paid
-      # the full ~14 minutes for those regardless of whether anything
-      # actually changed. thirdparty/SDL is pinned to a fixed submodule
-      # commit, so once its object files are in the cache once they stay hit
-      # on every run after.
-      #
-      # Keyed on the run id, which never matches on restore, so this always
-      # falls through to restore-keys and pulls the most recent cache under
-      # that prefix regardless of which commit produced it -- ccache keys its
-      # own entries by preprocessed content and flags, so a cache from a
-      # different commit is still almost entirely useful, unlike vcpkg's
-      # cache above where an exact manifest match is what matters. Saved
-      # unconditionally (`if: always()`), the same fix the vcpkg cache
-      # needed: a job that fails after compiling anything should not throw
-      # that work away.
-      - name: restore ccache
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ runner.temp }}/ccache
-          key: ccache-android-${{ github.run_id }}
-          restore-keys: ccache-android-
-      # ccache's default compiler_check is "mtime": it treats a compiler
-      # binary with a different mtime as a different compiler and refuses to
-      # reuse anything compiled with the "old" one. The NDK is unzipped fresh
-      # by the "install the NDK" step above on every run -- same pinned
-      # version and byte-identical clang binary, but a brand new mtime each
-      # time -- which was silently invalidating nearly the whole cache run
-      # over run even after the sloppiness fix below made everything
-      # cacheable (hit rate stayed flat around 15-20% across several
-      # consecutive successful builds instead of climbing toward "only the
-      # files this commit touched"). Hashing the compiler's actual content
-      # instead is slower per compile but stable across a re-extracted NDK.
-      # The compiler_check fix above did not move the needle -- CCACHE_LOGFILE
-      # (below) showed the same ~122/568 (21.48%) hit rate before and after
-      # it, on a run whose C/C++ source was byte-identical to the one before.
-      # The actual cause, and the real fix, is in CMakeLists.txt: see its
-      # -fno-pch-timestamp comment. include_file_mtime/include_file_ctime
-      # sloppiness looked right from ccache's own docs (headers "automatically
-      # updated by CVS, git, or similar" getting "a new ctime/mtime even
-      # though the content is unchanged" is exactly this checkout) and was
-      # tried here first, but a second CI run under it showed no improvement
-      # either -- confirmed uninvolved by a local ccache+clang repro before
-      # being reverted: that sloppiness setting has no effect on the specific
-      # mtime check a precompiled header trips (see CMakeLists.txt).
-      - run: |
-          echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
-          echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
-          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
-          echo "CCACHE_LOGFILE=${{ runner.temp }}/ccache.log" >> "$GITHUB_ENV"
+    # ccache, for this project's own object files and SDL's -- vcpkg's
+    # binary cache above already covers every port it builds, but nothing
+    # was caching the ~140 translation units (most of them SDL's) this
+    # project's own CMake configure compiles directly, so every run paid
+    # the full ~14 minutes for those regardless of whether anything
+    # actually changed. thirdparty/SDL is pinned to a fixed submodule
+    # commit, so once its object files are in the cache once they stay hit
+    # on every run after.
+    #
+    # Keyed on the run id, which never matches on restore, so this always
+    # falls through to restore-keys and pulls the most recent cache under
+    # that prefix regardless of which commit produced it -- ccache keys its
+    # own entries by preprocessed content and flags, so a cache from a
+    # different commit is still almost entirely useful, unlike vcpkg's
+    # cache above where an exact manifest match is what matters. Saved
+    # unconditionally (`if: always()`), the same fix the vcpkg cache
+    # needed: a job that fails after compiling anything should not throw
+    # that work away.
+    - name: restore ccache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/ccache
+        key: ccache-android-${{ github.run_id }}
+        restore-keys: ccache-android-
+    # ccache's default compiler_check is "mtime": it treats a compiler
+    # binary with a different mtime as a different compiler and refuses to
+    # reuse anything compiled with the "old" one. The NDK is unzipped fresh
+    # by the "install the NDK" step above on every run -- same pinned
+    # version and byte-identical clang binary, but a brand new mtime each
+    # time -- which was silently invalidating nearly the whole cache run
+    # over run even after the sloppiness fix below made everything
+    # cacheable (hit rate stayed flat around 15-20% across several
+    # consecutive successful builds instead of climbing toward "only the
+    # files this commit touched"). Hashing the compiler's actual content
+    # instead is slower per compile but stable across a re-extracted NDK.
+    # The compiler_check fix above did not move the needle -- CCACHE_LOGFILE
+    # (below) showed the same ~122/568 (21.48%) hit rate before and after
+    # it, on a run whose C/C++ source was byte-identical to the one before.
+    # The actual cause, and the real fix, is in CMakeLists.txt: see its
+    # -fno-pch-timestamp comment. include_file_mtime/include_file_ctime
+    # sloppiness looked right from ccache's own docs (headers "automatically
+    # updated by CVS, git, or similar" getting "a new ctime/mtime even
+    # though the content is unchanged" is exactly this checkout) and was
+    # tried here first, but a second CI run under it showed no improvement
+    # either -- confirmed uninvolved by a local ccache+clang repro before
+    # being reverted: that sloppiness setting has no effect on the specific
+    # mtime check a precompiled header trips (see CMakeLists.txt).
+    - run: |
+        echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+        echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
+        echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+        echo "CCACHE_LOGFILE=${{ runner.temp }}/ccache.log" >> "$GITHUB_ENV"
 
-      # The first ccache-instrumented run (see below) showed exactly why the
-      # ~14 minute compile time barely moved with a warm cache: SDL's own
-      # CMakeLists.txt calls target_precompile_headers() for SDL_internal.h
-      # across its whole source tree, and ccache refuses to cache *any*
-      # compile that consumes a precompiled header unless told it is safe to
-      # -- 444 of 568 compiler invocations were falling into exactly that
-      # bucket, all uncacheable, while the other 124 (this project's own
-      # sources, which use no PCH) were hitting 97% of the time. The
-      # sloppiness setting above is ccache's own documented fix for this
-      # (https://ccache.dev/manual/latest.html#_precompiled_headers): it
-      # tells ccache to ignore #define and time-macro (__TIME__/__DATE__)
-      # differences that it otherwise can't see through a PCH, which is safe
-      # here since SDL_internal.h uses neither.
-      #
-      # Aggregate hit/miss counts (ccache -s -v below) can't say *which*
-      # calls miss or why -- they showed the sloppiness fix alone left hits
-      # capped well below 100% even on runs that changed no C/C++ source at
-      # all, which is what motivated the compiler_check=content fix above,
-      # but there was no way to confirm from the aggregate numbers alone
-      # whether that actually closed the gap or whether the still-uncached
-      # calls are the PCH-consuming ones specifically. CCACHE_LOGFILE records
-      # ccache's own per-call reasoning (which lookup was tried, what it
-      # matched or didn't, why a call was a miss) so the next run's numbers
-      # can be explained rather than just observed.
-      #
-      # Zeroed immediately before the build and read immediately after, so
-      # this run's own hit/miss counts are visible rather than a cumulative
-      # total masking whether ccache is doing anything on THIS run in
-      # particular -- the restored cache directory carries ccache's own
-      # stats database along with the object files themselves, so without
-      # this a low hit rate here could hide behind a high count left over
-      # from whichever earlier run's stats happened to still be in it.
-      - run: ccache -z
-      - name: gradlew assembleDebug
-        working-directory: packaging/android
-        run: ./gradlew assembleDebug --stacktrace
-      - run: ccache -s -v
+    # The first ccache-instrumented run (see below) showed exactly why the
+    # ~14 minute compile time barely moved with a warm cache: SDL's own
+    # CMakeLists.txt calls target_precompile_headers() for SDL_internal.h
+    # across its whole source tree, and ccache refuses to cache *any*
+    # compile that consumes a precompiled header unless told it is safe to
+    # -- 444 of 568 compiler invocations were falling into exactly that
+    # bucket, all uncacheable, while the other 124 (this project's own
+    # sources, which use no PCH) were hitting 97% of the time. The
+    # sloppiness setting above is ccache's own documented fix for this
+    # (https://ccache.dev/manual/latest.html#_precompiled_headers): it
+    # tells ccache to ignore #define and time-macro (__TIME__/__DATE__)
+    # differences that it otherwise can't see through a PCH, which is safe
+    # here since SDL_internal.h uses neither.
+    #
+    # Aggregate hit/miss counts (ccache -s -v below) can't say *which*
+    # calls miss or why -- they showed the sloppiness fix alone left hits
+    # capped well below 100% even on runs that changed no C/C++ source at
+    # all, which is what motivated the compiler_check=content fix above,
+    # but there was no way to confirm from the aggregate numbers alone
+    # whether that actually closed the gap or whether the still-uncached
+    # calls are the PCH-consuming ones specifically. CCACHE_LOGFILE records
+    # ccache's own per-call reasoning (which lookup was tried, what it
+    # matched or didn't, why a call was a miss) so the next run's numbers
+    # can be explained rather than just observed.
+    #
+    # Zeroed immediately before the build and read immediately after, so
+    # this run's own hit/miss counts are visible rather than a cumulative
+    # total masking whether ccache is doing anything on THIS run in
+    # particular -- the restored cache directory carries ccache's own
+    # stats database along with the object files themselves, so without
+    # this a low hit rate here could hide behind a high count left over
+    # from whichever earlier run's stats happened to still be in it.
+    - run: ccache -z
+    - name: gradlew assembleDebug
+      working-directory: packaging/android
+      run: ./gradlew assembleDebug assembleX86_64DebugAndroidTest --stacktrace
+    - name: verify accessibility adapter and delegate in both APKs
+      run: packaging/android/check-accessibility-apks.sh
+    - run: ccache -s -v
 
-      # Uploaded regardless of the numbers above -- it's the per-call detail
-      # behind whatever ccache -s -v just printed, and a build that fails
-      # partway through still leaves calls in it worth reading.
-      - if: always()
-        name: upload ccache log
-        uses: actions/upload-artifact@v7
-        with:
-          name: ccache-log
-          path: ${{ runner.temp }}/ccache.log
-          if-no-files-found: warn
+    # Uploaded regardless of the numbers above -- it's the per-call detail
+    # behind whatever ccache -s -v just printed, and a build that fails
+    # partway through still leaves calls in it worth reading.
+    - if: always()
+      name: upload ccache log
+      uses: actions/upload-artifact@v7
+      with:
+        name: ccache-log
+        path: ${{ runner.temp }}/ccache.log
+        if-no-files-found: warn
 
-      - if: always()
-        name: save ccache
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ runner.temp }}/ccache
-          key: ccache-android-${{ github.run_id }}
+    - if: always()
+      name: save ccache
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/ccache
+        key: ccache-android-${{ github.run_id }}
 
-      - if: always()
-        name: save vcpkg binary cache
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ runner.temp }}/vcpkg-binary-cache
-          key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
+    - if: always()
+      name: save vcpkg binary cache
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/vcpkg-binary-cache
+        key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4e
 
-      # CMake's own File API reply -- what AGP's "error parsing CMake File
-      # API result" means it could not make sense of -- plus the raw
-      # configure logs. The whole tree rather than picking specific files
-      # inside it: the first attempt at this named individual paths under
-      # .cxx and .cmake and uploaded nothing, since actions/upload-artifact
-      # excludes dot-directories unless told not to. include-hidden-files is
-      # that override; taking the whole directory besides is what makes this
-      # robust to not already knowing the exact layout AGP produced.
-      - if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: cmake-configure-diagnostics
-          path: packaging/android/app/.cxx
-          include-hidden-files: true
-          if-no-files-found: warn
+    # CMake's own File API reply -- what AGP's "error parsing CMake File
+    # API result" means it could not make sense of -- plus the raw
+    # configure logs. The whole tree rather than picking specific files
+    # inside it: the first attempt at this named individual paths under
+    # .cxx and .cmake and uploaded nothing, since actions/upload-artifact
+    # excludes dot-directories unless told not to. include-hidden-files is
+    # that override; taking the whole directory besides is what makes this
+    # robust to not already knowing the exact layout AGP produced.
+    - if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: cmake-configure-diagnostics
+        path: packaging/android/app/.cxx
+        include-hidden-files: true
+        if-no-files-found: warn
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-debug-apks
-          path: packaging/android/app/build/outputs/apk/**/*.apk
-          if-no-files-found: error
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-debug-apks
+        path: packaging/android/app/build/outputs/apk/**/*.apk
+        if-no-files-found: error
 
   # A real device is what packaging/android/README.md asks a person to test
   # against, but a headless emulator on the runner is what catches a build
@@ -260,71 +264,95 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        api: [28, 30]
 
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: gleditor-debug-apks
-          path: apks
+    - uses: actions/download-artifact@v8
+      with:
+        name: gleditor-debug-apks
+        path: apks
 
-      - uses: android-actions/setup-android@v4
-      - run: sdkmanager --install "system-images;android-30;google_apis;x86_64" "emulator"
+    - uses: android-actions/setup-android@v4
+    - run: |
+        sdkmanager --install "system-images;android-${{ matrix.api }};google_apis;x86_64" "emulator"
 
-      # GitHub's own runners have /dev/kvm, but not always the permissions to
-      # use it; the emulator falls back to unaccelerated TCG rather than
-      # failing outright when this does nothing, which is why it is a step of
-      # its own instead of a precondition the job fails without.
-      - name: enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
+    # GitHub's own runners have /dev/kvm, but not always the permissions to
+    # use it; the emulator falls back to unaccelerated TCG rather than
+    # failing outright when this does nothing, which is why it is a step of
+    # its own instead of a precondition the job fails without.
+    - name: enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+          | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
 
-      - name: boot a headless emulator
-        run: |
-          set -eu
-          # avdmanager and emulator both fall back to $HOME/.android/avd when
-          # this is unset, but set it explicitly and create it up front
-          # rather than trust that default and that the directory already
-          # exists -- avdmanager does not create parents of $HOME/.android
-          # itself, and a create that silently wrote nowhere real is exactly
-          # what left the previous run's emulator stuck waiting for a device
-          # that could never appear (adb wait-for-device has no timeout of
-          # its own, so it hung until the job's).
-          export ANDROID_AVD_HOME="$HOME/.android/avd"
-          mkdir -p "$ANDROID_AVD_HOME"
-          echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;x86_64" --device "pixel_4" -f
-          echo "AVDs known to avdmanager:"; avdmanager list avd
-          echo "$ANDROID_AVD_HOME:"; ls -la "$ANDROID_AVD_HOME"
-          [ -f "$ANDROID_AVD_HOME/test.ini" ] || { echo "::error::avdmanager did not write $ANDROID_AVD_HOME/test.ini" >&2; exit 1; }
-          "$ANDROID_HOME/emulator/emulator" -avd test -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot -accel auto &
-          timeout 120 adb wait-for-device
-          timeout 300 sh -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+    - name: boot a headless emulator
+      run: |
+        set -eu
+        # avdmanager and emulator both fall back to $HOME/.android/avd when
+        # this is unset, but set it explicitly and create it up front
+        # rather than trust that default and that the directory already
+        # exists -- avdmanager does not create parents of $HOME/.android
+        # itself, and a create that silently wrote nowhere real is exactly
+        # what left the previous run's emulator stuck waiting for a device
+        # that could never appear (adb wait-for-device has no timeout of
+        # its own, so it hung until the job's).
+        export ANDROID_AVD_HOME="$HOME/.android/avd"
+        mkdir -p "$ANDROID_AVD_HOME"
+        echo "no" | avdmanager create avd -n test \
+          -k "system-images;android-${{ matrix.api }};google_apis;x86_64" --device "pixel_4" -f
+        echo "AVDs known to avdmanager:"; avdmanager list avd
+        echo "$ANDROID_AVD_HOME:"; ls -la "$ANDROID_AVD_HOME"
+        if [ ! -f "$ANDROID_AVD_HOME/test.ini" ]; then
+          echo "::error::avdmanager did not write $ANDROID_AVD_HOME/test.ini" >&2
+          exit 1
+        fi
+        "$ANDROID_HOME/emulator/emulator" -avd test -no-window -no-audio \
+          -no-boot-anim -gpu swiftshader -no-snapshot -accel auto &
+        timeout 120 adb wait-for-device
+        timeout 300 sh -c '
+          until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do
+            sleep 2
+          done
+        '
 
-      - name: install and launch gleditor
-        run: |
-          set -eu
-          adb install -r apks/x86_64/debug/app-x86_64-debug.apk
-          adb shell am start -n io.github.ccs4ever.gleditor/org.libsdl.app.SDLActivity
-          # SDL's own startup (loading libSDL3.so and libmain.so, then this
-          # project's asset extraction and FontManager/fontconfig initialisation in
-          # androidBootstrap()) is what this sleep is giving room to finish
-          # before the process is checked for rather than caught mid-launch.
-          sleep 15
-          adb exec-out screencap -p > gleditor-emulator.png
-          if [ -z "$(adb shell pidof io.github.ccs4ever.gleditor)" ]; then
-            echo "::error::gleditor is not running 15s after launch -- it crashed or never started" >&2
-            exit 1
-          fi
+    - name: install and launch gleditor
+      run: |
+        set -eu
+        adb install -r apks/x86_64/debug/app-x86_64-debug.apk
+        adb shell am start -n io.github.ccs4ever.gleditor/.GleditorActivity
+        # SDL's own startup (loading libSDL3.so and libmain.so, then this
+        # project's asset extraction and FontManager/fontconfig initialisation in
+        # androidBootstrap()) is what this sleep is giving room to finish
+        # before the process is checked for rather than caught mid-launch.
+        sleep 15
+        adb exec-out screencap -p > gleditor-emulator.png
+        if [ -z "$(adb shell pidof io.github.ccs4ever.gleditor)" ]; then
+          echo "::error::gleditor is not running 15s after launch" >&2
+          exit 1
+        fi
+        # UiAutomation reads through Android's platform accessibility service,
+        # including typed text and actions returned to native document state.
+        adb install -r apks/androidTest/x86_64/debug/app-x86_64-debug-androidTest.apk
+        adb shell am instrument -w \
+          io.github.ccs4ever.gleditor.test/io.github.ccs4ever.gleditor.AccessibilitySmoke \
+          > gleditor-a11y-actions.txt
+        cat gleditor-a11y-actions.txt
+        grep 'accessibility=PASS' gleditor-a11y-actions.txt
+        grep 'INSTRUMENTATION_CODE: -1' gleditor-a11y-actions.txt
 
-      - if: always()
-        run: adb logcat -d > logcat.txt || true
+    - if: always()
+      run: adb logcat -d > logcat.txt || true
 
-      - if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-emulator-smoke-test
-          path: |
-            gleditor-emulator.png
-            logcat.txt
-          if-no-files-found: warn
+    - if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-emulator-smoke-test-api-${{ matrix.api }}
+        path: |
+          gleditor-emulator.png
+          gleditor-a11y-actions.txt
+          logcat.txt
+        if-no-files-found: warn

@@ -1,4 +1,5 @@
 #include "store.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -2020,7 +2021,7 @@ std::vector<MicroversionId> Store::structureHeads() const {
       std::views::transform(
           [this](const std::uint32_t idx) { return opsSpool.idOf(idx); });
 
-  return std::ranges::to<std::vector<MicroversionId>>(leafHeads);
+  return gleditor::toVector(leafHeads);
 }
 
 MicroversionId Store::structureHead() const {
@@ -2029,7 +2030,7 @@ MicroversionId Store::structureHead() const {
 }
 
 std::vector<MicroversionId> Store::branchHeads() const {
-  return std::ranges::to<std::vector<MicroversionId>>(
+  return gleditor::toVector(
       std::views::iota(1U, static_cast<std::uint32_t>(opsSpool.size() + 1)) |
       std::views::filter([this](const std::uint32_t idx) {
         return opsSpool.childrenOf(idx).empty();

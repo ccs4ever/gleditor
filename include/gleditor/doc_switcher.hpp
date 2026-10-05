@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,8 @@ public:
                             RenderState &state) override;
 
   void describe(a11y::Builder &into) override;
+  bool performAction(std::uint64_t nodeId, a11y::Action action,
+                     std::string_view value) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
     return revision;
   }
@@ -106,6 +109,9 @@ private:
     bool active{};
   };
   std::vector<TabInfo> currentTabs;
+  std::mutex actionsGuard;
+  std::vector<std::pair<std::uint64_t, std::uint32_t>> accessibleTags;
+  std::vector<std::uint32_t> pendingTags;
 };
 
 } // namespace gleditor

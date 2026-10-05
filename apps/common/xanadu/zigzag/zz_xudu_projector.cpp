@@ -379,7 +379,10 @@ projectStoreWithProvenance(const xanadu::Store &store,
     });
   }
 
-  const auto allLinks = store.linkView() | std::ranges::to<std::vector>();
+  std::vector<xanadu::Link> allLinks;
+  for (const auto &link : store.linkView()) {
+    allLinks.push_back(link);
+  }
 
   ProjectedXuduStore result;
   result.document = projectXuduToZigzag(docInputs, allLinks, opts,

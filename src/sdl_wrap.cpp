@@ -67,7 +67,11 @@ AutoSDLGL::~AutoSDLGL() {
 }
 
 AutoSDLSurface::AutoSDLSurface(const char *fileName)
+#ifdef GLEDITOR_HAVE_SDL_IMAGE
     : surface(IMG_Load(fileName)) {
+#else
+    : surface(nullptr) {
+#endif
   // The window icon is decoration. Failing to load it must not stop the editor
   // from starting -- which it used to, both when SDL_image was unavailable and
   // whenever the program was run from a directory that does not hold the file.

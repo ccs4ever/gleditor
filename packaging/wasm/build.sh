@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# Build gleditor and zigzag as WebAssembly / WebGL2 web applications using Emscripten.
+# Build gleditor and xuzz as WebAssembly / WebGL2 applications using Emscripten.
 #
 # Usage:
-#   packaging/wasm/build.sh [output-dir]
+#   packaging/wasm/build.sh [--a11y-test] [output-dir]
 #
 # Prerequisites:
 #   Emscripten SDK installed and active (e.g. `source /path/to/emsdk/emsdk_env.sh`).
-#   Builds output HTML, JS, WASM, and DATA files ready to serve via any static HTTP server.
+#   Full builds require VCPKG_ROOT and browser ports for native media/identity dependencies.
+#   --a11y-test builds the platform adapter independently of those dependencies.
 
 set -eu
 
-OUTPUT_DIR=${1:-build/wasm}
 ROOT_DIR=$(cd "$(dirname "$0")/../.." && pwd)
+A11Y_TEST=0
+if [[ ${1:-} == --a11y-test ]]; then
+  A11Y_TEST=1
+  shift
+fi
+OUTPUT_DIR=${1:-build/wasm}
+WASM_CXX=${EMXX:-em++}
 
-if ! command -v em++ >/dev/null 2>&1; then
+if ! command -v "$WASM_CXX" >/dev/null 2>&1; then
   echo "ERROR: em++ not found in PATH." >&2
   echo "Please install and activate Emscripten SDK (e.g. 'emsdk activate latest && source emsdk_env.sh')." >&2
   exit 1
@@ -24,23 +31,67 @@ mkdir -p "$OUTPUT_DIR"
 
 cd "$ROOT_DIR"
 
-EM_FLAGS=(
-  -std=c++2c
+STD_FLAG=$(make -s -j"$(nproc)" print-std-flag CXX="$WASM_CXX" GLEDITOR_ENABLE_A11Y=0 GLEDITOR_DISABLE_VULKAN=1 GLEDITOR_SDL=2)
+COMMON_FLAGS=(
+  "$STD_FLAG"
   -O3
   -Iinclude
   -Isrc
   -Iapps
   -Ithirdparty/Choreograph/src
   -Ithirdparty/argparse/include
+  -Ithirdparty/nontype_functional/include
+  -Ithirdparty/beman_optional/include
+  -Ithirdparty/beman_inplace_vector/include
+  -Ithirdparty/opengl-registry
+  -DGLEDITOR_HAVE_A11Y=1
+  --shell-file packaging/wasm/shell.html
+  --pre-js packaging/wasm/accessibility.js
+)
+
+if [[ $A11Y_TEST == 1 ]]; then
+  "$WASM_CXX" "${COMMON_FLAGS[@]}" \
+    src/a11y/platform_web.cpp packaging/wasm/test-accessibility.cpp \
+    -sNO_EXIT_RUNTIME=1 -o "$OUTPUT_DIR/test-accessibility.html"
+  exit 0
+fi
+
+if [[ ! -x ${VCPKG_ROOT:-}/vcpkg ]]; then
+  echo "ERROR: full WebAssembly builds require VCPKG_ROOT pointing to the pinned vcpkg checkout." >&2
+  exit 1
+fi
+WASM_DEPENDENCIES=${WASM_DEPENDENCIES:-$ROOT_DIR/build/wasm-dependencies}
+python3 packaging/wasm/prepare-dependencies.py "$VCPKG_ROOT" "$WASM_DEPENDENCIES/overlays"
+"$VCPKG_ROOT/vcpkg" install --triplet=wasm32-gleditor \
+  --overlay-triplets="$ROOT_DIR/packaging/wasm/triplets" \
+  --overlay-ports="$WASM_DEPENDENCIES/overlays" \
+  --x-manifest-root="$ROOT_DIR/packaging/wasm" --x-install-root="$WASM_DEPENDENCIES"
+export PKG_CONFIG_LIBDIR="$WASM_DEPENDENCIES/wasm32-gleditor/lib/pkgconfig"
+export PKG_CONFIG_PATH=
+DEP_CFLAGS_RAW=$(pkg-config --cflags freetype2 harfbuzz fribidi fontconfig poppler-cpp poppler libmagic openssl spdlog)
+DEP_LIBS_RAW=$(pkg-config --static --libs freetype2 harfbuzz fribidi fontconfig poppler-cpp poppler libmagic openssl spdlog)
+read -r -a DEP_CFLAGS <<<"$DEP_CFLAGS_RAW"
+read -r -a DEP_LIBS <<<"$DEP_LIBS_RAW"
+mkdir -p "$OUTPUT_DIR/generated"
+GLEDITOR_WASM_VERSION=$(cat VERSION)
+sed "s/@@VERS@@/$GLEDITOR_WASM_VERSION/" src/config.h.in >"$OUTPUT_DIR/generated/config.h"
+
+EM_FLAGS=(
+  "${COMMON_FLAGS[@]}"
+  "${DEP_CFLAGS[@]}"
+  "-I$WASM_DEPENDENCIES/wasm32-gleditor/include"
+  "-I$OUTPUT_DIR/generated"
   -DGLEDITOR_SDL_MAJOR=2
   -DGLM_ENABLE_EXPERIMENTAL
   -DGLEDITOR_DISABLE_VULKAN=1
   -DGLEDITOR_WASM=1
+  '-DGLEDITOR_DEFAULT_BACKEND="opengles"'
+  -pthread
+  -sPROXY_TO_PTHREAD=1
+  -sOFFSCREENCANVAS_SUPPORT=1
+  -sPTHREAD_POOL_SIZE=2
+  -fexceptions
   -sUSE_SDL=2
-  -sUSE_FREETYPE=1
-  -sUSE_HARFBUZZ=1
-  -sUSE_LIBPNG=1
-  -sUSE_ZLIB=1
   -sMAX_WEBGL_VERSION=2
   -sMIN_WEBGL_VERSION=2
   -sFULL_ES3=1
@@ -50,17 +101,17 @@ EM_FLAGS=(
   # this is a glob that silently rewrites the flag if anything in the working
   # directory happens to match it, and shfmt refuses to parse it at all.
   "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']"
-  --shell-file packaging/wasm/shell.html
   --preload-file assets@assets
 )
 
 # Common library source files
-mapfile -t LIB_SRCS < <(find src -name '*.cpp' ! -name 'device_vk*.cpp' ! -name 'platform_accesskit.cpp')
+mapfile -t LIB_SRCS < <(find src thirdparty/Choreograph/src -name '*.cpp' ! -path 'src/render/vulkan/*' ! -name 'platform_accesskit.cpp' ! -name 'platform_none.cpp' ! -name 'platform_android.cpp' | sort)
 
 echo "==> Compiling gleditor WebAssembly target..."
-em++ "${EM_FLAGS[@]}" \
+"$WASM_CXX" "${EM_FLAGS[@]}" \
   "${LIB_SRCS[@]}" \
-  apps/gleditor/main.cpp \
+  apps/gleditor/main.cpp apps/gleditor/editor_config.cpp \
+  "${DEP_LIBS[@]}" "$WASM_DEPENDENCIES/wasm32-gleditor/lib/libunibreak.a" \
   -o "$OUTPUT_DIR/gleditor.html"
 
 echo "==> Compiling xuzz WebAssembly target..."
@@ -68,12 +119,13 @@ mapfile -t COMMON_XANADU_SRCS < <(find apps/common/xanadu -name '*.cpp')
 mapfile -t XUDU_SRCS < <(find apps/xudu -maxdepth 1 -name '*.cpp')
 mapfile -t ZIGZAG_SRCS < <(find apps/zigzag -name '*.cpp')
 mapfile -t XUZZ_SRCS < <(find apps/xuzz -name '*.cpp')
-em++ "${EM_FLAGS[@]}" \
+"$WASM_CXX" "${EM_FLAGS[@]}" \
   "${LIB_SRCS[@]}" \
   "${COMMON_XANADU_SRCS[@]}" \
   "${XUDU_SRCS[@]}" \
   "${ZIGZAG_SRCS[@]}" \
   "${XUZZ_SRCS[@]}" \
+  "${DEP_LIBS[@]}" "$WASM_DEPENDENCIES/wasm32-gleditor/lib/libunibreak.a" \
   -o "$OUTPUT_DIR/xuzz.html"
 
 # Generate index page

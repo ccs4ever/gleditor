@@ -3,6 +3,7 @@
  * @brief Implementation of Spin-Head Virtual Machine for Vortex.
  */
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <cmath>
 #include <iostream>
@@ -142,7 +143,7 @@ CellRef VortexVM::spawnCursor(CellRef entryOpcode, std::string_view name) {
 
 std::vector<CellRef> VortexVM::activeCursors() const {
   return zigzag::rankAfter(core_.arena(), core_.home(), core_.dims().cursors) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {

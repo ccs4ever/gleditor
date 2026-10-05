@@ -4,9 +4,55 @@
  */
 #include <gtest/gtest.h>
 
+#include <cmath>
+
+#include "common/tsv.hpp"
 #include "gleditor/editor_config.hpp"
 
 namespace {
+
+TEST(EditorConfigTest, ClassicFloatFallbackPreservesStrictTsvGrammar) {
+  constexpr float fallback = 17.0F;
+  for (const auto text : {"0",
+                          "-0",
+                          "0e-500",
+                          "1.25",
+                          ".5",
+                          "-.5",
+                          "1.e2",
+                          "1e-45",
+                          "3.4028235e38",
+                          "3.4028236e38",
+                          "1e-500",
+                          "inf",
+                          "-INF",
+                          "Infinity",
+                          "nan",
+                          "-NaN",
+                          "nan()",
+                          "NaN(payload_7)",
+                          "nan(bad-payload)",
+                          "",
+                          "-",
+                          "+1",
+                          " 1",
+                          "1 ",
+                          "1\t",
+                          "1x",
+                          "0x1p2",
+                          "1,5",
+                          "1e"}) {
+    SCOPED_TRACE(text);
+    const auto expected = common::tsv::parseFloat(text, fallback);
+    const auto actual = common::tsv::detail::parseFloatClassic(text, fallback);
+    if (std::isnan(expected)) {
+      EXPECT_TRUE(std::isnan(actual));
+    } else {
+      EXPECT_FLOAT_EQ(actual, expected);
+    }
+    EXPECT_EQ(std::signbit(actual), std::signbit(expected));
+  }
+}
 
 TEST(EditorConfigTest, ParseDefaultConfig) {
   const std::string tsv = gleditor::defaultEditorConfigTsv();

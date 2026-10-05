@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>gleditor - GPU Document Engine</title>
     <style>
       body {
@@ -100,14 +100,28 @@
         opacity: 0;
         pointer-events: none;
       }
+
+      /* Keep the semantic controls in the browser's accessibility tree. Neither
+         display:none nor visibility:hidden can serve as a canvas counterpart. */
+      .gleditor-accessibility {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: pre-wrap;
+        border: 0;
+      }
     </style>
   </head>
   <body>
     <div id="canvas-container">
-      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+      <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1" aria-hidden="true"></canvas>
       <div id="status-overlay">
-        <div id="spinner"></div>
-        <div id="status">Downloading WebAssembly package...</div>
+        <div id="spinner" aria-hidden="true"></div>
+        <div id="status" role="status">Downloading WebAssembly package...</div>
         <progress value="0" max="100" id="progress" hidden></progress>
       </div>
     </div>
@@ -164,7 +178,7 @@
               overlayElement.classList.add('hidden');
             }
           }
-          statusElement.innerHTML = text;
+          statusElement.textContent = text;
         },
         totalDependencies: 0,
         monitorRunDependencies: function(left) {

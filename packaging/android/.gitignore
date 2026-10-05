@@ -12,6 +12,7 @@ build/
 # vcpkg's own build tree and install cache -- large, and rebuilt from
 # vcpkg.json by the CI workflow (or by anyone else) rather than carried here.
 vcpkg_installed/
+.dependencies/
 
 # Fetched by fetch-validation-layers.sh; only ever a debug-build concern, and
 # not something to keep two copies of (the repo's and whatever a build just

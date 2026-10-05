@@ -63,6 +63,19 @@ void DocumentSwitcher::deviceReady(
 }
 
 void DocumentSwitcher::drawFrame(FrameContext &ctx) {
+  std::vector<std::uint32_t> requested;
+  {
+    const std::scoped_lock lock(actionsGuard);
+    requested.swap(pendingTags);
+  }
+  // Platform callbacks arrive on the event thread; document handlers belong
+  // to the render thread, just like pointer picks.
+  for (const auto tag : requested) {
+    render::PickingResult pick;
+    pick.tag.kind         = render::tagKindOverlay;
+    pick.tag.clusterIndex = tag;
+    std::ignore           = picked(pick, ctx.state);
+  }
   if (!visible || nullptr == canvas || ctx.state.docs.empty()) {
     currentTabs.clear();
     return;
@@ -226,6 +239,8 @@ bool DocumentSwitcher::picked(const render::PickingResult &pick,
 }
 
 void DocumentSwitcher::describe(a11y::Builder &into) {
+  const std::scoped_lock lock(actionsGuard);
+  accessibleTags.clear();
   if (!visible || currentTabs.empty()) {
     return;
   }
@@ -242,6 +257,7 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
     node.toggled         = tab.active;
     node.actions         = a11y::bit(a11y::Action::Click);
     entries.push_back(into.id(tabNodeId));
+    accessibleTags.emplace_back(tabNodeId, tab.docIndex << 1U);
   }
 
   const auto mgrNodeId = 98U;
@@ -249,18 +265,39 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
   mgrNode.label        = "Store Object Manager";
   mgrNode.actions      = a11y::bit(a11y::Action::Click);
   entries.push_back(into.id(mgrNodeId));
+  accessibleTags.emplace_back(mgrNodeId, kManagerTag);
 
   const auto newDocNodeId = 99U;
   auto &newNode           = into.add(newDocNodeId, a11y::Role::Button);
   newNode.label           = "New Document";
   newNode.actions         = a11y::bit(a11y::Action::Click);
   entries.push_back(into.id(newDocNodeId));
+  accessibleTags.emplace_back(newDocNodeId, kNewDocTag);
 
   constexpr std::uint64_t barId = 1;
   auto &bar                     = into.add(barId, a11y::Role::List);
   bar.label                     = "Open Documents";
   bar.children                  = std::move(entries);
   into.contribute(into.id(barId));
+}
+
+bool DocumentSwitcher::performAction(const std::uint64_t nodeId,
+                                     const a11y::Action action,
+                                     const std::string_view /*value*/) {
+  if (action != a11y::Action::Click) {
+    return false;
+  }
+  const std::scoped_lock lock(actionsGuard);
+  const auto local = a11y::Ids::localOf(nodeId);
+  const auto found =
+      std::ranges::find_if(accessibleTags, [local](const auto &entry) {
+        return entry.first == local;
+      });
+  if (found == accessibleTags.end()) {
+    return false;
+  }
+  pendingTags.push_back(found->second);
+  return true;
 }
 
 } // namespace gleditor

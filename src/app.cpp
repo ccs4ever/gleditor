@@ -1172,7 +1172,8 @@ int Application::run() {
   AutoSDLWindow window(
       title.c_str(), state->view.screenWidth, state->view.screenHeight,
       render::backendWindowFlags(backend) | SDL_WINDOW_RESIZABLE |
-          SDL_WINDOW_HIGH_PIXEL_DENSITY | accessibilityWindowFlags(),
+          SDL_WINDOW_HIGH_PIXEL_DENSITY | accessibilityWindowFlags() |
+          (state->noPresent ? SDL_WINDOW_HIDDEN : 0),
       icon.surface);
 
   // Accessibility, before the window is on screen. That ordering is a
@@ -1200,7 +1201,9 @@ int Application::run() {
     std::cout << "accessibility: " << status << "\n";
   }
 #ifdef _WIN32
-  SDL_ShowWindow(window.window);
+  if (!state->noPresent) {
+    SDL_ShowWindow(window.window);
+  }
 #endif
 
   if (textInput) {

@@ -3,6 +3,7 @@
  * @brief Implementation of the True Arrayfilade and VQL Query Planning Index.
  */
 #include "common/xanadu/enfilade/arrayfilade.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -126,7 +127,7 @@ std::vector<ArrayCellEntry> rankEntries(const M &m, const zigzag::CellRef head,
            return entryOf(m, cell, Coords{static_cast<std::int64_t>(index)},
                           textOf);
          }) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 } // namespace
@@ -176,7 +177,7 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
   };
   return fromEntries(zigzag::rank(m, origin, rowDim) | std::views::enumerate |
                          std::views::transform(row) | std::views::join |
-                         std::ranges::to<std::vector>(),
+                         gleditor::toVector(),
                      2);
 }
 

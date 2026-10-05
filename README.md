@@ -252,6 +252,18 @@ internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requir
 `ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
 for headless inspection, at its place among the other automation options.
 
+Distribution builds require accessibility. Debian, Fedora, Arch and Nix build the pinned AccessKit C
+binding from source and link it statically (`ACCESSKIT_LINK=static`); Windows and macOS bundle its
+native runtime. Android uses AccessKit's Android provider on the SDL surface. WebAssembly mirrors
+the tree into native browser controls and sends supported actions back to the application. Local
+desktop builds retain the optional adapter for development without AccessKit installed.
+
+`packaging/check-accessibility-linux.py /path/to/xuzz` reads document text and activates New
+Document through an independent AT-SPI client in an isolated D-Bus session. It needs Python GI,
+AT-SPI introspection and the registry daemon. Native client checks for Windows and macOS live under
+their packaging directories; the macOS checker needs Accessibility permission on the test runner.
+`--no-present` keeps desktop test windows hidden while retaining their native accessibility host.
+
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2
 needs version 2.0.22 or newer. SDL supplies windows and message boxes, not a widget toolkit:

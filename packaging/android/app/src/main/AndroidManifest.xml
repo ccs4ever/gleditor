@@ -2,9 +2,8 @@
 <!--
   Modelled on thirdparty/SDL/android-project/app/src/main/AndroidManifest.xml,
   trimmed to what an editor rather than a game needs. The activity is SDL's
-  own org.libsdl.app.SDLActivity, unmodified: this project supplies no Java
-  of its own, only the native libraries (libmain.so, plus libSDL3.so) that its
-  default getLibraries() already expects to find.
+  unmodified SDLActivity with a subclass that exposes the rendering surface
+  to the AccessKit Android provider.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="auto">
@@ -37,7 +36,7 @@
         android:theme="@style/AppTheme"
         android:hardwareAccelerated="true">
 
-        <activity android:name="org.libsdl.app.SDLActivity"
+        <activity android:name="io.github.ccs4ever.gleditor.GleditorActivity"
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"

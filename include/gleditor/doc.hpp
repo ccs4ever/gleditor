@@ -152,6 +152,9 @@ struct PageShaping {
   std::vector<PlacedBox> boxes;
 };
 
+// Keep editor page symbols distinct from Poppler's global Page in static
+// builds.
+namespace gleditor {
 class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
@@ -333,6 +336,7 @@ public:
                std::uint32_t colour) const;
   ~Page() override = default;
 };
+} // namespace gleditor
 
 /**
  * @brief How much had to be laid out again after an edit.
@@ -360,18 +364,17 @@ private:
    * missing slot only ever means "not reached yet", never "skipped". See
    * design/priority-page-building.md's Stage 2.
    */
-  std::vector<std::optional<Page>> pages;
+  std::vector<std::optional<gleditor::Page>> pages;
 
   /// Every built page with its true index, skipping the gaps -- what each
   /// page-by-page question walks, so none of them re-checks a slot by hand.
   [[nodiscard]] auto builtPages() const {
-    return pages | std::views::enumerate |
+    return std::views::iota(std::size_t{0}, pages.size()) |
            std::views::filter(
-               [](const auto &slot) { return std::get<1>(slot).has_value(); }) |
-           std::views::transform([](const auto &slot) {
-             const auto &[index, page] = slot;
-             return std::pair<std::uint32_t, const Page &>{
-                 static_cast<std::uint32_t>(index), *page};
+               [this](const auto index) { return pages[index].has_value(); }) |
+           std::views::transform([this](const auto index) {
+             return std::pair<std::uint32_t, const gleditor::Page &>{
+                 static_cast<std::uint32_t>(index), *pages[index]};
            });
   }
 
@@ -384,7 +387,7 @@ private:
   /// @p ask takes (index, page) and answers an optional.
   template <typename Ask>
   [[nodiscard]] auto firstBuiltPage(Ask &&ask) const
-      -> std::invoke_result_t<Ask &, std::uint32_t, const Page &> {
+      -> std::invoke_result_t<Ask &, std::uint32_t, const gleditor::Page &> {
     for (const auto &[index, page] : builtPages()) {
       if (auto answer = ask(index, page)) {
         return answer;
@@ -917,7 +920,7 @@ public:
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   /// Built page @p index, or nothing for one not built yet or past the end.
-  [[nodiscard]] gleditor::cpp26::optional<const Page &>
+  [[nodiscard]] gleditor::cpp26::optional<const gleditor::Page &>
   page(const std::size_t index) const {
     if (index >= pages.size() || !pages[index].has_value()) {
       return gleditor::cpp26::nullopt;
@@ -956,7 +959,7 @@ public:
                      .bottomPx     = built->topPixels() - built->heightPixels(),
                      .marginPx     = pageGeometry.marginPx > 0.0F
                                          ? pageGeometry.marginPx
-                                         : Page::marginPixels};
+                                         : gleditor::Page::marginPixels};
   }
 
   /**
@@ -1250,7 +1253,7 @@ public:
   /// catches up to it. Render thread only.
   std::vector<std::uint32_t> priorityOffsets;
 
-  friend class Page;
+  friend class gleditor::Page;
   friend class DocGapTest;
 };
 

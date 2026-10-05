@@ -205,8 +205,10 @@ void Form::describe(a11y::Builder &into) {
     switch (one.kind) {
     case Kind::Text:
       node.value = one.value;
+      node.actions |= a11y::bit(a11y::Action::SetValue);
       break;
     case Kind::Secret:
+      node.actions |= a11y::bit(a11y::Action::SetValue);
       // Never the passphrase itself, revealed or not. What is on screen is a
       // person's choice about their own screen; what goes on the accessibility
       // bus is readable by anything on the session, and a screen reader will

@@ -3,6 +3,7 @@
   stdenv,
   pkg-config,
   makeWrapper,
+  callPackage,
   freetype,
   harfbuzz,
   fribidi,
@@ -31,9 +32,14 @@
   # ones.
   boost,
   openssl,
+  vlc,
+  sqlite,
   version ? "0.1.0",
 }:
 
+let
+  accesskit = callPackage ./accesskit.nix { };
+in
 stdenv.mkDerivation {
   pname = "gleditor";
   inherit version;
@@ -48,7 +54,19 @@ stdenv.mkDerivation {
         let
           base = baseNameOf name;
         in
-        _type: !(base == "build" || base == ".git" || base == "result" || lib.hasSuffix ".o" base);
+        _type:
+        !(
+          builtins.elem base [
+            "build"
+            ".git"
+            "result"
+            ".dependencies"
+            ".gradle"
+            ".cxx"
+            "vcpkg_installed"
+          ]
+          || lib.hasSuffix ".o" base
+        );
     in
     lib.cleanSourceWith {
       filter = keep;
@@ -83,6 +101,9 @@ stdenv.mkDerivation {
     rnp
     boost
     openssl
+    vlc
+    sqlite
+    accesskit
   ];
 
   # The Makefile's compiler default is clang++; stdenv supplies its own, and
@@ -91,6 +112,9 @@ stdenv.mkDerivation {
   makeFlags = [
     "GLEDITOR_SDL=3"
     "GLEDITOR_ENABLE_VULKAN=1"
+    "GLEDITOR_ENABLE_A11Y=1"
+    "ACCESSKIT_LINK=static"
+    "ACCESSKIT_DIR=${accesskit}"
     "GLEDITOR_VERSION=${version}"
     "prefix=${placeholder "out"}"
   ];
@@ -115,6 +139,8 @@ stdenv.mkDerivation {
   # libGL comes from the driver on a NixOS system, hence only the Vulkan
   # loader being pinned here.
   postInstall = ''
+    mkdir -p $out/share/licenses/accesskit
+    cp ${accesskit}/share/licenses/accesskit/* $out/share/licenses/accesskit/
     for program in gleditor xudu; do
       wrapProgram $out/bin/$program \
         --prefix LD_LIBRARY_PATH : ${

@@ -62,6 +62,10 @@ fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+export XDG_DATA_HOME="$work/data"
+export XDG_CONFIG_HOME="$work/config"
+export XDG_CACHE_HOME="$work/cache"
 cd "$work"
 
 cat >sample.txt <<'SAMPLE'
@@ -74,21 +78,32 @@ SAMPLE
 # --import, which it will only accept into an empty one -- hence a store per
 # backend rather than one shared by the loop.
 case $(basename "$BIN") in
-  xudu*) doc_args() { echo "--import sample.txt $work/$1.xanadoc"; } ;;
+  xudu* | xuzz* | zigzag*) doc_args() { echo "--import sample.txt $work/$1.xanadoc"; } ;;
   *) doc_args() { echo "sample.txt"; } ;;
 esac
 
 failed=0
 for backend in $BACKENDS; do
   echo "==> rendering with $backend from $work"
+  set -- --dump-a11y
+  # Vulkan returns acquired swapchain images by presenting them. Its smoke
+  # runs use the caller's virtual display rather than suppressing presentation.
+  if [ "$backend" != vulkan ]; then
+    set -- "$@" --no-present
+  fi
   # Unquoted on purpose: doc_args prints one or more arguments.
   # shellcheck disable=SC2046
   if ! "$BIN" --backend "$backend" --profile --strict-diagnostics \
-    --screenshot "$work/$backend.ppm" $(doc_args "$backend") >"$work/$backend.log" 2>&1; then
+    "$@" --screenshot "$work/$backend.ppm" $(doc_args "$backend") >"$work/$backend.log" 2>&1; then
     echo "FAIL: $backend run exited non-zero"
     tail -20 "$work/$backend.log"
     failed=1
     continue
+  fi
+  if ! grep -q 'accessibility: reporting to the platform' "$work/$backend.log"; then
+    echo "FAIL: $backend package did not open a native accessibility adapter"
+    tail -20 "$work/$backend.log"
+    failed=1
   fi
 
   # A frame of one flat colour is what a missing shader or an unfound atlas

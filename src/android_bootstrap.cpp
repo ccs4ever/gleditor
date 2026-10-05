@@ -6,7 +6,6 @@
 
 #ifdef __ANDROID__
 
-#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -20,23 +19,12 @@
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_system.h>
+#include <gleditor/logging.hpp>
 #include <jni.h>
 
 namespace gleditor {
 
 namespace {
-
-// The full set of files the GL/GLES and Vulkan backends open by path, kept in
-// step with assets/shaders/*.glsl and the SPIRV list in the Makefile. Small
-// and fixed, so copying the lot on every launch is simpler than tracking
-// whether it changed -- a few kilobytes of text and SPIR-V, not an asset
-// pack.
-constexpr std::array<const char *, 8> kShaderAssets = {
-    "shaders/glyph.vert.glsl",       "shaders/glyph.frag.glsl",
-    "shaders/beam.vert.glsl",        "shaders/beam.frag.glsl",
-    "shaders/vulkan/glyph.vert.spv", "shaders/vulkan/glyph.frag.spv",
-    "shaders/vulkan/beam.vert.spv",  "shaders/vulkan/beam.frag.spv",
-};
 
 /// Copies one asset out of the APK. SDL_LoadFile resolves a relative path
 /// through the Android asset manager, which is what makes the source side of
@@ -59,16 +47,63 @@ void copyAsset(const std::filesystem::path &destRoot, const char *relative) {
   SDL_free(data);
 }
 
+void copyAssetTree(JNIEnv *env, jobject manager, jmethodID list,
+                   const std::string &relative,
+                   const std::filesystem::path &destRoot) {
+  const auto path = env->NewStringUTF(relative.c_str());
+  const auto entries =
+      static_cast<jobjectArray>(env->CallObjectMethod(manager, list, path));
+  env->DeleteLocalRef(path);
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    GLEDITOR_LOG_ERROR("app.assets", "could not enumerate APK asset {}",
+                       relative);
+    return;
+  }
+  const auto count = nullptr != entries ? env->GetArrayLength(entries) : 0;
+  if (0 == count) {
+    copyAsset(destRoot, relative.c_str());
+  } else {
+    for (jsize index = 0; index < count; ++index) {
+      const auto name =
+          static_cast<jstring>(env->GetObjectArrayElement(entries, index));
+      const auto *chars = env->GetStringUTFChars(name, nullptr);
+      const auto child  = relative + "/" + chars;
+      env->ReleaseStringUTFChars(name, chars);
+      env->DeleteLocalRef(name);
+      copyAssetTree(env, manager, list, child, destRoot);
+    }
+  }
+  env->DeleteLocalRef(entries);
+}
+
 void extractShaderAssets(const std::filesystem::path &internal) {
   const std::filesystem::path assetRoot = internal / "assets";
-  for (const char *asset : kShaderAssets) {
-    copyAsset(assetRoot, asset);
+  auto *env           = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+  const auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (nullptr == env || nullptr == activity) {
+    return;
   }
+  const auto activityClass = env->GetObjectClass(activity);
+  const auto getAssets     = env->GetMethodID(
+      activityClass, "getAssets", "()Landroid/content/res/AssetManager;");
+  const auto manager      = env->CallObjectMethod(activity, getAssets);
+  const auto managerClass = env->GetObjectClass(manager);
+  const auto list         = env->GetMethodID(managerClass, "list",
+                                             "(Ljava/lang/String;)[Ljava/lang/String;");
+  // Enumerate the APK itself so new rendering pipelines need no second
+  // shader list to stay usable on Android.
+  copyAssetTree(env, manager, list, "shaders", assetRoot);
+  env->DeleteLocalRef(managerClass);
+  env->DeleteLocalRef(manager);
+  env->DeleteLocalRef(activityClass);
+  env->DeleteLocalRef(activity);
   setenv("GLEDITOR_ASSET_DIR", assetRoot.string().c_str(), 1);
 }
 
-/// Android has no fontconfig of its own; without one, Pango finds no fonts at
-/// all. This writes out the bundled fonts.conf (assets/fontconfig/fonts.conf,
+/// Android has no fontconfig of its own; the FreeType/HarfBuzz font manager
+/// needs a configuration to resolve families. This writes out the bundled
+/// fonts.conf (assets/fontconfig/fonts.conf,
 /// which points at /system/fonts and restates the generic family aliases a
 /// desktop fontconfig install would otherwise supply) with its cache
 /// directory placeholder filled in, and points FONTCONFIG_FILE at the result.
@@ -100,9 +135,8 @@ void extractFontConfig(const std::filesystem::path &internal) {
 
 /// Reads a "backend" extra off the launch intent, when the app was started
 /// with one, and applies it the same way GLEDITOR_BACKEND already works
-/// everywhere else. SDL's stock Java Activity is used unmodified, so this --
-/// JNI calls against the Activity and Intent SDL itself hands back -- is the
-/// only way in that does not mean writing a custom one.
+/// everywhere else. The accessibility Activity inherits SDL's Intent handling,
+/// so native startup reads the same Activity and Intent that SDL hands back.
 void applyBackendOverrideFromIntent() {
   auto *env     = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
   auto activity = static_cast<jobject>(SDL_GetAndroidActivity());

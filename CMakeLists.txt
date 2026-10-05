@@ -56,20 +56,19 @@ file(WRITE "${CMAKE_BINARY_DIR}/generated/src/config.h" "${GLEDITOR_CONFIG_H_CON
 # -- sources ---------------------------------------------------------------
 #
 # The same tree the Makefile's LIB_SRCS walks (thirdparty/Choreograph/src and
-# src/, recursively), minus the AccessKit backend: accessibility is compiled
-# out for Android rather than cross-built, so src/a11y/platform_none.cpp -- a
-# no-op that answers the same interface -- is what actually links, same as a
-# desktop build with GLEDITOR_ENABLE_A11Y=0. Vulkan's src/render/vulkan/*.cpp
+# src/, recursively), with the AccessKit Android adapter. Distribution builds
+# require its pinned native library and Java delegate. Vulkan's src/render/vulkan/*.cpp
 # is always included, unlike the Makefile's conditional, since this build
 # exists specifically to carry that backend.
 file(GLOB_RECURSE GLEDITOR_LIB_SOURCES CONFIGURE_DEPENDS "${GLEDITOR_ROOT}/src/*.cpp")
-list(FILTER GLEDITOR_LIB_SOURCES EXCLUDE REGEX "/src/a11y/platform_accesskit\\.cpp$")
+list(FILTER GLEDITOR_LIB_SOURCES EXCLUDE REGEX "/src/a11y/platform_(none|web)\\.cpp$")
 file(GLOB_RECURSE GLEDITOR_CHOREOGRAPH_SOURCES CONFIGURE_DEPENDS "${GLEDITOR_ROOT}/thirdparty/Choreograph/src/*.cpp")
+file(GLOB_RECURSE GLEDITOR_APP_SOURCES CONFIGURE_DEPENDS "${GLEDITOR_ROOT}/apps/gleditor/*.cpp")
 
 add_library(main SHARED
   ${GLEDITOR_LIB_SOURCES}
   ${GLEDITOR_CHOREOGRAPH_SOURCES}
-  "${GLEDITOR_ROOT}/apps/gleditor/main.cpp"
+  ${GLEDITOR_APP_SOURCES}
 )
 
 target_compile_options(main PRIVATE -std=c++23 -Wall -Wextra)
@@ -80,6 +79,9 @@ target_include_directories(main PRIVATE
   "${GLEDITOR_ROOT}/apps"
   "${GLEDITOR_ROOT}/thirdparty/Choreograph/src"
   "${GLEDITOR_ROOT}/thirdparty/argparse/include"
+  "${GLEDITOR_ROOT}/thirdparty/nontype_functional/include"
+  "${GLEDITOR_ROOT}/thirdparty/beman_optional/include"
+  "${GLEDITOR_ROOT}/thirdparty/beman_inplace_vector/include"
   # GL/glcorearb.h and KHR/khrplatform.h, for the typedefs and enum values
   # gl_api.hpp reads. The NDK has GLES headers but not this one, the same gap
   # pkg-config's `gl` package fills in on desktop Linux; see the Makefile's
@@ -89,6 +91,7 @@ target_include_directories(main PRIVATE
 
 target_compile_definitions(main PRIVATE
   GLEDITOR_SDL_MAJOR=3
+  GLEDITOR_HAVE_A11Y=1
   GLEDITOR_ENABLE_VULKAN=1
   GLM_ENABLE_EXPERIMENTAL
   # No command line exists to pass --backend on, and desktop GL is not a
@@ -126,6 +129,41 @@ set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GLEDITOR_ROOT}/thirdparty/SDL" "${CMAKE_BINARY_DIR}/SDL3")
 
+# Link the adapter into main so it inherits the NDK's page-size alignment;
+# the upstream shared Android binaries use 4 KiB segments. Keep its Java
+# delegate at the same version as the release's Cargo.lock.
+set(ACCESSKIT_DIR "$ENV{ACCESSKIT_DIR}" CACHE PATH "AccessKit C release directory")
+if(NOT ACCESSKIT_DIR)
+  set(ACCESSKIT_DIR "${GLEDITOR_ROOT}/packaging/android/.dependencies/accesskit-c-0.22.3")
+endif()
+set(ACCESSKIT_ANDROID_LIBRARY "${ACCESSKIT_DIR}/lib/android/${ANDROID_ABI}/static/libaccesskit.a")
+if(NOT EXISTS "${ACCESSKIT_DIR}/include/accesskit.h" OR NOT EXISTS "${ACCESSKIT_ANDROID_LIBRARY}")
+  message(FATAL_ERROR "Android accessibility requires AccessKit; run packaging/android/fetch-accesskit.sh")
+endif()
+add_library(accesskit STATIC IMPORTED)
+set_target_properties(accesskit PROPERTIES IMPORTED_LOCATION "${ACCESSKIT_ANDROID_LIBRARY}")
+target_include_directories(main PRIVATE "${ACCESSKIT_DIR}/include")
+file(READ "${ACCESSKIT_DIR}/include/accesskit.h" ACCESSKIT_HEADER)
+if(ACCESSKIT_HEADER MATCHES "accesskit_tree_info_new")
+  target_compile_definitions(main PRIVATE GLEDITOR_ACCESSKIT_TREE_INFO=1)
+endif()
+find_library(GLEDITOR_ANDROID_LIB android REQUIRED)
+find_library(GLEDITOR_LOG_LIB log REQUIRED)
+target_link_libraries(main PRIVATE accesskit ${GLEDITOR_ANDROID_LIB}
+  ${GLEDITOR_LOG_LIB} ${CMAKE_DL_LIBS})
+
+# VideoLAN publishes its Android native C library through the official AAR.
+# Import only libvlc: the NDK supplies this application's shared C++ runtime.
+set(GLEDITOR_VLC_DIR "${GLEDITOR_ROOT}/packaging/android/.dependencies/libvlc")
+if(NOT EXISTS "${GLEDITOR_VLC_DIR}/jni/${ANDROID_ABI}/libvlc.so")
+  message(FATAL_ERROR "Run packaging/android/fetch-libvlc.sh before configuring")
+endif()
+add_library(vlc SHARED IMPORTED)
+set_target_properties(vlc PROPERTIES
+  IMPORTED_LOCATION "${GLEDITOR_VLC_DIR}/jni/${ANDROID_ABI}/libvlc.so")
+target_include_directories(main PRIVATE "${GLEDITOR_VLC_DIR}/include")
+target_link_libraries(main PRIVATE vlc)
+
 # -- freetype/harfbuzz/fribidi/unibreak/fontconfig, glm ------------------------
 #
 # All from vcpkg (see packaging/android/vcpkg.json), statically linked -- the
@@ -142,9 +180,12 @@ add_subdirectory("${GLEDITOR_ROOT}/thirdparty/SDL" "${CMAKE_BINARY_DIR}/SDL3")
 # everything static, and only `pkg-config --static` walks the full transitive
 # dependency graph and adds the system libraries (-pthread and the like) a static link needs.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(TEXT_DEPS REQUIRED freetype2 harfbuzz fribidi fontconfig)
+pkg_check_modules(TEXT_DEPS REQUIRED freetype2 harfbuzz fribidi fontconfig
+  poppler-cpp poppler libmagic)
 find_package(libunibreak CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 # libvulkan.so is the NDK's own stub for the platform loader, present from
 # API 24 on; nothing here is vcpkg's to provide.
@@ -160,5 +201,7 @@ target_link_libraries(main PRIVATE
   ${TEXT_DEPS_STATIC_LDFLAGS_OTHER}
   libunibreak::libunibreak
   glm::glm
+  spdlog::spdlog
+  OpenSSL::Crypto
   ${GLEDITOR_VULKAN_LIB}
 )

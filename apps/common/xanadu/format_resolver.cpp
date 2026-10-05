@@ -3,6 +3,7 @@
  * @brief Universal content-addressed formatting extraction implementation.
  */
 #include "format_resolver.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <utility>
 
@@ -62,7 +63,7 @@ FormatResolver::FormatResolver(const Store &store) noexcept {
                        .align      = textAlignFromFormatAttribute(attribute),
                    };
                  }) |
-                 std::ranges::to<std::vector>();
+                 gleditor::toVector();
 }
 
 std::optional<PrimediaSpan> FormatResolver::spanIn(const Store &from,

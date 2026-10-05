@@ -3,6 +3,7 @@
  * @brief Unit tests for the rank views and optional-returning steps in
  *        cell_views.hpp, and the expected-returning fold and arena writes.
  */
+#include <gleditor/ranges.hpp>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -39,7 +40,7 @@ struct Line {
 TEST(RankWalkTest, ArenaManifoldLinearForwardWalk) {
   const Line line;
   const auto visited =
-      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+      rank(line.arena, line.c1, line.d1) | gleditor::toVector();
   EXPECT_EQ(visited, (std::vector{line.c1, line.c2, line.c3}));
 
   // The step index the old callback walk handed out is views::enumerate.
@@ -48,14 +49,14 @@ TEST(RankWalkTest, ArenaManifoldLinearForwardWalk) {
                      std::views::transform([](const auto indexed) {
                        return static_cast<std::size_t>(std::get<0>(indexed));
                      }) |
-                     std::ranges::to<std::vector>();
+                     gleditor::toVector();
   EXPECT_EQ(steps, (std::vector<std::size_t>{0, 1, 2}));
 }
 
 TEST(RankWalkTest, ArenaManifoldLinearBackwardWalk) {
   const Line line;
-  const auto visited = rank(line.arena, line.c3, line.d1, DimVector::NEG) |
-                       std::ranges::to<std::vector>();
+  const auto visited =
+      rank(line.arena, line.c3, line.d1, DimVector::NEG) | gleditor::toVector();
   EXPECT_EQ(visited, (std::vector{line.c3, line.c2, line.c1}));
 }
 
@@ -64,7 +65,7 @@ TEST(RankWalkTest, ArenaManifoldEarlyTermination) {
   const auto visited =
       rank(line.arena, line.c1, line.d1) |
       std::views::take_while([&](const CellRef c) { return c != line.c3; }) |
-      std::ranges::to<std::vector>();
+      gleditor::toVector();
   EXPECT_EQ(visited, (std::vector{line.c1, line.c2}));
 }
 
@@ -74,12 +75,11 @@ TEST(RankWalkTest, ArenaManifoldCycleProtection) {
   ASSERT_TRUE(line.arena.link(line.c3, line.d1, DimVector::POS, line.c1));
 
   // Stops when the next cell is the start, visiting each cell once.
-  EXPECT_EQ(rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>(),
+  EXPECT_EQ(rank(line.arena, line.c1, line.d1) | gleditor::toVector(),
             (std::vector{line.c1, line.c2, line.c3}));
 
   // rankAfter drops the start and still stops there.
-  EXPECT_EQ(rankAfter(line.arena, line.c1, line.d1) |
-                std::ranges::to<std::vector>(),
+  EXPECT_EQ(rankAfter(line.arena, line.c1, line.d1) | gleditor::toVector(),
             (std::vector{line.c2, line.c3}));
 
   // On a ring the tail is the cell before the start, and the end is the start.
@@ -92,9 +92,9 @@ TEST(RankWalkTest, SelfLinkStopsTheWalk) {
   // A link keeps both its ends, so a self-link on c3 evicts c2 -> c3: c3 is
   // a rank of one that loops on itself, and the walk visits it once.
   ASSERT_TRUE(line.arena.link(line.c3, line.d1, DimVector::POS, line.c3));
-  EXPECT_EQ(rank(line.arena, line.c3, line.d1) | std::ranges::to<std::vector>(),
+  EXPECT_EQ(rank(line.arena, line.c3, line.d1) | gleditor::toVector(),
             (std::vector{line.c3}));
-  EXPECT_EQ(rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>(),
+  EXPECT_EQ(rank(line.arena, line.c1, line.d1) | gleditor::toVector(),
             (std::vector{line.c1, line.c2}));
 }
 
@@ -105,10 +105,10 @@ TEST(RankWalkTest, ARingWalkedFromItsMiddleVisitsEachCellOnce) {
   // starts. (A lasso cannot be built: a link keeps both of its ends, so
   // closing c3 -> c2 would evict c1 -> c2. traversalBound() bounds only a
   // structure that is already inconsistent.)
-  EXPECT_EQ(rank(line.arena, line.c2, line.d1) | std::ranges::to<std::vector>(),
+  EXPECT_EQ(rank(line.arena, line.c2, line.d1) | gleditor::toVector(),
             (std::vector{line.c2, line.c3, line.c1}));
   EXPECT_EQ(rank(line.arena, line.c2, line.d1, DimVector::NEG) |
-                std::ranges::to<std::vector>(),
+                gleditor::toVector(),
             (std::vector{line.c2, line.c1, line.c3}));
 }
 
@@ -139,18 +139,17 @@ TEST(RankWalkTest, NeighboursAndFilters) {
   ASSERT_TRUE(line.arena.link(line.c2, d2, DimVector::POS, off));
 
   EXPECT_EQ(neighbours(line.arena, line.c2, DimVector::POS) |
-                std::ranges::to<std::vector>(),
+                gleditor::toVector(),
             (std::vector{Hop{.dim = line.d1, .cell = line.c3},
                          Hop{.dim = d2, .cell = off}}));
 
-  const auto all =
-      neighbours(line.arena, line.c2) | std::ranges::to<std::vector>();
+  const auto all = neighbours(line.arena, line.c2) | gleditor::toVector();
   EXPECT_EQ(all.size(), 3U);
   EXPECT_TRUE(std::ranges::contains(all, Hop{.dim = line.d1, .cell = line.c1}));
 
   EXPECT_EQ(rank(line.arena, line.c1, line.d1) |
                 std::views::filter(linksAlong(line.arena, d2)) |
-                std::ranges::to<std::vector>(),
+                gleditor::toVector(),
             (std::vector{line.c2}));
 
   const auto named = [&](const std::string_view text) {
@@ -198,8 +197,7 @@ TEST(RankWalkTest, CopyOnWriteArenaWalksTheWholeBase) {
   // An arena over the base with no cells of its own. Bounding the walk by the
   // arena's own cellCount() cut it off after one cell.
   const ArenaManifold view{&base};
-  EXPECT_EQ(rank(view, cells.front(), dSeq) | std::ranges::to<std::vector>(),
-            cells);
+  EXPECT_EQ(rank(view, cells.front(), dSeq) | gleditor::toVector(), cells);
 }
 
 TEST(RankWalkTest, ManifoldRankWalk) {
@@ -221,7 +219,7 @@ TEST(RankWalkTest, ManifoldRankWalk) {
   at = store.setLink(at, cB, dSeq, DimVector::POS, cC);
 
   const auto manifold = store.rebuildManifold(at);
-  EXPECT_EQ(rank(manifold, cA, dSeq) | std::ranges::to<std::vector>(),
+  EXPECT_EQ(rank(manifold, cA, dSeq) | gleditor::toVector(),
             (std::vector{cA, cB, cC}));
   EXPECT_EQ(manifold.dimensionNamed("absent", store), std::nullopt);
   EXPECT_EQ(manifold.cloneMaster(cC + 1000, dSeq), std::nullopt);
@@ -365,20 +363,20 @@ TEST(RankWalkTest, ArenaManifoldRankContainsAndUnbrokenInsertion) {
   EXPECT_TRUE(line.arena.rankContains(line.c1, splice1, line.d1));
 
   const auto afterSplice =
-      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+      rank(line.arena, line.c1, line.d1) | gleditor::toVector();
   EXPECT_EQ(afterSplice, (std::vector{line.c1, splice1, line.c2, line.c3}));
 
   // Idempotency: re-inserting splice1 does nothing to rank topology
   line.arena.insertIntoRank(splice1, line.c1, line.d1, DimVector::POS);
   const auto afterReinsert =
-      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+      rank(line.arena, line.c1, line.d1) | gleditor::toVector();
   EXPECT_EQ(afterReinsert, (std::vector{line.c1, splice1, line.c2, line.c3}));
 
   // Tail insertion after c3: c1 -> splice1 -> c2 -> c3 -> tailCell
   const CellRef tailCell = line.arena.makeCell("tailCell");
   line.arena.insertIntoRank(tailCell, line.c3, line.d1, DimVector::POS);
   const auto afterTail =
-      rank(line.arena, line.c1, line.d1) | std::ranges::to<std::vector>();
+      rank(line.arena, line.c1, line.d1) | gleditor::toVector();
   EXPECT_EQ(afterTail,
             (std::vector{line.c1, splice1, line.c2, line.c3, tailCell}));
 

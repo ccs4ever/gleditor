@@ -6,9 +6,13 @@ Summary:        GPU-rendered text editor with three graphics backends
 License:        GPL-3.0-or-later
 URL:            https://github.com/ccs4ever/gleditor
 Source0:        %{name}-%{version}.tar.gz
+Source1:        https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip
 
 BuildRequires:  gcc-c++ >= 13
 BuildRequires:  make
+BuildRequires:  cargo >= 1.85
+BuildRequires:  rust >= 1.85
+BuildRequires:  unzip
 BuildRequires:  pkgconfig
 BuildRequires:  pkgconfig(freetype2)
 BuildRequires:  pkgconfig(harfbuzz)
@@ -17,6 +21,8 @@ BuildRequires:  pkgconfig(libunibreak)
 BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  pkgconfig(spdlog)
 BuildRequires:  pkgconfig(poppler-cpp)
+BuildRequires:  pkgconfig(libvlc)
+BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  file-devel
 BuildRequires:  SDL3-devel
 BuildRequires:  SDL3_image-devel
@@ -68,16 +74,21 @@ document format; xudu, shipped in the main package, is one program built on it.
 
 %prep
 %autosetup
+echo 'b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177  %{SOURCE1}' | sha256sum -c -
+mkdir -p build/accesskit-source
+unzip -q %{SOURCE1} -d build/accesskit-source
 
 %build
 # SDL3 is what the code is written against and Fedora ships it, so unlike the
 # Debian package this one does not fall back to SDL2. GLEDITOR_VERSION is
 # passed because the tarball has no git history to describe.
 %set_build_flags
+packaging/accesskit/build-linux.sh build/accesskit-source/accesskit-c-0.22.3 "$PWD/build/accesskit"
 %make_build \
     libdir=%{_libdir} \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION=%{version} \
     lib gleditor xudu shaders
 
@@ -91,6 +102,7 @@ document format; xudu, shipped in the main package, is one program built on it.
     mandir=%{_mandir} \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION=%{version}
 
 %check
@@ -100,9 +112,12 @@ appstream-util validate-relax --nonet \
 
 %files
 %license LICENSE
+%license build/accesskit/LICENSE-MIT build/accesskit/LICENSE-APACHE
 %doc README.md
 %{_bindir}/gleditor
 %{_bindir}/xudu
+%{_bindir}/xuzz
+%{_bindir}/zigzag
 %{_libdir}/libgleditor.so.0
 %{_datadir}/gleditor/
 %{_datadir}/applications/gleditor.desktop

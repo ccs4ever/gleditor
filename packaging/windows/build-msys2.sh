@@ -32,10 +32,15 @@ version=${GLEDITOR_VERSION:-$(cat VERSION 2>/dev/null || echo 0.0.0)}
 outdir=${OUTDIR:-$root/build/windows}
 stage=$outdir/gleditor
 
+if ! pkg-config --exists librnp; then
+  bash "$here/build-rnp.sh" "$outdir/dependencies/rnp"
+fi
+
 echo "==> building gleditor $version for $MSYSTEM"
 make clean >/dev/null 2>&1 || true
 make -j"$(nproc)" \
   GLEDITOR_SDL=3 \
+  GLEDITOR_ENABLE_A11Y=1 \
   GLEDITOR_ENABLE_VULKAN=1 \
   GLEDITOR_VERSION="$version" \
   lib gleditor xudu shaders
@@ -54,7 +59,19 @@ cp assets/shaders/vulkan/*.spv "$stage/assets/shaders/vulkan/"
 cp assets/logo.png "$stage/assets/logo.png"
 cp LICENSE README.md "$stage/"
 
-# AccessKit, when this was built with it. Copied by name rather than left to
+# VLC finds runtime-loaded codecs beside libvlccore.dll, rather than through
+# the executable's import table. Include their DLL dependencies below too.
+test -d "$MINGW_PREFIX/lib/vlc/plugins"
+cp -R "$MINGW_PREFIX/lib/vlc/plugins" "$stage/plugins"
+cp -R "$MINGW_PREFIX/share/vlc/." "$stage/"
+if [ -d "$MINGW_PREFIX/share/licenses/vlc" ]; then
+  mkdir -p "$stage/licenses"
+  cp -R "$MINGW_PREFIX/share/licenses/vlc" "$stage/licenses/vlc"
+fi
+mkdir -p "$stage/licenses"
+cp -R "$MINGW_PREFIX/share/licenses/rnp" "$stage/licenses/rnp"
+
+# AccessKit is required for a distributable bundle. Copied by name rather than left to
 # the collector below: the collector takes what is under $MINGW_PREFIX, and
 # this came from wherever ACCESSKIT_DIR pointed. Windows has no run path -- the
 # loader looks beside the executable -- so the DLL has to be in the bundle or
@@ -88,13 +105,24 @@ collect() {
         changed=1
       fi
     done < <(
-      ldd "$stage"/*.exe "$stage"/*.dll 2>/dev/null |
+      find "$stage" -type f \( -name '*.exe' -o -name '*.dll' \) -print0 |
+        xargs -0 ldd 2>/dev/null |
         awk '{print $3}' |
         grep -i "^${MINGW_PREFIX}/" || true
     )
   done
 }
 collect
+test -f "$stage/libvlc.dll"
+test -f "$stage/libvlccore.dll"
+if [ ! -f "$stage/accesskit.dll" ]; then
+  echo "accesskit.dll is missing from the accessibility-enabled bundle" >&2
+  exit 1
+fi
+if [ -n "${ACCESSKIT_DIR:-}" ]; then
+  mkdir -p "$stage/licenses/accesskit"
+  cp "$ACCESSKIT_DIR"/LICENSE* "$stage/licenses/accesskit/"
+fi
 echo "    bundled $(find "$stage" -maxdepth 1 -name '*.dll' | wc -l) DLLs"
 
 # Pango picks its font backend by loading a module at run time, and on Windows

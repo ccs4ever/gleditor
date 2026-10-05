@@ -54,3 +54,6 @@ this implementation displays the existing append-only visit records and their pa
 
 The [coincident-link follow-up](audit-2026-10-05-ux-coincident-links.md) adds pointer controls to
 reach covered link identities. A direct overlap comparison list remains proposed.
+
+The [distribution accessibility follow-up](audit-2026-10-05-distribution-accessibility.md) verifies
+native Linux document text and New Document delivery. Native Walks actions remain untested.

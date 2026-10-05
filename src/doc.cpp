@@ -104,7 +104,7 @@ std::uint32_t rowsFor(const std::size_t characters) {
 /// Margin in layout pixels between the page edge and its text. The one
 /// definition lives on Page, where anything drawing in a page's margin can
 /// reach it; this is the short name the layout below reads it by.
-constexpr float pageMargin = Page::marginPixels;
+constexpr float pageMargin = gleditor::Page::marginPixels;
 
 /// How far in front of the page background its glyphs and bars sit, in the
 /// same layout-pixel space. Small enough to be a depth tie-break rather than a
@@ -232,10 +232,11 @@ render::VertexLayout Doc::vertexLayout() {
   return layout;
 }
 
-Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-           PageShaping aShaping, const std::uint32_t aTextOffset,
-           const std::uint32_t aPageIndex,
-           const BufferPool::Allocation &inherited)
+gleditor::Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state,
+                     glm::mat4 &model, PageShaping aShaping,
+                     const std::uint32_t aTextOffset,
+                     const std::uint32_t aPageIndex,
+                     const BufferPool::Allocation &inherited)
     : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
       textOffset(aTextOffset), clusters(std::move(aShaping.clusters)),
       pageIndex(aPageIndex),
@@ -370,7 +371,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
 }
 
-bool Page::contains(const std::uint32_t globalOffset) const {
+bool gleditor::Page::contains(const std::uint32_t globalOffset) const {
   // The end of the last page is a valid caret position, so the upper bound is
   // inclusive there and exclusive everywhere else -- otherwise the caret could
   // not be put after the final character.
@@ -379,7 +380,7 @@ bool Page::contains(const std::uint32_t globalOffset) const {
 
 void Doc::keepLayoutOf(const std::uint32_t pageIndex) { (void)pageIndex; }
 
-std::string_view Page::pageText() const {
+std::string_view gleditor::Page::pageText() const {
   const std::string_view whole{doc->contents()};
   if (textOffset >= whole.size()) {
     return {};
@@ -387,10 +388,12 @@ std::string_view Page::pageText() const {
   return whole.substr(textOffset, textBytes);
 }
 
-PageShaping Page::ensureShaping() const { return doc->layoutFrom(textOffset); }
+PageShaping gleditor::Page::ensureShaping() const {
+  return doc->layoutFrom(textOffset);
+}
 
 std::optional<CaretGeometry>
-Page::caretGeometry(const std::uint32_t globalOffset) const {
+gleditor::Page::caretGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
     return std::nullopt;
   }
@@ -470,7 +473,7 @@ Page::caretGeometry(const std::uint32_t globalOffset) const {
 }
 
 std::optional<BoxGeometry>
-Page::boxGeometry(const std::uint32_t globalOffset) const {
+gleditor::Page::boxGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
     return std::nullopt;
   }
@@ -491,8 +494,8 @@ Page::boxGeometry(const std::uint32_t globalOffset) const {
 }
 
 std::optional<std::uint32_t>
-Page::offsetForCluster(const std::uint32_t clusterIndex,
-                       const float fraction) const {
+gleditor::Page::offsetForCluster(const std::uint32_t clusterIndex,
+                                 const float fraction) const {
   if (clusterIndex >= clusters.size()) {
     return std::nullopt;
   }
@@ -518,8 +521,8 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
   return textOffset + static_cast<std::uint32_t>(offset);
 }
 
-std::uint32_t Page::offsetForPagePoint(const float xFraction,
-                                       const float yFraction) const {
+std::uint32_t gleditor::Page::offsetForPagePoint(const float xFraction,
+                                                 const float yFraction) const {
   const auto shaped = ensureShaping();
   if (shaped.lines.empty()) {
     return textOffset;
@@ -528,10 +531,10 @@ std::uint32_t Page::offsetForPagePoint(const float xFraction,
   // Layout coordinates exclude the page border and grow down from the top;
   // the picking quad coordinates cover the complete page and grow up from
   // the bottom.
-  const float x =
-      (std::clamp(xFraction, 0.0F, 1.0F) * pageWidth) - Page::marginPixels;
+  const float x = (std::clamp(xFraction, 0.0F, 1.0F) * pageWidth) -
+                  gleditor::Page::marginPixels;
   const float y = ((1.0F - std::clamp(yFraction, 0.0F, 1.0F)) * pageHeight) -
-                  Page::marginPixels;
+                  gleditor::Page::marginPixels;
 
   const auto lineIt = std::ranges::min_element(
       shaped.lines, [y](const auto &left, const auto &right) {
@@ -568,9 +571,9 @@ std::uint32_t Page::offsetForPagePoint(const float xFraction,
 }
 
 // Always called from the render thread
-void Page::collect(std::vector<render::GlyphBatch> &batches,
-                   const glm::mat4 &docTransform, const float opacity,
-                   const DrawBudget &budget, DrawStats &stats) const {
+void gleditor::Page::collect(std::vector<render::GlyphBatch> &batches,
+                             const glm::mat4 &docTransform, const float opacity,
+                             const DrawBudget &budget, DrawStats &stats) const {
   if (0 == detailInstances) {
     return;
   }
@@ -646,7 +649,8 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
   // Asked page by page rather than by searching, because the same call
   // decides whether the offset is on the page and where -- and the deciding
   // half is answered without shaping anything.
-  return firstBuiltPage([&](const std::uint32_t index, const Page &page) {
+  return firstBuiltPage([&](const std::uint32_t index,
+                            const gleditor::Page &page) {
     return page.caretGeometry(globalOffset)
         .transform([index](const CaretGeometry &at) {
           return Anchor{
@@ -657,16 +661,17 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
 
 std::optional<Doc::BoxRect>
 Doc::boxFor(const std::uint32_t globalOffset) const {
-  return firstBuiltPage([&](const std::uint32_t index, const Page &page) {
-    return page.boxGeometry(globalOffset)
-        .transform([index](const BoxGeometry &box) {
-          return BoxRect{.pageIndex = index,
-                         .x         = box.x,
-                         .y         = box.y,
-                         .width     = box.width,
-                         .height    = box.height};
-        });
-  });
+  return firstBuiltPage(
+      [&](const std::uint32_t index, const gleditor::Page &page) {
+        return page.boxGeometry(globalOffset)
+            .transform([index](const BoxGeometry &box) {
+              return BoxRect{.pageIndex = index,
+                             .x         = box.x,
+                             .y         = box.y,
+                             .width     = box.width,
+                             .height    = box.height};
+            });
+      });
 }
 
 void Doc::refreshPageIndexFilade() const {
@@ -785,8 +790,9 @@ void Doc::animateOpacity(ch::Timeline &timeline, const float target,
 }
 
 std::optional<render::HighlightRange>
-Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
-                   const std::uint32_t colour) const {
+gleditor::Page::highlightFor(const std::uint32_t selStart,
+                             const std::uint32_t selEnd,
+                             const std::uint32_t colour) const {
   if (selEnd <= selStart || clusters.empty()) {
     return std::nullopt;
   }
@@ -945,14 +951,12 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   // anchor falls within this page's own slice, the same "start falls on
   // this page or it does not" rule decoratedRanges' clipping does not
   // need, since a box has no length of its own to be truncated.
-  opts.boxes = layoutBoxes | std::views::filter([&](const auto &box) {
-                 return box.anchor >= offset && box.anchor < pageEnd;
-               }) |
-               std::views::transform([&](auto box) {
-                 box.anchor -= static_cast<std::uint32_t>(offset);
-                 return box;
-               }) |
-               std::ranges::to<std::vector>();
+  for (auto box : layoutBoxes) {
+    if (box.anchor >= offset && box.anchor < pageEnd) {
+      box.anchor -= static_cast<std::uint32_t>(offset);
+      opts.boxes.push_back(box);
+    }
+  }
 
   // blockStyles is clipped and rebased the same way decoratedRanges is
   // above: a paragraph style, unlike an atomic range's height, is not
@@ -1219,7 +1223,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   inherited.resize(std::min(inherited.size(), rebuilt.size()));
 
   const auto tailFrom = std::min(lastRebuilt, pages.size());
-  std::vector<Page> tail;
+  std::vector<gleditor::Page> tail;
   tail.reserve(pages.size() - tailFrom);
   for (std::size_t i = tailFrom; i < pages.size(); i++) {
     // Guaranteed built: everything past firstPage was dense before this
@@ -1729,7 +1733,7 @@ void Doc::ensurePagesBuiltThrough(RenderState &state,
     pages.resize(exclusiveEnd);
   }
   if (std::ranges::all_of(std::span{pages}.first(exclusiveEnd),
-                          &std::optional<Page>::has_value)) {
+                          [](const auto &page) { return page.has_value(); })) {
     return;
   }
 
@@ -1762,7 +1766,9 @@ void Doc::ensurePagesBuiltThrough(RenderState &state,
 }
 
 std::size_t Doc::builtPageCount() const {
-  return static_cast<std::size_t>(std::count_if(
-      pages.begin(), pages.end(),
-      [](const std::optional<Page> &slot) { return slot.has_value(); }));
+  return static_cast<std::size_t>(
+      std::count_if(pages.begin(), pages.end(),
+                    [](const std::optional<gleditor::Page> &slot) {
+                      return slot.has_value();
+                    }));
 }

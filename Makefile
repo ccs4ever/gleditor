@@ -118,11 +118,11 @@ SDL_IMAGE_PKG := SDL2_image
 else
 $(error GLEDITOR_SDL must be 2 or 3, got "$(GLEDITOR_SDL)")
 endif
-# Skipped when every requested goal is one of the text-only targets below:
-# format, format-check and lint touch no source that needs a compiler, and
-# would otherwise fail this check on a machine that has never installed SDL
-# at all -- which is the point of having them not need to.
-NO_SDL_GOALS := format format-check lint
+# These goals need no application SDK. The shader assembler uses only the
+# standard library, so Android packaging can generate SPIR-V with a host
+# compiler without installing every desktop application dependency.
+NO_SDL_GOALS := format format-check lint print-std-flag shaders
+
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
 $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
@@ -310,9 +310,9 @@ endif
 # technologies: UI Automation on Windows, AT-SPI on X11 and Wayland,
 # NSAccessibility on macOS. What is used here is accesskit-c, its C bindings --
 # one header and one library, the same as any other dependency. There is
-# nothing to build: releases are
-# published as archives holding an `include/` and a `lib/<os>/<arch>/`, and
-# distributions that package it install a pkg-config file.
+# Releases include source and prebuilt bindings in `include/` and
+# `lib/<os>/<arch>/`. Linux distributions build the static binding from source;
+# other native targets bundle the prebuilt runtime.
 #
 # Three ways to find it, in the order somebody is likely to have arranged one:
 #
@@ -339,9 +339,8 @@ ifdef ACCESSKIT_DIR
 # MSVC one are not interchangeable. Kept in step with accesskit.cmake, which is
 # the authority on it.
 #
-# The shared library rather than the static one: this goes into a shared
-# library of ours, and every distribution would rather have one copy of it on
-# the system than one inside each thing that links it.
+# Shared bindings are the default. Linux distribution recipes select the
+# static binding explicitly when no system runtime package is available.
 A11Y_ARCH := $(shell uname -m 2>/dev/null | $(SED) 's/^amd64$$/x86_64/;s/^aarch64$$/arm64/;s/^i.86$$/x86/')
 ifdef WINDOWS
 A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/windows/$(A11Y_ARCH)/mingw/shared
@@ -351,6 +350,16 @@ else
 A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/linux/$(A11Y_ARCH)/shared
 endif
 ifneq ($(wildcard $(ACCESSKIT_DIR)/include/accesskit.h),)
+ifeq ($(ACCESSKIT_LINK),static)
+A11Y_STATIC := $(patsubst %/shared,%/static,$(A11Y_LIBDIR))/libaccesskit.a
+ifneq ($(wildcard $(A11Y_STATIC)),)
+GLEDITOR_HAVE_A11Y := 1
+A11Y_HEADER := $(ACCESSKIT_DIR)/include/accesskit.h
+A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
+A11Y_LIBS   := $(A11Y_STATIC) -ldl -lpthread -lm
+endif
+else
+ifneq ($(wildcard $(A11Y_LIBDIR)/*accesskit*),)
 GLEDITOR_HAVE_A11Y := 1
 A11Y_HEADER := $(ACCESSKIT_DIR)/include/accesskit.h
 A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
@@ -360,6 +369,8 @@ ifndef WINDOWS
 # has no run path: the loader looks beside the executable, which is what the
 # packaging script arranges.
 A11Y_LIBS   += -Wl,-rpath,$(A11Y_LIBDIR)
+endif
+endif
 endif
 endif
 else ifeq ($(shell pkg-config --exists accesskit && echo 1),1)
@@ -462,12 +473,13 @@ endif
 # in designated initializers) which is known safe, but the compiler doesn't know this as of (2026-09)
 # INFO: added -Wno-deprecated-declarations for std::inplace_vector, which (as of 2026-09) uses
 # a deprecated template
+SHADER_HOST_CXXFLAGS := $(CXXFLAGS)
 override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps \
 -isystem thirdparty/Choreograph/src -isystem thirdparty/argparse/include \
 -isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include \
 -isystem thirdparty/beman_optional/include -Werror -Wall -Wextra \
 -Wno-missing-field-initializers -Wno-deprecated-declarations \
-$(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+$(patsubst -I%,-isystem%,$(shell pkg-config $(STATIC) --cflags $(PKGS))) $(GL_CFLAGS)
 override CXXFLAGS += -isystem thirdparty/beman_inplace_vector/include
 ifeq ($(GLEDITOR_CPP26_FORCE_FALLBACK),1)
 override CXXFLAGS += -DGLEDITOR_CPP26_FORCE_FALLBACK=1
@@ -485,7 +497,7 @@ override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
 # Only src/a11y/platform_accesskit.cpp includes the header, but the flags are
 # not per-file here and a stray include path costs nothing.
 override CXXFLAGS += $(A11Y_CFLAGS)
-override CXXFLAGS += $(shell pkg-config --cflags libtorrent-rasterbar)
+override CXXFLAGS += $(patsubst -I%,-isystem%,$(shell pkg-config --cflags libtorrent-rasterbar))
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif
@@ -571,7 +583,7 @@ endif
 # Exactly one end of the accessibility seam is built -- the one that talks to
 # AccessKit or the one that does nothing -- since they define the same
 # functions.
-LIB_SRCS := $(filter-out src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,accesskit).cpp,$(LIB_SRCS))
+LIB_SRCS := $(filter-out src/a11y/platform_web.cpp src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,accesskit).cpp,$(LIB_SRCS))
 # The only vendored C (not C++) sources this tree compiles -- see the
 # HAVE_DECODE_INDEX_ZSTD block above and .gitmodules' own comment on why
 # zstd's seekable format is vendored rather than found via pkg-config.
@@ -738,6 +750,10 @@ GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
 all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
+
+.PHONY: print-std-flag
+print-std-flag:
+	@printf '%s\n' '$(STD_FLAG)'
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -789,6 +805,7 @@ $(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
 # generator, so the two forms cannot drift apart.
+$(OBJDIR)/shader_assemble: override CXXFLAGS := $(SHADER_HOST_CXXFLAGS) $(DEBUG_OPTS) $(STD_FLAG) -Iinclude -Werror -Wall -Wextra
 $(OBJDIR)/shader_assemble: tools/shader_assemble.cpp src/render/shader_source.cpp src/render/backend.cpp | $(OBJDIR)/
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
@@ -810,8 +827,8 @@ lib: $(LIBLINK)
 # the other order only ever worked because clang's linker is forgiving about
 # it; gcc with link-time optimisation, which is what Debian builds with,
 # reported every library symbol as undefined.
-$(LIBREAL): $(LIB_OBJS)
-	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS) $(A11Y_LIBS)
+$(LIBREAL): $(LIB_OBJS) $(A11Y_STATIC)
+	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $(LIB_OBJS) $(LIBS) $(A11Y_LIBS)
 
 ifdef WINDOWS
 # The import library falls out of the link above, so asking for it is asking

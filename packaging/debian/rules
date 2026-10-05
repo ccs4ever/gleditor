@@ -4,18 +4,20 @@
 # off and the three steps are spelled out below.
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
-# Stated rather than left to the Makefile, whose own default is clang++ when
-# nothing else asks. clang is not in build-essential, so a buildd would either
-# not have it or would use it without it appearing in Build-Depends; either way
-# the package would not be built with the compiler it claims. The Makefile
-# picks the -std flag the compiler accepts, which is what makes gcc work here.
-export CXX = g++
+# Use Debian's declared toolchain for both languages. Letting the C compiler
+# probe independently can mix Clang debug sections into GCC package binaries,
+# which older dwz cannot process. The application still probes its -std flag.
+DPKG_EXPORT_BUILDTOOLS = 1
+include /usr/share/dpkg/buildtools.mk
 
 # SDL2 rather than SDL3: SDL3 is not in the Debian archive, and "whichever is
 # installed" is not something a package can depend on. The Makefile would pick
 # SDL3 when it finds it, so this is stated rather than left to the probe.
 export GLEDITOR_SDL = 2
 export GLEDITOR_ENABLE_VULKAN = 1
+export GLEDITOR_ENABLE_A11Y = 1
+export ACCESSKIT_LINK = static
+export ACCESSKIT_DIR = $(CURDIR)/build/accesskit
 
 # Debian builds from an unpacked tarball with no git history, so the version
 # has to be handed in. dpkg-parsechangelog is the authority on what it is.
@@ -28,6 +30,8 @@ DEB_VERSION_UPSTREAM := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$/
 # DEB_BUILD_OPTIONS into a -j flag. Calling make directly silently built the
 # whole package on one core.
 override_dh_auto_build:
+	packaging/accesskit/fetch.sh $(CURDIR)/build/accesskit-source
+	packaging/accesskit/build-linux.sh $(CURDIR)/build/accesskit-source/accesskit-c-0.22.3 $(ACCESSKIT_DIR)
 	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) lib gleditor xudu shaders
 
 # The test binary links gmock, which is a build dependency Debian would rather
@@ -43,7 +47,9 @@ override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/gleditor prefix=/usr \
 		libdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
 		GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM)
+	install -d debian/gleditor/usr/share/doc/gleditor/accesskit
+	cp $(ACCESSKIT_DIR)/LICENSE-* debian/gleditor/usr/share/doc/gleditor/accesskit/
 
 # The default clean also removes build/, which the Makefile owns.
 override_dh_auto_clean:
-	$(MAKE) clean
+	$(MAKE) clean GLEDITOR_ENABLE_A11Y=0

@@ -3,6 +3,7 @@
  * @brief Sovereign system xanadocs managing runtime parameters.
  */
 #include "common/xanadu/system_docs.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -2098,18 +2099,16 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
         .groupCell          = gCell,
         .memberSettingNames = zigzag::rankAfter(manifold, gCell, varsDim) |
                               std::views::transform(text) |
-                              std::ranges::to<std::vector>(),
+                              gleditor::toVector(),
         .childSubgroups =
             zigzag::rank(manifold, manifold.linked(gCell, subgroupsDim),
                          groupsDim) |
-            std::views::transform(readGroupNode) |
-            std::ranges::to<std::vector>(),
+            std::views::transform(readGroupNode) | gleditor::toVector(),
     };
   };
 
   model.groups_ = zigzag::rankAfter(manifold, homeCell, groupsDim) |
-                  std::views::transform(readGroupNode) |
-                  std::ranges::to<std::vector>();
+                  std::views::transform(readGroupNode) | gleditor::toVector();
 
   // One alternative schema: the type clones on d.schemas after its blank
   // cell, each with its default on d.default when it has one.
@@ -2146,15 +2145,15 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     } else {
       entry.schema.alternatives = zigzag::rank(manifold, firstBlank, altsDim) |
                                   std::views::transform(shapeOf) |
-                                  std::ranges::to<std::vector>();
+                                  gleditor::toVector();
     }
 
     // Active values along d.values
-    entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
-                             std::ranges::to<std::vector>();
+    entry.value.valueCells =
+        zigzag::rankAfter(manifold, setCell, valuesDim) | gleditor::toVector();
     entry.value.elements = entry.value.valueCells |
                            std::views::transform(valueOf) |
-                           std::ranges::to<std::vector>();
+                           gleditor::toVector();
 
     // Validate
     std::string err;

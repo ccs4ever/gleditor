@@ -1,0 +1,5 @@
+include("${VCPKG_ROOT_DIR}/triplets/community/wasm32-emscripten.cmake")
+set(VCPKG_BUILD_TYPE release)
+set(VCPKG_C_FLAGS "-pthread")
+set(VCPKG_CXX_FLAGS "-pthread")
+set(VCPKG_LINKER_FLAGS "-pthread")

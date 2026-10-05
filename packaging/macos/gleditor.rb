@@ -37,6 +37,21 @@ class Gleditor < Formula
   depends_on "sdl3"
   depends_on "sdl3_image"
   depends_on "spdlog"
+  depends_on "sqlite"
+
+  resource "libvlc-runtime" do
+    if Hardware::CPU.arm?
+      url "https://download.videolan.org/pub/videolan/vlc/3.0.23/macosx/vlc-3.0.23-arm64.dmg"
+      sha256 "fc6fac08d87f538517d44aca0c5e7a244b67c8c4cb589bf478363a7315fd5e0d"
+    else
+      url "https://download.videolan.org/pub/videolan/vlc/3.0.23/macosx/vlc-3.0.23-intel64.dmg"
+      sha256 "ec01530ce69d849dd057fba8876e68ac39bf279dc28de4e9c04e4aec11fc98db"
+    end
+  end
+  resource "libvlc-source" do
+    url "https://download.videolan.org/pub/videolan/vlc/3.0.23/vlc-3.0.23.tar.xz"
+    sha256 "e891cae6aa3ccda69bf94173d5105cbc55c7a7d9b1d21b9b21666e69eff3e7e0"
+  end
 
   # AccessKit is what reports the user interface to screen readers --
   # NSAccessibility here, via view subclassing rather than a system service,
@@ -85,6 +100,12 @@ class Gleditor < Formula
 
   def install
     resource("accesskit-c").stage buildpath/"accesskit-c"
+    resource("libvlc-runtime").stage buildpath/"libvlc-runtime"
+    resource("libvlc-source").stage buildpath/"libvlc-source"
+    system "bash", "packaging/macos/prepare-libvlc.sh",
+           buildpath/"libvlc-runtime/VLC.app/Contents", buildpath/"libvlc-source",
+           buildpath/"libvlc-sdk"
+    ENV.prepend_path "PKG_CONFIG_PATH", buildpath/"libvlc-sdk/lib/pkgconfig"
 
     # SDL3 is what the code is written against and Homebrew ships it, so this
     # does not fall back to SDL2 the way the Debian package does.
@@ -105,6 +126,8 @@ class Gleditor < Formula
            "GLEDITOR_ENABLE_A11Y=1",
            "ACCESSKIT_DIR=#{buildpath}/accesskit-c",
            "GLEDITOR_ENABLE_VULKAN=1"
+    system "bash", "packaging/macos/bundle-libvlc.sh", prefix, buildpath/"libvlc-sdk"
+    system "bash", "packaging/macos/bundle-accesskit.sh", lib, buildpath/"accesskit-c"
   end
 
   test do
@@ -112,5 +135,9 @@ class Gleditor < Formula
     # check of the installed binary's dynamic dependencies and nothing more.
     system bin/"gleditor", "--version"
     system bin/"xudu", "--version"
+    assert_path_exists lib/"libaccesskit.dylib"
+    assert_path_exists lib/"libvlc.dylib"
+    assert_path_exists lib/"vlc/plugins"
+    assert_match "@loader_path/libaccesskit.dylib", shell_output("otool -L #{lib}/libgleditor.0.dylib")
   end
 end

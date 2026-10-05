@@ -289,8 +289,7 @@ void FloatingToolbar3D::describe(a11y::Builder &into) {
     return;
   }
   constexpr std::uint64_t barId = 0x5000;
-  auto &bar                     = into.add(barId, a11y::Role::Group);
-  bar.label                     = "3D Word Processing Controls";
+  std::vector<std::uint64_t> children;
 
   for (const auto &btn : currentButtons) {
     const auto btnNodeId = 0x5000U + static_cast<std::uint64_t>(btn.id);
@@ -298,9 +297,13 @@ void FloatingToolbar3D::describe(a11y::Builder &into) {
     node.label           = btn.tooltip;
     node.toggled         = btn.active;
     node.actions         = a11y::bit(a11y::Action::Click);
-    bar.children.push_back(into.id(btnNodeId));
+    children.push_back(into.id(btnNodeId));
   }
-
+  // add() can reallocate the tree, so retain child IDs before adding the
+  // parent.
+  auto &bar    = into.add(barId, a11y::Role::Group);
+  bar.label    = "3D Word Processing Controls";
+  bar.children = std::move(children);
   into.contribute(into.id(barId));
 }
 
@@ -308,8 +311,9 @@ bool FloatingToolbar3D::performAction(const std::uint64_t nodeId,
                                       const a11y::Action action,
                                       const std::string_view /*value*/) {
   if (action == a11y::Action::Click || action == a11y::Action::Focus) {
-    if (nodeId >= 0x5000) {
-      const auto btnId = static_cast<ButtonId>(nodeId - 0x5000);
+    const auto local = a11y::Ids::localOf(nodeId);
+    if (local >= 0x5000) {
+      const auto btnId = static_cast<ButtonId>(local - 0x5000);
       if (actionHandler) {
         actionHandler(btnId, activeDoc);
         return true;

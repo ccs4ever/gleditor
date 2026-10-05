@@ -8,17 +8,32 @@ rather than folded into this one). Two backends are carried, matching the deskto
 
 ## Why this looks the way it does
 
-- **SDL's own Java, unmodified.** This project writes no Java or Kotlin.
-  `org.libsdl.app.SDLActivity` (from `thirdparty/SDL/android-project`, a git submodule) is a stock
-  Activity that loads native libraries named `SDL3` and `main` and forwards lifecycle and input
-  events to them; every line of actual behaviour is C++ this repository owns, compiled into
-  `libmain.so`. `apps/gleditor/main.cpp` is still the entry point -- `SDL_main.h`'s macro
-  redirection is what lets SDL's JNI glue call the same `main()` the desktop binary uses.
+- **SDL's own Java, unmodified.** `GleditorActivity` subclasses the stock
+  `org.libsdl.app.SDLActivity` from the SDL submodule and exposes its rendering surface to
+  AccessKit. SDL loads `SDL3`, `vlc` and `main` and forwards lifecycle and input events to them.
+  `apps/gleditor/main.cpp` is still the entry point -- `SDL_main.h`'s macro redirection is what lets
+  SDL's JNI glue call the same `main()` the desktop binary uses.
+- **Android accessibility is required.** AccessKit's native Android adapter exposes the same
+  document, text, selection and action tree used on desktop through an `AccessibilityNodeProvider`.
+  Its Java delegate and native static library are fetched at matching pinned versions, checked by
+  SHA-256, and packaged for both ABIs. Linking into `libmain.so` preserves the NDK's 16 KiB page
+  alignment. The adapter delivers hover exploration and accessibility events on the Android UI
+  thread; editing actions return to the existing event-loop queue. `./gradlew assembleDebug` fetches
+  these dependencies automatically. The emulator job reads the editable document and typed text
+  through UiAutomation's platform accessibility client.
 - **vcpkg for text stack dependencies.** FreeType, HarfBuzz, FriBidi, libunibreak, Fontconfig, and
   GLM are built via vcpkg's `arm64-android` and `x64-android` triplets from source, and both default
   to static linkage, so none of it needs a separate packaging step to end up in the APK -- it links
   straight into `libmain.so`. See `vcpkg.json` for the manifest and `/CMakeLists.txt` for how the
   toolchain is chained under the NDK's own.
+- **The complete library dependencies.** The Android build also links Poppler, libmagic, OpenSSL and
+  spdlog from vcpkg, with the same pinned C++26 fallback headers as desktop. LibVLC's Android C
+  library comes from VideoLAN's pinned Maven AAR; only its native library is imported, using the
+  NDK's shared C++ runtime. Stable 3.0 public C headers and the AAR are checked by SHA-256.
+- **Complete rendering assets.** Gradle builds Vulkan SPIR-V through the same Make shader assembler
+  as desktop; the host needs `make`, a supported C++ compiler and `glslang-tools`. All shader bodies
+  and binaries enter the APK. Native startup enumerates and extracts the packaged shader tree, so a
+  new pipeline needs no separate Android resource list.
 - **Two ABIs, two product flavors.** `arm64-v8a` for real devices, `x86_64` for the classic Android
   Studio emulator image (Apple Silicon hosts default to `arm64-v8a` emulator images instead, which
   this also covers). Each needs a different `VCPKG_TARGET_TRIPLET`, which is why they are separate
@@ -26,7 +41,7 @@ rather than folded into this one). Two backends are carried, matching the deskto
   in `app/build.gradle`.
 - **Assets extracted at startup, not read from the APK directly.** `shader_source.cpp` opens shader
   files with `std::ifstream`, which cannot read out of a zip. `src/android_bootstrap.cpp` copies the
-  small fixed set of shader files (and a generated `fonts.conf` -- see below) out of the APK to the
+  complete packaged shader tree (and a generated `fonts.conf` -- see below) out of the APK to the
   app's internal storage on every launch and points `GLEDITOR_ASSET_DIR` at them, which `paths.cpp`
   already honours verbatim on every platform.
 - **A generated fontconfig.** Android has fonts but no fontconfig of its own -- font lookup there
@@ -47,12 +62,11 @@ the same `--backend` machinery `src/app.cpp` exposes on desktop) because every d
 in (`GLEDITOR_ENABLE_VULKAN=1`) and can be exercised without a rebuild:
 
 ```sh
-adb shell am start -n io.github.ccs4ever.gleditor/org.libsdl.app.SDLActivity \
+adb shell am start -n io.github.ccs4ever.gleditor/.GleditorActivity \
   --es backend vulkan
 ```
 
-`src/android_bootstrap.cpp` reads that `backend` launch-intent extra over JNI (SDL's Activity is
-unmodified, so this is the only way in that does not mean writing a custom one) and sets
+`src/android_bootstrap.cpp` reads that `backend` launch-intent extra over JNI and sets
 `GLEDITOR_BACKEND`, which `defaultBackendName()` in `src/app.cpp` already checks on every platform.
 
 ### Vulkan validation
@@ -67,12 +81,11 @@ debuggable enough to load it and never ships it. Run the script before a local G
 
 ## Building
 
-This was written and wired up in an environment with no Android SDK/NDK installed, so the build was
-never exercised locally -- `.github/workflows/ android.yml` is what actually proved it out, building
-both ABIs and running the result on a headless emulator (`-gpu swiftshader`) as part of every CI
-run: the APK installs, `SDLActivity.onCreate()` reaches `SDL_main`, and the process is still alive
-15 seconds after launch. To build locally, with Android Studio (which supplies its own SDK/NDK) or a
-standalone `cmdline-tools` install:
+The [Android workflow](../../.github/workflows/android.yml) builds both ABIs and runs the x86_64 APK
+on headless API 28 and API 30 emulators (`-gpu swiftshader`). It verifies the packaged native
+adapter and Java delegate, reads edited document text through UiAutomation, and exercises focus and
+click through the platform accessibility client. To build locally, with Android Studio (which
+supplies its own SDK/NDK) or a standalone `cmdline-tools` install:
 
 ```sh
 export ANDROID_NDK_HOME=/path/to/ndk/27.3.13750724   # app/build.gradle's ndkVersion
@@ -104,9 +117,8 @@ with `adb install` or by dragging it onto a running emulator window.
   opens the same way a command-line argument would on desktop. An in-app "Open..." *picker* --
   browsing for a file from inside gleditor rather than being handed one -- is a different feature
   (Android's Storage Access Framework, `ACTION_OPEN_DOCUMENT`) and still needs the small amount of
-  Java (a `registerForActivityResult` call) a stock `SDLActivity` does not provide on its own, which
-  is why that half is left out rather than done halfway. Saving (`Ctrl+S`, `src/renderer.cpp`'s
-  `Renderer::saveDoc()`) writes back through the same Uri a document was opened or shared in from --
-  `android_bootstrap.cpp`'s `androidSaveDocument()` -- so the same gap applies there too: a document
-  `gleditor` itself created with "new" has no picker to ask where to save it, on Android or on
-  desktop.
+  Java (a `registerForActivityResult` call) beyond the accessibility host supplied by
+  `GleditorActivity`. Saving (`Ctrl+S`, `src/renderer.cpp`'s `Renderer::saveDoc()`) writes back
+  through the same Uri a document was opened or shared in from -- `android_bootstrap.cpp`'s
+  `androidSaveDocument()` -- so the same gap applies there too: a document `gleditor` itself created
+  with "new" has no picker to ask where to save it, on Android or on desktop.

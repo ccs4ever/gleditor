@@ -1,4 +1,5 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <bit>
 #include <iostream>
@@ -344,7 +345,7 @@ std::vector<CellRef> VortexCore::wingOf(const CellRef opcode,
   };
   return zigzag::rank(arena_, arena_.linked(opcode, dims_.grab, side),
                       dims_.step) |
-         std::views::transform(operand) | std::ranges::to<std::vector>();
+         std::views::transform(operand) | gleditor::toVector();
 }
 
 std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
@@ -420,7 +421,7 @@ std::vector<CellRef> VortexCore::contractOf(const CellRef opcode,
                                             const DimVector side) const {
   return zigzag::rank(arena_, arena_.linked(opcode, dims_.contract, side),
                       dims_.step) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 void VortexCore::attachContract(const CellRef opcode, const DimVector side,
@@ -530,7 +531,7 @@ VortexCore::lookupMemo(CellRef memoPin, const std::vector<CellValue> &inputs) {
   return zigzag::firstOf(zigzag::rankAfter(arena_, memoPin, dims_.cache) |
                          std::views::filter(matches))
       .transform([&](const CellRef entry) {
-        return outputsOf(entry) | rendered | std::ranges::to<std::vector>();
+        return outputsOf(entry) | rendered | gleditor::toVector();
       });
 }
 

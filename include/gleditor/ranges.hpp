@@ -1,6 +1,6 @@
 /**
  * @file ranges.hpp
- * @brief Bridges from ranges to optionals.
+ * @brief Bridges from ranges to optionals and owned vectors.
  *
  * A pipeline that filters down to "the one I want" ends in find_if and an
  * iterator the caller has to compare against end(). These answer the value,
@@ -14,9 +14,12 @@
 #define GLEDITOR_RANGES_HPP
 
 #include <algorithm>
+#include <concepts>
 #include <optional>
 #include <ranges>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include <gleditor/cpp26.hpp>
 
@@ -117,6 +120,42 @@ template <typename T>
   }
   return *pointer;
 }
+
+namespace ranges_detail {
+
+// GCC 13 provides C++20 views but not ranges::to or range_adaptor_closure.
+// A terminal collector needs neither common iterators nor a second pass.
+struct ToVector {
+  [[nodiscard]] constexpr ToVector operator()() const { return {}; }
+
+  template <std::ranges::input_range Range>
+    requires std::constructible_from<std::ranges::range_value_t<Range>,
+                                     std::ranges::range_reference_t<Range>>
+  [[nodiscard]] constexpr auto operator()(Range &&range) const {
+    std::vector<std::ranges::range_value_t<Range>> result;
+    if constexpr (std::ranges::sized_range<Range>) {
+      result.reserve(std::ranges::size(range));
+    }
+    for (auto &&element : range) {
+      result.emplace_back(std::forward<decltype(element)>(element));
+    }
+    return result;
+  }
+
+  template <std::ranges::input_range Range>
+    requires std::constructible_from<std::ranges::range_value_t<Range>,
+                                     std::ranges::range_reference_t<Range>>
+  [[nodiscard]] friend constexpr auto operator|(Range &&range,
+                                                const ToVector collector) {
+    return collector(std::forward<Range>(range));
+  }
+};
+
+} // namespace ranges_detail
+
+/// Materialize a range's values, copying lvalue elements and moving prvalues.
+/// Use toVector(range), range | toVector, or range | toVector().
+inline constexpr ranges_detail::ToVector toVector{};
 
 } // namespace gleditor
 

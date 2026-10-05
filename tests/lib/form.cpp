@@ -16,6 +16,41 @@
 
 #include <gleditor/form.hpp>
 
+TEST(FormAccessibility,
+     textAndSecretAdvertiseReplacementAndKeepSecretsPrivate) {
+  namespace a11y = gleditor::a11y;
+  gleditor::Form form{"Sans 11"};
+  form.open("Credentials", "",
+            {gleditor::Form::Field{"Name", "existing", "", true},
+             gleditor::Form::Field{"Password", "existing secret", "", true,
+                                   gleditor::Form::Kind::Secret}},
+            [](const auto &) {});
+  a11y::Tree tree;
+  a11y::Builder builder(tree, 17);
+  form.describe(builder);
+  for (const auto &node : tree.nodes) {
+    if (node.role != a11y::Role::TextInput &&
+        node.role != a11y::Role::PasswordInput) {
+      continue;
+    }
+    EXPECT_NE(node.actions & a11y::bit(a11y::Action::SetValue), 0U);
+    EXPECT_TRUE(form.performAction(
+        node.id, a11y::Action::SetValue,
+        node.role == a11y::Role::PasswordInput ? "new secret" : "Ada"));
+  }
+  EXPECT_EQ(form.current()[0].value, "Ada");
+  EXPECT_EQ(form.current()[1].value, "new secret");
+  tree = {};
+  a11y::Builder updated(tree, 17);
+  form.describe(updated);
+  for (const auto &node : tree.nodes) {
+    if (node.role == a11y::Role::PasswordInput) {
+      EXPECT_EQ(node.value, "**********");
+    }
+    EXPECT_EQ(node.value.find("new secret"), std::string::npos);
+  }
+}
+
 namespace {
 
 using gleditor::Form;

@@ -3,6 +3,7 @@
  * @brief Implementation of Vortex Standard Library in Vortex.
  */
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
+#include <gleditor/ranges.hpp>
 
 #include <algorithm>
 #include <bit>
@@ -1389,7 +1390,7 @@ std::vector<std::string> VortexStdLib::namesAfter(const CellRef from,
          std::views::transform([this](const CellRef cell) {
            return core_.arena().textOf(cell);
          }) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 void VortexStdLib::exportSymbol(CellRef moduleCell, std::string_view symbolName,
@@ -2217,7 +2218,7 @@ CellRef VortexStdLib::map(
                         std::views::transform([&](const CellRef cell) {
                           return valueCell(fn(core_.render(cell)));
                         }) |
-                        std::ranges::to<std::vector>(),
+                        gleditor::toVector(),
                     outDim);
 }
 
@@ -2238,10 +2239,10 @@ CellRef VortexStdLib::filter(
                     std::views::transform([this](const CellRef cell) {
                       return core_.render(cell);
                     }) |
-                    std::ranges::to<std::vector>() | std::views::filter(pred) |
+                    gleditor::toVector() | std::views::filter(pred) |
                     std::views::transform(
                         [this](const CellValue &v) { return valueCell(v); }) |
-                    std::ranges::to<std::vector>();
+                    gleditor::toVector();
   return chainCells(core_.arena(), kept, outDim);
 }
 
@@ -2283,7 +2284,7 @@ CellRef VortexStdLib::zip(CellRef headA, CellRef headB, DimRef dimA,
   // pair onto dimA would otherwise put it on the rank still being walked.
   const auto pairs =
       std::views::zip(rank(arena, headA, dimA), rank(arena, headB, dimB)) |
-      std::ranges::to<std::vector>();
+      gleditor::toVector();
   return chainCells(
       arena,
       pairs | std::views::transform([&](const auto &pair) {
@@ -2292,7 +2293,7 @@ CellRef VortexStdLib::zip(CellRef headA, CellRef headB, DimRef dimA,
         zigzag::expectWritten(arena.link(pairCell, dimA, DimVector::NEG, a));
         zigzag::expectWritten(arena.link(pairCell, dimB, DimVector::POS, b));
         return pairCell;
-      }) | std::ranges::to<std::vector>(),
+      }) | gleditor::toVector(),
       outDim);
 }
 
@@ -2302,7 +2303,7 @@ CellRef VortexStdLib::createList(const std::vector<CellValue> &items,
   return chainCells(core_.arena(),
                     items | std::views::transform([this](const CellValue &v) {
                       return valueCell(v);
-                    }) | std::ranges::to<std::vector>(),
+                    }) | gleditor::toVector(),
                     listDim(dim));
 }
 
@@ -2311,7 +2312,7 @@ std::vector<CellValue> VortexStdLib::listToVector(CellRef head,
   return rank(core_.arena(), head, listDim(dim)) |
          std::views::transform(
              [this](const CellRef cell) { return core_.render(cell); }) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 void VortexStdLib::pushBack(CellRef head, const CellValue &val, DimRef dim) {
@@ -2405,7 +2406,7 @@ std::vector<std::string> VortexStdLib::mapKeys(CellRef mapRoot) const {
          std::views::transform([this](const CellRef cell) {
            return core_.arena().textOf(cell);
          }) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 CellRef VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
@@ -3226,7 +3227,7 @@ VortexStdLib::arrayShape(CellRef origin, std::span<const DimRef> dims) const {
            return static_cast<std::size_t>(std::ranges::distance(
                rank(core_.arena(), origin, d) | std::views::take_while(held)));
          }) |
-         std::ranges::to<std::vector>();
+         gleditor::toVector();
 }
 
 CellRef VortexStdLib::arrayTake(CellRef origin, DimRef dim, std::size_t count) {
@@ -3240,7 +3241,7 @@ CellRef VortexStdLib::arrayTake(CellRef origin, DimRef dim, std::size_t count) {
                         std::views::transform([this](const CellRef cell) {
                           return copyValueCell(cell);
                         }) |
-                        std::ranges::to<std::vector>(),
+                        gleditor::toVector(),
                     linkDim);
 }
 
@@ -3258,13 +3259,13 @@ CellRef VortexStdLib::arrayReverse(CellRef origin, DimRef dim) {
   const DimRef linkDim = listDim(dim);
   // Collected first: a rank is a forward range, and reverse needs both ends.
   const auto cells =
-      rank(core_.arena(), origin, linkDim) | std::ranges::to<std::vector>();
+      rank(core_.arena(), origin, linkDim) | gleditor::toVector();
   return chainCells(core_.arena(),
                     cells | std::views::reverse |
                         std::views::transform([this](const CellRef cell) {
                           return copyValueCell(cell);
                         }) |
-                        std::ranges::to<std::vector>(),
+                        gleditor::toVector(),
                     linkDim);
 }
 

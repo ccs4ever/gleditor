@@ -5,13 +5,17 @@
 #include <mutex>
 
 #include <spdlog/cfg/env.h>
+#ifdef __ANDROID__
+#include <spdlog/sinks/android_sink.h>
+#else
 #include <spdlog/sinks/stdout_sinks.h>
+#endif
 #include <spdlog/spdlog.h>
 
 namespace gleditor::logging {
 
-// A named logger keeps diagnostic output on stderr and lets SPDLOG_LEVEL
-// enable one subsystem without enabling every debug call in the process.
+// Android's native stderr is not delivered to logcat. Named categories use
+// its platform sink there and stderr elsewhere, with the same level controls.
 inline std::shared_ptr<spdlog::logger> category(const char *name) {
   static std::once_flag levelsLoaded;
   std::call_once(levelsLoaded, [] { spdlog::cfg::load_env_levels(); });
@@ -22,7 +26,11 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
   // Two first uses can race. spdlog's registry rejects the second name;
   // retrieve the logger registered by the other thread in that case.
   try {
+#ifdef __ANDROID__
+    return spdlog::android_logger_mt(name, "gleditor");
+#else
     return spdlog::stderr_logger_mt(name);
+#endif
   } catch (const spdlog::spdlog_ex &) {
     if (auto existing = spdlog::get(name)) {
       return existing;

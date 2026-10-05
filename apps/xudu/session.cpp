@@ -637,7 +637,8 @@ std::string Session::publishDocument(const MicroversionId &version,
   record.opsLength     = sealedOps.size();
   record.opsDigest     = sha256Hex(sealedOps);
 
-  for (const auto &piece : st.rebuild(version).pieces()) {
+  const auto rebuilt = st.rebuild(version);
+  for (const auto &piece : rebuilt.pieces()) {
     if (piece.isLocal()) {
       continue;
     }
