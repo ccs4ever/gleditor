@@ -1021,7 +1021,7 @@ TEST(E2EBinaryOrchestrationTest, coincidentLinksRemainReachableByPointer) {
       counts.emplace_back(document.storePath, store.opCount());
     }
   });
-  const auto previous = run("--click 550,236 --dump-a11y --capture " +
+  const auto previous = run("--click 726,196 --dump-a11y --capture " +
                             (root / "previous.ppm").string());
   ASSERT_EQ(previous.exitCode, 0) << previous.output;
   EXPECT_THAT(previous.output, testing::HasSubstr("Link 1/2"));
@@ -1033,7 +1033,7 @@ TEST(E2EBinaryOrchestrationTest, coincidentLinksRemainReachableByPointer) {
     ASSERT_TRUE(place.active);
     EXPECT_EQ(place.documents[*place.active].caret, 2U);
   });
-  const auto next = run("--click 625,236 --dump-a11y --capture " +
+  const auto next = run("--click 517,217 --dump-a11y --capture " +
                         (root / "next.ppm").string());
   ASSERT_EQ(next.exitCode, 0) << next.output;
   EXPECT_THAT(next.output, testing::HasSubstr("Link 2/2"));
@@ -1093,7 +1093,7 @@ TEST(E2EBinaryOrchestrationTest, walksPreviewAndMetadataSurviveRestart) {
   const auto annotated =
       run("--chord Alt+Shift+W --key home --key down --chord Ctrl+N --chord "
           "Ctrl+Alt+B --chord Delete --type n"
-          " --chord Backspace --type 'Branch note' --key enter --click 300,310 "
+          " --chord Backspace --type 'Branch note' --key enter --type r "
           "--dump-a11y"
           " --capture " +
           (root / "annotated.ppm").string() + " --key escape");
@@ -1265,7 +1265,7 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
-        " --chord Ctrl+Left --chord Ctrl+Shift+Right --drag 140,145:" +
+        " --chord Ctrl+Left --chord Ctrl+Shift+Right --drag 95,129:" +
         drop);
   };
   const auto untitledOps = [&] {
@@ -1283,10 +1283,9 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   };
 
   // Onto the page, just past "gamma".
-  const auto onPage = dragTo("196,145");
+  const auto onPage = dragTo("185,129");
   ASSERT_EQ(onPage.exitCode, 0) << onPage.output;
-  EXPECT_THAT(onPage.output,
-              ::testing::HasSubstr("drag 140,145: doc 1 [6,11)"));
+  EXPECT_THAT(onPage.output, ::testing::HasSubstr("drag 95,129: doc 1 [6,11)"));
   const auto ops = untitledOps();
   // Spliced in at the end, and quoting the very bytes "beta " was typed as:
   // six bytes into the first insert's span.
@@ -1301,8 +1300,8 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
       << ops;
   EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
 
-  // Into the empty space right of the page.
-  const auto inSpace = dragTo("770,300");
+  // Into the empty band between the header and the document tabs.
+  const auto inSpace = dragTo("560,45");
   ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
   EXPECT_THAT(inSpace.output,
               ::testing::HasSubstr("spawned transcluded document"));

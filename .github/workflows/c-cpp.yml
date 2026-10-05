@@ -140,6 +140,8 @@ jobs:
           mesa-vulkan-drivers vulkan-validationlayers \
           libgmock-dev libgtest-dev \
           libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev gnupg \
+          libpoppler-dev libpoppler-cpp-dev libmagic-dev libvlc-dev \
+          librnp-dev libsqlite3-dev \
           xvfb \
           clang libclang-rt-dev make
 
@@ -233,6 +235,8 @@ jobs:
           libfribidi-dev libunibreak-dev libfontconfig-dev \
           libsdl2-dev libsdl2-image-dev \
           libgl-dev libgmock-dev pkg-config \
+          libpoppler-dev libpoppler-cpp-dev libmagic-dev libvlc-dev \
+          librnp-dev libsqlite3-dev \
           libtorrent-rasterbar-dev libssl-dev liblmdb-dev libspdlog-dev iproute2
     - name: build
       run: make -j$(nproc) GLEDITOR_SDL=2 xudu_test xudu-swarm-peer
