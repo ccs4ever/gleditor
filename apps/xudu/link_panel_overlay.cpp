@@ -130,6 +130,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                              [this](const xanadu::OccurrenceSite &site) {
                                return context.describe(site);
                              });
+  lines.front().text += " · " + xanadu::linkCandidateLabel(
+                                    selected->key, context.candidateKeys());
   if (const auto error = context.refusal()) {
     lines.push_back({.text = std::string(xanadu::name(*error)),
                      .tone = xanadu::PanelLine::Tone::Muted});
@@ -327,6 +329,8 @@ void LinkPanelOverlay::describe(gleditor::a11y::Builder &into) {
                              [this](const xanadu::OccurrenceSite &site) {
                                return context.describe(site);
                              });
+  lines.front().text += " · " + xanadu::linkCandidateLabel(
+                                    selected->key, context.candidateKeys());
   if (const auto error = context.refusal()) {
     lines.push_back({.text = std::string(xanadu::name(*error)),
                      .tone = xanadu::PanelLine::Tone::Muted});

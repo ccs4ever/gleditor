@@ -23,6 +23,7 @@
 #include <expected>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -328,6 +329,10 @@ public:
   NavigationResult
   supply(std::uint64_t generation,
          std::expected<LinkOccurrences, LinkQueryError> occurrences);
+
+  [[nodiscard]] std::span<const LinkKey> candidateKeys() const noexcept {
+    return candidates;
+  }
 
   /// Record arriving at @p site by some means other than a link.
   VisitId recordArrival(const OccurrenceSite &site);

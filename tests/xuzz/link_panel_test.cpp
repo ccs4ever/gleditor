@@ -211,6 +211,9 @@ TEST(LinkPanelTest, ButtonsSendTheKeymapsCommands) {
   };
 
   using namespace xanadu::settings;
+  EXPECT_EQ(command("Previous link"),
+            xanadu::commandForAction(kKeymapLinkPrevious));
+  EXPECT_EQ(command("Next link"), xanadu::commandForAction(kKeymapLinkNext));
   EXPECT_EQ(command("Cross"), xanadu::commandForAction(kKeymapLinkCross));
   EXPECT_EQ(command("Enter"), xanadu::commandForAction(kKeymapLinkEnter));
   EXPECT_EQ(command("Origin"), xanadu::commandForAction(kKeymapLinkOrigin));
@@ -236,4 +239,16 @@ TEST(LinkPanelTest, EnterIsEnabledOnlyWithAChosenPlace) {
   EXPECT_FALSE(enterEnabled()) << "five places, none chosen";
   p.run(nav::StepOccurrence{.delta = 1});
   EXPECT_TRUE(enterEnabled());
+}
+
+TEST(LinkPanelTest, CandidatePositionKeepsPinnedLinksDistinctFromTheList) {
+  Panel p;
+  const xanadu::LinkKey other{p.key().authority, p.f.overlapping};
+  const std::vector candidates{p.key(), other};
+  EXPECT_EQ(xanadu::linkCandidateLabel(p.key(), candidates), "Link 1/2");
+  EXPECT_EQ(xanadu::linkCandidateLabel(other, candidates), "Link 2/2");
+  EXPECT_EQ(xanadu::linkCandidateLabel(p.key(), {}),
+            "Link outside current list (0)");
+  EXPECT_EQ(xanadu::linkCandidateLabel(other, std::vector{p.key()}),
+            "Link outside current list (1)");
 }

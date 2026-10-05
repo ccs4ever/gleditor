@@ -119,6 +119,16 @@ linkPanelLines(const SelectedLink &selected,
   return lines;
 }
 
+std::string linkCandidateLabel(const LinkKey &selected,
+                               const std::span<const LinkKey> candidates) {
+  const auto found = std::ranges::find(candidates, selected);
+  if (found == candidates.end()) {
+    return std::format("Link outside current list ({})", candidates.size());
+  }
+  return std::format("Link {}/{}", found - candidates.begin() + 1,
+                     candidates.size());
+}
+
 std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
                                           const bool hasOrigin) {
   const bool resolved = selected.occurrences.has_value();
@@ -147,6 +157,8 @@ std::vector<PanelButton> linkPanelButtons(const SelectedLink &selected,
        .command = nav::ReturnToOrigin{},
        .enabled = hasOrigin},
       {.label = "Back", .command = nav::ActivityBack{}},
+      {.label = "Previous link", .command = nav::StepLink{.delta = -1}},
+      {.label = "Next link", .command = nav::StepLink{.delta = 1}},
       {.label = "\u00d7", .command = nav::Dismiss{}},
   };
 }

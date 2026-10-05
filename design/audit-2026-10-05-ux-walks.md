@@ -51,3 +51,6 @@ Remaining work includes fully coincident link selection, unseen external and rem
 native accessibility delivery and unopened ZigZag formatting inheritance. The richer Walks design
 still proposes named walks, destination snippets, reference labels and a structural visit index;
 this implementation displays the existing append-only visit records and their parent relations.
+
+The [coincident-link follow-up](audit-2026-10-05-ux-coincident-links.md) adds pointer controls to
+reach covered link identities. A direct overlap comparison list remains proposed.

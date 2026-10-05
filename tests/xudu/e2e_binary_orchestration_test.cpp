@@ -960,6 +960,96 @@ TEST(E2EBinaryOrchestrationTest, enteringAClosedEndpointRecordsNoVisit) {
   EXPECT_EQ(entered, 0U);
 }
 
+TEST(E2EBinaryOrchestrationTest, coincidentLinksRemainReachableByPointer) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_coincident";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto run = [&](const std::string &script) {
+    return executeProcess(
+        "SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+        "LIBGL_ALWAYS_SOFTWARE=1 XDG_CONFIG_HOME=" +
+        (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --backend " + activeBackend() + " --headless --profile " + script);
+  };
+  const auto prepare =
+      run((root / "source").string() +
+          " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+          " --chord Ctrl+N --type 'one two' --select 0,3 --chord Ctrl+Alt+]"
+          " --chord Ctrl+1 --chord Ctrl+Alt+L --select 0,5 --chord Ctrl+Alt+["
+          " --chord Ctrl+2 --select 0,3 --chord Ctrl+Alt+] --chord Ctrl+1"
+          " --chord Ctrl+Alt+L --select 2,2");
+  ASSERT_EQ(prepare.exitCode, 0) << prepare.output;
+  const auto picked = run("--click 400,300 --dump-a11y");
+  ASSERT_EQ(picked.exitCode, 0) << picked.output;
+  EXPECT_THAT(picked.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(picked.output, testing::HasSubstr("Link 2/2"));
+  std::vector<zigzag::CellRef> links;
+  std::vector<std::pair<std::string, std::size_t>> counts;
+  std::size_t visits{};
+  std::optional<xanadu::VisitId> current;
+  const auto inspect = [&](const auto &check) {
+    Store activity(permascrollAt(root / "permascroll"));
+    const auto directory = root / "data/xudu/activity";
+    activity.load(directory.string());
+    xanadu::StoreActivityLog log(&activity, directory);
+    const auto place = xanadu::latestPlace(activity);
+    ASSERT_TRUE(place && place->link);
+    check(log, *place);
+  };
+  {
+    Store source(permascrollAt(root / "permascroll"));
+    source.load((root / "source").string());
+    ASSERT_EQ(source.links().size(), 2U);
+    for (const auto &[id, link] : source.links()) links.push_back(id);
+    EXPECT_EQ(source.links().at(links[0]).left,
+              source.links().at(links[1]).left);
+    EXPECT_EQ(source.links().at(links[0]).right,
+              source.links().at(links[1]).right);
+  }
+  inspect([&](const auto &log, const auto &place) {
+    visits  = log.allVisits().size();
+    current = log.current();
+    EXPECT_EQ(place.link->key.id, links[1]);
+    for (const auto &document : place.documents) {
+      Store store(permascrollAt(root / "permascroll"));
+      store.load(document.storePath);
+      counts.emplace_back(document.storePath, store.opCount());
+    }
+  });
+  const auto previous = run("--click 550,236 --dump-a11y --capture " +
+                            (root / "previous.ppm").string());
+  ASSERT_EQ(previous.exitCode, 0) << previous.output;
+  EXPECT_THAT(previous.output, testing::HasSubstr("Link 1/2"));
+  EXPECT_THAT(previous.output, testing::HasSubstr("[caret 2]"));
+  inspect([&](const auto &log, const auto &place) {
+    EXPECT_EQ(place.link->key.id, links[0]);
+    EXPECT_EQ(log.allVisits().size(), visits);
+    EXPECT_EQ(log.current(), current);
+    ASSERT_TRUE(place.active);
+    EXPECT_EQ(place.documents[*place.active].caret, 2U);
+  });
+  const auto next = run("--click 625,236 --dump-a11y --capture " +
+                        (root / "next.ppm").string());
+  ASSERT_EQ(next.exitCode, 0) << next.output;
+  EXPECT_THAT(next.output, testing::HasSubstr("Link 2/2"));
+  EXPECT_THAT(next.output, testing::HasSubstr("[caret 2]"));
+  inspect([&](const auto &log, const auto &place) {
+    EXPECT_EQ(place.link->key.id, links[1]);
+    EXPECT_EQ(log.allVisits().size(), visits);
+    EXPECT_EQ(log.current(), current);
+  });
+  for (const auto &[path, count] : counts) {
+    Store store(permascrollAt(root / "permascroll"));
+    store.load(path);
+    EXPECT_EQ(store.opCount(), count);
+  }
+}
+
 TEST(E2EBinaryOrchestrationTest, walksPreviewAndMetadataSurviveRestart) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));

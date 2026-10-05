@@ -71,6 +71,11 @@ linkPanelLines(const SelectedLink &selected,
                const std::optional<OccurrenceSite> &origin,
                const ReadingPosition &reading, SiteNamer name);
 
+/// Position in the same ordered candidates that Previous/Next link use.
+[[nodiscard]] std::string
+linkCandidateLabel(const LinkKey &selected,
+                   std::span<const LinkKey> candidates);
+
 /// One of the panel's pointer controls: what it says and what it does.
 struct PanelButton {
   std::string label;

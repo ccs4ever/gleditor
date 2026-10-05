@@ -16,6 +16,7 @@
 #ifndef XUDU_LINK_CONTEXT_HPP
 #define XUDU_LINK_CONTEXT_HPP
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -92,7 +93,13 @@ public:
 
   /// The links on screen, in the stable order Next/Previous link walk.
   void setCandidates(std::vector<xanadu::LinkKey> keys) {
+    if (std::ranges::equal(keys, navigator.candidateKeys())) return;
     navigator.setCandidates(std::move(keys));
+    ++changes;
+  }
+
+  [[nodiscard]] std::span<const xanadu::LinkKey> candidateKeys() const {
+    return navigator.candidateKeys();
   }
 
   /// The key of link @p id in open store @p store, the one it was forged in.

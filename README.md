@@ -195,7 +195,11 @@ The link-context branch provides a Walks browser through Alt+Shift+W or the View
 Preview saved visits with the arrow keys, restore with Enter, reference with R, or edit a visit note
 with N. Notes and references persist in the private activity store. Preview and annotation leave the
 current visit and visited stores unchanged. See the
-[Walks validation](design/audit-2026-10-05-ux-walks.md) for evidence and remaining gaps.
+[Walks validation](design/audit-2026-10-05-ux-walks.md) for evidence and remaining gaps. The
+selected-link panel also exposes Previous/Next link buttons and a Link i/N indicator, so a covered
+identity remains reachable when ribbon bodies coincide. They cycle links from the open reading
+stores, matching Alt+Shift+P/N. See the
+[coincident-link validation](design/audit-2026-10-05-ux-coincident-links.md).
 
 Publication signs an authorship record, seals content and operations for sharing, and can publish
 mutable names through BEP 46. Global spans and operation references map published identities back to
