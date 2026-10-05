@@ -193,6 +193,10 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return activityBack();
         } else if constexpr (std::is_same_v<Command, nav::ActivityForward>) {
           return activityForward(c.child);
+        } else if constexpr (std::is_same_v<Command, nav::EnterSavedVisit>) {
+          const auto visit = activity.find(c.visit);
+          if (!visit) return std::unexpected(NavigationError::VisitNotFound);
+          return restoreVisit(*visit);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
         } else {
@@ -543,6 +547,8 @@ std::string_view name(const NavigationError error) noexcept {
     return "link not found";
   case NavigationError::NoOrigin:
     return "no origin";
+  case NavigationError::VisitNotFound:
+    return "saved visit not found";
   case NavigationError::NoPreviousVisit:
     return "no previous visit";
   case NavigationError::NoCandidates:
@@ -563,6 +569,7 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "enter at",
                                                "activity back",
                                                "activity forward",
+                                               "enter saved visit",
                                                "return to origin",
                                                "dismiss"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);

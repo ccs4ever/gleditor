@@ -496,6 +496,7 @@ inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
 inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
 inline constexpr std::string_view kKeymapOverviewToggle =
     "std:xudu/overview_toggle";
+inline constexpr std::string_view kKeymapWalks = "std:xuzz/walks";
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapActivityForward =

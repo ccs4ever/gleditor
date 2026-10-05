@@ -129,7 +129,9 @@ public:
    *
    * @return Whether anything was bound.
    */
-  [[nodiscard]] bool dispatch(int scancode, Mod mods) const;
+  [[nodiscard]] bool
+  dispatch(int scancode, Mod mods,
+           const std::function<bool(std::string_view)> &permit = {}) const;
 
   /**
    * @brief Run the command called @p name.

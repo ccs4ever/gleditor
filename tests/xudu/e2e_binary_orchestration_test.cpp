@@ -960,6 +960,89 @@ TEST(E2EBinaryOrchestrationTest, enteringAClosedEndpointRecordsNoVisit) {
   EXPECT_EQ(entered, 0U);
 }
 
+TEST(E2EBinaryOrchestrationTest, walksPreviewAndMetadataSurviveRestart) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build/integration_workspace_walks";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto run = [&](const std::string &script) {
+    return executeProcess(
+        "SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+        "LIBGL_ALWAYS_SOFTWARE=1 XDG_CONFIG_HOME=" +
+        (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --backend " + activeBackend() + " --headless --profile " + script);
+  };
+  const auto inspect = [&](const auto &check) {
+    Store activity(permascrollAt(root / "permascroll"));
+    const auto directory = root / "data/xudu/activity";
+    activity.load(directory.string());
+    xanadu::StoreActivityLog log(&activity, directory);
+    check(log);
+  };
+  const auto documentOps = [&] {
+    Store document(permascrollAt(root / "permascroll"));
+    document.load((root / "notes").string());
+    return document.opCount();
+  };
+  const auto prepared =
+      run((root / "notes").string() +
+          " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+          " --select 6,11 --chord Ctrl+Alt+] --chord Ctrl+Alt+L"
+          " --chord Alt+Shift+N --chord Alt+Shift+X --chord Alt+Shift+Return"
+          " --chord Alt+Shift+B --chord Alt+Shift+X --chord Alt+Shift+Return");
+  ASSERT_EQ(prepared.exitCode, 0) << prepared.output;
+  inspect([](const auto &log) {
+    ASSERT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{3}));
+    EXPECT_EQ(log.find({2})->parent, log.find({3})->parent);
+  });
+  const auto before = documentOps();
+  const auto annotated =
+      run("--chord Alt+Shift+W --key home --key down --chord Ctrl+N --chord "
+          "Ctrl+Alt+B --chord Delete --type n"
+          " --chord Backspace --type 'Branch note' --key enter --click 300,310 "
+          "--dump-a11y"
+          " --capture " +
+          (root / "annotated.ppm").string() + " --key escape");
+  ASSERT_EQ(annotated.exitCode, 0) << annotated.output;
+  EXPECT_THAT(annotated.output, testing::HasSubstr("Visit referenced"));
+  EXPECT_THAT(annotated.output, testing::HasSubstr("Preview Visit 2"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{3}));
+    EXPECT_EQ(log.annotation({2}), "Branch note");
+    EXPECT_TRUE(log.referenced({2}));
+  });
+  EXPECT_EQ(documentOps(), before);
+  const auto restored = run("--chord Alt+Shift+W --key home --key down"
+                            " --dump-a11y --key enter --dump-a11y");
+  ASSERT_EQ(restored.exitCode, 0) << restored.output;
+  EXPECT_THAT(restored.output, testing::HasSubstr("Branch note"));
+  EXPECT_THAT(restored.output, testing::HasSubstr("Selected link"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{2}));
+  });
+  EXPECT_EQ(documentOps(), before);
+  fs::rename(root / "notes", root / "offline-notes");
+  const auto unavailable =
+      run("--chord Alt+Shift+W --key home --key down --type n"
+          " --type ' offline' --key enter --key enter --dump-a11y");
+  ASSERT_EQ(unavailable.exitCode, 0) << unavailable.output;
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("Target unavailable"));
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("target unavailable"));
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("Branch note offline"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{2}));
+    EXPECT_EQ(log.annotation({2}), "Branch note offline");
+    EXPECT_TRUE(log.referenced({2}));
+  });
+}
+
 TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;

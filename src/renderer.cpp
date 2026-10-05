@@ -866,6 +866,15 @@ void Renderer::advanceScript(RenderState &state) {
     }
     return;
   case Kind::Click:
+    if (this->state->modal && this->state->modal->grabbing()) {
+      awaitingInput = this->state->queueSynthetic(
+          {.kind   = AppState::SyntheticInput::Kind::ButtonDown,
+           .x      = step.x,
+           .y      = step.y,
+           .button = SDL_BUTTON_LEFT});
+      finishStepWhenSettled();
+      return;
+    }
     if (requestPick(state, step.x, step.y)) {
       awaitingClick = std::pair{step.x, step.y};
       awaitingDrag  = false;

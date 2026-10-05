@@ -72,6 +72,7 @@
 #include "xudu/tenuous_tether.hpp"
 #include "xudu/transcopyright_overlay.hpp"
 #include "xudu/views.hpp"
+#include "xudu/walks_overlay.hpp"
 #include "xudu/wireframe_hull.hpp"
 #include "zigzag/zigzag_commands.hpp"
 #include <gleditor/caret_motion.hpp>
@@ -814,6 +815,7 @@ int XuzzApp::run(const int argc, char **argv) {
   links.setLinkContext(&linkContext);
 
   xudu::LinkPanelOverlay linkPanel(linkContext, *session, renderer);
+  xudu::WalksOverlay walks(linkContext, renderer);
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
       -> std::optional<xudu::LinkPanelOverlay::AnchorPair> {
@@ -1222,6 +1224,7 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addPickObserver(&overview);
   renderer->addFrameContributor(radialMenu.get());
   renderer->addFrameContributor(&publishForm);
+  renderer->addFrameContributor(&walks);
   renderer->addFrameContributor(&pouchDrawer);
   renderer->addFrameContributor(&swarmTelescope);
   renderer->addFrameContributor(&quotationOverlay);
@@ -1231,6 +1234,7 @@ int XuzzApp::run(const int argc, char **argv) {
   state->accessibility->addSource(&links);
   state->accessibility->addSource(&map);
   state->accessibility->addSource(&publishForm);
+  state->accessibility->addSource(&walks);
   state->accessibility->addSource(&quotationOverlay);
   state->accessibility->addSource(radialMenu.get());
   state->accessibility->addSource(&pouchDrawer);
@@ -1427,7 +1431,7 @@ int XuzzApp::run(const int argc, char **argv) {
   });
 
   gleditor::CompositeModalInput compositeModal(
-      {&publishForm, zigzagPresentation.get(), &quotationOverlay});
+      {&publishForm, zigzagPresentation.get(), &quotationOverlay, &walks});
   state->modal = &compositeModal;
 
   renderer->addPickObserver(docSwitcher.get());
@@ -2435,6 +2439,12 @@ int XuzzApp::run(const int argc, char **argv) {
         std::cout << "xuzz: cleared clasp forge bench\n";
       });
 
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapWalks),
+      "browse saved walks, references and notes", [renderer, &walks] {
+        renderer->runWithState([&walks](RenderState &) { walks.open(); });
+      });
+
   // Selected-link navigation
   using namespace xanadu::settings;
   const std::pair<std::string_view, const char *> linkActions[] = {
@@ -2803,7 +2813,7 @@ int XuzzApp::run(const int argc, char **argv) {
   // 8. System Store Change Watcher Callback
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
-       &views, &overview, readablePx, &session, zigzagPresentation,
+       &walks, &views, &overview, readablePx, &session, zigzagPresentation,
        &bridgeCoordinator, &showKeyHints](const xudu::SystemDocKind kind,
                                           const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
@@ -2849,6 +2859,7 @@ int XuzzApp::run(const int argc, char **argv) {
           const auto uiCfg = xudu::UIConfig::fromStore(store);
           radialMenu->setConfig(uiCfg.radialMenu);
           linkPanel.setConfig(uiCfg.linkPanel);
+          walks.setConfig(uiCfg.linkPanel);
           overview.setConfig(uiCfg.overview);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
           map.setVisible(uiCfg.hypertimeMapVisible);
@@ -2880,6 +2891,7 @@ int XuzzApp::run(const int argc, char **argv) {
       const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
       radialMenu->setConfig(uiCfg.radialMenu);
       linkPanel.setConfig(uiCfg.linkPanel);
+      walks.setConfig(uiCfg.linkPanel);
       overview.setConfig(uiCfg.overview);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
       map.setVisible(uiCfg.hypertimeMapVisible);

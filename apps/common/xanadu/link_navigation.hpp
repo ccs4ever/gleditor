@@ -197,6 +197,10 @@ struct ActivityForward {
   VisitId child;
   bool operator==(const ActivityForward &) const = default;
 };
+struct EnterSavedVisit {
+  VisitId visit;
+  bool operator==(const EnterSavedVisit &) const = default;
+};
 struct ReturnToOrigin {
   bool operator==(const ReturnToOrigin &) const = default;
 };
@@ -210,7 +214,8 @@ using NavigationCommand =
     std::variant<nav::SelectLink, nav::StepLink, nav::SelectMember,
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
-                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss>;
+                 nav::ActivityForward, nav::EnterSavedVisit,
+                 nav::ReturnToOrigin, nav::Dismiss>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -228,6 +233,7 @@ enum class NavigationError : std::uint8_t {
   LinkNotFound,
   NoOrigin,
   NoPreviousVisit,
+  VisitNotFound,
   NoCandidates,
 };
 

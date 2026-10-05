@@ -191,6 +191,12 @@ Current beam activation still follows a rendered strand directly; the exact, man
 interface is described as a proposal in the
 [Xuzz navigation workflow](design/ui_workflow_xuzz_navigation.md).
 
+The link-context branch provides a Walks browser through Alt+Shift+W or the View radial submenu.
+Preview saved visits with the arrow keys, restore with Enter, reference with R, or edit a visit note
+with N. Notes and references persist in the private activity store. Preview and annotation leave the
+current visit and visited stores unchanged. See the
+[Walks validation](design/audit-2026-10-05-ux-walks.md) for evidence and remaining gaps.
+
 Publication signs an authorship record, seals content and operations for sharing, and can publish
 mutable names through BEP 46. Global spans and operation references map published identities back to
 local stores. A Merkle identity ledger and BEP 10 extensions support author lookup and peer

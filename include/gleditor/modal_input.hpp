@@ -24,6 +24,7 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -103,6 +104,13 @@ public:
   /// which does not use a key does not silently swallow it.
   virtual bool keyPressed(Key key, KeyMods mods) = 0;
 
+  /// A primary-button press in window coordinates. Other modals may
+  /// continue to consume clicks without acting on them.
+  virtual bool pointerPressed(int, int) { return false; }
+
+  /// Whether a command may run behind this modal.
+  virtual bool permitsCommand(std::string_view) const { return true; }
+
   /// Composed text -- what an input method produced, not a scancode.
   virtual void textTyped(const std::string &utf8) = 0;
 
@@ -160,6 +168,20 @@ public:
       }
     }
     return false;
+  }
+
+  bool pointerPressed(const int x, const int y) override {
+    for (auto *modal : std::views::reverse(modals_)) {
+      if (modal && modal->grabbing()) return modal->pointerPressed(x, y);
+    }
+    return false;
+  }
+
+  bool permitsCommand(const std::string_view name) const override {
+    for (auto *modal : std::views::reverse(modals_)) {
+      if (modal && modal->grabbing()) return modal->permitsCommand(name);
+    }
+    return true;
   }
 
   void textTyped(const std::string &utf8) override {

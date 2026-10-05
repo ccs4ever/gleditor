@@ -2,6 +2,7 @@
 
 #include <array>
 #include <charconv>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -15,8 +16,10 @@
 namespace xanadu {
 namespace {
 
-constexpr std::string_view kVisits  = "d.activity-visits";
-constexpr std::string_view kCurrent = "d.activity-current";
+constexpr std::string_view kVisits     = "d.activity-visits";
+constexpr std::string_view kCurrent    = "d.activity-current";
+constexpr std::string_view kNotes      = "d.activity-annotations";
+constexpr std::string_view kReferences = "d.activity-references";
 
 std::string bytesOf(const DocumentId &id) { return id.str().substr(6); }
 
@@ -153,6 +156,29 @@ StoreActivityLog::StoreActivityLog(Store *aStore,
       selected = VisitId{id};
     }
   }
+  for (const auto dimension : {kNotes, kReferences}) {
+    if (const auto dim = manifold.dimensionNamed(dimension, *store)) {
+      auto cell = manifold.linked(store->homeCell(), *dim);
+      for (auto left = manifold.cellCount(); cell != zigzag::noCell; --left) {
+        if (!left) throw std::runtime_error("activity: cyclic metadata rank");
+        std::istringstream input(manifold.textOf(cell, *store));
+        std::string signature, text, extra;
+        std::uint64_t id{};
+        if (!(input >> signature >> id) || !find(VisitId{id}) ||
+            (dimension == kNotes &&
+             (signature != "note1" || !(input >> std::quoted(text)))) ||
+            (dimension == kReferences && signature != "reference1") ||
+            (input >> extra)) {
+          throw std::runtime_error("activity: malformed visit metadata");
+        }
+        if (dimension == kNotes)
+          notes[id] = std::move(text);
+        else
+          references.insert(id);
+        cell = manifold.linked(cell, *dim);
+      }
+    }
+  }
 }
 
 void StoreActivityLog::appendRecord(const std::string_view dimension,
@@ -206,6 +232,32 @@ void StoreActivityLog::select(const VisitId id) {
   if (!find(id)) throw std::runtime_error("activity: unknown visit");
   appendRecord(kCurrent, std::to_string(id.value));
   selected = id;
+}
+
+std::string StoreActivityLog::annotation(const VisitId id) const {
+  const auto found = notes.find(id.value);
+  return found == notes.end() ? std::string{} : found->second;
+}
+
+bool StoreActivityLog::referenced(const VisitId id) const {
+  return references.contains(id.value);
+}
+
+void StoreActivityLog::annotate(const VisitId id, std::string text) {
+  if (!store) throw std::runtime_error("activity: storage unavailable");
+  if (!find(id)) throw std::runtime_error("activity: unknown annotated visit");
+  std::ostringstream record;
+  record << "note1 " << id.value << ' ' << std::quoted(text);
+  appendRecord(kNotes, record.str());
+  notes[id.value] = std::move(text);
+}
+
+void StoreActivityLog::reference(const VisitId id) {
+  if (!store) throw std::runtime_error("activity: storage unavailable");
+  if (!find(id)) throw std::runtime_error("activity: unknown referenced visit");
+  if (referenced(id)) return;
+  appendRecord(kReferences, "reference1 " + std::to_string(id.value));
+  references.insert(id.value);
 }
 
 } // namespace xanadu

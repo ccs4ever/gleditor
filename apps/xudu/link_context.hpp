@@ -127,6 +127,29 @@ public:
   }
   [[nodiscard]] ReadingStamp readingStamp() const;
   [[nodiscard]] std::vector<xanadu::Visit> forwardChoices() const;
+  [[nodiscard]] std::span<const xanadu::Visit> savedVisits() const {
+    return activity.allVisits();
+  }
+  [[nodiscard]] std::optional<xanadu::VisitId> currentVisit() const {
+    return activity.current();
+  }
+  [[nodiscard]] std::string visitNote(xanadu::VisitId id) const {
+    return activity.annotation(id);
+  }
+  [[nodiscard]] bool visitReferenced(xanadu::VisitId id) const {
+    return activity.referenced(id);
+  }
+  void annotateVisit(xanadu::VisitId id, std::string text) {
+    activity.annotate(id, std::move(text));
+    ++changes;
+  }
+  void referenceVisit(xanadu::VisitId id) {
+    activity.reference(id);
+    ++changes;
+  }
+  [[nodiscard]] bool visitAvailable(const xanadu::Visit &visit) const {
+    return canFocus(visit.target);
+  }
 
   /**
    * @brief Where the reader is, for the panel.

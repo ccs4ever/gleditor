@@ -50,3 +50,6 @@ separately retained UI captures above use OpenGL.
 Remaining work: discovery of unseen external and remote authorities, visit annotation/reference and
 Walks controls, fully coincident link selection, and native accessibility delivery. This follow-up
 does not establish formatting inheritance in unopened ZigZag cell views.
+
+The [Walks follow-up](audit-2026-10-05-ux-walks.md) implements and validates saved-visit preview,
+restoration, notes and references. The other gaps above remain open.

@@ -520,7 +520,9 @@ bool CommandTable::run(const std::string_view name) const {
   return true;
 }
 
-bool CommandTable::dispatch(const int scancode, const Mod mods) const {
+bool CommandTable::dispatch(
+    const int scancode, const Mod mods,
+    const std::function<bool(std::string_view)> &permit) const {
   const auto active  = scopeResolver ? scopeResolver() : std::string{};
   const auto inScope = [&](const std::string_view scope) {
     return std::ranges::find_if(bindings, [&](const Command &cmd) {
@@ -535,7 +537,7 @@ bool CommandTable::dispatch(const int scancode, const Mod mods) const {
   if (found == bindings.end()) {
     return false;
   }
-  found->run();
+  if (!permit || permit(found->name)) found->run();
   return true;
 }
 
@@ -1359,7 +1361,11 @@ int Application::run() {
         return;
       }
     }
-    std::ignore = commandTable.dispatch(scancode, mods);
+    std::ignore =
+        commandTable.dispatch(scancode, mods, [this](const auto name) {
+          return !state->modal || !state->modal->grabbing() ||
+                 state->modal->permitsCommand(name);
+        });
   };
   const auto onMotion = [&](const int x, const int y,
                             const std::uint32_t held) {
@@ -1387,9 +1393,9 @@ int Application::run() {
     // (the radial menu) reads it from here.
     state->mouseX = x;
     state->mouseY = y;
-    // Held while a modal is up, along with the drag above: the caret is not
-    // what is being moved when there is a question on screen.
+    // A modal owns the press; the document behind it must not receive it.
     if (nullptr != state->modal && state->modal->grabbing()) {
+      if (button == SDL_BUTTON_LEFT) state->modal->pointerPressed(x, y);
       return;
     }
     if (state->mouseDownHandler && state->mouseDownHandler(x, y, button)) {

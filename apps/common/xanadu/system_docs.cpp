@@ -969,6 +969,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Put the selected link away",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+D"}}}}},
+        {.name    = std::string(settings::kKeymapWalks),
+         .notes   = "Browse saved walks, references and notes without moving",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+W"}}}}},
         {.name    = std::string(settings::kKeymapActivityBack),
          .notes   = "Return to the previous visit, not the previous version",
          .schemas = {{.expectedTypes = {"string"},
@@ -2940,6 +2944,7 @@ gleditor::RadialConfig createDefaultRadialConfig() {
   auto viewAction = makeAction("group:view", "View", "V", "subwheel:view");
   viewAction.desc = "View Mode";
   viewAction.subActions = {
+      makeAction("run:std:xuzz/walks", "Walks", "W", "run:std:xuzz/walks"),
       makeAction("run:std:xuzz/view_unified", "Unified", "U",
                  "run:std:xuzz/view_unified"),
       makeAction("run:std:xuzz/view_xanadoc", "Xanadocs only", "X",

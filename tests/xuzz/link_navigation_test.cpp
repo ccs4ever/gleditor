@@ -110,6 +110,37 @@ VisitId arrive(Harness &h) { return h.navigator.recordArrival(h.inHead(0, 5)); }
 
 } // namespace
 
+TEST(LinkNavigationTest, SavedVisitRestoresAcrossRootsWithoutCreatingVisits) {
+  Harness h;
+  const auto root  = h.log.append({.target = h.inHead(0, 0)});
+  const auto saved = h.log.append(
+      {.parent  = root,
+       .target  = h.inCell(h.f.wholeCell, 0, 3),
+       .arrival = xanadu::Arrival::EnteredEndpoint,
+       .link    = xanadu::LinkVisitContext{.key    = h.link(),
+                                           .active = LinkSide::Right,
+                                           .left  = {.member = 0, .occurrence = 0},
+                                           .right = {.member = 2, .occurrence = 3},
+                                           .origin = root}});
+  const auto other  = h.log.append({.target = h.inHead(2, 4)});
+  const auto count  = h.log.size();
+  const auto result = h.run(nav::EnterSavedVisit{saved});
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result->focus, h.log.find(saved)->target);
+  EXPECT_EQ(h.log.current(), saved);
+  ASSERT_TRUE(h.navigator.selection());
+  EXPECT_EQ(h.navigator.selection()->right.member, 2U);
+  EXPECT_EQ(h.navigator.selection()->right.occurrence, 3U);
+  EXPECT_EQ(h.log.size(), count);
+  h.navigator.setTargetReady([](const auto &) { return false; });
+  const auto refused = h.run(nav::EnterSavedVisit{other});
+  ASSERT_FALSE(refused);
+  EXPECT_EQ(refused.error(), NavigationError::TargetUnavailable);
+  EXPECT_EQ(h.log.current(), saved);
+  EXPECT_EQ(h.log.size(), count);
+  EXPECT_EQ(h.navigator.selection()->right.member, 2U);
+}
+
 TEST(LinkNavigationTest, SelectingPinsTheWholeLinkWithoutMoving) {
   Harness h;
   const auto origin = arrive(h);
@@ -671,7 +702,8 @@ TEST(LinkNavigationTest, EveryUiActionHasAnUnclaimedDefaultChord) {
       kKeymapLinkOccurrenceNext, kKeymapLinkOccurrencePrevious,
       kKeymapLinkCross,          kKeymapLinkEnter,
       kKeymapLinkOrigin,         kKeymapLinkDismiss,
-      kKeymapActivityBack,       kKeymapOverviewToggle};
+      kKeymapActivityBack,       kKeymapWalks,
+      kKeymapOverviewToggle};
   std::map<std::string, std::vector<std::string>> byChord;
   std::map<std::string, std::string> chordOf;
   for (const auto &spec :
