@@ -317,21 +317,6 @@ bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
 
 } // namespace
 
-std::string scrollKey(const Scroll &scroll) {
-  if (scroll.isNamed()) {
-    return scrollKeyFor(scroll.publisher, scroll.salt);
-  }
-  if (scroll.segments.empty()) {
-    return {};
-  }
-  const auto &first = scroll.segments.front();
-  return std::format("file:{}:{}", first.torrent.hex(), first.fileIndex);
-}
-
-std::string scrollKeyFor(const PublicKey &publisher, const std::string &salt) {
-  return std::format("btpk:{}:{}", publisher.hex(), salt);
-}
-
 GlobalSpan GlobalSpan::intersect(const GlobalSpan &other) const {
   if (scroll != other.scroll) {
     return {};

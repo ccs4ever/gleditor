@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <set>
 
 #include "bencode.hpp"
 #include "scroll_codec.hpp"
@@ -20,8 +21,10 @@ namespace {
 
 /// Keys of the container's dictionary, written once here so that the reader
 /// and the writer cannot disagree about them.
-constexpr auto keyLocalSegments = "local";
-constexpr auto keyDocumentId    = "document";
+constexpr auto keyLocalSegments  = "local";
+constexpr auto keyDocumentId     = "document";
+constexpr auto keyDeployment     = "deployment";
+constexpr auto keyPublishedLocal = "published_local";
 
 /// A registry segment: the shared encoding, plus the MIME type.
 ///
@@ -50,6 +53,45 @@ decodeRegistrySegment(const bencode::Value &value) {
   return segment;
 }
 
+bencode::Value encodeDeployment(const Scroll &scroll) {
+  bencode::List segments;
+  for (const auto &segment : scroll.segments)
+    segments.push_back(encodeRegistrySegment(segment));
+  return bencode::Value::dict(
+      {{"publisher",
+        bencode::Value::string(std::string{
+            reinterpret_cast<const char *>(scroll.publisher.bytes.data()),
+            32})},
+       {"salt", bencode::Value::string(scroll.salt)},
+       {"mime", bencode::Value::string(scroll.defaultMimeType)},
+       {"segments", bencode::Value::list(std::move(segments))}});
+}
+
+Scroll decodeDeployment(const bencode::Value &value) {
+  const auto publisher = value.find("publisher");
+  const auto salt      = value.find("salt");
+  const auto mime      = value.find("mime");
+  const auto segments  = value.find("segments");
+  if (!publisher || !publisher->isString() ||
+      publisher->asString().size() != 32 || !salt || !salt->isString() ||
+      !mime || !mime->isString() || !segments || !segments->isList())
+    throw StoreTablesUnreadable("invalid deployed scroll descriptor");
+  Scroll scroll;
+  std::copy(publisher->asString().begin(), publisher->asString().end(),
+            scroll.publisher.bytes.begin());
+  scroll.salt            = salt->asString();
+  scroll.defaultMimeType = mime->asString();
+  for (const auto &item : segments->asList()) {
+    const auto segment = decodeRegistrySegment(item);
+    if (!segment || segment->length > UINT64_MAX - segment->at ||
+        (!scroll.segments.empty() &&
+         segment->at < scroll.segments.back().end()))
+      throw StoreTablesUnreadable("invalid deployed scroll segment");
+    scroll.segments.push_back(*segment);
+  }
+  return scroll;
+}
+
 } // namespace
 
 void writeStoreTables(const std::filesystem::path &path,
@@ -60,6 +102,11 @@ void writeStoreTables(const std::filesystem::path &path,
     local.push_back(encodeRegistrySegment(segment));
   }
 
+  bencode::List deployment;
+  for (const auto &scroll : tables.deployedScrolls)
+    deployment.push_back(encodeDeployment(scroll));
+  if (tables.publishedLocalScroll > tables.deployedScrolls.size())
+    throw StoreTablesUnreadable("published local scroll is outside deployment");
   const auto body =
       bencode::Value::dict(
           {
@@ -68,6 +115,9 @@ void writeStoreTables(const std::filesystem::path &path,
                                       tables.documentId.bytes().data()),
                                   tables.documentId.bytes().size()})},
               {keyLocalSegments, bencode::Value::list(std::move(local))},
+              {keyDeployment, bencode::Value::list(std::move(deployment))},
+              {keyPublishedLocal,
+               bencode::Value::integer(tables.publishedLocalScroll)},
           })
           .encode();
 
@@ -107,7 +157,7 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   std::uint32_t version = 0;
   std::memcpy(&version, bytes.data() + storeTablesSignature.size(),
               sizeof(version));
-  if (version != 2 && version != storeTablesFormatVersion) {
+  if (version != storeTablesFormatVersion) {
     throw StoreTablesUnreadable(
         path.string() + " is store table format version " +
         std::to_string(version) + " and this build reads version " +
@@ -128,25 +178,40 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   }
 
   StoreTables tables;
-  if (const auto document = decoded.find(keyDocumentId); document.has_value()) {
-    if (!document->isString() ||
-        !DocumentId::fromBytes(document->asString(), tables.documentId)) {
+  const auto document = decoded.find(keyDocumentId);
+  const auto local    = decoded.find(keyLocalSegments);
+  if (!document || !document->isString() ||
+      !DocumentId::fromBytes(document->asString(), tables.documentId))
+    throw StoreTablesUnreadable(path.string() +
+                                " has an invalid document identity");
+  if (!local || !local->isList())
+    throw StoreTablesUnreadable(path.string() +
+                                " has an invalid local segment table");
+  for (const auto &item : local->asList()) {
+    const auto segment = decodeRegistrySegment(item);
+    if (!segment)
       throw StoreTablesUnreadable(path.string() +
-                                  " has a document identity it cannot read");
-    }
+                                  " has a local segment it cannot read");
+    tables.localSegments.push_back(*segment);
   }
-  if (const auto local = decoded.find(keyLocalSegments);
-      local.has_value() && local->isList()) {
-    for (const auto &item : local->asList()) {
-      auto segment = decodeRegistrySegment(item);
-      if (!segment.has_value()) {
-        throw StoreTablesUnreadable(path.string() +
-                                    " has a local segment it cannot read");
-      }
-      tables.localSegments.push_back(*segment);
-    }
+  const auto deployment = decoded.find(keyDeployment);
+  const auto binding    = decoded.find(keyPublishedLocal);
+  if (!deployment || !deployment->isList() || !binding ||
+      !binding->isInteger() || binding->asInteger() < 0 ||
+      static_cast<std::uint64_t>(binding->asInteger()) >
+          deployment->asList().size())
+    throw StoreTablesUnreadable(path.string() +
+                                " has an invalid deployment binding");
+  std::set<std::string> keys;
+  for (const auto &item : deployment->asList()) {
+    auto scroll    = decodeDeployment(item);
+    const auto key = scrollKey(scroll);
+    if (!key.empty() && !keys.insert(key).second)
+      throw StoreTablesUnreadable(path.string() +
+                                  " has duplicate deployed scrolls");
+    tables.deployedScrolls.push_back(std::move(scroll));
   }
-
+  tables.publishedLocalScroll = static_cast<ScrollId>(binding->asInteger());
   return tables;
 }
 

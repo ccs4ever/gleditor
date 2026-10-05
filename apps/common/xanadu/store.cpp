@@ -1294,7 +1294,8 @@ void Store::bindPublishedLocalScroll(const ScrollId id) {
 }
 
 void Store::setContentSource(const ContentSource *source) {
-  resolver.setSource(source);
+  retainedContent_.setFallback(source);
+  resolver.setSource(&retainedContent_);
   if (source) {
     for (auto &sc : externals) {
       hydrateExternalScroll(sc);
@@ -3875,9 +3876,11 @@ void Store::sealPendingMetadataAsCells() const {
     manifold                                  = rebuildManifold(curHead);
   }
 
-  // Only seal externals on d.scrolls if this store is a slice (homeCell_ !=
-  // noCell)
-  if (zigzag::noCell != homeCell_ && !externals.empty()) {
+  // Imported deployment descriptors are not author registrations. A read
+  // retains even scrolls quoted on branches whose registry never names them;
+  // saving those bindings must not mint operations in the author's history.
+  if (publishedLocalScroll_ == localScroll && zigzag::noCell != homeCell_ &&
+      !externals.empty()) {
     const auto reg = manifold.scrollRegistry(*this);
     for (const auto &sc : externals) {
       const auto key = scrollKey(sc);
@@ -3954,9 +3957,12 @@ void Store::save(const std::string &directory) const {
         }
       }
     }
-    writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId    = documentId_,
-                                 .localSegments = deploymentSegments});
+    writeStoreTables(
+        dir / storeTablesName,
+        StoreTables{.documentId           = documentId_,
+                    .localSegments        = deploymentSegments,
+                    .deployedScrolls      = externals,
+                    .publishedLocalScroll = publishedLocalScroll_});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
@@ -4004,9 +4010,12 @@ void Store::saveOsmicText(const std::string &directory) const {
         }
       }
     }
-    writeStoreTables(dir / storeTablesName,
-                     StoreTables{.documentId    = documentId_,
-                                 .localSegments = deploymentSegments});
+    writeStoreTables(
+        dir / storeTablesName,
+        StoreTables{.documentId           = documentId_,
+                    .localSegments        = deploymentSegments,
+                    .deployedScrolls      = externals,
+                    .publishedLocalScroll = publishedLocalScroll_});
   }
 }
 
@@ -4058,6 +4067,9 @@ void Store::load(const std::string &directory) {
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
+  retainedContent_.clear();
+  resolver.pieceCache().clear();
+  resolver.setSource(&retainedContent_);
   publishedLocalScroll_ = localScroll;
   scrollRegistry_       = {};
   localSegments         = Scroll{};
@@ -4118,6 +4130,46 @@ void Store::load(const std::string &directory) {
     documentId_            = tables.documentId;
     localSegments          = Scroll{};
     localSegments.segments = std::move(tables.localSegments);
+    externals              = std::move(tables.deployedScrolls);
+    publishedLocalScroll_  = tables.publishedLocalScroll;
+    // Registry names may themselves live in imported primedia. Load their
+    // immutable carriers before folding any authored Structure metadata.
+    for (const auto &scroll : externals) {
+      for (const auto &segment : scroll.segments) {
+        const auto root = dir / "published" / segment.torrent.hex();
+        const auto file = root / "metainfo.torrent";
+        if (!std::filesystem::exists(file)) continue;
+        std::ifstream input(file, std::ios::binary);
+        const std::string encoded{std::istreambuf_iterator<char>(input),
+                                  std::istreambuf_iterator<char>()};
+        if (Metainfo::parse(encoded).hash() != segment.torrent)
+          throw StoreTablesUnreadable("retained metainfo hash mismatch: " +
+                                      file.string());
+        (void)retainedContent_.add(encoded, root.string());
+      }
+    }
+  }
+
+  if (publishedLocalScroll_ != localScroll) {
+    const auto root = scroll(publishedLocalScroll_);
+    if (!root || !root->isNamed())
+      throw StoreTablesUnreadable(
+          "imported publication root is not a named scroll");
+    for (std::uint32_t i = 1; i <= opCount(); ++i) {
+      const auto span = getCompactOp(i)->span();
+      if (span.empty() || span.scroll == localScroll ||
+          isReservedScroll(span.scroll))
+        continue;
+      const auto descriptor = scroll(span.scroll);
+      if (!descriptor)
+        throw StoreTablesUnreadable(
+            "imported operation has no deployed scroll");
+      const auto bytes = resolver.resolve(*descriptor, span);
+      if (bytes.status == ResolutionStatus::MissingPieces ||
+          bytes.status == ResolutionStatus::UnverifiedHash)
+        throw StoreTablesUnreadable(
+            "imported publication cache is missing or corrupt");
+    }
   }
 
   // The nodes above arrived as a mapped segment rather than through putOp(),

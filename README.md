@@ -140,11 +140,12 @@ addresses. The default permascroll lives under `$XDG_DATA_HOME/xudu/permascroll/
 need to read, instead of copying a bare store directory.
 
 `ops.nodes` starts with a format header, followed by immutable, 64-byte `CompactOpNode` records in
-64 KiB Merkle-piece-aligned segments. `store.tables` holds scroll registration, links, designated
-versions, and annotations. A format the loader does not understand is refused by name and version;
-`xudu-dump --section=header STORE` or `--section=ops` inspects the bytes without that loader.
-Human-readable OSMIC or compact binary operations are optional `ops.export` output, not another
-store file.
+64 KiB Merkle-piece-aligned segments. `store.tables` format 4 holds local segment carriers and
+private reader deployment bindings. Scroll registration, links, designated versions and annotations
+are authored Structure operations. A format the loader does not understand is refused by name and
+version; `xudu-dump --section=header STORE` or `--section=ops` inspects the bytes without that
+loader. Human-readable OSMIC or compact binary operations are optional `ops.export` output, not
+another store file.
 
 A microversion is rebuilt by replaying its ancestral path through the append-only operation tree.
 Editing an earlier state branches rather than discarding its descendants. Deletion removes a
@@ -196,7 +197,9 @@ slice store. Swarm Telescope (`F3`) takes search input until Escape closes it. P
 are persisted per publishing key and salt. The Publish form accepts topics and defaults to local
 preparation; `Ctrl+Shift+P` shows background verification, DHT acknowledgement and retry status. For
 an isolated test swarm, `--test-publication-swarm HOST:PORT --dht-node HOST:PORT` enables the
-explicit mock verification destination. Topic and author-catalog discovery remain pending. See
+explicit mock verification destination. `Ctrl+O` opens signed `.xanadoc` publications with
+dependencies cached beside the manifest, and reopens their separate reader stores offline. Topic and
+author-catalog discovery remain pending. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
 repaired prerequisites and remaining network/UI work.
 

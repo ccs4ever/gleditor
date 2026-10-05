@@ -409,6 +409,13 @@ TEST_F(PublicationOutboxNetworkTest,
                       std::to_string(publication.opsSegments.front().length) +
                       " " + std::to_string(publication.inventory.size()) +
                       " 0");
+  // The child and its BitTorrent session have exited. Reopening consults only
+  // the reader's retained cache and deployment metadata, across no sockets.
+  xanadu::Store offline(std::make_shared<xanadu::UserPermascroll>());
+  offline.load((cache / "reader").string());
+  EXPECT_EQ(offline.documentId(), publication.storeId);
+  EXPECT_EQ(offline.textOf(publication.version), "Story Ideas");
+  EXPECT_EQ(offline.opCount(), publication.opsSegments.front().length);
 }
 
 } // namespace

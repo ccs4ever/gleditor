@@ -53,6 +53,13 @@ StoreTables everything() {
   local.length   = 228;
   local.mimeType = "image/png";
   tables.localSegments.push_back(local);
+  Scroll scroll;
+  scroll.publisher       = xanadu::createMutableKeys().publicKey;
+  scroll.salt            = "permascroll";
+  scroll.defaultMimeType = "image/png";
+  scroll.segments.push_back(local);
+  tables.deployedScrolls.push_back(scroll);
+  tables.publishedLocalScroll = 1;
 
   return tables;
 }
@@ -65,6 +72,13 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   const auto back = xanadu::readStoreTables(path);
 
   EXPECT_EQ(back.documentId, sent.documentId);
+  EXPECT_EQ(back.publishedLocalScroll, 1U);
+  ASSERT_EQ(back.deployedScrolls.size(), 1U);
+  EXPECT_EQ(back.deployedScrolls[0].publisher,
+            sent.deployedScrolls[0].publisher);
+  EXPECT_EQ(back.deployedScrolls[0].salt, "permascroll");
+  EXPECT_EQ(back.deployedScrolls[0].defaultMimeType, "image/png");
+  EXPECT_EQ(back.deployedScrolls[0].segments, sent.deployedScrolls[0].segments);
 
   ASSERT_EQ(back.localSegments.size(), 1U);
   EXPECT_EQ(back.localSegments.front().mimeType, "image/png")
@@ -124,6 +138,31 @@ TEST(StoreTablesTest, aFileThatIsNotOneIsRefusedAndSaysWhy) {
     out << "not bencode";
   }
   EXPECT_THROW(std::ignore = xanadu::readStoreTables(dir / "torn.tables"),
+               xanadu::StoreTablesUnreadable);
+}
+
+TEST(StoreTablesTest, OldVersionsAndInvalidDeploymentAreRefusedByNumber) {
+  const auto dir = scratch("deployment-refused");
+  for (const std::uint32_t old : {2U, 3U}) {
+    const auto path = dir / "old.tables";
+    xanadu::writeStoreTables(path, StoreTables{});
+    std::fstream out(path, std::ios::binary | std::ios::in | std::ios::out);
+    out.seekp(static_cast<std::streamoff>(xanadu::storeTablesSignature.size()));
+    out.write(reinterpret_cast<const char *>(&old), sizeof(old));
+    out.close();
+    try {
+      (void)xanadu::readStoreTables(path);
+      FAIL() << "obsolete format accepted";
+    } catch (const xanadu::StoreTablesUnreadable &error) {
+      EXPECT_THAT(std::string(error.what()),
+                  testing::HasSubstr("version " + std::to_string(old)));
+      EXPECT_THAT(std::string(error.what()),
+                  testing::HasSubstr("reads version 4"));
+    }
+  }
+  auto invalid                 = everything();
+  invalid.publishedLocalScroll = 2;
+  EXPECT_THROW(xanadu::writeStoreTables(dir / "invalid.tables", invalid),
                xanadu::StoreTablesUnreadable);
 }
 

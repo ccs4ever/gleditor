@@ -67,7 +67,7 @@ Quadrant Gamma (Bottom-Left): Blue (59, 130, 246)
 Quadrant Delta (Bottom-Right): Gold (250, 204, 21)
 
 Figure Caption: The above diagram illustrates the optical path of identity gold transclusion ribbons flowing across 3D canvas coordinates.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:87036c850bfb162f631bef45c20fb9b4c51faa98:0mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:a6a7261031290875859a239f10c685e094744551:0mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:092218064a805e14f9c3349bfb92386644144c20:0Embedded Multimedia Xanadoc: Integrated Lecture & Demonstration
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:5ce388ae4269add2c7ab180ac6d209bf1ea2fc91:0mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:86e07e61693592a17d5a82d06895d6e1e4b6aecf:0mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:462d0c4e27602109336a66936826a14ddeb0d5d9:0Embedded Multimedia Xanadoc: Integrated Lecture & Demonstration
 
 1. Theoretical Introduction
 The fundamental architecture of Project Xanadu integrates sound, moving imagery, and typography into a single continuous primedia space.
@@ -83,25 +83,25 @@ Title: 'Zigzag 3D Visualizer'
 Status: Video Surface Rendered with Hardware Acceleration
 3. Experimental Conclusions
 Multi-modal primedia streams preserve temporal and spatial fidelity across all transclusion coordinates in hypertime.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:a6a7261031290875859a239f10c685e094744551:0file:092218064a805e14f9c3349bfb92386644144c20:0file:87036c850bfb162f631bef45c20fb9b4c51faa98:0Page 2: Transcluded Audio Excerpt (E5 659.25Hz Keynote Tone)
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:5f2d2760214131f9307d8ff250ed61bd00f0ee41:0file:d942e7be7a07bfd19f84a75bea5df62cfae03a8e:0file:b2323f5453f11365b2e56b26e4f2eca69e0aeff5:0Page 2: Transcluded Audio Excerpt (E5 659.25Hz Keynote Tone)
 
 Excerpt Analysis:
 
 
 Provenance: Directly transcluded from Master Audio Track on Page 1.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:a6a7261031290875859a239f10c685e094744551:0Page 2: Transcluded Video Clip (Scene Gamma at 04:00-06:00)
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:86e07e61693592a17d5a82d06895d6e1e4b6aecf:0Page 2: Transcluded Video Clip (Scene Gamma at 04:00-06:00)
 
 Featured Clip:
 
 
 Note: Transcluded sub-stream without duplicating video bytes.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:092218064a805e14f9c3349bfb92386644144c20:0Page 2: Transcluded Detail View (Quadrant Delta)
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:462d0c4e27602109336a66936826a14ddeb0d5d9:0Page 2: Transcluded Detail View (Quadrant Delta)
 
 Selected Quadrant:
 
 
 Coordinate Mapping: Resolves to identical primedia span on Page 1.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:87036c850bfb162f631bef45c20fb9b4c51faa98:0Figure 1.2: Vector Quadrant Docuverse Topology
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:5ce388ae4269add2c7ab180ac6d209bf1ea2fc91:0Figure 1.2: Vector Quadrant Docuverse Topology
 
 [EMBEDDED_IMAGE_ASSET: tests/samples/sample_image.svg]
 Rendering: static SVG, rasterized via ThorVG
@@ -112,7 +112,7 @@ Quadrant Delta (Bottom-Right): Gold (#facc15)
 Centre: White disc, proving curved paths rasterize alongside the quadrant rects.
 
 Figure Caption: The above diagram is vector primedia, not a raster bitmap -- the same page layout and transclusion machinery as Figure 1.1 applies unchanged.
-mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:bb9bdead5386e11575617377328869b6baf2b0d7:0Document A: Hypertext Theses and System Architecture
+mainhomed.dimsd.editionsd.edition-ofcurrentd.scrollsfile:adf7683ed0bc0e06825fb810a1236406400c719e:0Document A: Hypertext Theses and System Architecture
 
 Thesis 1 (Central Synthesis):
 Complex ideas synthesize insights across disparate domains including foundational philosophy, mathematical topology, and optical rendering.

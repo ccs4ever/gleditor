@@ -285,8 +285,10 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   nodes each), sealed segments, the id hash, `TreeLinks`.
 - `user_permascroll.hpp/.cpp` — the author's one permascroll, **the only place primedia is stored**;
   a `Store` is handed one, never makes its own.
-- `store_tables.hpp` — `store.tables` (bencode, version 3): scroll registry, local segments, the
-  `Link` records, designated current versions, version annotations. None has a hypertime name.
+- `store_tables.hpp` — `store.tables` (bencode, version 4): local segments and ordered private
+  deployment scroll descriptors with an imported author-local scroll binding. The registry, `Link`
+  records, editions and annotations are authored Structure operations. Deployment slots have no
+  hypertime names.
 - `publication.hpp/.cpp` — publish/adopt, `GlobalSpan` ↔ `PrimediaSpan` (`globalise`/`localise`),
   `GlobalOpRef` ↔ op index (`opRefOf`/`localiseOpRef`), `historyFromSeal`. `provenance.hpp` — the
   GPG-signed `AUTHORSHIP.tsv` sealed into a torrent. `merkle_ledger`, `managed_torrent`,
@@ -354,11 +356,11 @@ This ruling expires the first time someone outside this repository has a documen
 
 A store directory is exactly:
 
-| file           | shape                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------- |
-| `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse, records `nodeSize`) then a run of `CompactOpNode`                          |
-| `store.tables` | `\x89XUDUTBL` + version 3 + bencode: scrolls, local segments, links, current versions, annotations             |
-| `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV4`) |
+| file           | shape                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse, records `nodeSize`) then a run of `CompactOpNode`                             |
+| `store.tables` | `\x89XUDUTBL` + version 4 + bencode: local segments, deployment scroll descriptors, imported author-local binding |
+| `ops.export`   | only with `--export-osmic`: the operations as OSMIC text or the compact binary wire format (`CompactBinaryV4`)    |
 
 **A store holds no primedia**, so it is not portable alone: it needs the permascroll it was written
 against (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia` or `--permascroll`). The retired

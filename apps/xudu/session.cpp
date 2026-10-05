@@ -802,7 +802,8 @@ std::string Session::publishDocument(const MicroversionId &version,
   return outPath;
 }
 
-MicroversionId Session::readPublication(const std::string &aPath) {
+std::pair<std::size_t, MicroversionId>
+Session::readPublication(const std::string &aPath) {
   std::ifstream in(aPath, std::ios::binary);
   if (!in) {
     throw std::runtime_error("cannot read publication: " + aPath);
@@ -816,13 +817,22 @@ MicroversionId Session::readPublication(const std::string &aPath) {
                 "to be from. A manifest that does not verify is somebody's "
                 "claim to have published what they did not.");
   }
-  auto &st         = store(0);
-  const auto taken = adopt(st, *pub);
+  std::vector<std::filesystem::path> roots{
+      std::filesystem::path(aPath).parent_path()};
+  for (std::size_t i = 0; i < stores.size(); ++i)
+    roots.emplace_back(publishedDir(i));
+  // A private snapshot per opening avoids overwriting an earlier publication
+  // or the reader's local edits when the author announces a newer version.
+  const auto destination = untitledStoreDir("publication");
+  std::filesystem::remove(
+      destination); // installer requires exclusive ownership
+  auto restored = installPublication(
+      *pub, roots, stores[0].store->userPermascrollPtr(), destination);
+  const auto index = addStore(std::move(restored), destination.string(), false);
   invalidate();
-  std::cout << "xudu: read " << pub->describe() << " as " << taken.version.str()
-            << " (" << taken.scrolls << " scroll(s), " << taken.links
-            << " link(s) new here)\n";
-  return taken.version;
+  std::cout << "xudu: read " << pub->describe() << " as " << pub->version.str()
+            << " (complete store " << index << ")\n";
+  return {index, pub->version};
 }
 
 MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {

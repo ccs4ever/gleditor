@@ -385,12 +385,16 @@ int XuzzApp::run(const int argc, char **argv) {
   if (batchRes.shouldExit) {
     return batchRes.exitCode;
   }
-  auto opening            = batchRes.opening;
-  const auto extraImports = batchRes.extraImports;
+  std::vector<std::pair<std::size_t, xanadu::MicroversionId>> readPublications;
+  std::size_t openingStore = 0;
+  auto opening             = batchRes.opening;
+  const auto extraImports  = batchRes.extraImports;
 
   if (parser.present<std::vector<std::string>>("--read")) {
     for (const auto &file : parser.get<std::vector<std::string>>("--read")) {
-      opts.read.push_back(session->readPublication(file));
+      const auto opened = session->readPublication(file);
+      readPublications.push_back(opened);
+      opts.read.push_back(opened.second);
     }
     session->save(0);
   }
@@ -399,7 +403,8 @@ int XuzzApp::run(const int argc, char **argv) {
     if (!opts.askedVersion.empty()) {
       opening = xanadu::MicroversionId::parse(opts.askedVersion);
     } else if (!opts.read.empty()) {
-      opening = opts.read.front();
+      opening      = opts.read.front();
+      openingStore = readPublications.front().first;
     } else {
       opening = session->store(0).latest();
     }
@@ -413,7 +418,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                       .author     = {},
                                       .extra      = {},
                                       .passphrase = {}},
-        0);
+        openingStore);
     if (!opts.quiet) {
       std::cout << "xudu: prepared " << opening.str() << " as " << manifest
                 << "\n";
@@ -1653,7 +1658,7 @@ int XuzzApp::run(const int argc, char **argv) {
           });
     }
   } else {
-    views.showAlongside(opening, 0.0F, 0);
+    views.showAlongside(opening, 0.0F, openingStore);
   }
 
   for (const auto &[extraVer, sIdx] : extraImports) {
@@ -1662,9 +1667,9 @@ int XuzzApp::run(const int argc, char **argv) {
   if (!opts.alongside.empty()) {
     views.showAlongside(xanadu::MicroversionId::parse(opts.alongside), 0.0F, 0);
   }
-  for (const auto &also : opts.read) {
-    if (also != opening) {
-      views.showAlongside(also, 0.0F, 0);
+  for (const auto &[storeIndex, also] : readPublications) {
+    if (also != opening || storeIndex != openingStore) {
+      views.showAlongside(also, 0.0F, storeIndex);
     }
   }
   for (const auto &behind : opts.background) {

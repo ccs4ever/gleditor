@@ -66,7 +66,7 @@ gleditor::cpp26::optional<const Metainfo &>
 DirectoryContentSource::metainfo(const InfoHash &hash) const {
   const auto found = held.find(hash);
   if (found == held.end()) {
-    return gleditor::cpp26::nullopt;
+    return fallback_ ? fallback_->metainfo(hash) : gleditor::cpp26::nullopt;
   }
   return found->second.meta;
 }
@@ -77,7 +77,8 @@ DirectoryContentSource::readStream(const InfoHash &hash,
                                    const std::uint64_t length) const {
   const auto found = held.find(hash);
   if (found == held.end()) {
-    return {};
+    return fallback_ ? fallback_->readStream(hash, offset, length)
+                     : std::string{};
   }
   const auto &meta = found->second.meta;
   const std::filesystem::path root(found->second.root);

@@ -119,6 +119,11 @@ public:
  */
 class DirectoryContentSource : public ContentSource {
 public:
+  /// Retained immutable seeds take precedence over an optional remote source.
+  /// The fallback is borrowed and must outlive this source.
+  void setFallback(const ContentSource *source) { fallback_ = source; }
+  void clear() { held.clear(); }
+
   /**
    * @brief Make a torrent's content available.
    * @param torrentFile The contents of a .torrent file.
@@ -142,6 +147,7 @@ private:
     std::string root;
   };
   std::map<InfoHash, Held> held;
+  const ContentSource *fallback_{};
 };
 
 /**

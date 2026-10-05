@@ -369,6 +369,11 @@ public:
   [[nodiscard]] static std::optional<ScrollSealedBroadcast>
   decodeScrollSealed(std::string_view body);
 
+  /// Metainfo with the exact verified info dictionary, for retaining a
+  /// downloaded torrent beside its immutable payload. Call on the owner thread.
+  [[nodiscard]] std::optional<std::string>
+  torrentMetadata(const InfoHash &hash) const;
+
   // -- ContentSource --------------------------------------------------------
 
   [[nodiscard]] gleditor::cpp26::optional<const Metainfo &>

@@ -32,6 +32,7 @@
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -636,6 +637,135 @@ TEST_F(PublicationInventoryTest,
                 head, restored->segmentedOps().indexOf(sliceB)),
             "Second board");
   EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest,
+       ImportedBindingsDoNotInventRegistryOperations) {
+  xanadu::Store sparse;
+  const auto text    = sparse.insert({}, 0, "Ideas");
+  const auto foreign = std::ranges::find_if(pub.scrolls, [](const auto &entry) {
+    return entry.first.starts_with("file:");
+  });
+  ASSERT_NE(foreign, pub.scrolls.end());
+  (void)sparse.transcludeExternal(text, 5, foreign->second, 0, 9);
+  const auto genesis = sparse.sliceGenesis(text);
+  (void)sparse.makeCell(genesis, "Idea cell");
+  // The slice branch has no authored registry rank. Complete publication
+  // descriptors still make the quotation on the other branch addressable.
+  const auto sealed = xanadu::sealLocalSpool(sparse, keys, "sparse-permascroll",
+                                             root.string(), provenance);
+  const auto publication =
+      xanadu::publish(sparse, text, keys, "doc:sparse", "Ideas", 1, 1,
+                      &sealed.scroll, {*sealed.opsSegment});
+  const auto installed = xanadu::installPublication(publication, {root}, reader,
+                                                    root / "sparse-reader");
+  EXPECT_EQ(installed->opCount(), sparse.opCount());
+  EXPECT_EQ(installed->textOf(text), "Ideas");
+  EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest,
+       InstalledReaderReopensOfflineWithoutChangingAuthorship) {
+  const auto destination = root / "reader";
+  auto installed = xanadu::installPublication(pub, {root}, reader, destination);
+  const auto count = installed->opCount();
+  EXPECT_EQ(count, author.opCount());
+  EXPECT_EQ(reader->bytes().size(), 0U);
+  EXPECT_NE(installed->publishedLocalScroll(), xanadu::localScroll);
+  const auto table = xanadu::readStoreTables(destination / "store.tables");
+  EXPECT_EQ(table.publishedLocalScroll, installed->publishedLocalScroll());
+  EXPECT_EQ(table.deployedScrolls.size(), installed->scrolls().size());
+  // The installation owns its carriers; removing all author seed roots and
+  // discarding every source/store object cannot make the reader dependent on
+  // the publishing machine or borrowed ContentSource lifetime.
+  installed.reset();
+  for (const auto &seed : xanadu::reviewPublicationDependencies(pub, {root}))
+    std::filesystem::remove_all(seed.savePath);
+  xanadu::Store offline(reader);
+  offline.load(destination.string());
+  EXPECT_EQ(offline.documentId(), pub.storeId);
+  EXPECT_EQ(offline.opCount(), count);
+  EXPECT_EQ(offline.textOf(fork), "Alice's ideas alternate");
+  EXPECT_EQ(offline.textOf(head, offline.segmentedOps().indexOf(docB)),
+            "More ideas");
+  EXPECT_EQ(offline.currentVersions(), author.currentVersions());
+  EXPECT_EQ(offline.editionNamed(head, "release")->targetVersion, docB);
+  EXPECT_EQ(offline.resolveStructureName(
+                head, offline.segmentedOps().indexOf(sliceB)),
+            "Second board");
+  offline.save(destination.string());
+  EXPECT_EQ(offline.opCount(), count);
+  EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest, ReaderEditsUseItsOwnScrollAndSurviveReopen) {
+  const auto destination = root / "reader-edit";
+  auto installed = xanadu::installPublication(pub, {root}, reader, destination);
+  const auto edited = installed->insert(textA, 13, " Bob", docA);
+  installed->save(destination.string());
+  const auto count = installed->opCount();
+  EXPECT_EQ(reader->bytes().size(), 4U);
+  xanadu::Store offline(reader);
+  offline.load(destination.string());
+  EXPECT_EQ(offline.textOf(edited), "Alice's ideas Bob");
+  EXPECT_EQ(offline.textOf(textA), "Alice's ideas");
+  EXPECT_EQ(offline.opCount(), count);
+  EXPECT_EQ(offline.editionNamed(head, "release")->targetVersion, docB);
+}
+
+TEST_F(PublicationInventoryTest, InstalledReaderRefusesCorruptAndMissingCache) {
+  for (const bool corrupt : {false, true}) {
+    const auto destination =
+        root / (corrupt ? "reader-corrupt" : "reader-missing");
+    auto installed =
+        xanadu::installPublication(pub, {root}, reader, destination);
+    installed.reset();
+    const auto &segment = pub.scrolls.at(pub.historyScroll).segments.front();
+    const auto seed     = destination / "published" / segment.torrent.hex();
+    if (corrupt) {
+      const auto meta = xanadu::Metainfo::parse([&] {
+        std::ifstream in(seed / "metainfo.torrent", std::ios::binary);
+        return std::string{std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>()};
+      }());
+      std::ofstream bytes(seed / meta.name() / segment.path,
+                          std::ios::binary | std::ios::trunc);
+      bytes << "corrupt";
+    } else {
+      std::filesystem::remove_all(seed);
+    }
+    xanadu::Store offline(reader);
+    EXPECT_THROW(offline.load(destination.string()),
+                 xanadu::StoreTablesUnreadable);
+  }
+}
+
+TEST_F(PublicationInventoryTest,
+       InstallationRefusesIncompleteHistoryAndLeavesNoStore) {
+  const auto destination = root / "refused-reader";
+  auto bad               = pub;
+  bad.opsSegments.clear();
+  bad.signature =
+      xanadu::signMutableItem(xanadu::publicationSigningBuffer(bad), keys);
+  EXPECT_THROW(
+      (void)xanadu::installPublication(bad, {root}, reader, destination),
+      xanadu::PublicationUnreadable);
+  EXPECT_FALSE(std::filesystem::exists(destination));
+  EXPECT_FALSE(std::filesystem::exists(destination.string() + ".partial"));
+  EXPECT_EQ(reader->bytes().size(), 0U);
+}
+
+TEST_F(PublicationInventoryTest, InstallationNeverOverwritesAnExistingReader) {
+  const auto destination = root / "existing-reader";
+  auto installed = xanadu::installPublication(pub, {root}, reader, destination);
+  const auto edited = installed->insert(textA, 13, " Bob", docA);
+  installed->save(destination.string());
+  EXPECT_THROW(
+      (void)xanadu::installPublication(pub, {root}, reader, destination),
+      std::runtime_error);
+  xanadu::Store offline(reader);
+  offline.load(destination.string());
+  EXPECT_EQ(offline.textOf(edited), "Alice's ideas Bob");
 }
 
 TEST_F(PublicationInventoryTest,

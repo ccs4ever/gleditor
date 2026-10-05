@@ -300,6 +300,68 @@ reviewPublicationDependencies(const Publication &pub,
   return seeds;
 }
 
+std::unique_ptr<Store>
+installPublication(const Publication &pub,
+                   const std::vector<std::filesystem::path> &roots,
+                   std::shared_ptr<UserPermascroll> reader,
+                   const std::filesystem::path &destination) {
+  namespace fs = std::filesystem;
+  if (!reader)
+    throw PublicationUnreadable("reader permascroll must be supplied");
+  if (pub.opsSegments.empty())
+    throw PublicationUnreadable("publication has no complete store history");
+  if (fs::exists(destination))
+    throw std::runtime_error("publication destination already exists");
+  const auto seeds       = reviewPublicationDependencies(pub, roots);
+  const fs::path staging = destination.string() + ".partial";
+  if (!destination.parent_path().empty())
+    fs::create_directories(destination.parent_path());
+  if (!fs::create_directory(staging))
+    throw std::runtime_error("publication staging directory already exists");
+  try {
+    const auto retained = staging / "published";
+    for (const auto &seed : seeds) {
+      const auto meta   = Metainfo::parse(seed.metainfo);
+      const auto output = retained / seed.hash.hex();
+      fs::create_directories(output);
+      std::ofstream torrent(output / "metainfo.torrent", std::ios::binary);
+      torrent << seed.metainfo;
+      torrent.close();
+      if (!torrent)
+        throw std::runtime_error("cannot retain publication metainfo");
+      for (const auto &file : meta.files()) {
+        const auto target = output / meta.name() / file.path;
+        fs::create_directories(target.parent_path());
+        fs::copy_file(seed.savePath / meta.name() / file.path, target);
+      }
+    }
+    // Recheck the copies, including path escapes and piece hashes: source
+    // files may have changed while the reader was retaining them.
+    const auto copies = reviewPublicationDependencies(pub, {retained});
+    DirectoryContentSource source;
+    for (const auto &seed : copies)
+      (void)source.add(seed.metainfo, seed.savePath.string());
+    auto restored    = restorePublication(pub, source, reader);
+    const auto count = restored->opCount();
+    restored->save(staging.string());
+    if (restored->opCount() != count)
+      throw PublicationUnreadable(
+          "saving a publication changed its authored history");
+    // Native loading must succeed before installing anything discoverable.
+    auto offline = std::make_unique<Store>(reader);
+    offline->load(staging.string());
+    if (offline->opCount() != count || offline->documentId() != pub.storeId)
+      throw PublicationUnreadable(
+          "offline publication deployment disagrees with history");
+    fs::rename(staging, destination);
+    offline->load(destination.string());
+    return offline;
+  } catch (...) {
+    fs::remove_all(staging);
+    throw;
+  }
+}
+
 std::string_view publicationPhaseName(PublicationPhase phase) {
   switch (phase) {
   case PublicationPhase::Queued:

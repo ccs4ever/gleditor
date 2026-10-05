@@ -1112,41 +1112,11 @@ void Views::spawnTranscludedDocument(const TetherPayload &payload,
 }
 
 void Views::summonPublication(const PublicationEntry &entry) {
-  const auto storeIndex = session.createNewStore("");
-  auto &st              = session.store(storeIndex);
-
-  std::string content;
-  content.reserve(entry.title.size() + entry.authorName.size() +
-                  entry.abstractText.size() + 256);
-  content.append("# ");
-  content.append(entry.title);
-  content.append("\n\nAuthor: ");
-  content.append(entry.authorName);
-  content.append("\nSwarm URI: ");
-  content.append(entry.bep46Uri);
-  content.append("\nInfoHash: ");
-  content.append(entry.infoHash);
-  content.append("\n\n");
-  content.append(entry.abstractText);
-  if (entry.hasTranscopyright) {
-    content.append("\n\n[Transcopyright Active: ");
-    content.append(entry.transcopyrightTerms);
-    content.append("]\n");
-  } else {
-    content.append("\n\n[Merkle Verified Docuverse Publication]\n");
-  }
-
-  const auto ver = st.insert(MicroversionId{}, 0, content);
-  showAlongside(ver, 0.0F, storeIndex);
-  if (wireframeOverlay_ && !session.views().empty()) {
-    const auto newDocIndex = session.views().size() - 1;
-    wireframeOverlay_->startLoading(newDocIndex, entry.title, entry.infoHash,
-                                    16);
-    wireframeOverlay_->updateProgress(newDocIndex, 12);
-  }
-  activateNewest();
-  std::cout << "xudu: summoned publication '" << entry.title
-            << "' into 3D space (store " << storeIndex << ")\n";
+  state->showDialog(
+      render::DiagnosticSeverity::Warning, "Publication is not cached",
+      "Open its signed .xanadoc and downloaded dependencies with Ctrl+O. "
+      "Fetching discovery results is not available yet: " +
+          entry.title);
 }
 
 void Views::insertSpanAtCaret(const PrimediaSpan &span) {
@@ -1330,7 +1300,7 @@ void Views::openDocumentPalette() {
 
   Field choiceField;
   choiceField.label = "Document";
-  choiceField.hint  = "select a document or system xanadoc";
+  choiceField.hint  = "select a store, cached publication, or system xanadoc";
   choiceField.kind  = Kind::Choice;
 
   for (std::uint8_t k = 0;
@@ -1370,6 +1340,12 @@ void Views::openDocumentPalette() {
   const auto curPath = fs::current_path(ec);
   if (!ec) {
     for (const auto &dirEntry : fs::directory_iterator(curPath, ec)) {
+      if (dirEntry.is_regular_file() &&
+          dirEntry.path().extension() == ".xanadoc") {
+        choiceField.options.push_back("[Publication] " +
+                                      dirEntry.path().filename().string());
+        choiceField.optionValues.push_back(dirEntry.path().string());
+      }
       if (dirEntry.is_directory()) {
         const auto &p = dirEntry.path();
         if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
@@ -1387,7 +1363,8 @@ void Views::openDocumentPalette() {
 
   Field customPathField;
   customPathField.label = "Custom path";
-  customPathField.hint  = "optional file or store path if custom chosen";
+  customPathField.hint =
+      "store, file, or signed .xanadoc with cached dependencies";
 
   std::vector<Field> fields;
   fields.push_back(std::move(choiceField));
@@ -1422,8 +1399,17 @@ void Views::openDocumentFromPath(const std::string &chosen) {
 
   namespace fs = std::filesystem;
   const fs::path p(chosen);
-  if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
-      fs::is_directory(p)) {
+  if (fs::is_regular_file(p) && p.extension() == ".xanadoc") {
+    try {
+      const auto [sIdx, version] = session.readPublication(chosen);
+      showAlongside(version, 0.0F, sIdx);
+      activateNewest();
+    } catch (const std::exception &err) {
+      state->showDialog(render::DiagnosticSeverity::Error,
+                        "Could not open publication", err.what());
+    }
+  } else if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
+             fs::is_directory(p)) {
     try {
       const auto sIdx = session.loadAuxiliaryStore(chosen);
       auto &st        = session.store(sIdx);

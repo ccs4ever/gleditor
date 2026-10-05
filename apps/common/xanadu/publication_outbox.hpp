@@ -27,6 +27,15 @@ struct PublicationSeed {
 reviewPublicationDependencies(const Publication &publication,
                               const std::vector<std::filesystem::path> &roots);
 
+/// Install a verified complete publication with immutable seeds for offline
+/// reopening. The destination must not exist; failure removes staged output.
+/// The returned Store owns its retained content source and borrows no roots.
+[[nodiscard]] std::unique_ptr<Store>
+installPublication(const Publication &publication,
+                   const std::vector<std::filesystem::path> &roots,
+                   std::shared_ptr<UserPermascroll> readerPermascroll,
+                   const std::filesystem::path &destination);
+
 enum class PublicationPhase : std::uint8_t {
   Queued,
   LocalReady,

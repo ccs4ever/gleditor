@@ -218,7 +218,8 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
             "and quit")
       .default_value(std::string{});
   hiddenUnlessDetailed(parser.add_argument("--read"))
-      .help("open a published document from a manifest file; repeatable")
+      .help("open a complete signed publication with cached dependencies; "
+            "repeatable")
       .append();
   hiddenUnlessDetailed(parser.add_argument("--publish"))
       .help("publish the opening document under this name")

@@ -354,22 +354,13 @@ public:
                               const InfoHash &hash, std::uint32_t fileIndex,
                               std::uint64_t offset, std::uint64_t length);
 
-  /**
-   * @brief Read a published document and take it into this store.
-   *
-   * After this it is a document like any other here: it can be read, quoted,
-   * and linked to by documents written on this machine that have never been
-   * published themselves. Nothing about it is copied -- its pieces point at
-   * the publisher's scrolls, so this store and theirs are pointing at one copy
-   * of the content, which is what makes a link between them a link about the
-   * same passage.
-   *
-   * @param path A manifest as publishDocument() writes one.
-   * @return The state showing it, ready to be opened.
-   * @throws std::runtime_error when the file cannot be read, is not a
-   *         publication, or is not signed by whoever it claims.
-   */
-  MicroversionId readPublication(const std::string &path);
+  /// Open a signed complete publication as a separate reader store. Immutable
+  /// dependencies must already be cached beside the manifest. The author's
+  /// editions and operation history are preserved; no primedia is copied into
+  /// this user's permascroll. Returns its session store slot and selected
+  /// state.
+  std::pair<std::size_t, MicroversionId>
+  readPublication(const std::string &path);
 
   /**
    * @brief Who publishes from this store, and what signs for them.

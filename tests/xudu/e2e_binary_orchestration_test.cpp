@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <memory>
 #include <regex>
 #include <set>
@@ -473,13 +474,41 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_GE(info1.distinctColors, 20U);
   exportToPng(step1Ppm, step1Png);
 
+  // Retain the source torrents in the immutable seed layout used by reader
+  // installation, rather than relying on this process's --torrent
+  // registrations.
+  const auto retainSource = [&](const fs::path &torrentPath,
+                                const fs::path &dataRoot) {
+    std::ifstream input(torrentPath, std::ios::binary);
+    const std::string encoded{std::istreambuf_iterator<char>(input),
+                              std::istreambuf_iterator<char>()};
+    const auto meta = xanadu::Metainfo::parse(encoded);
+    const auto root = testRoot / meta.hash().hex();
+    fs::create_directories(root);
+    fs::copy_file(torrentPath, root / "metainfo.torrent");
+    for (const auto &file : meta.files()) {
+      const auto target = root / meta.name() / file.path;
+      fs::create_directories(target.parent_path());
+      fs::copy_file(dataRoot / file.path, target);
+    }
+  };
+  retainSource(s1TorrentPath, s1Dir);
+  retainSource(s2TorrentPath, s2Dir);
+  retainSource(s3TorrentPath, s3Dir);
+  const xanadu::SignedProvenance provenance{.tsv = "orchestration test record",
+                                            .signature =
+                                                "orchestration test signature"};
+
   // STEP 2: Loading 2 XanaDoc Publications Side-by-Side
   const auto authorA = createMutableKeys();
   Store storeA(permascrollAt(testRoot / "permascroll"));
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
-                      "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
+  const auto sealA = xanadu::sealLocalSpool(storeA, authorA, "permascroll",
+                                            testRoot.string(), provenance);
+  auto pubA =
+      publish(storeA, vA1, authorA, "xanadoc_a", "Alice Study on Fox Behavior",
+              1, 1700000000, &sealA.scroll, {*sealA.opsSegment});
   pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
 
   const auto pubAPath = testRoot / "xanadoc_a.manifest";
@@ -492,9 +521,11 @@ TEST(E2EBinaryOrchestrationTest,
   Store storeB(permascrollAt(testRoot / "permascroll"));
   const auto vB1 =
       storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
-  auto pubB =
-      publish(storeB, vB1, authorB, "xanadoc_b",
-              "Bob Observations on Multi-Source Data", 1, 1700000050, nullptr);
+  const auto sealB = xanadu::sealLocalSpool(storeB, authorB, "permascroll",
+                                            testRoot.string(), provenance);
+  auto pubB = publish(storeB, vB1, authorB, "xanadoc_b",
+                      "Bob Observations on Multi-Source Data", 1, 1700000050,
+                      &sealB.scroll, {*sealB.opsSegment});
   pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
 
   const auto pubBPath = testRoot / "xanadoc_b.manifest";
@@ -515,7 +546,8 @@ TEST(E2EBinaryOrchestrationTest,
       " --capture " + step2Ppm.string() + " " + storeReader.string();
 
   const auto res2 = executeProcess(cmd2);
-  EXPECT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
+  ASSERT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
+  EXPECT_THAT(res2.output, testing::HasSubstr("complete store"));
   EXPECT_TRUE(fs::exists(step2Ppm)) << "Step 2 screenshot missing";
 
   const auto info2 = inspectPpm(step2Ppm);
@@ -526,10 +558,12 @@ TEST(E2EBinaryOrchestrationTest,
   // STEP 3: Bi-directional Linking Between the XanaDocs
   Store activeReaderStore(permascrollAt(testRoot / "permascroll"));
   activeReaderStore.load(storeReader.string());
-  const auto allReaderVersions = activeReaderStore.allVersions();
-  ASSERT_GE(allReaderVersions.size(), 2U);
-  const auto verA = allReaderVersions[0];
-  const auto verB = allReaderVersions[1];
+  EXPECT_TRUE(activeReaderStore.allVersions().empty())
+      << "Opening must leave the primary curator store untouched";
+  // Quotation is an explicit curator operation, distinct from opening the
+  // author's complete store. Both publications retain their independent IDs.
+  const auto verA = adopt(activeReaderStore, pubA).version;
+  const auto verB = adopt(activeReaderStore, pubB).version;
 
   Link crossDocLink;
   crossDocLink.type  = LinkType::Comment;
@@ -593,9 +627,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
   const auto vC1 =
       storeC.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
-  auto pubC =
-      publish(storeC, vC1, authorC, "xanadoc_c",
-              "Epilogue on Universal Xanadu Wisdom", 1, 1700000250, nullptr);
+  const auto sealC = xanadu::sealLocalSpool(storeC, authorC, "permascroll",
+                                            testRoot.string(), provenance);
+  auto pubC      = publish(storeC, vC1, authorC, "xanadoc_c",
+                           "Epilogue on Universal Xanadu Wisdom", 1, 1700000250,
+                           &sealC.scroll, {*sealC.opsSegment});
   pubC.signature = signMutableItem(publicationSigningBuffer(pubC), authorC);
 
   const auto pubCPath = testRoot / "xanadoc_c.manifest";
@@ -1297,22 +1333,22 @@ TEST(E2EBinaryOrchestrationTest,
                          1700000010, std::move(links), std::move(pkgScrolls));
 
   Store readerStore(permascrollAt(testRoot / "permascroll"));
-  adopt(readerStore, pub1);
-  adopt(readerStore, pub2);
-  adopt(readerStore, pub3);
+  const auto reader1 = adopt(readerStore, pub1).version;
+  const auto reader2 = adopt(readerStore, pub2).version;
+  const auto reader3 = adopt(readerStore, pub3).version;
   adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
   readerStore.save(storePath.string());
 
   const auto ppmPath = screenshotDir / "full_page_three_doc_depth_routing.ppm";
   const auto pngPath = screenshotDir / "full_page_three_doc_depth_routing.png";
 
-  std::string cmd = xuduBin.string() +
-                    permascrollFlag(testRoot / "permascroll") + " --backend " +
-                    activeBackend() +
-                    " --profile --whole-pages --fov 18 --coarse-below 0" +
-                    torrentArgs + " --read " + pub1Path.string() + " --read " +
-                    pub2Path.string() + " --read " + pub3Path.string() +
-                    " --capture " + ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --whole-pages --fov 18 --coarse-below 0" + torrentArgs +
+      " --version-id " + reader1.str() + " --alongside " + reader2.str() +
+      " --background " + reader3.str() + " --capture " + ppmPath.string() +
+      " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;

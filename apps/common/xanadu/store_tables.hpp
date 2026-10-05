@@ -63,7 +63,10 @@ inline constexpr std::array<std::uint8_t, 12> storeTablesSignature{
 /// Two more parse paths, two more files to keep in step with a save, and two
 /// more ways for a store to be half-written bought nothing the dump tool does
 /// not buy back.
-inline constexpr std::uint32_t storeTablesFormatVersion = 3;
+/// Version 4 persists private deployment slots and the imported author's
+/// original local-scroll binding. Metadata is still authored as Structure ops.
+/// Versions 2 and 3 are refused; regenerate stores from their inputs (R11).
+inline constexpr std::uint32_t storeTablesFormatVersion = 4;
 
 /**
  * @class StoreTablesUnreadable
@@ -107,6 +110,11 @@ struct StoreTables {
   /// The local spool's own segments. Not a Scroll: scroll zero is this
   /// machine's permascroll and has no entry in the registry to hold them.
   std::vector<ScrollSegment> localSegments;
+  /// Private deployment slots. Operations and their authored registry retain
+  /// their identities; these descriptors bind them to this reader's cache.
+  std::vector<Scroll> deployedScrolls;
+  /// The imported author's original local slot, or zero for a native author.
+  ScrollId publishedLocalScroll{localScroll};
 };
 
 /// Write @p tables to @p path, header and all.

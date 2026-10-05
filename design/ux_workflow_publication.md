@@ -314,3 +314,12 @@ must expose their names and targets for review, keep them unchanged by default, 
 creation or repointing before signing. Reading another branch, constructing the inventory or finding
 a higher microversion does not authorize a designation change. Multiple editions with the same name
 remain independently selectable by their birth identities.
+
+## Cached publication opening prerequisite
+
+The normal Open dialog (`Ctrl+O`) accepts a signed `.xanadoc` with immutable torrent dependencies
+cached beside it. It opens a separate complete reader store, retains author editions and can reopen
+that native store through the same dialog after the publisher goes offline. Missing/corrupt carriers
+and bad signatures must produce a diagnostic without creating a reader publication. The reader's
+permascroll receives only their own later typing, never a copy of the author's primedia. This does
+not satisfy P2 or P3 until following/discovery and downloading are reachable through their UI.

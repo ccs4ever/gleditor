@@ -58,30 +58,6 @@ class ContentSource;
 class UserPermascroll;
 
 /**
- * @brief The name of a scroll that means the same thing on every machine.
- *
- * A ScrollId is an index into one store's table. This is what that index
- * stands for, written so that two machines that have never met agree:
- *
- *   - `btpk:<64 hex>:<salt>` for a scroll with a publisher, which is the
- *     usual case and the one that survives re-sealing -- the key does not
- *     change when the torrent carrying the bytes does.
- *   - `file:<40 hex>:<index>` for content that exists only as one fixed
- *     torrent file. Honest rather than convenient: without a publisher there
- *     is nothing to bind two packagings of the same bytes together, so they
- *     are not the same scroll and must not be given the same name.
- *
- * The local spool has no global name at all, which is the point of
- * publishLocalSpool(): a document whose content is only here cannot be
- * published, because a reader would have no way to fetch what it points at.
- */
-[[nodiscard]] std::string scrollKey(const Scroll &scroll);
-
-/// The key the local spool would have once published under @p publisher.
-[[nodiscard]] std::string scrollKeyFor(const PublicKey &publisher,
-                                       const std::string &salt);
-
-/**
  * @brief A span addressed the way another machine can read it.
  *
  * The same triple a PrimediaSpan carries, with the scroll named globally.

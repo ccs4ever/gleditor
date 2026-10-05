@@ -217,3 +217,78 @@ diagnostic peer mode. The selected-EDL adoption path remains in Session. Durable
 bindings, remote-open UI, author catalogs/topic exchange, subscriptions, commentary discovery and
 independent link-package publication/toggles still require implementation. Initial signing/sealing
 also remains synchronous on the Session command path.
+
+## Cached opening and offline reader batch
+
+This batch connects complete restoration to ordinary cached opening and native offline reopening.
+Author editions stay unchanged unless the reader explicitly edits their local copy; opening and
+saving add no authored operations. Signed manifests that lack a complete history are refused by the
+reader-opening pathway. Selected-EDL quotation remains an explicit core operation.
+
+| Scope                          | Affordance or check                                                                          | Outcome | Evidence                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------- |
+| Cached opening prerequisite    | `Ctrl+O`, Custom path, signed `.xanadoc`, Enter                                              | Pass    | Local runner `reader-open.log`, form/document captures   |
+| Offline reopening prerequisite | `Ctrl+O`, retained native reader path, Enter while publisher seeds are unavailable           | Pass    | `reader-offline.log`, capture, unchanged `ops.nodes`     |
+| Dependency rejection           | `Ctrl+O`, signed manifest without its carriers                                               | Pass    | `reader-rejection.log`, stderr diagnostic, no new reader |
+| Full model restoration         | Documents, slices, branches, editions and annotations; reader-only edits; corruption refusal | Pass    | `publication-reader-fixes/engine-verified.log`           |
+| Cross-veth deployment          | Diagnostic network child installs complete reader; parent reopens after child exits          | Pass    | `publication-reader-fixes/swarm-recheck.log`             |
+
+Store tables change from version 3 to **4**, including ordered deployment descriptors and the
+imported author-local root. Versions 2 and 3 are refused with `StoreTablesUnreadable`; native node,
+operation-wire and signed publication formats are unchanged. Both sample generators were run, and
+all eighteen fixture operation dumps were compared before/after. Sixteen are identical. Two core
+hypertext fixtures now include current-edition operations from the preceding author-choice fixes;
+regression checks verify their text, links and transclusions. Immutable media seed carriers are
+retained with the regenerated multimedia fixtures. Generated private publication-state directories
+are excluded from the commit.
+
+The first full engine attempt ran 1,242 tests: 1,235 passed, one optional video check skipped and
+six failed. Two orchestration fixtures still assumed EDL-only `--read` and implicit merging into
+store zero. They were updated to complete-history opening and explicit curator quotation; the
+separate bypass-rendering fixture uses its already quoted versions. Four query/compiler checks
+launched old executables linked to table format 3; the full build relinks every program before final
+validation. The initial failed log is retained for review.
+
+This batch does not provide following by author key, DHT topic discovery, UI downloads, update
+subscriptions, backlinks or independent package toggles. Telescope now explains that fetching is
+unavailable instead of manufacturing a summary presented as a verified publication. Cached copying
+and verification remain synchronous. These results are prerequisites; P1–P7 remain incomplete.
+Platform accessibility delivery is still untested without AccessKit.
+
+The first namespace installation check exposed imported scroll descriptors being automatically
+registered as new author operations during native save. The loader's private bindings now carry
+those descriptors without writing authored registry cells, including a quotation on another branch
+whose slice registry never named it. The new regression passes, and the opposite-namespace reader
+installs and reopens successfully after its network child exits (`swarm-recheck.log`). The eleven
+legacy namespace checks passed in `swarm-final.log` before that publication check exposed the
+defect.
+
+Final keyboard evidence is `build/publication-local/run-ieq55szl/`: three signed publications,
+explicit edition creation/repointing, status/retry, cached reader opening, offline native reopening
+while publisher carriers are moved away, and missing-carrier rejection without a new reader store.
+The form and both document frames were inspected. The very long custom-path value wraps into the
+Open form footer; full keyboard entry still works. Fixing single-line field clipping/caret scrolling
+is a remaining presentation finding. Native SDL message boxes are suppressed by the headless runner,
+so the rejection message is validated on stderr rather than through a visible/accessibility dialog;
+platform message-box delivery remains unverified.
+
+Docker excludes generated `publication-state` directories as well as GPG homes, so temporary fixture
+device keys do not enter the image context. Only immutable public carriers are retained with the
+native sample stores.
+
+Final native outcomes: `engine-verified.log` ran 1,243 tests with 1,241 passes, one optional video
+skip and one throughput-threshold failure during concurrent UI/model checks. The cache-hit benchmark
+measured 34,978 hits/s against a 35,000 threshold; its isolated recheck passed at 51,180 hits/s in
+`benchmark-idle.log`. Thus all 1,242 executed cases succeeded either in the full run or that
+recheck; this is not a claim of a single all-green final full run. `xuzz-verified.log` passed 57
+tests and `zigzag-verified.log` passed 119. The 35 focused reader/table/outbox checks also passed in
+`registry-focused.log`. Formatting and lint passed before the final report update; they are rerun
+before committing. The image is rebuilt after the registry fix, rather than relying on the earlier
+87-test image.
+
+The final `gleditor-swarm-test:local` image passed **88 smoke tests**, including the
+imported-registry regression and format-4 table checks (`docker-final.log`). Its image ID is
+`sha256:7188a02b353195bb8309f898cd59b9e9e71f8c6fb22da4e252c6d28d40b71236`. A container with
+networking disabled confirmed the three regenerated fixture permascrolls contain no
+`publication-state` directories. Repository formatting and lint passed after the code/report
+changes.

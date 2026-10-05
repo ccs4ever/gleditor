@@ -64,3 +64,7 @@ containers on the internal network for journeys that do not need nested namespac
 the host kernel: the namespace test still requires host veth support. An image cannot fix
 `Error: Unknown device type.`; the host administrator must make veth available. Docker daemon
 availability and kernel support are separate from a passing publication test.
+
+The publication smoke tests also cover complete reader installation, author edition preservation,
+reader-only edits, offline reopening and refusal of missing/corrupt cache files. Store-table format
+4 and its deployment bindings are covered by `StoreTablesTest`.

@@ -25,3 +25,6 @@
 **/gnupg
 **/.gnupg
 **/private-keys-v1.d
+
+# Permascroll fixture runs generate temporary private device keys here.
+**/publication-state

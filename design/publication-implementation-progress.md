@@ -199,20 +199,59 @@ The swarm peer has a diagnostic `--restore-publication HASH HOST PORT CACHE` mod
 signed manifest and every dependency through the named BitTorrent peer, using separate directories
 for each immutable hash. The namespace runner supplies an opposite-namespace reader, rather than
 having the publisher and final reader share a loopback. This diagnostic is not a remote-opening UI
-affordance. The legacy `Session::readPublication()` still adopts the selected EDL; wiring full-store
-restoration and durable reader deployment bindings into the catalog/open UI is the next batch.
+affordance. At the end of that batch, `Session::readPublication()` still adopted the selected EDL.
+The reader-opening batch below replaces that path; network catalog ingestion remains pending.
 
 Validation evidence for this batch is under `build/publication-inventory-fixes/`; final outcomes are
 recorded in the validation report. Docker smoke filters now include the inventory suite.
+
+## Cached reader opening and offline deployment
+
+`Ctrl+O` accepts a signed `.xanadoc` publication with immutable dependencies cached beside it.
+Opening verifies the manifest, all torrent files and pieces, the complete operation history and the
+signed inventory before creating a separate reader store under the user's xanadocs directory. It
+copies carriers into that reader's `published/<hash>/` cache, re-verifies the copies and stages a
+native load before installing the directory. Existing readers and their edits are never overwritten.
+Signature or dependency failures produce a diagnostic and create no opened publication.
+
+`Session::readPublication()` and diagnostic `--read` now open that complete store instead of
+adopting only its selected EDL into store zero. The reader's own permascroll receives no copied
+primedia. It retains author-selected editions and annotations; subsequent reader typing appends only
+to the reader's local scroll. The normal Open dialog also reopens the installed native store
+offline. This is a cached-opening prerequisite, not author-key following or topic discovery.
+
+Store tables are now **format 4**, with ordered private deployment descriptors and the imported
+author's original local-scroll binding. The authoritative registry and editions remain Structure
+operations. The loader installs these descriptors and retained carriers before folding registry
+names, verifies imported spans, and refuses missing/corrupt cache data. Unsupported table versions 2
+and 3 are refused by number. Regenerate owned native stores; the repository's two sample generators
+were run in this batch. Operation nodes, wire format and publication format 2 are unchanged.
+`xudu-dump --section=scrolls` exposes the deployment slots and root binding without needing a
+loader.
+
+Saving a restored publication does not add author registrations for imported deployment descriptors,
+change editions or append document operations. Its retained cache belongs to the Store and takes
+precedence over a borrowed remote source, avoiding dangling resolver pointers after network
+shutdown. The namespace diagnostic now retains downloaded metainfo, installs the full reader and
+checks native reopening after its BitTorrent process exits. This remains a diagnostic, not a UI
+download affordance.
+
+Telescope no longer creates a text summary labelled as a verified publication when asked to open an
+uncached result. It explains the missing fetch affordance and points to cached opening. Initial
+verification and cache installation still run synchronously; moving them and signing to a worker is
+remaining work.
+
+Validation evidence is under `build/publication-reader-fixes/`. The local publication runner now
+also drives cached opening, offline reopening and missing-cache rejection with `Ctrl+O`, capturing
+the form, documents and diagnostics. Final counts and limitations appear in the validation report.
 
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
-1. Integrate complete-store restoration into remote opening and persist reader deployment bindings
-   for offline reopening. Format 2 inventory, authored metadata restoration and verified dependency
-   reconstruction are implemented; manifest-only adoption still opens the selected EDL.
+1. Add asynchronous download and opening of remote discovery results. Verified cached opening and
+   native offline reopening with durable reader deployment bindings are now implemented.
 1. Add signed author catalog publication/ingestion and topic rendezvous exchange, author-key
    following and remote opening. An empty catalog now honestly stays empty until data is learned.
 1. Add persisted update subscriptions, sequence polling, dependency verification, retry and

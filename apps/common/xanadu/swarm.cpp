@@ -124,6 +124,7 @@ struct Swarm {
   /// against libtorrent's. A disagreement between the two is exactly the kind
   /// of thing that must not pass unnoticed.
   std::unique_ptr<Metainfo> meta;
+  std::string encodedMetadata;
   /// Pieces read back so far, kept because a read of one byte fetches a whole
   /// piece and the next read very likely wants the same one.
   std::map<int, std::string> pieces;
@@ -463,7 +464,8 @@ struct SwarmContentSource::Impl {
       // asked for is not the content that was asked for.
       return;
     }
-    found->second.meta = std::move(parsed);
+    found->second.encodedMetadata = std::move(encoded);
+    found->second.meta            = std::move(parsed);
   }
 
   /// Wait until @p ready holds, pumping alerts, or the deadline passes.
@@ -775,6 +777,7 @@ InfoHash SwarmContentSource::addTorrent(const std::string_view torrentFile,
                                             .pieces        = {},
                                             .wantedPeers   = {},
                                             .pendingPieces = {}});
+  impl->swarms.at(hash).encodedMetadata = std::string(torrentFile);
   return hash;
 }
 
@@ -939,6 +942,14 @@ std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &hash) const {
     return 0;
   }
   return found->second.handle.status().all_time_download;
+}
+
+std::optional<std::string>
+SwarmContentSource::torrentMetadata(const InfoHash &hash) const {
+  impl->pump();
+  const auto found = impl->swarms.find(hash);
+  if (found == impl->swarms.end() || !found->second.meta) return std::nullopt;
+  return found->second.encodedMetadata;
 }
 
 gleditor::cpp26::optional<const Metainfo &>

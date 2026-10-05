@@ -25,6 +25,7 @@
 #include <tuple>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/torrent.hpp"
@@ -80,8 +81,25 @@ int restoreRemote(const int argc, char **argv) {
   for (const auto &segment : pub->opsSegments)
     dependencies.insert(segment.torrent);
   for (const auto &dependency : dependencies) fetch(dependency);
+  // Retain complete carriers, including provenance files absent from visible
+  // text, then install a reader whose ContentSource outlives this network peer.
+  for (const auto &dependency : dependencies) {
+    const auto metadata = source.torrentMetadata(dependency);
+    const auto meta     = source.metainfo(dependency);
+    if (!metadata || !meta ||
+        source.readStream(dependency, 0, meta->totalLength()).size() !=
+            meta->totalLength())
+      throw std::runtime_error("publication carrier is incomplete");
+    std::ofstream torrent(std::filesystem::path(argv[5]) / dependency.hex() /
+                              "metainfo.torrent",
+                          std::ios::binary);
+    torrent << *metadata;
+    torrent.close();
+    if (!torrent) throw std::runtime_error("cannot retain downloaded metainfo");
+  }
   const auto reader   = std::make_shared<xanadu::UserPermascroll>();
-  const auto restored = xanadu::restorePublication(*pub, source, reader);
+  const auto restored = xanadu::installPublication(
+      *pub, {argv[5]}, reader, std::filesystem::path(argv[5]) / "reader");
   std::cout << "restored " << pub->publisher.hex() << " " << pub->sequence
             << " " << restored->opCount() << " " << pub->inventory.size() << " "
             << reader->bytes().size() << "\n";

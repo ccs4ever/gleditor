@@ -1352,6 +1352,7 @@ private:
   /// segmentAt()/addSegment() are used here; its torrent-facing fields go
   /// unused, the same way ScrollSegment's do for anything Plain.
   Scroll localSegments;
+  DirectoryContentSource retainedContent_;
   Resolver resolver;
   /// The operations spool, filed by the state each op produces: the single
   /// copy of them. Every question about what has been recorded is asked of
