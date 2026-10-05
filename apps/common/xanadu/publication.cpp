@@ -213,7 +213,12 @@ bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
     holesList.push_back(encodeHole(hole));
   }
 
+  bencode::List topics;
+  for (const auto &topic : pub.topics)
+    topics.push_back(bencode::Value::string(topic));
   bencode::Dict manifest{
+      {"format", bencode::Value::integer(publicationFormatVersion)},
+      {"topics", bencode::Value::list(std::move(topics))},
       {keyHoles, bencode::Value::list(std::move(holesList))},
       {keyLinks, bencode::Value::list(std::move(links))},
       {keyOpsSegs, bencode::Value::list(std::move(opsSegs))},
@@ -308,6 +313,28 @@ std::string Publication::describe() const {
                      pieces.size(), links.size());
 }
 
+std::vector<std::string> publicationTopics(const std::string_view input) {
+  std::vector<std::string> topics;
+  std::size_t at = 0;
+  while (at < input.size()) {
+    const auto comma = input.find(',', at);
+    auto token       = input.substr(
+        at, comma == std::string_view::npos ? input.size() - at : comma - at);
+    const auto first = token.find_first_not_of(" \t\r\n");
+    const auto last  = token.find_last_not_of(" \t\r\n");
+    if (first != std::string_view::npos) {
+      std::string topic{token.substr(first, last - first + 1)};
+      for (auto &byte : topic)
+        if (byte >= 'A' && byte <= 'Z') byte += 'a' - 'A';
+      if (std::ranges::find(topics, topic) == topics.end())
+        topics.push_back(std::move(topic));
+    }
+    if (comma == std::string_view::npos) break;
+    at = comma + 1;
+  }
+  return topics;
+}
+
 std::string publicationSigningBuffer(const Publication &pub) {
   return bencode::Value::dict(manifestOf(pub, false)).encode();
 }
@@ -332,6 +359,20 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     return std::nullopt;
   }
 
+  const auto format = root.find("format");
+  if (!format || !format->isInteger() ||
+      format->asInteger() != publicationFormatVersion)
+    throw PublicationUnreadable("publication format version 1 expected, got " +
+                                (format && format->isInteger()
+                                     ? std::to_string(format->asInteger())
+                                     : std::string{"0 (unversioned)"}));
+  const auto topics   = root.find("topics");
+  const auto opsSegs  = root.find(keyOpsSegs);
+  const auto holesVal = root.find(keyHoles);
+  if (!topics || !topics->isList() || !opsSegs || !opsSegs->isList() ||
+      !holesVal || !holesVal->isList())
+    throw PublicationUnreadable(
+        "publication format 1: required topics/history/holes table missing");
   const auto publisher = root.find(keyPublisher);
   const auto salt      = root.find(keySalt);
   const auto title     = root.find(keyTitle);
@@ -355,8 +396,12 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
   Publication pub;
   std::copy(publisher->asString().begin(), publisher->asString().end(),
             pub.publisher.bytes.begin());
-  pub.salt      = salt->asString();
-  pub.title     = title->asString();
+  pub.salt  = salt->asString();
+  pub.title = title->asString();
+  for (const auto &topic : topics->asList()) {
+    if (!topic.isString() || topic.asString().empty()) return std::nullopt;
+    pub.topics.push_back(topic.asString());
+  }
   pub.sequence  = sequence->asInteger();
   pub.published = static_cast<std::uint64_t>(time->asInteger());
   std::copy(signature->asString().begin(), signature->asString().end(),
@@ -388,30 +433,15 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     pub.scrolls.emplace(key, std::move(*scroll));
   }
 
-  // Absent in a manifest published before the operations were sealed in --
-  // not a decode failure, since the pieces still decode to a whole document
-  // on their own; that manifest simply says nothing about the history behind
-  // them.
-  if (const auto opsSegs = root.find(keyOpsSegs);
-      opsSegs.has_value() && opsSegs->isList()) {
-    for (const auto &item : opsSegs->asList()) {
-      auto segment = decodeSegment(item);
-      if (!segment) {
-        return std::nullopt;
-      }
-      pub.opsSegments.push_back(std::move(*segment));
-    }
+  for (const auto &item : opsSegs->asList()) {
+    auto segment = decodeSegment(item);
+    if (!segment) return std::nullopt;
+    pub.opsSegments.push_back(std::move(*segment));
   }
-
-  if (const auto holesVal = root.find(keyHoles);
-      holesVal.has_value() && holesVal->isList()) {
-    for (const auto &item : holesVal->asList()) {
-      auto hole = decodeHole(item);
-      if (!hole) {
-        return std::nullopt;
-      }
-      pub.holes.push_back(std::move(*hole));
-    }
+  for (const auto &item : holesVal->asList()) {
+    auto hole = decodeHole(item);
+    if (!hole) return std::nullopt;
+    pub.holes.push_back(std::move(*hole));
   }
 
   // Checked last, over everything just read: a manifest that does not verify
@@ -1048,7 +1078,8 @@ Publication publish(const Store &store, const MicroversionId &version,
                     const std::uint64_t published,
                     const Scroll *const localSealedAs,
                     const std::vector<ScrollSegment> &opsSegments,
-                    const std::vector<PublishedHoleRecord> &holes) {
+                    const std::vector<PublishedHoleRecord> &holes,
+                    const std::vector<std::string> &topics) {
   Publication pub;
   pub.publisher   = keys.publicKey;
   pub.salt        = std::move(salt);
@@ -1057,6 +1088,7 @@ Publication publish(const Store &store, const MicroversionId &version,
   pub.sequence    = sequence;
   pub.opsSegments = opsSegments;
   pub.holes       = holes;
+  pub.topics      = topics;
   pub.published   = published;
 
   const auto document  = store.rebuild(version);

@@ -1966,10 +1966,11 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   // insertSpan() rather than insertMedia() -- the fix must not change what
   // gets displayed, only how many times identical bytes are stored.
   const auto ppmPath = getScreenshotDir() / "repeated_pdf_figure_dedup.ppm";
+  fs::create_directories(ppmPath.parent_path());
   const std::string screenshotCmd =
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() +
-      " --profile --strict-diagnostics --screenshot " + ppmPath.string() + " " +
+      " --profile --strict-diagnostics --capture " + ppmPath.string() + " " +
       storePath.string();
   const auto screenshotRes = executeProcess(screenshotCmd);
   EXPECT_EQ(screenshotRes.exitCode, 0)
@@ -2233,6 +2234,44 @@ TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
       manifold.handleTarget(ed->handle),
       std::optional<zigzag::CellRef>{reloaded.segmentedOps().indexOf(v1)});
   EXPECT_EQ(reloaded.resolveAlias("original-release"), v1);
+}
+
+TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build" / "publication_import_seed";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto original = root / "image.png";
+  fs::copy_file("tests/samples/sample_image.png", original);
+  std::ifstream in(original, std::ios::binary);
+  const std::string expected{std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>()};
+  const auto storePath = root / "store";
+  const auto result    = executeProcess(
+      binary.string() + permascrollFlag(root / "permascroll") +
+      " --headless --import " + original.string() + " " + storePath.string());
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  fs::remove(original);
+  Store store(permascrollAt(root / "permascroll"));
+  store.load(storePath.string());
+  const auto scroll = std::ranges::find_if(
+      store.scrolls(), [](const auto &item) { return !item.segments.empty(); });
+  ASSERT_NE(scroll, store.scrolls().end());
+  const auto &segment = scroll->segments.front();
+  const auto seed     = storePath / "published" / segment.torrent.hex();
+  std::ifstream metadata(seed / "metainfo.torrent", std::ios::binary);
+  const std::string encoded{std::istreambuf_iterator<char>(metadata),
+                            std::istreambuf_iterator<char>()};
+  xanadu::DirectoryContentSource source;
+  EXPECT_EQ(source.add(encoded, seed.string()), segment.torrent);
+  xanadu::Resolver resolver(&source);
+  EXPECT_EQ(resolver.read(*scroll, PrimediaSpan{1, 0, expected.size()}),
+            expected);
+  const auto reopened =
+      executeProcess(binary.string() + permascrollFlag(root / "permascroll") +
+                     " --headless " + storePath.string());
+  EXPECT_EQ(reopened.exitCode, 0) << reopened.output;
 }
 
 } // namespace

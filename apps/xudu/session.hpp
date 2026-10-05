@@ -49,6 +49,7 @@
 #include "common/xanadu/mutable_link.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
@@ -282,6 +283,10 @@ public:
   InfoHash addTorrentMemory(std::string_view torrentData,
                             const std::string &dataRoot = ".");
 
+  Scroll retainMediaScroll(std::string_view bytes, const std::string &fileName,
+                           const std::string &mimeType,
+                           const std::filesystem::path &seedDirectory);
+
   /**
    * @brief Name content by a magnet link.
    *
@@ -441,11 +446,21 @@ public:
      * gpg-agent has already been given it, or the key has none.
      */
     std::string passphrase;
+    std::vector<std::string> topics;
+    bool announce{};
   };
 
   std::string publishDocument(const MicroversionId &version,
                               const PublishRequest &request,
                               std::size_t storeIndex = 0);
+
+  void configureTestPublicationSwarm(
+      const std::string &listen,
+      std::vector<std::pair<std::string, std::uint16_t>> nodes);
+  [[nodiscard]] bool testPublicationSwarmEnabled() const {
+    return testPublicationSwarm_;
+  }
+  PublicationOutbox &publicationOutbox();
 
   /// Where publishing writes manifests, torrents and the sealed spool.
   [[nodiscard]] std::string publishedDir(std::size_t storeIndex = 0) const;
@@ -817,9 +832,14 @@ private:
   void invalidate() { epoch++; }
 
   /// Where the bytes of torrent-backed scrolls come from.
+  void loadRetainedScrolls(const Store &store, const std::string &storePath);
   DirectoryContentSource contentSource;
   /// Null unless useSwarm() was called.
   std::unique_ptr<SwarmContentSource> swarmSource;
+  std::unique_ptr<PublicationOutbox> publicationOutbox_;
+  bool testPublicationSwarm_{};
+  std::string publicationListen_;
+  std::vector<std::pair<std::string, std::uint16_t>> publicationNodes_;
 
   struct StoreEntry {
     std::unique_ptr<Store> store;

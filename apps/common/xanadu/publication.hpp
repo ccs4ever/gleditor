@@ -133,6 +133,16 @@ struct GlobalLink {
   bool operator==(const GlobalLink &) const = default;
 };
 
+inline constexpr std::int64_t publicationFormatVersion = 1;
+
+class PublicationUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
+
+[[nodiscard]] std::vector<std::string>
+publicationTopics(std::string_view commaSeparated);
+
 /**
  * @brief One state of one document, signed by whoever published it.
  *
@@ -146,6 +156,7 @@ struct Publication {
   /// Which document under that key. One person publishes many.
   std::string salt;
   std::string title;
+  std::vector<std::string> topics;
   /// Which state of the document this is. Carried for the author's sake --
   /// what a reader gets is the list of pieces below, which is that state.
   MicroversionId version;
@@ -362,7 +373,8 @@ publish(const Store &store, const MicroversionId &version,
         std::int64_t sequence, std::uint64_t published,
         const Scroll *localSealedAs                   = nullptr,
         const std::vector<ScrollSegment> &opsSegments = {},
-        const std::vector<PublishedHoleRecord> &holes = {});
+        const std::vector<PublishedHoleRecord> &holes = {},
+        const std::vector<std::string> &topics        = {});
 
 class PublicationSequenceUnreadable : public std::runtime_error {
 public:

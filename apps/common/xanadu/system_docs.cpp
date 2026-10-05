@@ -1170,6 +1170,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to publish sovereign document",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Shift+S"}}}}},
+        {.name = std::string(settings::kKeymapPublicationStatus),
+         .notes =
+             "Review publication completion and retry a pending publication",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+P"}}}}},
         {.name    = std::string(settings::kKeymapHistory),
          .notes   = "Shortcut to open history view",
          .schemas = {{.expectedTypes = {"string"},

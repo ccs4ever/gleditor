@@ -167,6 +167,10 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
       .help("allow more than one DHT node on the same /8 network")
       .default_value(false)
       .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--test-publication-swarm"))
+      .help("publication worker listen HOST:PORT with explicit mock identity "
+            "verification; testing only")
+      .default_value(std::string{});
   hiddenUnlessDetailed(parser.add_argument("--peer"))
       .help("introduce a peer as HOST:PORT; repeatable")
       .append();
@@ -330,6 +334,8 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   opts.askedVersion = parser.get<std::string>("--version-id");
   opts.alongside    = parser.get<std::string>("--alongside");
   opts.publishAs    = parser.get<std::string>("--publish");
+  opts.testPublicationSwarm =
+      parser.get<std::string>("--test-publication-swarm");
 
   opts.permascrollPath     = parser.get<std::string>("--permascroll");
   opts.dumpPermascrollPath = parser.get<std::string>("--dump-permascroll");

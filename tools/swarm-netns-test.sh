@@ -6,11 +6,11 @@
 # so they have separate addresses, separate routing and -- the part that
 # matters -- separate loopbacks: neither can reach the other by accident, and
 # 127.0.0.1 means something different to each of them. They are joined by a
-# veth pair and nothing else. There is no DHT, no local discovery and no
-# tracker, so the swarm contains exactly the two peers that were introduced.
+# veth pair and nothing else. The DHT bootstraps only the named fixture node;
+# local discovery and trackers are off.
 #
-# Needs root, because creating a network namespace does. It is not part of
-# `make test` for that reason: see the note in README.md about what runs where.
+# Runs inside an unprivileged user namespace when available. The host needs
+# veth support; make test and test/swarm both invoke this runner.
 #
 # Usage: tools/swarm-netns-test.sh [sample-file]
 
@@ -148,7 +148,7 @@ ip netns exec "$TEST_NS" env \
   XUDU_PEER_TEXT="$WORK/seed/sample.txt" \
   XUDU_PEER_PUBKEY="$PEER_PUBKEY" \
   LD_LIBRARY_PATH="$PWD/build" \
-  ./build/xudu_test --gtest_filter='SwarmTest.*:MutableNameTest.*'
+  ./build/xudu_test --gtest_filter="${XUDU_SWARM_TEST_FILTER:-SwarmTest.*:MutableNameTest.*}"
 STATUS=$?
 set -e
 

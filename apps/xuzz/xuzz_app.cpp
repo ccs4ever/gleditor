@@ -356,6 +356,23 @@ int XuzzApp::run(const int argc, char **argv) {
   // 2. Initialize Session
   auto session =
       std::make_unique<xudu::Session>(opts.storePath, userPermascroll);
+  if (!opts.testPublicationSwarm.empty()) {
+    std::vector<std::pair<std::string, std::uint16_t>> nodes;
+    for (const auto &node :
+         parser.get<std::vector<std::string>>("--dht-node")) {
+      const auto colon = node.rfind(':');
+      if (colon == std::string::npos)
+        throw std::invalid_argument("DHT node requires HOST:PORT");
+      std::size_t consumed = 0;
+      const auto number    = std::stoul(node.substr(colon + 1), &consumed);
+      if (consumed != node.size() - colon - 1 || number == 0 || number > 65535)
+        throw std::invalid_argument("invalid DHT node port");
+      nodes.emplace_back(node.substr(0, colon),
+                         static_cast<std::uint16_t>(number));
+    }
+    session->configureTestPublicationSwarm(opts.testPublicationSwarm,
+                                           std::move(nodes));
+  }
   state->onDecoratedInsert = [&session](Doc &doc, const std::uint32_t at,
                                         const std::uint32_t length,
                                         const gleditor::DecorationMask mask) {
@@ -398,7 +415,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                       .passphrase = {}},
         0);
     if (!opts.quiet) {
-      std::cout << "xudu: published " << opening.str() << " as " << manifest
+      std::cout << "xudu: prepared " << opening.str() << " as " << manifest
                 << "\n";
     }
   }
@@ -1897,6 +1914,13 @@ int XuzzApp::run(const int argc, char **argv) {
         views.publishCurrent(opts.publishAs.empty() ? std::string{"document"}
                                                     : opts.publishAs);
       });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPublicationStatus),
+      "review publication status and retry",
+      [&views] { views.publicationStatus(); });
+  app.commands().registerAction("publication-status",
+                                "review publication status and retry",
+                                [&views] { views.publicationStatus(); });
   app.commands().registerAction(std::string(xanadu::settings::kKeymapHistory),
                                 "print every state to the terminal",
                                 [&views] { views.printHistory(); });

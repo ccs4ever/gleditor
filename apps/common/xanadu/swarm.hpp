@@ -240,6 +240,15 @@ public:
   void publishMutable(const MutableKeys &keys, const std::string &salt,
                       const InfoHash &hash, std::int64_t sequence);
 
+  /// True only after a DHT node acknowledged this exact signed put. A value
+  /// returned from our own local DHT cache is not publication completion.
+  [[nodiscard]] bool publicationAcknowledged(const PublicKey &key,
+                                             const std::string &salt,
+                                             const InfoHash &hash,
+                                             std::int64_t sequence);
+  /// Drive alerts from an owning background worker without making a read.
+  void poll();
+
   /// The port actually listened on, once the session is up.
   [[nodiscard]] std::uint16_t listenPort() const;
 

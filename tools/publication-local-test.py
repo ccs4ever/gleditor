@@ -55,6 +55,7 @@ def run(binary, root):
         "LIBGL_ALWAYS_SOFTWARE": "1",
         "XDG_DATA_HOME": str(root / "data"),
         "XDG_CONFIG_HOME": str(root / "config"),
+        "XDG_CACHE_HOME": str(root / "cache"),
     }
     identity = "Alice Publication Test <alice.publication@example.invalid>"
     try:
@@ -72,7 +73,8 @@ def run(binary, root):
             if value in ["doc:story-ideas", "Story Ideas"]:
                 answers += ["--chord", "Backspace"] * 8
             answers += ["--type", value, "--chord", "Tab"]
-        answers += ["--chord", "Tab", "--chord", "Return", "--dump-a11y"]
+        answers += ["--chord", "Tab"] * 5
+        answers += ["--type", " Ideas, writing,IDEAS ", "--chord", "Return", "--dump-a11y"]
         for edition in range(1, 4):
             script = []
             if edition == 1:
@@ -87,6 +89,19 @@ def run(binary, root):
                                timeout=120, check=True)
             shutil.copyfile(root / "store/published/doc:story-ideas.xanadoc",
                             root / f"edition-{edition}.xanadoc")
+        with (root / "status.log").open("w") as log:
+            subprocess.run(base + ["--chord", "Ctrl+Shift+P", "--chord", "Tab",
+                                  "--chord", "Right", "--chord", "Return",
+                                  "--chord", "Tab", "--chord", "Return",
+                                  "--chord", "Tab", "--chord", "Return",
+                                  "--dump-a11y", "--capture", str(root / "status.ppm")],
+                           env=env, stdout=log, stderr=log, timeout=120, check=True)
+        status = (root / "status.log").read_text()
+        assert "Publication status" in status and "Refresh status" in status
+        assert "Retry selected publication" in status, "Retry action is inaccessible"
+        assert "publication retry queued" in status, "Retry did not execute"
+        assert "Local ready" in status, "Prepared publication never became ready"
+
         records = list((root / "store/published").rglob("AUTHORSHIP.tsv"))
         assert records, "No signed seed records were produced"
         for record in records:
@@ -113,6 +128,8 @@ def run(binary, root):
 
 def validate(root):
     pubs = [decode((root / f"edition-{i}.xanadoc").read_bytes()) for i in (1, 2, 3)]
+    assert all(p[b"format"] == 1 and p[b"topics"] == [b"ideas", b"writing"]
+               for p in pubs), "Topics were not normalized and signed by the form"
     assert len({p[b"publisher"] for p in pubs}) == 1, "Publication identity changed"
     assert [p[b"seq"] for p in pubs] == [1, 2, 3], "Sequence did not advance"
     keys = [next(iter(p[b"scrolls"])) for p in pubs]
@@ -150,6 +167,8 @@ def validate(root):
             assert record["ops_sha256"] == hashlib.sha256(payload).hexdigest()
     report = {
         "sequences": [p[b"seq"] for p in pubs],
+        "topics_signed": True,
+        "status_and_retry_accessible": True,
         "same_publisher": True,
         "same_permascroll_key": True,
         "segment_counts": [len(s) for s in segments],

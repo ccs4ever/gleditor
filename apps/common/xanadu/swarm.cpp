@@ -1,6 +1,7 @@
 #include "swarm.hpp"
 
 #include "lt_compat.hpp"
+#include <gleditor/logging.hpp>
 
 #include <algorithm>
 #include <stdexcept>
@@ -170,6 +171,14 @@ struct SwarmContentSource::Impl {
   mutable std::map<InfoHash, Swarm> swarms;
   /// Names being resolved right now, by where in the DHT their pointer lives.
   std::map<DhtTarget, PendingName> names;
+  struct MutablePut {
+    PublicKey key;
+    std::string salt;
+    InfoHash hash;
+    std::int64_t sequence{};
+    bool acknowledged{};
+  };
+  std::map<DhtTarget, MutablePut> puts;
   /// When the outstanding names were last asked about, so that re-asking is
   /// periodic rather than as fast as the session can be pumped.
   std::chrono::steady_clock::time_point lastNameQuery;
@@ -356,6 +365,30 @@ struct SwarmContentSource::Impl {
     }
   }
 
+  void recordMutablePut(const lt::dht_put_alert &alert) {
+    MutableLink link;
+    std::ranges::copy(alert.public_key, link.key.bytes.begin());
+    link.salt        = alert.salt;
+    const auto found = puts.find(link.target());
+    GLEDITOR_LOG_DEBUG("xudu.publication",
+                       "DHT put sequence {}, accepted by {} nodes, tracked {}",
+                       alert.seq, alert.num_success, found != puts.end());
+    if (found == puts.end() || found->second.sequence != alert.seq ||
+        alert.num_success <= 0)
+      return;
+    Signature signature;
+    std::ranges::copy(alert.signature, signature.bytes.begin());
+    const auto &put = found->second;
+    const auto verified =
+        verifyMutableItem(mutableSigningBuffer(put.salt, put.sequence,
+                                               encodeMutablePointer(put.hash)),
+                          signature, put.key);
+    GLEDITOR_LOG_DEBUG("xudu.publication",
+                       "DHT put acknowledgement signature verified {}",
+                       verified);
+    if (verified) found->second.acknowledged = true;
+  }
+
   /// Drain the session's alerts, updating whatever they are about.
   void pump() {
     tryConnectPeers();
@@ -384,6 +417,22 @@ struct SwarmContentSource::Impl {
                      lt::alert_cast<lt::dht_mutable_item_alert>(alert);
                  nullptr != item) {
         recordMutableItem(*item);
+      } else if (const auto *stats = lt::alert_cast<lt::dht_stats_alert>(alert);
+                 stats) {
+        GLEDITOR_LOG_DEBUG(
+            "xudu.publication", "DHT routing buckets {}, active lookups {}",
+            stats->routing_table.size(), stats->active_requests.size());
+        for (const auto &bucket : stats->routing_table)
+          GLEDITOR_LOG_DEBUG("xudu.publication", "DHT bucket: {} nodes",
+                             bucket.num_nodes);
+        for (const auto &lookup : stats->active_requests)
+          GLEDITOR_LOG_DEBUG(
+              "xudu.publication",
+              "DHT {}: responses {}, outstanding {}, timeouts {}", lookup.type,
+              lookup.responses, lookup.outstanding_requests, lookup.timeouts);
+      } else if (const auto *put = lt::alert_cast<lt::dht_put_alert>(alert);
+                 put) {
+        recordMutablePut(*put);
       }
     }
   }
@@ -819,6 +868,17 @@ void SwarmContentSource::publishMutable(const MutableKeys &keys,
                                         const InfoHash &hash,
                                         const std::int64_t sequence) {
   const auto payload = encodeMutablePointer(hash);
+  if (gleditor::logging::category("xudu.publication")
+          ->should_log(spdlog::level::debug))
+    impl->session.post_dht_stats();
+  MutableLink link;
+  link.key  = keys.publicKey;
+  link.salt = salt;
+  impl->puts.insert_or_assign(link.target(),
+                              Impl::MutablePut{.key      = keys.publicKey,
+                                               .salt     = salt,
+                                               .hash     = hash,
+                                               .sequence = sequence});
   // Everything the callback touches is copied into it: libtorrent runs it on
   // its own thread, at a time of its choosing, and a reference to a caller's
   // argument would be a reference to something long gone.
@@ -845,6 +905,21 @@ void SwarmContentSource::publishMutable(const MutableKeys &keys,
       salt);
   impl->pump();
 }
+
+bool SwarmContentSource::publicationAcknowledged(const PublicKey &key,
+                                                 const std::string &salt,
+                                                 const InfoHash &hash,
+                                                 const std::int64_t sequence) {
+  impl->pump();
+  MutableLink link;
+  link.key         = key;
+  link.salt        = salt;
+  const auto found = impl->puts.find(link.target());
+  return found != impl->puts.end() && found->second.hash == hash &&
+         found->second.sequence == sequence && found->second.acknowledged;
+}
+
+void SwarmContentSource::poll() { impl->pump(); }
 
 std::uint16_t SwarmContentSource::listenPort() const {
   return static_cast<std::uint16_t>(impl->session.listen_port());

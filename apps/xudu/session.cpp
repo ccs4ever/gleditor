@@ -103,6 +103,7 @@ Session::Session(std::string aStorePath,
                  std::shared_ptr<UserPermascroll> scroll) {
   auto primaryStore = std::make_unique<Store>(std::move(scroll));
   primaryStore->load(aStorePath);
+  loadRetainedScrolls(*primaryStore, aStorePath);
   primaryStore->setContentSource(&contentSource);
   stores.push_back(StoreEntry{.store       = std::move(primaryStore),
                               .path        = std::move(aStorePath),
@@ -179,6 +180,23 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
   return prod;
 }
 
+Scroll Session::retainMediaScroll(std::string_view bytes,
+                                  const std::string &fileName,
+                                  const std::string &mimeType,
+                                  const std::filesystem::path &seedDirectory) {
+  const std::vector<TorrentContent> files{
+      {.path = fileName, .data = std::string(bytes)}};
+  const auto made = makeTorrent(files, "media");
+  const auto seed = writeTorrentSeed(seedDirectory, made, files);
+  addTorrentMemory(made.file, seed.string());
+  auto scroll = Scroll::ofTorrentFile(made.hash, 0, fileName, 0, bytes.size());
+  if (!mimeType.empty()) {
+    scroll.defaultMimeType      = mimeType;
+    scroll.segments[0].mimeType = mimeType;
+  }
+  return scroll;
+}
+
 MicroversionId Session::insertMedia(const std::uint32_t docIndex,
                                     const std::uint32_t at,
                                     std::string_view bytes,
@@ -194,34 +212,11 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
   const auto sIdx = open[docIndex].storeIndex;
   auto &st        = store(sIdx);
 
-  std::filesystem::path p(filePath);
-  std::string fileName = filePath.empty() ? "media.dat" : p.filename().string();
-  const auto made      = makeTorrent(bytes, fileName);
-  if (filePath.empty()) {
-    const auto &stPath  = path(sIdx);
-    const auto mediaDir = stPath.empty()
-                              ? std::filesystem::temp_directory_path()
-                              : std::filesystem::path(stPath);
-    if (!std::filesystem::exists(mediaDir)) {
-      std::filesystem::create_directories(mediaDir);
-    }
-    fileName = "media_" + made.hash.hex().substr(0, 8) + ".dat";
-    p        = mediaDir / fileName;
-    filePath = p.string();
-    std::ofstream out(filePath, std::ios::binary);
-    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-  }
-  const auto dataRoot =
-      p.parent_path().empty() ? "." : p.parent_path().string();
-  addTorrentMemory(made.file, dataRoot);
-
-  auto scroll = Scroll::ofTorrentFile(made.hash, 0, filePath, 0, bytes.size());
-  if (!mimeType.empty()) {
-    scroll.defaultMimeType = mimeType;
-    if (!scroll.segments.empty()) {
-      scroll.segments[0].mimeType = mimeType;
-    }
-  }
+  const auto fileName =
+      filePath.empty() ? "media.dat"
+                       : std::filesystem::path(filePath).filename().string();
+  const auto scroll =
+      retainMediaScroll(bytes, fileName, mimeType, publishedDir(sIdx));
 
   const auto prod = st.transcludeExternal(open[docIndex].version, at, scroll, 0,
                                           bytes.size());
@@ -586,9 +581,52 @@ const MutableKeys &Session::identity() {
   return *keys;
 }
 
+void Session::configureTestPublicationSwarm(
+    const std::string &listen,
+    std::vector<std::pair<std::string, std::uint16_t>> nodes) {
+  if (publicationOutbox_)
+    throw std::logic_error("publication outbox is already running");
+  testPublicationSwarm_ = true;
+  publicationListen_    = listen;
+  publicationNodes_     = std::move(nodes);
+  (void)publicationOutbox();
+}
+
+PublicationOutbox &Session::publicationOutbox() {
+  if (!publicationOutbox_) {
+    PublicationOutbox::Options options;
+    options.directory = std::filesystem::path(path(0)) / "publication-outbox";
+    if (testPublicationSwarm_) {
+      const auto keys        = identity();
+      options.verifyIdentity = [key = keys.publicKey](const Publication &pub) {
+        return pub.publisher == key ? PublicationIdentity::MockVerified
+                                    : PublicationIdentity::Unknown;
+      };
+      SwarmContentSource::Options swarm;
+      swarm.listenInterfaces               = publicationListen_;
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      options.makeTransport =
+          publicationSwarmTransport(keys, swarm, publicationNodes_);
+    }
+    publicationOutbox_ =
+        std::make_unique<PublicationOutbox>(std::move(options));
+  }
+  return *publicationOutbox_;
+}
+
 std::string Session::publishDocument(const MicroversionId &version,
                                      const PublishRequest &request,
                                      const std::size_t storeIndex) {
+  if (request.salt.empty() || request.salt.size() > 64 || request.salt == "." ||
+      request.salt == ".." ||
+      request.salt.find_first_of("/\\") != std::string::npos ||
+      request.salt.find('\0') != std::string::npos)
+    throw std::invalid_argument(
+        "publication name must be 1–64 bytes without path separators");
+  if (request.announce && !testPublicationSwarm_)
+    throw std::runtime_error(
+        "test swarm publication requires mock verification configuration");
   flushUncommitted();
   auto &st         = store(storeIndex);
   const auto &mine = identity();
@@ -731,7 +769,7 @@ std::string Session::publishDocument(const MicroversionId &version,
   }
   const auto pub =
       publish(st, version, mine, request.salt, request.title, sequence, now,
-              &sealed.scroll, opsSegments, withheldHoles);
+              &sealed.scroll, opsSegments, withheldHoles, request.topics);
 
   SealState nextState;
   nextState.scroll           = sealed.scroll;
@@ -746,6 +784,10 @@ std::string Session::publishDocument(const MicroversionId &version,
   out << encodePublication(pub);
   out.close();
   if (!out) throw std::runtime_error("cannot write publication: " + outPath);
+  std::vector<std::filesystem::path> roots;
+  for (std::size_t i = 0; i < stores.size(); ++i)
+    if (!stores[i].path.empty()) roots.emplace_back(publishedDir(i));
+  (void)publicationOutbox().submit(pub, roots, request.announce);
   return outPath;
 }
 
@@ -821,8 +863,28 @@ void Session::setStorePath(const std::size_t index, std::string newPath,
   }
 }
 
+void Session::loadRetainedScrolls(const Store &store,
+                                  const std::string &storePath) {
+  for (const auto &scroll : store.scrolls()) {
+    for (const auto &segment : scroll.segments) {
+      const auto root     = std::filesystem::path(storePath) / "published" /
+                            segment.torrent.hex();
+      const auto metainfo = root / "metainfo.torrent";
+      if (!std::filesystem::exists(metainfo)) continue;
+      std::ifstream in(metainfo, std::ios::binary);
+      if (!in) throw std::runtime_error("cannot read retained media metainfo");
+      const std::string encoded{std::istreambuf_iterator<char>(in),
+                                std::istreambuf_iterator<char>()};
+      if (Metainfo::parse(encoded).hash() != segment.torrent)
+        throw std::runtime_error("retained media metainfo hash mismatch");
+      contentSource.add(encoded, root.string());
+    }
+  }
+}
+
 std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
                               const bool aIsTemporary) {
+  loadRetainedScrolls(*aStore, aPath);
   if (swarmSource) {
     aStore->setContentSource(swarmSource.get());
   } else {
@@ -867,29 +929,10 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
     } else if (piece.mimeType.empty()) {
       imported = newStore->insert(imported, at, piece.bytes);
     } else {
-      std::filesystem::path p(filePath);
-      std::string pieceFilePath = filePath;
-      std::string fileName      = p.filename().string();
-      if (!std::filesystem::is_regular_file(p) ||
-          std::filesystem::file_size(p) != piece.bytes.size()) {
-        fileName      = "fig_" + std::to_string(insertedSpans.size()) + ".dat";
-        p             = tempDir / fileName;
-        pieceFilePath = p.string();
-        std::ofstream out(pieceFilePath, std::ios::binary);
-        out.write(piece.bytes.data(),
-                  static_cast<std::streamsize>(piece.bytes.size()));
-      }
-      const auto made = makeTorrent(piece.bytes, fileName);
-      const auto dataRoot =
-          p.parent_path().empty() ? "." : p.parent_path().string();
-      addTorrentMemory(made.file, dataRoot);
-
-      auto scroll = Scroll::ofTorrentFile(made.hash, 0, pieceFilePath, 0,
-                                          piece.bytes.size());
-      scroll.defaultMimeType = piece.mimeType;
-      if (!scroll.segments.empty()) {
-        scroll.segments[0].mimeType = piece.mimeType;
-      }
+      const auto fileName =
+          "fig_" + std::to_string(insertedSpans.size()) + ".dat";
+      const auto scroll = retainMediaScroll(
+          piece.bytes, fileName, piece.mimeType, tempDir / "published");
       const auto sId = newStore->addScroll(scroll);
       span =
           PrimediaSpan{.scroll = sId, .start = 0, .length = piece.bytes.size()};

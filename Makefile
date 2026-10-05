@@ -1069,6 +1069,11 @@ sample-xanadocs: $(OBJDIR)/xudu
 .PHONY: test/swarm
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 	tools/swarm-netns-test.sh
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
+
+.PHONY: test/publication-swarm
+test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
+	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-local
 test/publication-local: $(OBJDIR)/xuzz
@@ -1076,7 +1081,7 @@ test/publication-local: $(OBJDIR)/xuzz
 
 # Network namespace suites that require two peers on separate network stacks.
 # Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
-SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*
+SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
 # Programs the suites run as child processes (the E2E tests look for them
@@ -1091,8 +1096,9 @@ test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuz
 	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|\*'; then \
-		tools/swarm-netns-test.sh; \
+	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
+		tools/swarm-netns-test.sh && \
+		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; \
 	fi
 
 test/all: test

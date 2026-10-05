@@ -19,7 +19,8 @@ enabled; the image does not force a compiler or language standard.
 
 The image includes `xuzz` (and its compatibility aliases), `xudu-dump`, `xudu-swarm-peer`, engine
 tests, GnuPG, Python, iproute2 and software OpenGL. Build-time smoke tests exercise publication, V5
-history and signed link-package primitives. The default container command repeats those tests:
+history, durable outbox and signed link-package primitives. The default container command repeats
+those tests:
 
 ```sh
 docker run --rm --network none gleditor-swarm-test:local
@@ -29,8 +30,10 @@ For multiple peers, create an internal Docker network and use one named containe
 volume per user. Do not publish peer ports to the host. Bootstrap only other containers on this
 network. Seeder content needs a writable private data directory: copy fixture files there before
 starting `xudu-swarm-peer`, and pass its container IP as the listen address. Keep fixture inputs
-read-only separately. Xuzz accepts `--swarm --private-dht --dht-node HOST:PORT` for fixture
-provisioning. These flags configure the fixture, not the user publication steps.
+read-only separately. Xuzz accepts `--test-publication-swarm HOST:PORT` with repeatable
+`--dht-node HOST:PORT` for fixture provisioning. This enables the form's explicit mock verification
+and Test swarm destination. The Publish and status/retry steps remain keyboard actions in Xuzz.
+Topics are signed metadata; catalog ingestion and topic rendezvous are still pending.
 
 ```sh
 docker network create --internal publication-test

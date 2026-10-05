@@ -631,7 +631,6 @@ void Views::publishCurrent(const std::string &salt) {
     const auto version = session.versionOf(which);
     const auto storeIdx = session.storeIndexOf(which);
     const auto who      = session.author();
-    const auto where    = session.publishedDir(storeIdx);
 
     using Field = gleditor::Form::Field;
     using Kind  = gleditor::Form::Kind;
@@ -728,9 +727,28 @@ void Views::publishCurrent(const std::string &salt) {
     fNote.required = false;
     asked.push_back(std::move(fNote));
 
+    Field fTopics;
+    fTopics.label = "Topics";
+    fTopics.hint  = "comma-separated discovery tags, e.g. Ideas, Fiction";
+    asked.push_back(std::move(fTopics));
+
+    Field destination;
+    destination.label         = "Destination";
+    destination.kind          = Kind::Choice;
+    destination.submitOnEnter = true;
+    destination.options       = {"Local publication"};
+    destination.optionValues  = {"local"};
+    if (session.testPublicationSwarmEnabled()) {
+      destination.options.push_back("Test swarm — mock identity verification");
+      destination.optionValues.push_back("test-swarm");
+    }
+    asked.push_back(std::move(destination));
+
     form.open(
-        "Publish " + version.str(),
-        "Signed as an authorship record, then sealed into " + where,
+        "Publish " + version.str() + " — author scroll " +
+            std::to_string(session.store(storeIdx).primedia().size()) +
+            " bytes",
+        "All store history and scrolls; private settings withheld.",
         std::move(asked),
         [this, version, which, storeIdx](const std::vector<Field> &answers) {
           publishAnswers(version, which, storeIdx, answers);
@@ -756,15 +774,79 @@ void Views::publishAnswers(const MicroversionId &version,
     request.extra.emplace_back("note", answers[8].answer());
   }
 
-  renderer->runWithState([this, version, which, storeIdx,
-                          request](RenderState &) {
+  if (answers.size() > 9)
+    request.topics = publicationTopics(answers[9].answer());
+  if (answers.size() > 10)
+    request.announce = answers[10].answer() == "test-swarm";
+
+  renderer->runWithState(
+      [this, version, which, storeIdx, request](RenderState &) {
+        try {
+          const auto path = session.publishDocument(version, request, storeIdx);
+          std::cout << "xudu: prepared doc " << which << " as " << path
+                    << "; inspect Publication status with Ctrl+Shift+P\n";
+        } catch (const std::exception &err) {
+          std::cout << "xudu: cannot publish: " << err.what() << "\n";
+          state->showDialog(render::DiagnosticSeverity::Error,
+                            "Could not publish " + version.str(), err.what());
+        }
+      });
+}
+
+void Views::publicationStatus() {
+  renderer->runWithState([this](RenderState &) {
     try {
-      const auto path = session.publishDocument(version, request, storeIdx);
-      std::cout << "xudu: published doc " << which << " as " << path << "\n";
-    } catch (const std::exception &err) {
-      std::cout << "xudu: cannot publish: " << err.what() << "\n";
-      state->showDialog(render::DiagnosticSeverity::Error,
-                        "Could not publish " + version.str(), err.what());
+      const auto statuses = session.publicationOutbox().statuses();
+      if (statuses.empty()) {
+        state->showDialog(render::DiagnosticSeverity::Info,
+                          "Publication status",
+                          "No publications have been queued in this profile.");
+        return;
+      }
+      using Field = gleditor::Form::Field;
+      Field jobs;
+      jobs.label = "Publication";
+      jobs.kind  = gleditor::Form::Kind::Choice;
+      for (const auto &status : statuses) {
+        auto description = status.title + " #" +
+                           std::to_string(status.sequence) + ": " +
+                           std::string(publicationPhaseName(status.phase));
+        if (status.identity == PublicationIdentity::MockVerified)
+          description += " (mock verification)";
+        if (!status.error.empty()) description += " — " + status.error;
+        jobs.options.push_back(std::move(description));
+        jobs.optionValues.push_back(status.id);
+      }
+      jobs.chosen = statuses.size() - 1;
+      Field action;
+      action.label         = "Action";
+      action.kind          = gleditor::Form::Kind::Choice;
+      action.submitOnEnter = true;
+      action.options       = {"Refresh status", "Retry selected publication",
+                              "Close"};
+      action.optionValues  = {"refresh", "retry", "close"};
+      form.open("Publication status",
+                "Published: DHT acknowledged. Local ready: files verified.",
+                {std::move(jobs), std::move(action)},
+                [this](const std::vector<Field> &answers) {
+                  if (answers[1].answer() == "close") return;
+                  if (answers[1].answer() == "retry") {
+                    const auto id = answers[0].answer();
+                    renderer->runWithState([this, id](RenderState &) {
+                      try {
+                        session.publicationOutbox().retry(id);
+                        std::cout << "xudu: publication retry queued\n";
+                      } catch (const std::exception &error) {
+                        state->showDialog(render::DiagnosticSeverity::Error,
+                                          "Publication retry", error.what());
+                      }
+                    });
+                  }
+                  publicationStatus();
+                });
+    } catch (const std::exception &error) {
+      state->showDialog(render::DiagnosticSeverity::Error, "Publication status",
+                        error.what());
     }
   });
 }

@@ -250,36 +250,10 @@ BatchOrchestrator::execute(Session &session,
         } else if (piece.mimeType.empty()) {
           imported = session.store(0).insert(imported, at, piece.bytes);
         } else {
-          std::filesystem::path p(firstFile);
-          std::string pieceFilePath = firstFile;
-          std::string fileName      = p.filename().string();
-          if (!std::filesystem::is_regular_file(p) ||
-              std::filesystem::file_size(p) != piece.bytes.size()) {
-            const auto &stPath  = session.path(0);
-            const auto mediaDir = stPath.empty()
-                                      ? std::filesystem::temp_directory_path()
-                                      : std::filesystem::path(stPath);
-            if (!std::filesystem::exists(mediaDir)) {
-              std::filesystem::create_directories(mediaDir);
-            }
-            fileName = "fig_" + std::to_string(insertedSpans.size()) + ".dat";
-            p        = mediaDir / fileName;
-            pieceFilePath = p.string();
-            std::ofstream out(pieceFilePath, std::ios::binary);
-            out.write(piece.bytes.data(),
-                      static_cast<std::streamsize>(piece.bytes.size()));
-          }
-          const auto made = makeTorrent(piece.bytes, fileName);
-          const auto dataRoot =
-              p.parent_path().empty() ? "." : p.parent_path().string();
-          session.addTorrentMemory(made.file, dataRoot);
-
-          auto scroll = Scroll::ofTorrentFile(made.hash, 0, pieceFilePath, 0,
-                                              piece.bytes.size());
-          scroll.defaultMimeType = piece.mimeType;
-          if (!scroll.segments.empty()) {
-            scroll.segments[0].mimeType = piece.mimeType;
-          }
+          const auto fileName =
+              "fig_" + std::to_string(insertedSpans.size()) + ".dat";
+          const auto scroll = session.retainMediaScroll(
+              piece.bytes, fileName, piece.mimeType, session.publishedDir(0));
           const auto sId = session.store(0).addScroll(scroll);
           span           = PrimediaSpan{
               .scroll = sId, .start = 0, .length = piece.bytes.size()};

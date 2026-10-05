@@ -65,6 +65,7 @@ struct CliOptions {
   std::string askedVersion;
   std::string alongside;
   std::string publishAs;
+  std::string testPublicationSwarm;
   std::vector<xanadu::MicroversionId> read;
   std::vector<xanadu::MicroversionId> background;
   std::vector<std::pair<xanadu::MicroversionId, std::size_t>> extraImports;

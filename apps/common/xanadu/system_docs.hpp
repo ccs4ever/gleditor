@@ -312,9 +312,11 @@ inline constexpr std::string_view kKeymapCancelLink = "std:xudu/cancel_link";
 inline constexpr std::string_view kKeymapBeams      = "std:xudu/beams";
 inline constexpr std::string_view kKeymapSworph     = "std:xudu/sworph";
 inline constexpr std::string_view kKeymapPublish    = "std:xudu/publish";
-inline constexpr std::string_view kKeymapHistory    = "std:xudu/history";
-inline constexpr std::string_view kKeymapDelete     = "std:xudu/delete";
-inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
+inline constexpr std::string_view kKeymapPublicationStatus =
+    "std:xudu/publication_status";
+inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";
+inline constexpr std::string_view kKeymapDelete    = "std:xudu/delete";
+inline constexpr std::string_view kKeymapPageBreak = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";

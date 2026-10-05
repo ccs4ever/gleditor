@@ -193,7 +193,10 @@ global spans rather than injecting raw remote text into an author's local permas
 
 `Ctrl+Alt+Shift+N` adds a slice to the current document's store; `Ctrl+Alt+N` starts a standalone
 slice store. Swarm Telescope (`F3`) takes search input until Escape closes it. Publication counters
-are persisted per publishing key and salt. See
+are persisted per publishing key and salt. The Publish form accepts topics and defaults to local
+preparation; `Ctrl+Shift+P` shows background verification, DHT acknowledgement and retry status. For
+an isolated test swarm, `--test-publication-swarm HOST:PORT --dht-node HOST:PORT` enables the
+explicit mock verification destination. Topic and author-catalog discovery remain pending. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
 repaired prerequisites and remaining network/UI work.
 
@@ -263,6 +266,7 @@ make -j$(nproc) test                 # four gtest binaries, then rootless swarm 
 make test TEST_FILTER='MediaTest.*'  # focused gtest filter
 make test/e2e-orchestration          # whole-program xudu orchestration
 make -j$(nproc) test/publication-local # three local UI publications with disposable signing keys
+make -j$(nproc) test/publication-swarm # outbox acknowledgement/restart on separate network stacks
 make -j$(nproc) format-check lint    # formatting and text lint gates
 make -j$(nproc) shaders              # shader validation
 make profile                         # library test coverage

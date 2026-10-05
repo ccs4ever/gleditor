@@ -1,6 +1,6 @@
 # Publication implementation progress
 
-This is the first implementation batch following the
+These implementation batches follow the
 [validation report](ux_publication_validation_2026-10-04.md). It repairs prerequisites for
 [the seven publication journeys](ux_workflow_publication.md); none of P1–P7 is yet an end-to-end
 pass.
@@ -102,12 +102,73 @@ segment. Seed payloads are checked against provenance digests and private ranges
 the actual records before temporary signing keys are removed. These are local form and integrity
 checks; DHT catalog ingestion and the complete P1–P7 acceptance run remain pending.
 
+## Durable publication outbox
+
+The third batch adds a persistent outbox (`XPO1`, version 1) under the primary store profile.
+Preparing a publication commits its immutable signed request before returning. A worker verifies all
+referenced seed files, metainfo hashes, piece hashes, segment coordinates, scroll keys and visible
+span coverage before offering anything. File and data-directory symlink escapes, missing files and
+incomplete piece tables are refused. Seed roots from earlier jobs remain available after restart,
+including author-scroll segments retained beside another store.
+
+The worker owns its BitTorrent session throughout construction, use and destruction. It seeds the
+manifest and every dependency, then publishes the signed BEP 46 pointer. Completion requires a
+`dht_put_alert` reporting successful remote responses and a signature matching that exact pointer,
+salt and sequence. A value present only in the publisher's cache is insufficient. Bootstrap
+introductions are retried because libtorrent's DHT startup is asynchronous. Failed jobs expose their
+error; retry retains the signed sequence and manifest hash. Restart rechecks dependencies and
+re-seeds jobs. A newer queued version supersedes an earlier announcement while retaining its seeds.
+
+The Publish form adds signed, normalized topics and a destination choice. Local publication is the
+default. `Ctrl+Shift+P` opens status, refresh and retry controls through the sovereign keymap and
+accessibility tree. The publication command reports **prepared** while background work is pending.
+Statuses distinguish local readiness, identity verification needed, seeding, awaiting DHT
+acknowledgement, publication, failure and supersession.
+
+For the test fixture, launch Xuzz with `--test-publication-swarm HOST:PORT` and repeatable
+`--dht-node HOST:PORT`. This enables an explicitly labelled mock verification result for the
+session's own publishing identity. The form's **Test swarm** destination opts into announcement. It
+does not implement Oracle election, user enrollment or revocation. Ordinary local preparation
+requires no mock enrollment. Signed topics are metadata at this stage; they do not yet make a
+publication discoverable through a topic swarm or author catalog.
+
+Publication manifests now declare format version 1 and carry topics. Unversioned manifests and
+unsupported versions are refused by number with `PublicationUnreadable`; regenerate owned test
+publications. Native store and operation formats have not changed. Imported media now retains a
+multi-file torrent seed alongside its store, and Session reloads its metainfo on reopen. Publication
+no longer depends on the imported file remaining at its original path.
+
+Validation evidence is under `build/publication-outbox-fixes/`. The engine and selected import
+checks cover 114 publication/history/keymap/persistence, seed-escape and imported-media tests. The
+selected PDF regression now uses the current capture flag and creates its own output directory.
+`make -j$(nproc) test/publication-local` checks three UI publications with disposable GPG keys,
+signed topics, status and actual keyboard retry. Captures and accessibility output are retained
+under `build/publication-local/`; temporary secret keys are removed. The status frame was inspected
+and its explanatory text shortened to fit the panel. The rebuilt Docker image
+`gleditor-swarm-test:local` passed all 67 smoke tests with networking disabled. Repository
+formatting and lint passed.
+
+`make -j$(nproc) test/publication-swarm` exercises the outbox against a DHT node in a separate
+network namespace. It stops the publisher before resolving the signed pointer, proving the remote
+node retained it, then restarts the outbox and fetches/verifies the signed manifest with a fresh
+reader. The pointer acknowledgement and lookup cross the veth device. The reader's manifest transfer
+from the restarted publisher takes place within the reader namespace; this test does not establish
+cross-machine transfer or reconstruction of the complete store inventory. The existing eleven
+namespace transport/mutable-name tests run alongside this integration check under `test/swarm`, with
+a fresh bootstrap fixture for each suite. Sharing the legacy suite's DHT fixture caused the outbox
+check to stall; independent fixture lifetimes avoid that accumulated state. DHT protections are
+unchanged.
+
+Signing and initial sealing still run synchronously on the Session command path. This batch moves
+dependency verification and network operations to the worker; moving snapshot creation and GPG
+signing off that path requires a safely captured immutable store snapshot. These checks remain
+prerequisites, not end-to-end passes for P1–P7.
+
 ## Remaining work
 
-1. Implement one background publication coordinator for dependency review/sealing, seeding, mutable
-   pointer publication and completion/retry state. Add topic fields and the mock verification
-   boundary. The local shared-permascroll and restart prerequisites are now implemented; the
-   coordinator must also find and seed earlier segments stored by other publications.
+1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
+   path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
+   explicit mock verification boundary are now implemented in the outbox.
 1. Carry the complete store inventory, designated versions and annotations in the publication
    format, and reconstruct every advertised document/slice from an empty remote cache.
 1. Add signed author catalog publication/ingestion and topic rendezvous exchange, author-key
