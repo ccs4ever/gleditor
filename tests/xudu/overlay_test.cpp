@@ -70,12 +70,12 @@ struct TestStore {
                                         const MicroversionId &produces) {
     auto fold = store->rebuildManifold(head);
     if (!store->scrollRegistry().scrollIdForKey(targetScroll)) {
-      head = store->registerScroll(head, targetScroll, &fold);
+      head = store->registerScroll(head, targetScroll);
       fold = store->rebuildManifold(head);
     }
     const auto sid = *store->scrollRegistry().scrollIdForKey(targetScroll);
     const ExternOpRef ext{.scroll = sid, .produces = produces};
-    head          = store->makeExternRef(head, ext, &fold);
+    head          = store->makeExternRef(head, ext);
     fold          = store->rebuildManifold(head);
     const auto ph = fold.scrollRegistry(*store).placeholderForExtern(ext);
     return ph.value_or(zigzag::noCell);
@@ -202,12 +202,12 @@ TEST(OverlayTest, anExplicitBreakSurvivesTheFold) {
 // 4. aClaimOutsideThePinnedSnapshotIsRejectedSeparately
 TEST(OverlayTest, aClaimOutsideThePinnedSnapshotIsRejectedSeparately) {
   TestStore target("btpk:author:doc");
-  const auto cA = target.makeCell("Cell A");
-  const auto v1 = target.head; // Pinned snapshot T1
+  [[maybe_unused]] const auto cA = target.makeCell("Cell A");
+  const auto v1                  = target.head; // Pinned snapshot T1
 
   // Target advances to T2 with new cell B
-  const auto cB = target.makeCell("Cell B (minted after T1)");
-  const auto v2 = target.head; // State T2
+  [[maybe_unused]] const auto cB = target.makeCell("Cell B (minted after T1)");
+  const auto v2                  = target.head; // State T2
 
   TestStore overlay("btpk:curator:overlay");
   const auto rootRes = declareOverlayTarget(

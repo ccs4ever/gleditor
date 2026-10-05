@@ -76,7 +76,8 @@ public:
    *        opened -- which is the ordinary case for a link, since a link is
    *        made to content and not to whatever happens to be open.
    */
-  using Opener = std::function<void(const MicroversionId &)>;
+  using Opener =
+      std::function<void(const MicroversionId &, std::size_t storeIndex)>;
 
   /**
    * @brief Where a media span's own widget sits, as an anchor a beam can use
@@ -575,6 +576,22 @@ private:
   SpanfiladeCacheSignature spanfiladeSignature_{};
   bool spanfiladeClean_{false};
   int cellRadius_{3};
+
+  struct MarginAnchor {
+    Edge edge;
+    std::uint32_t colour{};
+    std::uint32_t tagId{};
+    bool farEnd{};
+    bool isActive{};
+    std::size_t docIndex{};
+    bool towardsRight{};
+    std::uint64_t linkId{};
+    ProminenceTier tier{};
+    LinkType type{};
+    bool transclusion{};
+  };
+
+  std::vector<MarginAnchor> allAnchors_;
 };
 
 } // namespace xudu

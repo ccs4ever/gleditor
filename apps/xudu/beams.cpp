@@ -11,6 +11,7 @@
 #include <format>
 #include <iostream>
 #include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -36,6 +37,21 @@
 namespace xudu {
 
 namespace {
+
+// A strand names its link by store and id together: every page made with
+// Ctrl+N is a store of its own, holding the links forged while it was
+// active, and link ids are counters local to one store. The store rides in
+// the high half, so a link of store 0 keeps the id it always had.
+constexpr std::uint64_t beamLinkOf(const std::size_t store,
+                                   const zigzag::CellRef id) noexcept {
+  return (static_cast<std::uint64_t>(store) << 32U) | id;
+}
+constexpr std::size_t storeOfBeamLink(const std::uint64_t link) noexcept {
+  return static_cast<std::size_t>(link >> 32U);
+}
+constexpr zigzag::CellRef idOfBeamLink(const std::uint64_t link) noexcept {
+  return static_cast<zigzag::CellRef>(link & 0xFFFF'FFFFULL);
+}
 
 /// Beam thickness as a fraction of the line height at the anchor. A beam is
 /// meant to read as attached to a line of text rather than as a pipe running
@@ -154,31 +170,37 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   const bool spanfiladeValid =
       spanfiladeClean_ && (currentSig == spanfiladeSignature_);
 
-  std::vector<LinkedPair> placed;
-  std::vector<HalfLink> unplaced;
+  // Every open store's links, not the primary's alone: a link is filed in
+  // the store of the page that was active when it was forged.
+  const auto placeEveryStoresLinks = [this](const auto &views) {
+    strands.clear();
+    dangling.clear();
+    for (std::size_t store = 0; store < session.storeCount(); ++store) {
+      std::vector<LinkedPair> placed;
+      std::vector<HalfLink> unplaced;
+      placeLinks(session.store(store).links(), views, placed, unplaced);
+      for (const auto &one : placed) {
+        strands.push_back(Strand{
+            .link = beamLinkOf(store, one.link),
+            .type = one.type,
+            .tier = one.tier,
+            .from = one.from,
+            .to   = one.to,
+        });
+      }
+      for (auto &one : unplaced) {
+        dangling.push_back(Dangling{.link = std::move(one), .looked = false});
+      }
+    }
+  };
+
   if (!manifoldViews_.empty()) {
     UniversalViewContext uctx;
     uctx.docViews      = versions;
     uctx.manifoldViews = manifoldViews_;
     uctx.manifoldFoci  = manifoldFoci_;
     uctx.cellRadius    = cellRadius_;
-    placeLinks(session.store().links(), uctx, placed, unplaced);
-    strands.clear();
-    strands.reserve(placed.size());
-    for (const auto &one : placed) {
-      strands.push_back(Strand{
-          .link = one.link,
-          .type = one.type,
-          .tier = one.tier,
-          .from = one.from,
-          .to   = one.to,
-      });
-    }
-    dangling.clear();
-    dangling.reserve(unplaced.size());
-    for (auto &one : unplaced) {
-      dangling.push_back(Dangling{.link = std::move(one), .looked = false});
-    }
+    placeEveryStoresLinks(uctx);
 
     std::vector<TransclusionPair> tPairs;
     // Spanfilade is the canonical interval index for shared primedia. Keep
@@ -216,23 +238,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   } else {
     looms_.clear();
     strandToLoom_.clear();
-    placeLinks(session.store().links(), versions, placed, unplaced);
-    strands.clear();
-    strands.reserve(placed.size());
-    for (const auto &one : placed) {
-      strands.push_back(Strand{
-          .link = one.link,
-          .type = one.type,
-          .tier = one.tier,
-          .from = one.from,
-          .to   = one.to,
-      });
-    }
-    dangling.clear();
-    dangling.reserve(unplaced.size());
-    for (auto &one : unplaced) {
-      dangling.push_back(Dangling{.link = std::move(one), .looked = false});
-    }
+    placeEveryStoresLinks(versions);
 
     std::vector<TransclusionPair> tPairs;
     if (!spanfiladeValid) {
@@ -255,12 +261,22 @@ void LinkBeams::rebuildStrands(RenderState &state) {
 
   ++described;
   if (linkContext_ != nullptr) {
-    std::vector<zigzag::CellRef> candidates;
-    candidates.reserve(session.store().links().size());
-    for (const auto &entry : session.store().links()) {
-      candidates.push_back(entry.first);
+    // The stores being read, not every one open: the system xanadocs are
+    // open too, and their format links are nothing the reader is looking at.
+    std::vector<std::size_t> reading;
+    for (const auto &view : session.views()) {
+      if (std::ranges::find(reading, view.storeIndex) == reading.end()) {
+        reading.push_back(view.storeIndex);
+      }
     }
-    linkContext_->setCandidates(candidates);
+    std::ranges::sort(reading);
+    std::vector<xanadu::LinkKey> candidates;
+    for (const auto store : reading) {
+      for (const auto &entry : session.store(store).links()) {
+        candidates.push_back(linkContext_->keyOf(store, entry.first));
+      }
+    }
+    linkContext_->setCandidates(std::move(candidates));
   }
 }
 
@@ -1292,10 +1308,10 @@ bool LinkBeams::openDangling(RenderState &state) {
   // Every version already on screen, so that the search does not offer back a
   // document that is open -- which for a link whose ends are both quoted from
   // one state is otherwise the first thing it would find.
-  std::vector<MicroversionId> open;
+  std::vector<std::pair<std::size_t, MicroversionId>> open;
   open.reserve(session.views().size());
   for (const auto &view : session.views()) {
-    open.push_back(view.version);
+    open.emplace_back(view.storeIndex, view.version);
   }
 
   for (auto &waiting : dangling) {
@@ -1310,9 +1326,10 @@ bool LinkBeams::openDangling(RenderState &state) {
     if (!showing) {
       continue;
     }
-    GLEDITOR_LOG_DEBUG("xudu.links", "link {} reaches {}, opening it",
-                       waiting.link.link, showing->str());
-    opener(*showing);
+    GLEDITOR_LOG_DEBUG(
+        "xudu.links", "link {} reaches {} of store {}, opening it",
+        waiting.link.link, showing->version.str(), showing->storeIndex);
+    opener(showing->version, showing->storeIndex);
     // One a frame. Opening a document is a load and a page build, and the
     // strands are worked out again when it lands, which is when the next one
     // can be judged -- so there is more to come.
@@ -1353,9 +1370,10 @@ bool LinkBeams::picked(const render::PickingResult &pick,
     // A beam body says which link, not which member: one strand of a 2x3 link
     // is one of six the renderer happened to draw, so selecting pins the whole
     // link and leaves the member to the reader.
-    static_cast<void>(linkContext_->execute(xanadu::commandForPick(
-        linkContext_->keyOf(static_cast<zigzag::CellRef>(strand.link)),
-        std::nullopt)));
+    std::ignore = linkContext_->execute(
+        xanadu::commandForPick(linkContext_->keyOf(storeOfBeamLink(strand.link),
+                                                   idOfBeamLink(strand.link)),
+                               std::nullopt));
   }
   // Selecting a link is a request to see both ends of it, which is the one
   // case where the far document is moved whether or not the sworph is on.
@@ -1448,7 +1466,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
     if (linkContext_ != nullptr) {
       for (const auto &command : asked) {
-        static_cast<void>(linkContext_->execute(command));
+        std::ignore = linkContext_->execute(command);
       }
     }
   }
@@ -1481,27 +1499,9 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
              !state.docs[end.doc]->isFullyLoaded();
     };
 
-    struct MarginAnchor {
-      Edge edge;
-      std::uint32_t colour{};
-      std::uint32_t tagId{};
-      bool farEnd{};
-      bool isActive{};
-      std::size_t docIndex{};
-      bool towardsRight{};
-      std::uint64_t linkId{};
-      ProminenceTier tier{};
-      LinkType type{};
-      /// Whether this anchor belongs to an emergent transclusion rather than
-      /// to a link. A transclusion has no link id to be told apart by, so
-      /// without this every transclusion along one margin would answer to the
-      /// same one and be joined into a single multi-span link that nobody
-      /// made.
-      bool transclusion{};
-    };
-
-    std::vector<MarginAnchor> allAnchors;
-    allAnchors.reserve((strands.size() + transclusionStrands.size()) * 2);
+    allAnchors_.clear();
+    allAnchors_.reserve((strands.size() + transclusionStrands.size()) * 2);
+    auto &allAnchors = allAnchors_;
 
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];
@@ -2049,10 +2049,14 @@ std::string sideName(const xanadu::LinkSide side) {
 void LinkBeams::describe(gleditor::a11y::Builder &into) {
   namespace a11y = gleditor::a11y;
   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>> nodes;
-  std::vector<zigzag::CellRef> onScreen;
+  std::vector<std::uint64_t> onScreen;
   onScreen.reserve(strands.size());
   for (const auto &strand : strands) {
-    onScreen.push_back(static_cast<zigzag::CellRef>(strand.link));
+    // Numbered by the link rather than by its position, so that a link keeps
+    // its identity as others are found and lost around it -- and so that what
+    // comes back names a link this can look up. A store index and a link id
+    // together stay well inside the forty-eight bits a node id leaves.
+    onScreen.push_back(strand.link);
   }
   std::ranges::sort(onScreen);
   const auto repeats = std::ranges::unique(onScreen);
@@ -2070,17 +2074,19 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
   const auto selected    = nullptr != linkContext_ ? linkContext_->selection()
                                                    : gleditor::cpp26::nullopt;
   std::uint64_t nextPart = kLinkPartNodeBase;
-  const auto &table      = session.store().links();
   for (const auto link : onScreen) {
-    const auto found = table.find(link);
+    const auto store = storeOfBeamLink(link);
+    const auto id    = idOfBeamLink(link);
+    if (store >= session.storeCount()) {
+      continue;
+    }
+    const auto &table = session.store(store).links();
+    const auto found  = table.find(id);
     if (table.end() == found) {
       continue;
     }
-    const auto key =
-        linkContext_ != nullptr
-            ? linkContext_->keyOf(link)
-            : xanadu::LinkKey{.authority = session.store().documentId(),
-                              .id        = link};
+    const auto key = xanadu::LinkKey{
+        .authority = session.store(store).documentId(), .id = id};
     nodes.emplace_back(link + 1ULL, xanadu::a11y_node::Link{.key = key});
 
     // One node per link however many strands draw it, so a 2x3 link is one

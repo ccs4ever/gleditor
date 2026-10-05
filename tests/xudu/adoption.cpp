@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/link_layout.hpp"
@@ -176,11 +177,11 @@ TEST(AdoptionTest, theEndInAPublishedDocumentLandsEvenWhenTheOtherIsNotHere) {
   const auto reading = xanadu::adopt(mine, theirs.pub).version;
   const auto notes   = mine.insert(MicroversionId{}, 0, "A private note.");
   Link link;
-  link.type  = LinkType::Comment;
-  link.owner = "me";
-  link.left  = mine.rebuild(notes).spansFor(0, 7);
-  link.right = mine.rebuild(reading).spansFor(0, 30);
-  static_cast<void>(mine.addLink(notes, link));
+  link.type   = LinkType::Comment;
+  link.owner  = "me";
+  link.left   = mine.rebuild(notes).spansFor(0, 7);
+  link.right  = mine.rebuild(reading).spansFor(0, 30);
+  std::ignore = mine.addLink(notes, link);
 
   // Only their document open.
   const std::vector<Version> open{mine.rebuild(reading)};
@@ -293,8 +294,7 @@ TEST(AdoptionTest, aManifestThatDoesNotVerifyIsNotRead) {
   altered.title     = "Something Else";
 
   Store mine;
-  EXPECT_THROW(static_cast<void>(xanadu::adopt(mine, altered)),
-               std::runtime_error);
+  EXPECT_THROW(std::ignore = xanadu::adopt(mine, altered), std::runtime_error);
   EXPECT_EQ(mine.opCount(), 0U) << "and nothing of it was taken in";
 }
 
@@ -316,5 +316,5 @@ TEST(AdoptionTest, aPublicationThatDoesNotSayWhereItsContentIsIsRefused) {
   ASSERT_TRUE(xanadu::verifyPublication(pub));
 
   Store mine;
-  EXPECT_THROW(static_cast<void>(xanadu::adopt(mine, pub)), std::runtime_error);
+  EXPECT_THROW(std::ignore = xanadu::adopt(mine, pub), std::runtime_error);
 }

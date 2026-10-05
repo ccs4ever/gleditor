@@ -12,9 +12,9 @@ description: >-
 # Real work UX validation
 
 The contract is [`design/ux_workflow_real_work.md`](../../../design/ux_workflow_real_work.md):
-sixteen journeys (J1–J16), what counts as reaching each step through the interface, and the evidence
-a pass needs. Read it first. This skill says how to run it. A validation reports what the build
-does; code that looks as if it should work is not a pass.
+seventeen journeys (J1–J17), what counts as reaching each step through the interface, and the
+evidence a pass needs. Read it first. This skill says how to run it. A validation reports what the
+build does; code that looks as if it should work is not a pass.
 
 ## Rules
 
@@ -42,7 +42,7 @@ does; code that looks as if it should work is not a pass.
   `--drag X1,Y1:X2,Y2`, `--right-click X,Y`, `--capture FILE`, `--screenshot FILE` and
   `--dump-a11y`. Prefer `--chord` with the default binding to `--do NAME`; use `--do` only for an
   action whose binding is confirmed in `system://keymap` (run once with
-  `SPDLOG_LEVEL=xudu.keymap=debug`, which logs each binding made and warns about any that do not
+  `SPDLOG_LEVEL=xuzz.keymap=debug`, which logs each binding made and warns about any that do not
   parse), and record the chord. An action with no binding and no control is *No affordance* however
   well `--do` drives it.
 
@@ -56,7 +56,10 @@ does; code that looks as if it should work is not a pass.
   their prompts in a PTY and keep the full input and output transcript. Do not use `-e`, `--store`,
   `--output-store`, a pipe or a prepared source file to complete a journey step. These can be used
   separately to diagnose a finding, but their success is not a journey pass. Check that the answer
-  uses the user's data and that a later prompt can continue the work.
+  uses the user's data and that a later prompt can continue the work. `tools/repl-transcript.py` is
+  that terminal: it runs the program under a PTY, types each line once the last answer has finished,
+  leaves with Ctrl+D and writes the transcript, prompts and echo included. Use it rather than
+  writing another driver.
 
 - **Track every handoff.** For a journey crossing programs, retain the input and output artifacts,
   their source cell identities and record counts at each stage. A manually copied value is not
@@ -78,7 +81,7 @@ a slot is free; the lead stays in the parent agent. Each subagent works in its o
 edits no product code.
 
 1. **Harness engineer (first, alone).** Inventory the automation (`xuzz --help-all`, the script step
-   kinds in `src/renderer.cpp`) against every gesture J1–J16 needs, close the gaps, and prove each
+   kinds in `src/renderer.cpp`) against every gesture J1–J17 needs, close the gaps, and prove each
    new graphical step with a test and a captured frame. Check that terminal sessions can capture
    REPL input and output. Hand the others the list of hands they now have.
 1. **Journey runners (in parallel, one per journey or pair).** Before running, map each step to the

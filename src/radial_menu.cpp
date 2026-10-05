@@ -732,21 +732,19 @@ void RadialMenu::describe(a11y::Builder &into) {
     return;
   }
 
-  constexpr std::uint64_t barId = 0x8000;
-  auto &bar                     = into.add(barId, a11y::Role::Group);
-  bar.label = inSubRadial() ? "Alignment Sub-Menu" : "3D Radial Marking Menu";
-
+  // The group is added after its entries: add() may move every node already
+  // added, so no reference to one is held across another add().
   const auto &actionList = inSubRadial()
                                ? config_.actions[activeParentAction_].subActions
                                : config_.actions;
-
+  std::vector<std::uint64_t> entries;
   for (std::size_t i = 0; i < actionList.size(); ++i) {
     const auto &act   = actionList[i];
     const auto nodeId = 0x8000U + 100U + static_cast<std::uint64_t>(i);
     auto &node        = into.add(nodeId, a11y::Role::Button);
     node.label        = act.desc.empty() ? act.label : act.desc;
     node.actions      = a11y::bit(a11y::Action::Click);
-    bar.children.push_back(into.id(nodeId));
+    entries.push_back(into.id(nodeId));
   }
 
   const auto hubId = 0x8000U + 99U;
@@ -754,8 +752,19 @@ void RadialMenu::describe(a11y::Builder &into) {
   hubNode.label =
       inSubRadial() ? "Back to Main Radial Menu" : "Close Radial Menu";
   hubNode.actions = a11y::bit(a11y::Action::Click);
-  bar.children.push_back(into.id(hubId));
+  entries.push_back(into.id(hubId));
 
+  // A sub-wheel is named for what it holds: File's was once announced as
+  // the alignment wheel, the only one there used to be.
+  constexpr std::uint64_t barId = 0x8000;
+  auto &bar                     = into.add(barId, a11y::Role::Group);
+  if (inSubRadial()) {
+    const auto &parent = config_.actions[activeParentAction_];
+    bar.label = (parent.desc.empty() ? parent.label : parent.desc) + " Menu";
+  } else {
+    bar.label = "3D Radial Marking Menu";
+  }
+  bar.children = std::move(entries);
   into.contribute(into.id(barId));
 }
 

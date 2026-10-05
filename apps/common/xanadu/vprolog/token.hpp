@@ -76,6 +76,7 @@ struct Token {
   SourceLocation loc{};
   std::int64_t intValue{0};
   double floatValue{0.0};
+  // NOLINTLINE
   std::string stringValue;
 
   [[nodiscard]] bool is(TokenKind k) const noexcept { return kind == k; }

@@ -38,12 +38,29 @@ TEST(StoreActivityLogTest, BranchesAndSelectedVisitSurviveReopening) {
     second = log.append({.parent = origin,
                          .target = xanadu::CellSite{document, {}, 21, {0, 3}}});
     log.select(origin);
+    const auto count   = log.allVisits().size();
+    const auto current = log.current();
+    log.reference(first);
+    const auto afterReference = store.opCount();
+    log.reference(first);
+    EXPECT_EQ(store.opCount(), afterReference);
+    log.annotate(second, "Earlier note");
+    log.annotate(second, "Unicode café\nA \"quoted\" branch");
+    EXPECT_EQ(log.allVisits().size(), count);
+    EXPECT_EQ(log.current(), current);
+    const auto afterNote = store.opCount();
+    EXPECT_THROW(log.annotate({999}, "invalid"), std::runtime_error);
+    EXPECT_THROW(log.reference({999}), std::runtime_error);
+    EXPECT_EQ(store.opCount(), afterNote);
   }
   {
     xanadu::Store reopened(scroll);
     reopened.load(directory.string());
     xanadu::StoreActivityLog log(&reopened, directory);
     ASSERT_EQ(log.current(), origin);
+    EXPECT_TRUE(log.referenced(first));
+    EXPECT_FALSE(log.referenced(second));
+    EXPECT_EQ(log.annotation(second), "Unicode café\nA \"quoted\" branch");
     EXPECT_EQ(log.children(origin),
               (std::vector<xanadu::VisitId>{first, second}));
     ASSERT_TRUE(log.find(first));

@@ -4,6 +4,7 @@
 #include <array>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 
 namespace gleditor {
 namespace {
@@ -17,9 +18,9 @@ TEST(Cpp26SpanTest, ChecksBoundsAndPreservesElementReferences) {
 
   const std::span<const int> dynamic{values};
   EXPECT_EQ(cpp26::span_at(dynamic, 2), 6);
-  EXPECT_THROW(static_cast<void>(cpp26::span_at(dynamic, dynamic.size())),
+  EXPECT_THROW(std::ignore = cpp26::span_at(dynamic, dynamic.size()),
                std::out_of_range);
-  EXPECT_THROW(static_cast<void>(cpp26::span_at(std::span<const int>{}, 0)),
+  EXPECT_THROW(std::ignore = cpp26::span_at(std::span<const int>{}, 0),
                std::out_of_range);
 }
 

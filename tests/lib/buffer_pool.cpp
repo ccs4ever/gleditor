@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <gmock/gmock.h>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "mocks/device.hpp"
@@ -462,8 +463,7 @@ TEST_F(BufferPoolTest, aReleasedAllocationIsNoLongerAddressable) {
 
   // Handles are never reissued, so using one after releasing it is caught
   // rather than quietly addressing somebody else's rows.
-  EXPECT_THROW(static_cast<void>(pool.byteOffset(alloc)),
-               std::invalid_argument);
+  EXPECT_THROW(std::ignore = pool.byteOffset(alloc), std::invalid_argument);
   EXPECT_THROW(pool.resize(alloc, 20), std::invalid_argument);
   EXPECT_NE(pool.reserve(10), alloc);
   // Releasing twice is not an error, though: it is what a holder does when it

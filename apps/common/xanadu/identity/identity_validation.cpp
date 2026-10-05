@@ -611,10 +611,6 @@ std::optional<std::uint64_t>
 HashcashEngine::mint(std::string_view resource, std::uint64_t timestamp,
                      std::uint8_t targetDifficultyBits,
                      std::uint64_t maxIterations) {
-  if (targetDifficultyBits > 256) {
-    return std::nullopt;
-  }
-
   for (std::uint64_t nonce = 0; nonce < maxIterations; ++nonce) {
     const auto digest = computeDigest(resource, timestamp, nonce);
     if (countLeadingZeroBits(digest) >= targetDifficultyBits) {

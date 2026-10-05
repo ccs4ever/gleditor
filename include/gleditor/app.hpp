@@ -129,7 +129,9 @@ public:
    *
    * @return Whether anything was bound.
    */
-  [[nodiscard]] bool dispatch(int scancode, Mod mods) const;
+  [[nodiscard]] bool
+  dispatch(int scancode, Mod mods,
+           const std::function<bool(std::string_view)> &permit = {}) const;
 
   /**
    * @brief Run the command called @p name.
@@ -234,6 +236,18 @@ void addCommonArguments(argparse::ArgumentParser &parser, bool detailed);
  */
 std::vector<AppState::AutomationStep>
 readAutomationScript(int argc, const char *const *argv);
+
+/**
+ * @brief Whether the parsed options ask for anything only a drawn frame gives.
+ *
+ * A scripted step, a screenshot, an accessibility dump, a benchmark or
+ * recorded frames. A program with a windowless batch path asks this before
+ * taking it, since that path would otherwise drop them without a word and
+ * exit 0.
+ *
+ * @param parser A parser addCommonArguments() registered and that has parsed.
+ */
+[[nodiscard]] bool wantsFrames(const argparse::ArgumentParser &parser);
 
 /**
  * @brief Apply the parsed common options to @p state.

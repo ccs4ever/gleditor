@@ -1,7 +1,7 @@
 /**
  * @file xudu-multimodal-demo.cpp
  * @brief Demonstration tool rendering xudu loading a test PDF linked to
- *        a text document with transclusion beams, an AudioWidget playing white
+ *        a text document with transclusion beams, a media widget playing white
  *        noise, and a MediaWidget playing sample video.
  */
 #include <algorithm>
@@ -24,8 +24,6 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <gleditor/app.hpp>
-#include <gleditor/audio.hpp>
-#include <gleditor/audio_widget.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/media.hpp>
@@ -45,7 +43,6 @@
 #include "xudu/session.hpp"
 
 namespace fs = std::filesystem;
-using gleditor::AudioWidget;
 using gleditor::FileTextSource;
 using gleditor::MediaPlayer;
 using gleditor::MediaResource;
@@ -164,7 +161,7 @@ int main(int argc, char **argv) {
   audioPlayer->load(audioResource);
   audioPlayer->play();
 
-  auto audioWidget = std::make_shared<AudioWidget>("Sans 12", audioPlayer);
+  auto audioWidget = std::make_shared<MediaWidget>("Sans 12", audioPlayer);
   audioWidget->setTitle("Audio: Synthetic White Noise (48 kHz)");
   audioWidget->setSize(560.0f, 160.0f);
   audioWidget->setScreenPosition(1300.0f, 650.0f);
@@ -186,7 +183,7 @@ int main(int argc, char **argv) {
   videoWidget->setScreenPosition(80.0f, 650.0f);
   videoWidget->setVisible(true);
 
-  std::cout << "  [4/4] Embedded AudioWidget and MediaWidget created\n";
+  std::cout << "  [4/4] Embedded audio and video media widgets created\n";
 
   // Attach LinkBeams & Widgets to Renderer
   renderer->addFrameContributor(session->linkBeams());
@@ -220,7 +217,7 @@ int main(int argc, char **argv) {
       // Scene 1: Overview of PDF + Text + Hypermedia Beams
       state->fov = 11.5f;
     } else if (timeSec < 8.0f) {
-      // Scene 2: Focus / Dolly onto AudioWidget playing white noise
+      // Scene 2: Focus / Dolly onto the audio widget playing white noise
       const float t = (timeSec - 4.0f) / 4.0f;
       state->fov    = 11.5f - 2.5f * std::sin(t * std::numbers::pi_v<float>);
     } else if (timeSec < 11.0f) {

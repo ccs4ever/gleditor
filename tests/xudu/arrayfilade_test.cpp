@@ -15,18 +15,18 @@
 
 namespace {
 
+using gleditor::enfilade::DisplacementMonoid;
+using gleditor::enfilade::EnfiladeAction;
+using gleditor::enfilade::WidthMonoid;
 using xanadu::ValueKind;
 using xanadu::enfilade::ArrayCellEntry;
 using xanadu::enfilade::ArrayDsp;
 using xanadu::enfilade::Arrayfilade;
 using xanadu::enfilade::ArrayWid;
-using xanadu::enfilade::DisplacementMonoid;
-using xanadu::enfilade::EnfiladeAction;
 using xanadu::enfilade::MaxValence;
 using xanadu::enfilade::Predicate;
 using xanadu::enfilade::PredicateOp;
 using xanadu::enfilade::QueryPlanStats;
-using xanadu::enfilade::WidthMonoid;
 using zigzag::ArenaManifold;
 using zigzag::DimVector;
 

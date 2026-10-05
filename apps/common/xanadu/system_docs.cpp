@@ -969,6 +969,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Put the selected link away",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+D"}}}}},
+        {.name    = std::string(settings::kKeymapWalks),
+         .notes   = "Browse saved walks, references and notes without moving",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+W"}}}}},
         {.name    = std::string(settings::kKeymapActivityBack),
          .notes   = "Return to the previous visit, not the previous version",
          .schemas = {{.expectedTypes = {"string"},
@@ -1178,6 +1182,70 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Shortcut to insert manual page break",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Return"}}}}},
+        {.name    = std::string(settings::kKeymapFormatItalic),
+         .notes   = "Italicise the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+I"}}}}},
+        {.name    = std::string(settings::kKeymapFormatBold),
+         .notes   = "Embolden the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+B"}}}}},
+        {.name    = std::string(settings::kKeymapFormatUnderline),
+         .notes   = "Underline the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+U"}}}}},
+        {.name    = std::string(settings::kKeymapFormatOverline),
+         .notes   = "Overline the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+O"}}}}},
+        {.name    = std::string(settings::kKeymapFormatStrikethrough),
+         .notes   = "Strike through the selection",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+X"}}}}},
+        {.name    = std::string(settings::kKeymapFormatSuperscript),
+         .notes   = "Raise the selection to a superscript",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Up"}}}}},
+        {.name    = std::string(settings::kKeymapFormatSubscript),
+         .notes   = "Lower the selection to a subscript",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Down"}}}}},
+        {.name    = std::string(settings::kKeymapAlignLeft),
+         .notes   = "Align the selected paragraphs left",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+L"}}}}},
+        {.name    = std::string(settings::kKeymapAlignCentre),
+         .notes   = "Centre the selected paragraphs",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+E"}}}}},
+        {.name    = std::string(settings::kKeymapAlignRight),
+         .notes   = "Align the selected paragraphs right",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+R"}}}}},
+        {.name    = std::string(settings::kKeymapAlignJustify),
+         .notes   = "Justify the selected paragraphs",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+J"}}}}},
+        {.name    = std::string(settings::kKeymapStoreManager),
+         .notes   = "Show or hide the store object manager",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+M"}}}}},
+        {.name    = std::string(settings::kKeymapViewModeCycle),
+         .notes   = "Cycle the view mode: unified, xanadoc only, ZigZag only",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+V"}}}}},
+        {.name    = std::string(settings::kKeymapViewUnified),
+         .notes   = "Show xanadocs and ZigZag together",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+U"}}}}},
+        {.name    = std::string(settings::kKeymapViewXanadocOnly),
+         .notes   = "Show xanadocs only, ZigZag suspended",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+X"}}}}},
+        {.name    = std::string(settings::kKeymapViewZigzagOnly),
+         .notes   = "Show ZigZag only",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+Z"}}}}},
         {.name    = std::string(settings::kKeymapHypertimeMap),
          .notes   = "Shortcut to toggle hypertime map",
          .schemas = {{.expectedTypes = {"string"},
@@ -1365,7 +1433,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapSaveStore),
          .notes   = "Shortcut to save current slice to sovereign store",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+Shift+S"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Alt+Shift+S"}}}}},
 
         // Xuzz Zigzag Presentation Actions
         {.name    = std::string(settings::kKeymapZigzagTogglePalette),
@@ -1555,7 +1623,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
       "- d.alternates: alternative schema shape choices (posward between blank "
       "cells)\n"
       "- d.default: default value cell (posward from each schema type clone)";
-  cur      = store.setCellText(cur, store.homeCell(), kHomeDesc, &manifold);
+  cur      = store.setCellText(cur, store.homeCell(), kHomeDesc);
   manifold = store.rebuildManifold(cur);
 
   // Mint store-level notes cell off home along +d.notes
@@ -1569,7 +1637,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const auto noteRef = store.cellRefOf(cur);
     manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
-                        noteRef, &manifold);
+                        noteRef);
     manifold = store.rebuildManifold(cur);
   }
 
@@ -1581,7 +1649,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
     cur                      = store.setLink(cur, store.homeCell(), groupsDim,
-                                             zigzag::DimVector::POS, emptyGroupRef, &manifold);
+                                             zigzag::DimVector::POS, emptyGroupRef);
     manifold                 = store.rebuildManifold(cur);
   }
 
@@ -1596,8 +1664,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
       cur             = store.makeCell(cur, typeStr);
       const auto cell = store.cellRefOf(cur);
       manifold        = store.rebuildManifold(cur);
-      cur = store.setLink(cur, prev, schemasDim, zigzag::DimVector::POS, cell,
-                          &manifold);
+      cur = store.setLink(cur, prev, schemasDim, zigzag::DimVector::POS, cell);
       manifold = store.rebuildManifold(cur);
       prev     = cell;
     }
@@ -1608,24 +1675,19 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
 }
 
 MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
-                             const SettingSpec &spec,
-                             const zigzag::Manifold *const known) {
+                             const SettingSpec &spec) {
   auto cur = resolveStartingVersion(store, parent);
   if (store.homeCell() == zigzag::noCell) {
     cur = initializeSystemStoreGenesis(store, SystemDocKind::Layout, cur);
   }
 
   std::optional<zigzag::Manifold> folded;
-  if (known == nullptr) {
+  if (const auto act = store.manifoldAt(cur)) {
+    folded = **act;
+  } else {
     folded = store.rebuildManifold(cur);
   }
-  // folded is unconditionally assigned just above whenever known == nullptr
-  // (the only time this branch is taken), and rebuildManifold() never
-  // returns an empty optional.
-  zigzag::Manifold localM =
-      (known != nullptr)
-          ? *known
-          : folded.value(); // NOLINT(bugprone-unchecked-optional-access)
+  zigzag::Manifold localM   = folded.value();
   const auto varsDim        = getOrMakeDim(store, cur, localM, kDimVars);
   const auto valuesDim      = getOrMakeDim(store, cur, localM, kDimValues);
   const auto groupsDim      = getOrMakeDim(store, cur, localM, kDimGroups);
@@ -1666,7 +1728,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       folded                  = store.rebuildManifold(cur);
       m                       = &folded.value();
       cur = store.setLink(cur, lastTopGroup, groupsDim, zigzag::DimVector::POS,
-                          topGroupCell, m);
+                          topGroupCell);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
     }
@@ -1689,10 +1751,10 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
         m                     = &folded.value();
         if (firstChild == zigzag::noCell) {
           cur = store.setLink(cur, currentGroup, subgroupsDim,
-                              zigzag::DimVector::POS, matchedSub, m);
+                              zigzag::DimVector::POS, matchedSub);
         } else {
           cur = store.setLink(cur, lastSub, groupsDim, zigzag::DimVector::POS,
-                              matchedSub, m);
+                              matchedSub);
         }
         folded       = store.rebuildManifold(cur);
         m            = &folded.value();
@@ -1708,7 +1770,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   folded                = store.rebuildManifold(cur);
   m                     = &folded.value();
   cur    = store.setLink(cur, lastMasterVar, varsDim, zigzag::DimVector::POS,
-                         masterCell, m);
+                         masterCell);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
 
@@ -1721,11 +1783,11 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   folded               = store.rebuildManifold(cur);
   m                    = &folded.value();
   cur    = store.setLink(cur, lastGroupVar, varsDim, zigzag::DimVector::POS,
-                         cloneRef, m);
+                         cloneRef);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
   cur    = store.setLink(cur, masterCell, cloneDim, zigzag::DimVector::POS,
-                         cloneRef, m);
+                         cloneRef);
   folded = store.rebuildManifold(cur);
   m      = &folded.value();
 
@@ -1736,7 +1798,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
     folded             = store.rebuildManifold(cur);
     m                  = &folded.value();
     cur    = store.setLink(cur, masterCell, notesDim, zigzag::DimVector::POS,
-                           noteRef, m);
+                           noteRef);
     folded = store.rebuildManifold(cur);
     m      = &folded.value();
   }
@@ -1759,10 +1821,10 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
 
     if (s == 0) {
       cur = store.setLink(cur, masterCell, schemasDim, zigzag::DimVector::POS,
-                          blankRef, m);
+                          blankRef);
     } else {
       cur = store.setLink(cur, prevBlank, altsDim, zigzag::DimVector::POS,
-                          blankRef, m);
+                          blankRef);
     }
     folded    = store.rebuildManifold(cur);
     m         = &folded.value();
@@ -1777,7 +1839,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       m                    = &folded.value();
 
       cur           = store.setLink(cur, prevTypeClone, schemasDim,
-                                    zigzag::DimVector::POS, typeRef, m);
+                                    zigzag::DimVector::POS, typeRef);
       folded        = store.rebuildManifold(cur);
       m             = &folded.value();
       prevTypeClone = typeRef;
@@ -1786,7 +1848,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
       if (const auto protoCell =
               findPrototypeCell(*m, schemasDim, typeName, reader)) {
         cur = store.setLink(cur, *protoCell, cloneDim, zigzag::DimVector::POS,
-                            typeRef, m);
+                            typeRef);
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
       }
@@ -1798,7 +1860,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
         cur    = store.setLink(cur, typeRef, defaultDim, zigzag::DimVector::POS,
-                               defValRef, m);
+                               defValRef);
         folded = store.rebuildManifold(cur);
         m      = &folded.value();
       }
@@ -1813,8 +1875,8 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
     cur    = makeValueCell(store, cur, val, valRef);
     folded = store.rebuildManifold(cur);
     m      = &folded.value();
-    cur = store.setLink(cur, prevVal, valuesDim, zigzag::DimVector::POS, valRef,
-                        m);
+    cur =
+        store.setLink(cur, prevVal, valuesDim, zigzag::DimVector::POS, valRef);
     folded  = store.rebuildManifold(cur);
     m       = &folded.value();
     prevVal = valRef;
@@ -1845,6 +1907,7 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
   const std::string p2 = defaultSystemDocNotes(kind);
 
   MicroversionId cur{};
+  cur = store.makeXanadoc(cur, systemDocName(kind));
   cur = store.insert(cur, 0, p1);
 
   const auto p1Size = static_cast<std::uint32_t>(p1.size());
@@ -2330,8 +2393,7 @@ bool SystemStoreModel::validate(const SettingSchema &schema,
 MicroversionId
 SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
                                 const std::string_view name,
-                                const std::span<const CellValue> values,
-                                const zigzag::Manifold *const known) {
+                                const std::span<const CellValue> values) {
   const auto curVer = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model  = fromStore(store, curVer);
   const auto entry  = model.find(name);
@@ -2347,14 +2409,12 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
   }
 
   std::optional<zigzag::Manifold> folded;
-  if (known == nullptr) {
+  if (const auto act = store.manifoldAt(curVer)) {
+    folded = **act;
+  } else {
     folded = store.rebuildManifold(curVer);
   }
-  // folded is populated in exactly the branch where the ternary below reads
-  // it (known == nullptr), so .value() can't actually throw here -- the
-  // analyzer just can't correlate the two conditions.
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  const zigzag::Manifold *m = (known != nullptr) ? known : &folded.value();
+  const zigzag::Manifold *m = &folded.value();
   const auto &reader        = static_cast<const SpanReader &>(store);
   const auto valuesDim      = m->dimensionNamed(kDimValues, reader);
 
@@ -2364,13 +2424,13 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       const auto c  = entry->value.valueCells[i];
       const auto &v = values[i];
       if (std::holds_alternative<double>(v)) {
-        cur = store.setScalar(cur, c, std::get<double>(v), m);
+        cur = store.setScalar(cur, c, std::get<double>(v));
       } else if (std::holds_alternative<std::int64_t>(v)) {
-        cur = store.setScalar(cur, c, std::get<std::int64_t>(v), m);
+        cur = store.setScalar(cur, c, std::get<std::int64_t>(v));
       } else if (std::holds_alternative<bool>(v)) {
-        cur = store.setScalar(cur, c, std::get<bool>(v), m);
+        cur = store.setScalar(cur, c, std::get<bool>(v));
       } else {
-        cur = store.setCellText(cur, c, std::get<std::string>(v), m);
+        cur = store.setCellText(cur, c, std::get<std::string>(v));
       }
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
@@ -2389,8 +2449,8 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
       cur    = makeValueCell(store, cur, v, valRef);
       folded = store.rebuildManifold(cur);
       m      = &folded.value();
-      cur = store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS, valRef,
-                          m);
+      cur =
+          store.setLink(cur, prev, *valuesDim, zigzag::DimVector::POS, valRef);
       prev = valRef;
     }
   }
@@ -2398,10 +2458,9 @@ SystemStoreModel::updateSetting(Store &store, const MicroversionId &parent,
   return cur;
 }
 
-MicroversionId
-SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
-                                 const std::string_view name,
-                                 const zigzag::Manifold *const known) {
+MicroversionId SystemStoreModel::resetToDefault(Store &store,
+                                                const MicroversionId &parent,
+                                                const std::string_view name) {
   auto curVer      = parent.isZero() ? store.primaryCurrentVersion() : parent;
   const auto model = fromStore(store, curVer);
   const auto entry = model.find(name);
@@ -2414,7 +2473,7 @@ SystemStoreModel::resetToDefault(Store &store, const MicroversionId &parent,
     return curVer;
   }
   return updateSetting(store, curVer, name,
-                       entry->schema.alternatives[0].defaultValues, known);
+                       entry->schema.alternatives[0].defaultValues);
 }
 
 std::vector<CellValue> getSetting(const Store &store,
@@ -2425,15 +2484,13 @@ std::vector<CellValue> getSetting(const Store &store,
 
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
                           const std::string_view name,
-                          const std::span<const CellValue> values,
-                          const zigzag::Manifold *const known) {
-  return SystemStoreModel::updateSetting(store, parent, name, values, known);
+                          const std::span<const CellValue> values) {
+  return SystemStoreModel::updateSetting(store, parent, name, values);
 }
 
 MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
-                                     const std::string_view name,
-                                     const zigzag::Manifold *const known) {
-  return SystemStoreModel::resetToDefault(store, parent, name, known);
+                                     const std::string_view name) {
+  return SystemStoreModel::resetToDefault(store, parent, name);
 }
 
 // -----------------------------------------------------------------------------
@@ -2507,6 +2564,23 @@ constexpr ActionAlias kActionAliases[] = {
     {.legacy = "pouch-drop-left", .canonical = "std:xudu/pouch_drop_left"},
     {.legacy = "pouch-drop-right", .canonical = "std:xudu/pouch_drop_right"},
     {.legacy = "forge-clasp", .canonical = "std:xudu/forge_clasp"},
+    {.legacy = "format-bold", .canonical = "std:xudu/format_bold"},
+    {.legacy = "format-italic", .canonical = "std:xudu/format_italic"},
+    {.legacy = "format-underline", .canonical = "std:xudu/format_underline"},
+    {.legacy    = "format-strikethrough",
+     .canonical = "std:xudu/format_strikethrough"},
+    {.legacy    = "format-superscript",
+     .canonical = "std:xudu/format_superscript"},
+    {.legacy = "format-subscript", .canonical = "std:xudu/format_subscript"},
+    {.legacy = "format-overline", .canonical = "std:xudu/format_overline"},
+    {.legacy    = "store-manager-toggle",
+     .canonical = "std:xuzz/store_manager_toggle"},
+    {.legacy = "save-document", .canonical = "std:xudu/save"},
+    {.legacy = "std:xudu/save_document", .canonical = "std:xudu/save"},
+    {.legacy = "export-osmic", .canonical = "std:xudu/export_osmic"},
+    {.legacy = "insert-break", .canonical = "std:xudu/page_break"},
+    {.legacy = "std:xudu/insert_break", .canonical = "std:xudu/page_break"},
+    {.legacy = "clear-bench", .canonical = "std:xudu/clear_bench"},
 
     // Zigzag Visualizer & Pure Vortex Actions
     {.legacy    = "view-mode-content-1",
@@ -2845,7 +2919,7 @@ gleditor::RadialConfig createDefaultRadialConfig() {
 
   auto alignAction =
       makeAction("group:align", "Align", "=", "subwheel:alignment");
-  alignAction.desc       = "Alignment Sub-Menu";
+  alignAction.desc       = "Alignment";
   alignAction.subActions = {
       makeAction("align:left", "Left", "|<", "align:left"),
       makeAction("align:centre", "Centre", "><", "align:centre"),
@@ -2856,13 +2930,27 @@ gleditor::RadialConfig createDefaultRadialConfig() {
   // Entries naming a keymap action run it, so a menu and a key reach the
   // same command and neither can drift from the other.
   auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
-  fileAction.desc = "New and Open";
+  fileAction.desc = "File";
   fileAction.subActions = {
       makeAction("run:std:xudu/new_doc", "New xanadoc", "+",
                  "run:std:xudu/new_doc"),
       makeAction("run:std:xuzz/new_slice", "New slice", "#",
                  "run:std:xuzz/new_slice"),
       makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
+      makeAction("run:std:xudu/close", "Close document", "X",
+                 "run:std:xudu/close"),
+  };
+
+  auto viewAction = makeAction("group:view", "View", "V", "subwheel:view");
+  viewAction.desc = "View Mode";
+  viewAction.subActions = {
+      makeAction("run:std:xuzz/walks", "Walks", "W", "run:std:xuzz/walks"),
+      makeAction("run:std:xuzz/view_unified", "Unified", "U",
+                 "run:std:xuzz/view_unified"),
+      makeAction("run:std:xuzz/view_xanadoc", "Xanadocs only", "X",
+                 "run:std:xuzz/view_xanadoc"),
+      makeAction("run:std:xuzz/view_zigzag", "ZigZag only", "Z",
+                 "run:std:xuzz/view_zigzag"),
   };
 
   cfg.actions = {
@@ -2873,7 +2961,11 @@ gleditor::RadialConfig createDefaultRadialConfig() {
       makeAction("format:superscript", "Superscript", "X²",
                  "format:superscript"),
       makeAction("format:subscript", "Subscript", "X₂", "format:subscript"),
+      makeAction("format:overline", "Overline", "Ō", "format:overline"),
+      makeAction("format:strikethrough", "Strikethrough", "-S-",
+                 "format:strikethrough"),
       std::move(alignAction),
+      std::move(viewAction),
       makeAction("op:pagebreak", "Page Break", "--", "op:pagebreak"),
       makeAction("op:transclude", "Transclude", "[]", "op:transclude"),
       makeAction("info:author", "Author", "@", "info:author"),
@@ -3013,7 +3105,7 @@ MicroversionId addPouchZone(Store &store, const MicroversionId &parent,
                                      static_cast<std::int64_t>(spec.auraColor),
                                      static_cast<double>(spec.heightWeight)}}},
   };
-  cur = ensureSetting(store, cur, sspec, nullptr);
+  cur = ensureSetting(store, cur, sspec);
   if (cellOut != nullptr) {
     const auto m       = store.rebuildManifold(cur);
     const auto &reader = static_cast<const SpanReader &>(store);

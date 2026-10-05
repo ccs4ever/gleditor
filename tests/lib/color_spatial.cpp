@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <tuple>
 
 #include <gleditor/color.hpp>
 #include <gleditor/spatial.hpp>
@@ -82,9 +83,9 @@ TEST(ColorTest, toHexAndFromHex) {
   const std::string hex  = gleditor::color::toHex(text);
   EXPECT_EQ(gleditor::color::fromHex(hex), text);
 
-  EXPECT_THROW(static_cast<void>(gleditor::color::fromHex("odd")),
+  EXPECT_THROW(std::ignore = gleditor::color::fromHex("odd"),
                std::runtime_error);
-  EXPECT_THROW(static_cast<void>(gleditor::color::fromHex("zz")),
+  EXPECT_THROW(std::ignore = gleditor::color::fromHex("zz"),
                std::runtime_error);
 }
 

@@ -32,23 +32,24 @@ std::optional<xanadu::LinkKey> keyNamed(const xanadu::NavigationCommand &c) {
 
 } // namespace
 
-void LinkContext::setCandidates(const std::vector<zigzag::CellRef> &linkIds) {
-  std::vector<xanadu::LinkKey> keys;
-  keys.reserve(linkIds.size());
-  for (const auto id : linkIds) {
-    keys.push_back(keyOf(id));
-  }
-  navigator.setCandidates(std::move(keys));
-}
-
-xanadu::LinkKey LinkContext::keyOf(const zigzag::CellRef id) const {
-  return {.authority = session.store().documentId(), .id = id};
+xanadu::LinkKey LinkContext::keyOf(const std::size_t store,
+                                   const zigzag::CellRef id) const {
+  return {.authority = session.store(store).documentId(), .id = id};
 }
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
 LinkContext::resolve(const xanadu::LinkKey &key) const {
-  const auto &primary = session.store();
-  if (key.authority != primary.documentId()) {
+  // Any open store, not only the primary: a resumed session reopens the
+  // stores it was reading as auxiliaries of the default one, and a link
+  // selected in one of them must still resolve there.
+  const xanadu::Store *authority = nullptr;
+  for (std::size_t i = 0; i < session.storeCount(); ++i) {
+    if (session.store(i).documentId() == key.authority) {
+      authority = &session.store(i);
+      break;
+    }
+  }
+  if (nullptr == authority) {
     return std::unexpected(xanadu::LinkQueryError::LinkNotFound);
   }
   std::vector<xanadu::DocumentView> documents;
@@ -67,7 +68,7 @@ LinkContext::resolve(const xanadu::LinkKey &key) const {
                      .manifold = *manifold,
                      .cells    = everyCell});
   }
-  return xanadu::resolveLinkOccurrences(primary, key.id, documents, cells);
+  return xanadu::resolveLinkOccurrences(*authority, key.id, documents, cells);
 }
 
 std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
@@ -163,10 +164,13 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
 
   auto result = navigator.dispatch(command);
   if (!result) {
+    refused = result.error();
+    ++changes;
     GLEDITOR_LOG_DEBUG("xudu.links", "link command '{}' refused: {}",
                        xanadu::name(command), xanadu::name(result.error()));
     return result;
   }
+  refused.reset();
   apply(*result);
   return result;
 }
@@ -200,8 +204,9 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
   }
 }
 
-void LinkContext::restoreCurrentSelection() {
-  if (auto effect = navigator.restoreCurrentSelection()) apply(*effect);
+void LinkContext::restoreSelection(const xanadu::LinkVisitContext &saved) {
+  refused.reset();
+  if (auto effect = navigator.restoreSelection(saved)) apply(*effect);
 }
 
 std::optional<xanadu::OccurrenceSite> LinkContext::originSite() const {
@@ -239,6 +244,21 @@ std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
           return "a closed version, " + bytes;
         } else {
           return "cell " + std::to_string(at.cell) + ", " + bytes;
+        }
+      },
+      site);
+}
+
+bool LinkContext::canFocus(const xanadu::OccurrenceSite &site) const {
+  return std::visit(
+      [this]<typename Site>(const Site &at) {
+        if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
+          return static_cast<bool>(focusDocument) &&
+                 viewIndexOf(at).has_value();
+        } else {
+          return static_cast<bool>(focusCell) && manifold &&
+                 at.store == session.store(manifoldStoreIndex).documentId() &&
+                 manifold->contains(at.cell);
         }
       },
       site);

@@ -322,6 +322,11 @@ bool UserPermascroll::flush() {
   return spool_.flush();
 }
 
+bool UserPermascroll::refresh() {
+  std::scoped_lock lock(appendMutex_);
+  return spool_.refreshActiveSegment();
+}
+
 // -- PermascrollRegistry -----------------------------------------------------
 
 PermascrollRegistry &PermascrollRegistry::instance() {

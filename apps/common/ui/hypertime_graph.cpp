@@ -867,7 +867,7 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
   return false;
 }
 
-void HypertimeGraph::toggleComparison(const MicroversionId &id) {
+HypertimeGraph *HypertimeGraph::toggleComparison(const MicroversionId &id) {
   const auto it = std::ranges::find(comparedVersions_, id);
   if (it != comparedVersions_.end()) {
     comparedVersions_.erase(it);
@@ -876,12 +876,14 @@ void HypertimeGraph::toggleComparison(const MicroversionId &id) {
   }
   diffNeedsUpdate_ = true;
   revision_++;
+  return this;
 }
 
-void HypertimeGraph::clearComparison() {
+HypertimeGraph *HypertimeGraph::clearComparison() {
   comparedVersions_.clear();
   diffNeedsUpdate_ = true;
   revision_++;
+  return this;
 }
 
 void HypertimeGraph::describe(gleditor::a11y::Builder &into) {

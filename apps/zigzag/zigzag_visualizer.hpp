@@ -136,7 +136,8 @@ public:
   // -- gleditor::a11y::Source -----------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return revision_;
+    // Both only grow, so the sum moves whenever either does.
+    return revision_ + keyboardMoves_.load();
   }
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
@@ -159,8 +160,9 @@ public:
                      const xanadu::MicroversionId &version);
   void reloadStoreVersion(const xanadu::MicroversionId &version,
                           zigzag::CellRef newFocus = zigzag::noCell);
-  void setOnOpenQuoteBuilder(std::function<void()> cb) {
+  ZigzagVisualizer *setOnOpenQuoteBuilder(std::function<void()> cb) {
     onOpenQuoteBuilder_ = std::move(cb);
+    return this;
   }
   void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
                      const std::vector<xanadu::Link> &links = {});
@@ -193,12 +195,12 @@ public:
         1, ///< Partial/abbreviated content, fixed-size cells on rigid lattice
   };
 
-  void setViewMode(ViewMode mode);
+  ZigzagVisualizer *setViewMode(ViewMode mode);
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
-  void toggleViewMode();
+  ZigzagVisualizer *toggleViewMode();
 
   /// Xuzz may hide the slice without unbinding its store or losing focus.
-  void setPresentationVisible(bool visible);
+  ZigzagVisualizer *setPresentationVisible(bool visible);
   [[nodiscard]] bool presentationVisible() const noexcept {
     return presentation_visible_;
   }
@@ -206,8 +208,8 @@ public:
   // -- Dimension Bundles ---------------------------------------------------
   using DimensionBundle = zigzag::DimensionBundle;
 
-  void setDimensionBundle(DimensionBundle bundle);
-  void cycleDimensionBundle(bool forward = true);
+  ZigzagVisualizer *setDimensionBundle(DimensionBundle bundle);
+  ZigzagVisualizer *cycleDimensionBundle(bool forward = true);
   [[nodiscard]] DimensionBundle dimensionBundle() const noexcept {
     return dimension_bundle_;
   }
@@ -219,24 +221,24 @@ public:
   }
 
   // -- Vortex Runtime & UI Integration --------------------------------------
-  void attachVortexHost(std::shared_ptr<vortex::VortexHost> host);
+  ZigzagVisualizer *attachVortexHost(std::shared_ptr<vortex::VortexHost> host);
   [[nodiscard]] std::shared_ptr<vortex::VortexHost> vortexHost() noexcept;
-  void ensureVortexHost();
+  ZigzagVisualizer *ensureVortexHost();
   bool dispatchAction(std::string_view actionName);
 
   // -- Opcode & Library Palette HUD -----------------------------------------
-  void togglePalette();
-  void setPaletteVisible(bool visible);
+  ZigzagVisualizer *togglePalette();
+  ZigzagVisualizer *setPaletteVisible(bool visible);
   [[nodiscard]] bool isPaletteVisible() const noexcept {
     return paletteVisible_;
   }
-  void paletteNext();
-  void palettePrev();
+  ZigzagVisualizer *paletteNext();
+  ZigzagVisualizer *palettePrev();
   bool paletteCloneSelectedToFocus();
   bool paletteTranslateVQL(std::string_view query = {});
-  void setPaletteFilter(std::string filter);
-  void paletteInputText(std::string_view text);
-  void paletteBackspace();
+  ZigzagVisualizer *setPaletteFilter(std::string filter);
+  ZigzagVisualizer *paletteInputText(std::string_view text);
+  ZigzagVisualizer *paletteBackspace();
   [[nodiscard]] const std::string &paletteFilter() const noexcept {
     return paletteFilter_;
   }
@@ -279,10 +281,17 @@ public:
    *        bindings it actually has: @p here while ZigZag has the keyboard,
    *        @p elsewhere while another pane does.
    */
-  void setKeyHints(std::string here, std::string elsewhere);
+  ZigzagVisualizer *setKeyHints(std::string here, std::string elsewhere);
   /// Whether ZigZag has the keyboard; always, in a program with no other
   /// pane.
-  void setHasKeyboard(bool has) noexcept { keyboardHere_ = has; }
+  ZigzagVisualizer *setHasKeyboard(bool has) noexcept {
+    // Counted rather than folded into revision_, which the render thread
+    // owns: this is called from the event thread.
+    if (keyboardHere_.exchange(has) != has) {
+      ++keyboardMoves_;
+    }
+    return this;
+  }
 
   // -- Naming and linking cells from the keyboard ---------------------------
   /**
@@ -292,13 +301,13 @@ public:
    * updateFocusCellText() or Escape drops it. The home cell and d.dims keep
    * their names, as updateFocusCellText() already insists.
    */
-  void beginCellEdit();
+  ZigzagVisualizer *beginCellEdit();
   [[nodiscard]] bool isCellEditing() const noexcept { return cellEditing_; }
   [[nodiscard]] const std::string &cellEditText() const noexcept {
     return cellEditText_;
   }
   /// Remember the focused cell as the far end of the next link.
-  void markFocus() noexcept;
+  ZigzagVisualizer *markFocus() noexcept;
   [[nodiscard]] CellID markedCell() const noexcept { return markedCell_; }
   /**
    * @brief Link the focused cell to the marked one along the active X
@@ -309,16 +318,16 @@ public:
   bool linkMarkedAlongX(bool positive);
 
   // -- VQL Command Omnibar --------------------------------------------------
-  void toggleCommandBar();
-  void setCommandBarVisible(bool visible);
+  ZigzagVisualizer *toggleCommandBar();
+  ZigzagVisualizer *setCommandBarVisible(bool visible);
   [[nodiscard]] bool isCommandBarVisible() const noexcept {
     return commandBarVisible_;
   }
-  void commandBarInputChar(char ch);
-  void commandBarInputText(std::string_view text);
-  void commandBarBackspace();
-  void commandBarClear();
-  void setCommandBarText(std::string text);
+  ZigzagVisualizer *commandBarInputChar(char ch);
+  ZigzagVisualizer *commandBarInputText(std::string_view text);
+  ZigzagVisualizer *commandBarBackspace();
+  ZigzagVisualizer *commandBarClear();
+  ZigzagVisualizer *setCommandBarText(std::string text);
   [[nodiscard]] const std::string &commandBarText() const noexcept {
     return commandBarText_;
   }
@@ -341,20 +350,28 @@ public:
   /// One-time script execution
   vortex::VortexHost::ScriptResult executeVQLScript(std::string_view script);
 
+  /// Execute a VPL expression via VortexHost
+  vortex::VortexHost::ScriptResult executeVPL(std::string_view expr);
+
+  /// Execute a logic goal query via VortexHost
+  std::vector<vortex::LogicSolution> executeLogicQuery(std::string_view query);
+
   /// Define and persist a named macro into the sovereign keymap store
   bool defineMacro(std::string_view name, std::string_view vqlExpr,
                    std::string_view keyBinding = {});
 
   /// Apply one validated system-slice snapshot between frames. The store is
   /// never consulted while drawing.
-  void setPresentationConfig(xanadu::ZigzagPresentationConfig config);
+  ZigzagVisualizer *
+  setPresentationConfig(xanadu::ZigzagPresentationConfig config);
   [[nodiscard]] const xanadu::ZigzagPresentationConfig &
   presentationConfig() const noexcept {
     return presentation_config_;
   }
 
   // -- Dual-Continuum Harmonic Depth Tiering --------------------------------
-  void setDepthTier(float baseDepthZ, float opacityMultiplier = 1.0F);
+  ZigzagVisualizer *setDepthTier(float baseDepthZ,
+                                 float opacityMultiplier = 1.0F);
   [[nodiscard]] float depthTier() const noexcept { return depth_tier_; }
   [[nodiscard]] float depthTierOpacity() const noexcept {
     return depth_tier_opacity_;
@@ -362,18 +379,21 @@ public:
 
   /// Place this presentation beside its host document without changing the
   /// manifold's intrinsic neighbourhood coordinates.
-  void setPresentationOrigin(glm::vec3 origin);
+  ZigzagVisualizer *setPresentationOrigin(glm::vec3 origin);
   /// Resolve the exact host-page transform once per frame. A null result keeps
   /// the surface hidden while its host page has not been built yet.
   using PresentationTransformResolver =
       std::function<std::optional<glm::mat4>()>;
-  void
+  ZigzagVisualizer *
   setPresentationTransformResolver(PresentationTransformResolver resolver) {
     presentationTransformResolver_ = std::move(resolver);
+    return this;
   }
   using PresentationOriginResolver = std::function<std::optional<glm::vec3>()>;
-  void setPresentationOriginResolver(PresentationOriginResolver resolver) {
+  ZigzagVisualizer *
+  setPresentationOriginResolver(PresentationOriginResolver resolver) {
     presentationOriginResolver_ = std::move(resolver);
+    return this;
   }
   [[nodiscard]] glm::vec3 presentationOrigin() const noexcept {
     return presentation_origin_;
@@ -402,7 +422,7 @@ public:
                             positive ? DimVector::POS : DimVector::NEG);
   }
   bool deleteFocusCell();
-  void updateFocusCellText(const std::string &text);
+  ZigzagVisualizer *updateFocusCellText(const std::string &text);
   bool saveStore(const std::string &filePath = {}) const;
 
   [[nodiscard]] bool isProtected(CellRef id) const;
@@ -420,7 +440,7 @@ public:
   cellAnchor(CellRef cell) const override;
   /// Show a chosen link occurrence outside the focused neighborhood without
   /// changing the reader's cell focus or recording a visit.
-  void setPreviewCell(std::optional<CellRef> cell);
+  ZigzagVisualizer *setPreviewCell(std::optional<CellRef> cell);
 
   // -- Embedded presentation surface ---------------------------------------
   [[nodiscard]] const Manifold &manifold() const noexcept override {
@@ -438,9 +458,11 @@ public:
       override {
     cellActivationCallback_ = std::move(callback);
   }
-  void setExternInspector(std::function<std::string(CellRef)> inspector) {
+  ZigzagVisualizer *
+  setExternInspector(std::function<std::string(CellRef)> inspector) {
     externInspector_ = std::move(inspector);
     invalidateAccessibility();
+    return this;
   }
   [[nodiscard]] int cellRadius() const noexcept override {
     return scene_.neighborhood_radius;
@@ -551,6 +573,9 @@ private:
   }
 
   void refreshCellLayouts();
+  /// Point the view at the dimensions the home cell links along when it
+  /// links along neither of the current two; see bindXuduStore().
+  void fitViewToHome();
 
   std::string fontName_;
   std::uint64_t revision_{1};
@@ -603,6 +628,7 @@ private:
   std::unique_ptr<gleditor::Canvas> ancillaryCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
+  std::vector<std::pair<CellID, CellID>> drawnEdges_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;
   std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
       pickTargets_;
@@ -622,6 +648,9 @@ private:
   std::string keyHintsHere_;
   std::string keyHintsElsewhere_;
   std::atomic<bool> keyboardHere_{true};
+  /// How often the keyboard changed pane: part of accessibilityRevision(),
+  /// since which pane holds the accessibility focus follows it.
+  std::atomic<std::uint64_t> keyboardMoves_{0};
 
   bool cellEditing_{false};
   /// The text starts selected, as a rename does: the first character typed

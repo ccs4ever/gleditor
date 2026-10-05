@@ -86,9 +86,19 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
 
   AnchorNode anchor = parseAnchorNode();
   std::vector<PathStep> steps;
+  std::vector<BooleanExpr> anchorPredicates;
 
   if (implicitContext) {
     steps.push_back(parsePathStep(false /*requireSlash*/));
+  } else {
+    // Predicates straight after the anchor filter its own cells. They used
+    // to be left unparsed and dropped, so `#[. = "x"]` answered # whatever x
+    // was.
+    while (check(TokenKind::OpenBracket)) {
+      consume(TokenKind::OpenBracket, "Expected '['");
+      anchorPredicates.push_back(parseBooleanExpr());
+      consume(TokenKind::CloseBracket, "Expected ']' after predicate");
+    }
   }
 
   while (check(TokenKind::Slash) || check(TokenKind::Dot)) {
@@ -125,9 +135,10 @@ PathExpression Parser::parsePathExpression(bool allowCloneTail) {
     cloneTail = parseCloneTail();
   }
 
-  return PathExpression{.anchor    = std::move(anchor),
-                        .steps     = std::move(steps),
-                        .cloneTail = std::move(cloneTail)};
+  return PathExpression{.anchor           = std::move(anchor),
+                        .anchorPredicates = std::move(anchorPredicates),
+                        .steps            = std::move(steps),
+                        .cloneTail        = std::move(cloneTail)};
 }
 
 AnchorNode Parser::parseAnchorNode() {
@@ -801,8 +812,19 @@ ValueExpr Parser::parseValueExpr() {
     return ValueExpr{.kind = vTok.stringValue};
   }
   if (check(TokenKind::Identifier) && peekToken().is(TokenKind::OpenParen)) {
-    return ValueExpr{.kind = std::make_shared<FunctionInvocation>(
-                         parseFunctionInvocation())};
+    auto fn = parseFunctionInvocation();
+    if (!check(TokenKind::Slash)) {
+      return ValueExpr{.kind =
+                           std::make_shared<FunctionInvocation>(std::move(fn))};
+    }
+    // A call that a step follows is a path's first step, as it is at the top
+    // of a query: count(find("x")/d.source) counts where the hits came from.
+    PathExpression path{.anchor = AnchorNode{.kind = AnchorKind::Context}};
+    path.steps.push_back(PathStep{.selector = std::move(fn)});
+    while (check(TokenKind::Slash)) {
+      path.steps.push_back(parsePathStep(true /*requireSlash*/));
+    }
+    return ValueExpr{.kind = std::make_shared<PathExpression>(std::move(path))};
   }
 
   // Fallback: PathExpression

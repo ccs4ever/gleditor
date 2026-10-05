@@ -67,6 +67,16 @@ TEST_F(VQLCompilerTest, CompileExecutableStore) {
   EXPECT_EQ(*kind, OpcodeKind::Halt);
 }
 
+// A function the compiler does not know used to compile to nothing, so
+// --engine vortex answered find("x") with an empty result and exit 0.
+TEST_F(VQLCompilerTest, AFunctionWithNoVortexFormIsRefusedByName) {
+  VQLCompiler compiler(*core, *vm);
+  const auto result = compiler.compile(R"(find("x"))", CompilationOptions{});
+  EXPECT_FALSE(result.success);
+  EXPECT_NE(result.errorMessage.find("find()"), std::string::npos)
+      << result.errorMessage;
+}
+
 TEST_F(VQLCompilerTest, CompileLibraryStore) {
   VQLCompiler compiler(*core, *vm);
 

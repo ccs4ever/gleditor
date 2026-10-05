@@ -19,15 +19,18 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include <glm/ext/vector_float2.hpp>
 #include <glm/ext/vector_float3.hpp>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/pick_observer.hpp>
+#include <gleditor/renderer.hpp>
 #include <gleditor/span_decorator.hpp>
 
 #include "common/xanadu/link_panel.hpp"
@@ -40,7 +43,8 @@ namespace xudu {
 
 class LinkPanelOverlay : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
-                         public gleditor::SpanDecorator {
+                         public gleditor::SpanDecorator,
+                         public gleditor::a11y::Source {
 public:
   /// Picking tags from here up are the panel's: its background, then one per
   /// button.
@@ -56,8 +60,9 @@ public:
   using FramingHandler =
       std::function<void(const AnchorPair &, ch::Timeline &)>;
 
-  LinkPanelOverlay(LinkContext &context, Session &session) noexcept
-      : context(context), session(session) {}
+  LinkPanelOverlay(LinkContext &context, Session &session,
+                   RendererRef renderer) noexcept
+      : context(context), session(session), renderer(std::move(renderer)) {}
 
   void setCellHighlighter(CellHighlighter highlighter) {
     cellHighlighter = std::move(highlighter);
@@ -79,6 +84,12 @@ public:
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
 
+  /// The panel's lines and buttons, the same ones it draws.
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
+                     std::string_view value) override;
+
 private:
   /// What the committed geometry and highlights were built from.
   struct Stamp {
@@ -97,6 +108,7 @@ private:
 
   LinkContext &context;
   Session &session;
+  RendererRef renderer;
   xanadu::LinkPanelConfig config;
   std::uint64_t configRevision{1};
 

@@ -176,12 +176,30 @@ multiple discontinuous spans; a stored link does not pair each left member with 
 Links attach to content addresses, so quotations can reveal the same link in another manifestation.
 The Spanfilade indexes span occurrences across documents and cells for transclusion discovery.
 
+Quotations inherit content-addressed formatting from loaded stores, unopened native stores directly
+under `$XDG_DATA_HOME/xudu/xanadocs`, and local store paths remembered in the reader's activity
+history. Unopened authorities are cached for reading without opening tabs or saving their stores;
+loaded authorities take precedence. Changes to `ops.nodes` or `store.tables` refresh a cached
+authority on the next text-source resolution. Toggling a decoration through a quotation loads the
+matching local authority so the edit persists there. Discovery does not yet cover remote authorities
+or stores outside the default directory that the reader has never opened.
+
 Xudu renders explicit links as cyan/magenta ribbons and shared-content transclusions as gold prisms.
 Its beam layout and margin brackets help distinguish dense, overlapping passages. Xuzz's
 `BridgeCoordinator` brings ZigZag cell anchors and an accessibility source into the xudu scene.
 Current beam activation still follows a rendered strand directly; the exact, many-to-many traversal
 interface is described as a proposal in the
 [Xuzz navigation workflow](design/ui_workflow_xuzz_navigation.md).
+
+The link-context branch provides a Walks browser through Alt+Shift+W or the View radial submenu.
+Preview saved visits with the arrow keys, restore with Enter, reference with R, or edit a visit note
+with N. Notes and references persist in the private activity store. Preview and annotation leave the
+current visit and visited stores unchanged. See the
+[Walks validation](design/audit-2026-10-05-ux-walks.md) for evidence and remaining gaps. The
+selected-link panel also exposes Previous/Next link buttons and a Link i/N indicator, so a covered
+identity remains reachable when ribbon bodies coincide. They cycle links from the open reading
+stores, matching Alt+Shift+P/N. See the
+[coincident-link validation](design/audit-2026-10-05-ux-coincident-links.md).
 
 Publication signs an authorship record, seals content and operations for sharing, and can publish
 mutable names through BEP 46. Global spans and operation references map published identities back to
@@ -232,7 +250,7 @@ defines platform-independent nodes; `src/a11y/` sends them through AccessKit to 
 Automation on Windows, and NSAccessibility on macOS. A build without AccessKit still builds the
 internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requires the binding;
 `ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
-for headless inspection.
+for headless inspection, at its place among the other automation options.
 
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2

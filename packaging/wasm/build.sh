@@ -63,14 +63,18 @@ em++ "${EM_FLAGS[@]}" \
   apps/gleditor/main.cpp \
   -o "$OUTPUT_DIR/gleditor.html"
 
-echo "==> Compiling zigzag WebAssembly target..."
-mapfile -t ZIGZAG_SRCS < <(find apps/zigzag/core -name '*.cpp' ! -name 'preflet_fetcher.cpp')
+echo "==> Compiling xuzz WebAssembly target..."
+mapfile -t COMMON_XANADU_SRCS < <(find apps/common/xanadu -name '*.cpp')
+mapfile -t XUDU_SRCS < <(find apps/xudu -maxdepth 1 -name '*.cpp')
+mapfile -t ZIGZAG_SRCS < <(find apps/zigzag -name '*.cpp')
+mapfile -t XUZZ_SRCS < <(find apps/xuzz -name '*.cpp')
 em++ "${EM_FLAGS[@]}" \
   "${LIB_SRCS[@]}" \
+  "${COMMON_XANADU_SRCS[@]}" \
+  "${XUDU_SRCS[@]}" \
   "${ZIGZAG_SRCS[@]}" \
-  apps/zigzag/zigzag_visualizer.cpp \
-  apps/zigzag/main.cpp \
-  -o "$OUTPUT_DIR/zigzag.html"
+  "${XUZZ_SRCS[@]}" \
+  -o "$OUTPUT_DIR/xuzz.html"
 
 # Generate index page
 cat >"$OUTPUT_DIR/index.html" <<'EOF'
@@ -121,9 +125,9 @@ cat >"$OUTPUT_DIR/index.html" <<'EOF'
       <h2>gleditor</h2>
       <p>Plain text GPU editor with HarfBuzz shaping, multi-file navigation, and subpixel quad rendering.</p>
     </a>
-    <a class="card" href="zigzag.html">
-      <h2>zigzag</h2>
-      <p>Project Xanadu Zigzag multidimensional slice visualizer with interactive 3D rank navigation.</p>
+    <a class="card" href="xuzz.html">
+      <h2>xuzz</h2>
+      <p>Project Xanadu hypertext and Zigzag multidimensional hypergrid visualizer and editor.</p>
     </a>
   </div>
 </body>

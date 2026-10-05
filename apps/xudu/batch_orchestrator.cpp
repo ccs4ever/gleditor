@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include <gleditor/app.hpp>
 #include <gleditor/text_source.hpp>
 
 #include "common/xanadu/format.hpp"
@@ -817,12 +818,9 @@ BatchOrchestrator::execute(Session &session,
     }
   }
 
-  const bool hasScript =
-      (parser.is_used("--do") || parser.is_used("--select") ||
-       parser.is_used("--type") || parser.is_used("--key") ||
-       parser.is_used("--click") || parser.is_used("--pick"));
+  const bool needsFrames = gleditor::wantsFrames(parser);
 
-  if (headless && !hasScript) {
+  if (headless && !needsFrames) {
     // Headless export temporarily opens every historical version so span
     // tokens can resolve against them. Those helper views are not a request
     // for a side-by-side presentation: persist one current head for each

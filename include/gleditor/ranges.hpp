@@ -66,6 +66,47 @@ template <std::ranges::forward_range R, typename Pred>
   return *it;
 }
 
+/// The nth element of @p range (0-indexed), by value, or nullopt if @p n is out
+/// of range.
+template <std::ranges::input_range R>
+[[nodiscard]] constexpr auto nthOf(R &&range, const std::size_t n)
+    -> std::optional<std::ranges::range_value_t<R>> {
+  if constexpr (std::ranges::random_access_range<R>) {
+    if (n >= std::ranges::size(range)) {
+      return std::nullopt;
+    }
+    return range[n];
+  } else {
+    auto it             = std::ranges::begin(range);
+    const auto sentinel = std::ranges::end(range);
+    for (std::size_t i = 0; i < n && it != sentinel; ++i) {
+      ++it;
+    }
+    if (it == sentinel) {
+      return std::nullopt;
+    }
+    return *it;
+  }
+}
+
+/// The single element of @p range, or nullopt if the range is empty or contains
+/// more than one element.
+template <std::ranges::input_range R>
+[[nodiscard]] constexpr auto singleOf(R &&range)
+    -> std::optional<std::ranges::range_value_t<R>> {
+  auto it             = std::ranges::begin(range);
+  const auto sentinel = std::ranges::end(range);
+  if (it == sentinel) {
+    return std::nullopt;
+  }
+  auto val = *it;
+  ++it;
+  if (it != sentinel) {
+    return std::nullopt;
+  }
+  return val;
+}
+
 /// A nullable pointer as an optional reference: the bridge for a value that
 /// arrives as a pointer (a parameter, a C API) and meets one that is already
 /// an optional reference, say on the other side of a conditional.

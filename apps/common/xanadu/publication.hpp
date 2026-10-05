@@ -422,6 +422,26 @@ localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls);
 
 /**
+ * @brief Whether @p span, addressed in @p from, can be named in @p into.
+ *
+ * A local span can when both stores read the same permascroll -- the same
+ * bytes at the same offsets. An external one can whenever @p from knows its
+ * scroll, since carrying it registers that scroll in @p into.
+ */
+[[nodiscard]] bool canCarry(const Store &from, const Store &into,
+                            const PrimediaSpan &span);
+
+/**
+ * @brief @p span, addressed in @p from, in @p into's own coordinates: the same
+ *        bytes, so a cell made from it transcludes rather than copies.
+ *
+ * @return Nothing when canCarry() says no. Registers an external scroll in
+ *         @p into, which is a change to @p into.
+ */
+[[nodiscard]] std::optional<PrimediaSpan>
+carrySpan(const Store &from, Store &into, const PrimediaSpan &span);
+
+/**
  * @brief The operation at @p opIndex, named so another machine can read it.
  *
  * globalise() for the op spool. @p sealedAs is the scroll @p store's own

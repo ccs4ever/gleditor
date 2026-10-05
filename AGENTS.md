@@ -4,17 +4,15 @@ A GPU-rendered text editor library (`gleditor`) and the programs built on it. C+
 pkg-config, **no CMake**. Backends: OpenGL, OpenGL ES, and Vulkan when available, from one rendering
 pipeline.
 
-| program                   | what it is                                                                                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/gleditor`           | the plain editor; shares no code with anything Xanadu-related and keeps its own YAML config                                                               |
-| `apps/xudu`               | the xanadoc (xanalogical hypertext) editor                                                                                                                |
-| `apps/zigzag`             | the Project Xanadu ZigZag multidimensional visualizer                                                                                                     |
-| `apps/xuzz`               | xudu and zigzag fused: `apps/xuzz/main.cpp` includes xudu's `main.cpp` under `XUZZ_BUILD`, which enables the Zigzag presentation boundary at compile time |
-| `apps/vquery` / `vqueryc` | VQL query REPL/runner over one or many stores, and the standalone VQL-to-Vortex-bytecode compiler                                                         |
-| `apps/vpl` / `vplc`       | VPL array-language REPL/runner (APL/J syntax, lattice grids), and its compiler                                                                            |
-| `apps/vprolog`            | Prolog REPL over the Vortex/Vlog logic runtime                                                                                                            |
-| `build/xudu-dump`         | reads a store directory or a single `ops.nodes` without the loader; the format-change diffing tool                                                        |
-| `build/xudu-swarm-peer`   | the peer the network-namespace swarm tests drive                                                                                                          |
+| program                   | what it is                                                                                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/gleditor`           | the plain editor; shares no code with anything Xanadu-related and keeps its own YAML config                                                                                       |
+| `apps/xuzz`               | the sovereign unified hypermedia application integrating Xanadu hypertext and ZigZag multidimensional space; `build/xudu` and `build/zigzag` are compatibility symlinks to `xuzz` |
+| `apps/vquery` / `vqueryc` | VQL query REPL/runner over one or many stores, and the standalone VQL-to-Vortex-bytecode compiler                                                                                 |
+| `apps/vpl` / `vplc`       | VPL array-language REPL/runner (APL/J syntax, lattice grids), and its compiler                                                                                                    |
+| `apps/vprolog`            | Prolog REPL over the Vortex/Vlog logic runtime                                                                                                                                    |
+| `build/xudu-dump`         | reads a store directory or a single `ops.nodes` without the loader; the format-change diffing tool                                                                                |
+| `build/xudu-swarm-peer`   | the peer the network-namespace swarm tests drive                                                                                                                                  |
 
 The README is the source of truth for anything not covered here (rendering architecture,
 accessibility, xudu's data model, zigzag's space, SDL2/SDL3 differences); read the relevant section
@@ -103,12 +101,11 @@ xvfb-run -s "-screen 0 1024x768x24" <command>                                   
 xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh                        # 3. both; what compare-backends wants
 ```
 
-That covers `./build/xudu_test --gtest_filter=...`, the common case that bypasses make. `xudu` (and
-therefore `xuzz`) also take `--headless`, which skips window creation entirely and is what
-`tools/create-sample-xanadocs.sh` uses; prefer it when driving them. `zigzag` has no such flag — use
-the environment. If nothing above works for a new tool, add a way (a dummy driver, your own `Xvfb`,
-a `--no-window` flag) rather than opening a window. When visual confirmation is the point, the user
-will say so.
+That covers `./build/xudu_test --gtest_filter=...`, the common case that bypasses make. `xuzz` (and
+the `xudu` / `zigzag` symlinks) also take `--headless`, which skips window creation entirely and is
+what `tools/create-sample-xanadocs.sh` uses; prefer it when driving them. If nothing above works for
+a new tool, add a way (a dummy driver, your own `Xvfb`, a `--no-window` flag) rather than opening a
+window. When visual confirmation is the point, the user will say so.
 
 ### Running them
 
@@ -147,7 +144,7 @@ Xanadu/ZigZag store (`XuzzConvergenceSample`), from `sources/slice_then_xanadoc.
 naming both sizes — a red test, not a working one. Regenerate in the same commit:
 
 ```sh
-make -j$(nproc) xudu
+make -j$(nproc) xuzz
 ./tools/create-sample-xanadocs.sh        # core_hypertext, multimedia, beams, permascroll/, the xuzz sample
 ./tools/create-floating-image-sample.sh  # multimedia/11_floating_image, which the script above deletes
 ```
@@ -247,28 +244,27 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   layout: `FontManager`, `FontFace`, `TextLayout` over HarfBuzz/FreeType/libunibreak/FriBidi),
   `src/render/` (`gl/`, `vulkan/`), `src/a11y/` (AccessKit), `src/enfilade/` (Layoutfilade).
 - `include/gleditor/` — public headers, incl. `text/`, `render/`, `enfilade/`.
-- **`apps/common/xanadu/` — where the xanalogical engine lives.** `apps/xudu/core/` and
-  `apps/zigzag/core/` are one-line forwarding shims (`#include "common/xanadu/x.hpp"` plus
-  `namespace xudu { using namespace ::xanadu; }`); `<xudu/core/store.hpp>` is the include spelling,
-  `apps/common/xanadu/store.cpp` is the file to edit. Editing a `core/` shim is almost always a
-  mistake. Subdirectories: `enfilade/` (Spanfilade, Chronofilade + `EdlTransform`, Holefilade,
-  Arrayfilade — all ephemeral replay products that mint no operations), `identity/` (BEP 10 plugins,
-  Hashcash PoW, network controller), `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`,
-  `zigzag/`.
-- `apps/xudu/` — the editor's own UI: `beams.cpp`, `framing.cpp`, `session.cpp`,
-  `hypertime_graph.cpp`, `bridge_coordinator.cpp`, the overlays, `main.cpp`. **Xudu emits no
-  Structure operations itself** (only `batch_orchestrator.cpp` does); the editor is text-ops only.
-- `apps/zigzag/` — the visualizer. `ZigzagVisualizer` owns a `UnifiedTransclusionEngine` over a
-  `Manifold` and draws from it; the legacy `ZZSpace` is gone from it. `adoptDocument()` takes the
-  projector's `ZzStructureDocument` DTO and mints it as Structure operations via `sliceToStore()`.
-- `apps/xuzz/`, `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
+- **`apps/common/xanadu/` — where the xanalogical engine lives.** `<common/xanadu/store.hpp>` is the
+  include spelling, `apps/common/xanadu/store.cpp` is the file to edit. Subdirectories: `enfilade/`
+  (Spanfilade, Chronofilade + `EdlTransform`, Holefilade, Arrayfilade — all ephemeral replay
+  products that mint no operations), `identity/` (BEP 10 plugins, Hashcash PoW, network controller),
+  `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`, `zigzag/`.
+- `apps/xudu/` — xanadoc UI components: `beams.cpp`, `framing.cpp`, `session.cpp`,
+  `hypertime_graph.cpp`, `bridge_coordinator.cpp`, `views.cpp`, overlays. Emits no Structure
+  operations directly (only `batch_orchestrator.cpp` does); the editor is text-ops only.
+- `apps/zigzag/` — ZigZag visualizer components: `zigzag_visualizer.cpp`,
+  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`.
+- `apps/xuzz/` — sovereign unified application entry point (`main.cpp`, `xuzz_app.cpp`,
+  `cli_parser.cpp`, `view_coordinator.cpp`).
+- `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
 - `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
   any more: the YAML slice format is deleted and every slice is a store.
 - `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/`, `tests/samples/`.
 - `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,
   `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
   `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,
-  `xudu-swarm-peer.cpp`, `code-quality-audit.py`, and the scene/showcase generators.
+  `xudu-swarm-peer.cpp`, `code-quality-audit.py`, `repl-transcript.py` (a REPL driven through a PTY,
+  for the UX journeys), and the scene/showcase generators.
 - `packaging/` (arch, debian, fedora, macos, windows, nix), `design/` (the *why*), `thirdparty/`.
 
 ### The engine's load-bearing types
@@ -325,8 +321,10 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   `d.subgroups`, `d.clone`, `d.notes`, `d.schemas`, `d.alternates`, `d.default`), with schema
   validation and defaults; the heaviest emitter of Structure operations in the tree. Adding a
   setting means adding a `defaultSettingSpecs()` entry, which is easy to skip.
-- `vql/multi_store.hpp` — many stores composed in **one arena** via a `d.stores` rank; foreign cells
-  are re-minted as fresh ephemeral refs. Nothing persistent crosses stores anywhere yet.
+- `multi_store.hpp` — many stores composed in **one arena** via a `d.stores` rank; foreign cells are
+  attached and proxied in the composite arena.
+- `store_loader.hpp` — singular native store loading (`loadStore`) and file import pathways
+  (`importFileStore`).
 - `vortex/vortex_host.hpp` — `promoteAndAttachToStore()` persists a compiled program as real
   Structure operations; the zigzag VQL palette calls it in production.
 
@@ -445,14 +443,14 @@ arises when meaning is hidden in paragraph structure or embedded markup.
 
 ## Sovereign keymap and Vortex governance
 
-- Every key binding in `xudu`, `zigzag` and `xuzz` is defined in `system://keymap`, never hardcoded;
-  binding actions are Vortex calls or registered Vortex routines/macros. `gleditor` is exempt and
-  must share no code or dependency with Xanadu, ZigZag or Xuzz.
+- Every key binding across `xuzz` is defined in `system://keymap`, never hardcoded; binding actions
+  are Vortex calls or registered Vortex routines/macros. `gleditor` is exempt and must share no code
+  or dependency with Xanadu, ZigZag or Xuzz.
 - New C++ must justify why it is not Vortex (hardware/driver interfacing, rendering intrinsics,
   allocator primitives, raw OS events).
 - New Vortex standard-library code reuses existing standard-library functions unless it cannot.
-- Configuration lives in system xanadocs (xudu/xuzz), sovereign-store-backed system slices (zigzag),
-  or gleditor's YAML — no naked magic numbers in algorithms; see
+- Configuration lives in system xanadocs (`system://keymap`, `system://settings`, `system://layout`,
+  `system://ui`, `system://pouches`), or gleditor's YAML — no naked magic numbers in algorithms; see
   `.agents/rules/architectural_governance.md`.
 
 ## Makefile gotchas

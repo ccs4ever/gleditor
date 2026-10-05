@@ -195,7 +195,14 @@ public:
    * number of keystrokes it has had -- so this is fast enough to do on every
    * change and would not be fast enough to do on every frame.
    */
-  [[nodiscard]] Version rebuild(const MicroversionId &version) const;
+  [[nodiscard]] Version rebuild(const MicroversionId &version,
+                                std::uint32_t xanadocBirth = 0) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index,
+                                         std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Carry @p document, which is the document at @p known, forward to
@@ -217,7 +224,8 @@ public:
    *         left untouched, and the caller wants rebuild() instead.
    */
   [[nodiscard]] bool advance(Version &document, const MicroversionId &known,
-                             const MicroversionId &version) const;
+                             const MicroversionId &version,
+                             std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Fast multi-step and branch-aware version advancement.
@@ -226,7 +234,8 @@ public:
    * using the Chronofilade in O(1) amortized time.
    */
   [[nodiscard]] bool advanceTo(Version &document, const MicroversionId &known,
-                               const MicroversionId &version) const;
+                               const MicroversionId &version,
+                               std::uint32_t xanadocBirth = 0) const;
 
   /**
    * @brief Verify R9 compliance: verify that Chronofilade version rebuilding
@@ -234,8 +243,11 @@ public:
    *        from State 0.
    */
   [[nodiscard]] bool
-  verifyAgainstFullRebuild(const MicroversionId &version) const;
-  [[nodiscard]] bool verifyAgainstFullRebuild(std::uint32_t index) const;
+  verifyAgainstFullRebuild(const MicroversionId &version,
+                           std::uint32_t xanadocBirth = 0) const;
+  [[nodiscard]] bool
+  verifyAgainstFullRebuild(std::uint32_t index,
+                           std::uint32_t xanadocBirth = 0) const;
 
   [[nodiscard]] const enfilade::Chronofilade *chronofilade() const noexcept {
     return chronofilade_.get();
@@ -247,7 +259,8 @@ public:
   /// The text of @p version, which is rebuild() followed by materialize().
   /// Content quoted from a torrent this machine cannot reach comes out empty,
   /// so a document is readable even when part of what it points at is not.
-  [[nodiscard]] std::string textOf(const MicroversionId &version) const;
+  [[nodiscard]] std::string textOf(const MicroversionId &version,
+                                   std::uint32_t xanadocBirth = 0) const;
 
   // -- mathematical primedia identity diffing --------------------------------
 
@@ -295,7 +308,8 @@ public:
   /// Type @p text into @p parent at @p at. Appends to the primedia spool and
   /// records an INSERT.
   MicroversionId insert(const MicroversionId &parent, std::uint32_t at,
-                        std::string_view text);
+                        std::string_view text,
+                        const MicroversionId &context = {});
 
   /// The result of insertMedia(): the version it produced, plus the span the
   /// bytes were appended as -- so a caller inserting a PDF's repeated figure
@@ -320,21 +334,25 @@ public:
    * failing.
    */
   InsertedMedia insertMedia(const MicroversionId &parent, std::uint32_t at,
-                            std::string_view bytes, std::string mimeType);
+                            std::string_view bytes, std::string mimeType,
+                            const MicroversionId &context = {});
 
   /// Insert @p span into @p parent at @p at. Records an INSERT referencing an
   /// existing span without appending new bytes to the spool.
   MicroversionId insertSpan(const MicroversionId &parent, std::uint32_t at,
-                            const PrimediaSpan &span);
+                            const PrimediaSpan &span,
+                            const MicroversionId &context = {});
 
   /// Stop pointing at [@p at, @p at + @p length) of @p parent. The content
   /// stays in the spool; see OpKind::Delete.
   MicroversionId erase(const MicroversionId &parent, std::uint32_t at,
-                       std::uint32_t length);
+                       std::uint32_t length,
+                       const MicroversionId &context = {});
 
   /// Move a range of @p parent so that it starts at @p to.
   MicroversionId rearrange(const MicroversionId &parent, std::uint32_t at,
-                           std::uint32_t length, std::uint32_t to);
+                           std::uint32_t length, std::uint32_t to,
+                           const MicroversionId &context = {});
 
   /**
    * @brief Put the content [@p sourceAt, +@p sourceLength) of @p source into
@@ -347,7 +365,8 @@ public:
    */
   MicroversionId transclude(const MicroversionId &parent, std::uint32_t at,
                             const MicroversionId &source,
-                            std::uint32_t sourceAt, std::uint32_t sourceLength);
+                            std::uint32_t sourceAt, std::uint32_t sourceLength,
+                            const MicroversionId &context = {});
 
   /**
    * @brief Force a page break at @p at in @p parent. Records an
@@ -358,7 +377,8 @@ public:
    * concatext-relative rather than content-addressed, and therefore does not
    * travel with a passage the way a Link does when it is quoted elsewhere.
    */
-  MicroversionId insertBreak(const MicroversionId &parent, std::uint32_t at);
+  MicroversionId insertBreak(const MicroversionId &parent, std::uint32_t at,
+                             const MicroversionId &context = {});
 
   // -- the structure map ----------------------------------------------------
   //
@@ -390,6 +410,17 @@ public:
   [[nodiscard]] zigzag::Manifold
   rebuildManifoldFromIndex(std::uint32_t index) const;
 
+  // -- Active Manifold Registry ---------------------------------------------
+
+  void attachManifold(zigzag::Manifold *m) noexcept;
+  void detachManifold(zigzag::Manifold *m) noexcept;
+  [[nodiscard]] std::span<const zigzag::Manifold *const>
+  manifolds() const noexcept {
+    return activeManifolds_;
+  }
+  [[nodiscard]] std::optional<const zigzag::Manifold *>
+  manifoldAt(const MicroversionId &version) const noexcept;
+
   /**
    * @brief Mint the two cells a slice cannot be built without.
    *
@@ -404,18 +435,37 @@ public:
    * @throws std::invalid_argument if this store already has a home cell.
    *         Genesis happens once.
    */
-  MicroversionId sliceGenesis(const MicroversionId &parent);
+  MicroversionId sliceGenesis(const MicroversionId &parent,
+                              std::string_view sliceName = "main");
+
+  /// Mint a slice birth carrying its initial local name in @p nameSpan.
+  MicroversionId makeSlice(const MicroversionId &parent,
+                           const PrimediaSpan &nameSpan,
+                           const MicroversionId &context = {});
+  MicroversionId makeSlice(const MicroversionId &parent,
+                           std::string_view name         = "main",
+                           const MicroversionId &context = {});
+
+  /// Mint a xanadoc birth carrying its initial local name in @p nameSpan.
+  MicroversionId makeXanadoc(const MicroversionId &parent,
+                             const PrimediaSpan &nameSpan,
+                             const MicroversionId &context = {});
+  MicroversionId makeXanadoc(const MicroversionId &parent,
+                             std::string_view name         = "document",
+                             const MicroversionId &context = {});
 
   /// Mint a cell whose content is @p content, already somewhere in a scroll.
   MicroversionId makeCell(const MicroversionId &parent,
-                          const PrimediaSpan &content);
+                          const PrimediaSpan &content,
+                          const MicroversionId &context = {});
 
   /// Mint a cell whose content is @p text, typed into the author's permascroll
   /// now. Scalars -- a cell carrying both a rendering and canonical bits --
   /// are R6's, and are deliberately not an overload of this: `makeCell(v,
   /// false)` would resolve to this one, since const char* converts to bool
   /// ahead of string_view.
-  MicroversionId makeCell(const MicroversionId &parent, std::string_view text);
+  MicroversionId makeCell(const MicroversionId &parent, std::string_view text,
+                          const MicroversionId &context = {});
 
   /**
    * @brief Mint a cell carrying a number, a flag, or an integer.
@@ -435,10 +485,13 @@ public:
    *
    * @throws std::invalid_argument if @p value is a signalling NaN.
    */
-  MicroversionId makeScalarCell(const MicroversionId &parent, double value);
-  MicroversionId makeScalarCell(const MicroversionId &parent, bool value);
+  MicroversionId makeScalarCell(const MicroversionId &parent, double value,
+                                const MicroversionId &context = {});
+  MicroversionId makeScalarCell(const MicroversionId &parent, bool value,
+                                const MicroversionId &context = {});
   MicroversionId makeScalarCell(const MicroversionId &parent,
-                                std::int64_t value);
+                                std::int64_t value,
+                                const MicroversionId &context = {});
 
   /**
    * @brief Mint a handle cell pointing at operation @p target.
@@ -448,27 +501,27 @@ public:
    * @param parent  State to branch from.
    * @param target  Operation index to reference (any OpKind is allowed).
    * @param text    Optional label or commentary content for the handle cell.
+   * @param context Containing structure or edit context.
    * @throws std::invalid_argument if target has ephemeralBit or does not exist.
    */
   MicroversionId makeOpHandle(const MicroversionId &parent,
-                              std::uint32_t target, std::string_view text = {});
+                              std::uint32_t target, std::string_view text = {},
+                              const MicroversionId &context = {});
 
   /// Restate @p cell as carrying @p value: a new rendering into the permascroll
   /// and new bits in the operation, both together, as setValue() requires.
-  /// See @ref setLink for @p known.
   MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
-                           double value,
-                           const zigzag::Manifold *known = nullptr);
+                           double value, const MicroversionId &context = {});
   MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
-                           bool value, const zigzag::Manifold *known = nullptr);
+                           bool value, const MicroversionId &context = {});
   MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
                            std::int64_t value,
-                           const zigzag::Manifold *known = nullptr);
+                           const MicroversionId &context = {});
 
   /// Restate @p cell's content as @p text, typed into the author's permascroll.
   MicroversionId setCellText(const MicroversionId &parent, zigzag::CellRef cell,
                              std::string_view text,
-                             const zigzag::Manifold *known = nullptr);
+                             const MicroversionId &context = {});
 
   /**
    * @brief Point @p from's @p dim-ward neighbour at @p to. noCell clears it.
@@ -477,13 +530,6 @@ public:
    * was holding along @p dim: after it, linked(from, dim, negward) is @p to and
    * linked(to, dim, !negward) is @p from.
    *
-   * @param known A manifold folded at @p parent, if the caller has one. The
-   *        operation has to name the previous operation on @p from -- that is
-   *        what makes a cell's micro-history walkable (R7) -- and a manifold
-   *        already holds it as CellSlot::lastOp. Without one this walks the
-   *        ancestral path to find it, which is O(history) per call and turns
-   *        building a large slice quadratic. Passing a manifold folded at some
-   *        *other* state is a programming error nothing here can detect.
    * @throws std::invalid_argument if any reference is ephemeral, which is R8's
    *         boundary refused at the API as well as in the fold.
    */
@@ -491,19 +537,20 @@ public:
                          zigzag::DimRef dim,
                          zigzag::DimVector dir         = zigzag::DimVector::POS,
                          zigzag::CellRef to            = zigzag::noCell,
-                         const zigzag::Manifold *known = nullptr);
+                         const MicroversionId &context = {});
 
   MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
                          zigzag::DirectedDim target,
                          zigzag::CellRef to            = zigzag::noCell,
-                         const zigzag::Manifold *known = nullptr) {
-    return setLink(parent, from, target.dim, target.dir, to, known);
+                         const MicroversionId &context = {}) {
+    return setLink(parent, from, target.dim, target.dir, to, context);
   }
 
   MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
                          zigzag::DimRef dim, bool negward, zigzag::CellRef to,
-                         const zigzag::Manifold *known = nullptr) {
-    return setLink(parent, from, dim, zigzag::fromNegward(negward), to, known);
+                         const MicroversionId &context = {}) {
+    return setLink(parent, from, dim, zigzag::fromNegward(negward), to,
+                   context);
   }
 
   /**
@@ -525,7 +572,7 @@ public:
   MicroversionId spliceCell(const MicroversionId &parent, zigzag::CellRef cell,
                             std::uint64_t at, std::uint64_t removing,
                             std::string_view text,
-                            const zigzag::Manifold *known = nullptr);
+                            const MicroversionId &context = {});
 
   /// Splice an existing address into @p cell rather than newly typed text --
   /// a transclusion into a cell, which shares the quoted bytes rather than
@@ -534,7 +581,7 @@ public:
                                 zigzag::CellRef cell, std::uint64_t at,
                                 std::uint64_t removing,
                                 const PrimediaSpan &quoted,
-                                const zigzag::Manifold *known = nullptr);
+                                const MicroversionId &context = {});
 
   /// Restate @p cell's content span and typed value. Both, not either: an
   /// operation that merged with what was already there would make the fold
@@ -542,7 +589,7 @@ public:
   MicroversionId setValue(const MicroversionId &parent, zigzag::CellRef cell,
                           const PrimediaSpan &content, ValueKind kind,
                           std::uint64_t bits,
-                          const zigzag::Manifold *known = nullptr);
+                          const MicroversionId &context = {});
 
   /// The result of makeDimension(): the state it produced and the dimension it
   /// minted. Both, because minting one is two operations and the last of them
@@ -556,10 +603,9 @@ public:
 
   /// Sugar over makeCell(name) plus setLink onto the tail of the d.dims rank:
   /// a dimension is a cell whose content is its name, so minting one needs no
-  /// verb of its own. See R12, and @ref setLink for @p known.
+  /// verb of its own. See R12.
   MintedDimension makeDimension(const MicroversionId &parent,
-                                std::string_view name,
-                                const zigzag::Manifold *known = nullptr);
+                                std::string_view name);
 
   /// The cell an operation minted: its spool index, which is what a CellRef
   /// is. noCell for a state this store has not recorded.
@@ -576,6 +622,99 @@ public:
   [[nodiscard]] zigzag::DimRef dimsDimension() const noexcept {
     return dimsDimension_;
   }
+  [[nodiscard]] std::uint32_t sliceBirth() const noexcept {
+    return sliceBirth_;
+  }
+
+  // -- structure renames, timestamps, and context lookups -------------------
+
+  /// Rename a structure birth (Cell, Slice, or Xanadoc) by minting an OpHandle,
+  /// alias Cell, and linking them on d.alias.
+  MicroversionId renameStructure(const MicroversionId &parent,
+                                 std::uint32_t structureBirth,
+                                 std::string_view newName);
+  MicroversionId renameStructure(const MicroversionId &parent,
+                                 std::uint32_t structureBirth,
+                                 const PrimediaSpan &newNameSpan);
+
+  /// Annotate a structure birth with a typed UTC timestamp on d.created.
+  MicroversionId annotateTimestamp(const MicroversionId &parent,
+                                   std::uint32_t structureBirth,
+                                   TimestampInstant instant);
+  MicroversionId annotateTimestamp(const MicroversionId &parent,
+                                   std::uint32_t structureBirth,
+                                   std::string_view timestampIso8601);
+
+  /// Branch-local name resolver: folds at version and finds the latest d.alias
+  /// link targeting structureBirth, falling back to structureBirth's Make span.
+  [[nodiscard]] std::string
+  resolveStructureName(const MicroversionId &version,
+                       std::uint32_t structureBirth) const;
+
+  /// Branch-local timestamp resolver: folds at version and finds the d.created
+  /// link targeting structureBirth, returning the parsed or typed instant.
+  [[nodiscard]] std::optional<TimestampInstant>
+  resolveStructureCreated(const MicroversionId &version,
+                          std::uint32_t structureBirth) const;
+
+  /// Find the last operation on structureBirth along parent's ancestral path.
+  [[nodiscard]] std::uint32_t
+  lastOpOnStructure(const MicroversionId &parent,
+                    std::uint32_t structureBirth) const;
+
+  [[nodiscard]] std::uint32_t
+  lastOpOnXanadoc(const MicroversionId &parent,
+                  std::uint32_t xanadocBirth) const {
+    return lastOpOnStructure(parent, xanadocBirth);
+  }
+
+  [[nodiscard]] std::uint32_t lastOpOnSlice(const MicroversionId &parent,
+                                            std::uint32_t sliceBirth) const {
+    return lastOpOnStructure(parent, sliceBirth);
+  }
+
+  /// Find the active Xanadoc birth on parent's ancestral branch (if any).
+  [[nodiscard]] std::uint32_t
+  activeXanadocOnBranch(const MicroversionId &parent) const;
+
+  struct StructureBirth {
+    std::uint32_t opIndex{0};
+    StructureKind kind{StructureKind::Cell};
+    std::string name;
+  };
+
+  /// Discover all high-level structure births (Slices and Xanadocs) in the
+  /// store.
+  [[nodiscard]] std::vector<StructureBirth>
+  discoverStructureBirths(const MicroversionId &version = {}) const;
+
+  /// Walk containment edges up from birth @p birthOp to top-level, returning
+  /// the sequence from top-level root down to @p birthOp, or empty if
+  /// invalid/broken.
+  [[nodiscard]] std::vector<std::uint32_t>
+  containmentPath(std::uint32_t birthOp) const;
+
+  /// Whether birth @p birthOp has a valid, unbroken, non-cyclic containment
+  /// path to a recognized top-level root.
+  [[nodiscard]] bool validateContainment(std::uint32_t birthOp) const;
+
+  /// Whether op @p opIndex belongs to a Cell's edit chain or Make(Cell).
+  [[nodiscard]] bool isCellOp(std::uint32_t opIndex) const noexcept;
+
+  /// The StructureKind of the birth op @p birthOp.
+  [[nodiscard]] StructureKind
+  structureKindOfOp(std::uint32_t birthOp) const noexcept;
+
+  /// Ephemeral map of operation index to edited structure birth.
+  [[nodiscard]] const std::vector<std::uint32_t> &
+  editedBirths() const noexcept {
+    return editedBirths_;
+  }
+
+  [[nodiscard]] std::uint32_t
+  editedBirthOf(std::uint32_t opIndex) const noexcept {
+    return (opIndex < editedBirths_.size()) ? editedBirths_[opIndex] : 0;
+  }
 
   // -- links ----------------------------------------------------------------
 
@@ -585,8 +724,13 @@ public:
    * Links are kept beside the operations rather than inside a version, because
    * they attach to content and every version quoting that content has them.
    */
-  MicroversionId addLink(const MicroversionId &parent, Link link,
-                         const zigzag::Manifold *known = nullptr);
+  MicroversionId addLink(const MicroversionId &parent, Link link);
+
+  /// Set an attribute on content addresses. Removing it splices only those
+  /// addresses out of existing format endsets; previous operations stay intact.
+  MicroversionId setFormat(const MicroversionId &parent,
+                           std::span<const PrimediaSpan> content,
+                           FormatAttribute attribute, bool enabled);
 
   [[nodiscard]] const std::map<zigzag::CellRef, Link> &links() const {
     return linkTable;
@@ -659,6 +803,16 @@ public:
   [[nodiscard]] MicroversionId structureHead() const;
   [[nodiscard]] std::vector<MicroversionId> structureHeads() const;
 
+  /// Every state no other state descends from: the head of each branch,
+  /// designated current or not, in replay order.
+  [[nodiscard]] std::vector<MicroversionId> branchHeads() const;
+
+  /// The head/leaf microversion of the specified structure birth on branch @p
+  /// branch. Defaults to latest() branch if branch is zero.
+  [[nodiscard]] MicroversionId
+  headOfStructure(std::uint32_t structureBirth,
+                  const MicroversionId &branch = {}) const;
+
   // -- Current Versions (Author-Designated Heads) --------------------------
 
   /// Author-designated current/active versions. Falls back to {latest()} when
@@ -701,8 +855,7 @@ public:
   MicroversionId designateEdition(const MicroversionId &parent,
                                   std::string_view name,
                                   const MicroversionId &target,
-                                  const zigzag::Manifold *known = nullptr,
-                                  bool allowDuplicateName       = false);
+                                  bool allowDuplicateName = false);
 
   /// All editions designated in @p version, in rank order.
   [[nodiscard]] std::vector<EditionInfo>
@@ -723,8 +876,7 @@ public:
    */
   MicroversionId annotateVersion(const MicroversionId &parent,
                                  const MicroversionId &target,
-                                 VersionAnnotation annotation,
-                                 const zigzag::Manifold *known = nullptr);
+                                 VersionAnnotation annotation);
 
   /// Record an alias, description, or semantic tag for @p id.
   void setVersionAnnotation(const MicroversionId &id,
@@ -814,13 +966,11 @@ public:
   [[nodiscard]] const zigzag::ScrollRegistry &scrollRegistry() const noexcept {
     return scrollRegistry_;
   }
-  [[nodiscard]] MicroversionId
-  registerScroll(const MicroversionId &parent, std::string_view globalKey,
-                 const zigzag::Manifold *known = nullptr);
-  [[nodiscard]] MicroversionId
-  linkScrollRef(const MicroversionId &parent, zigzag::CellRef scrollCell,
-                zigzag::CellRef placeholderCell,
-                const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId registerScroll(const MicroversionId &parent,
+                                              std::string_view globalKey);
+  [[nodiscard]] MicroversionId linkScrollRef(const MicroversionId &parent,
+                                             zigzag::CellRef scrollCell,
+                                             zigzag::CellRef placeholderCell);
 
   /**
    * @brief Mint a persistent placeholder cell for a foreign cell reference
@@ -829,9 +979,8 @@ public:
    * Reuses the existing placeholder cell if one is already recorded for
    * target in the scroll registry's replay index.
    */
-  [[nodiscard]] MicroversionId
-  makeExternRef(const MicroversionId &parent, const ExternOpRef &target,
-                const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId makeExternRef(const MicroversionId &parent,
+                                             const ExternOpRef &target);
 
   /**
    * @brief Decode the foreign reference target of @p placeholder.
@@ -859,21 +1008,19 @@ public:
   [[nodiscard]] AppendedPouchItem
   appendPouchItemWithRef(const MicroversionId &parent, zigzag::CellRef zone,
                          const PrimediaSpan &content,
-                         const PouchOrigin &origin     = {},
-                         const zigzag::Manifold *known = nullptr);
+                         const PouchOrigin &origin = {});
 
-  [[nodiscard]] MicroversionId
-  appendPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
-                  const PrimediaSpan &content, const PouchOrigin &origin = {},
-                  const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId appendPouchItem(const MicroversionId &parent,
+                                               zigzag::CellRef zone,
+                                               const PrimediaSpan &content,
+                                               const PouchOrigin &origin = {});
 
   /**
    * @brief Dismiss a pouch item from @p zone's d.items onto d.dismissed (§5.8).
    */
-  [[nodiscard]] MicroversionId
-  dismissPouchItem(const MicroversionId &parent, zigzag::CellRef zone,
-                   zigzag::CellRef item,
-                   const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] MicroversionId dismissPouchItem(const MicroversionId &parent,
+                                                zigzag::CellRef zone,
+                                                zigzag::CellRef item);
 
   struct AppendedAnthologyEntry {
     MicroversionId version;
@@ -890,10 +1037,11 @@ public:
    * descriptor, then appends the entry cell onto @p root's d.anthology rank
    * posward.
    */
-  [[nodiscard]] AppendedAnthologyEntry appendAnthologyEntry(
-      const MicroversionId &parent, zigzag::CellRef root,
-      const ExternOpRef &memberRef, const GlobalDocumentState &pinnedState,
-      std::string_view label = {}, const zigzag::Manifold *known = nullptr);
+  [[nodiscard]] AppendedAnthologyEntry
+  appendAnthologyEntry(const MicroversionId &parent, zigzag::CellRef root,
+                       const ExternOpRef &memberRef,
+                       const GlobalDocumentState &pinnedState,
+                       std::string_view label = {});
 
   /**
    * @brief Append a local member cell onto an anthology rank (§5.9).
@@ -902,8 +1050,7 @@ public:
    */
   [[nodiscard]] MicroversionId
   appendAnthologyLocalMember(const MicroversionId &parent, zigzag::CellRef root,
-                             zigzag::CellRef localCell,
-                             const zigzag::Manifold *known = nullptr);
+                             zigzag::CellRef localCell);
 
   /**
    * @brief Refresh an anthology entry's pinned state (§5.9 §3).
@@ -915,8 +1062,7 @@ public:
   [[nodiscard]] MicroversionId refreshAnthologyEntry(
       const MicroversionId &parent, zigzag::CellRef entryCell,
       const GlobalDocumentState &newPinnedState,
-      std::optional<ExternOpRef> optNewMemberRef = std::nullopt,
-      const zigzag::Manifold *known              = nullptr);
+      std::optional<ExternOpRef> optNewMemberRef = std::nullopt);
 
   /**
    * @brief Authored quotation adopting a foreign structure or rank (§5.10).
@@ -928,8 +1074,7 @@ public:
   [[nodiscard]] AppendedQuotation
   quote(const MicroversionId &parent, zigzag::CellRef localRankTail,
         zigzag::DimRef localRankDim, std::string_view label,
-        const GlobalDocumentState &pinnedState, const SelectorSpec &selector,
-        const zigzag::Manifold *known = nullptr);
+        const GlobalDocumentState &pinnedState, const SelectorSpec &selector);
 
   /**
    * @brief Author an override cell shadowing a foreign cell in a quotation
@@ -941,8 +1086,7 @@ public:
    */
   [[nodiscard]] MicroversionId overrideQuotedCell(
       const MicroversionId &parent, zigzag::CellRef quotationCell,
-      const ExternOpRef &foreignTargetRef, std::string_view overrideContent,
-      const zigzag::Manifold *known = nullptr);
+      const ExternOpRef &foreignTargetRef, std::string_view overrideContent);
 
   void syncScrollsFromRank(const zigzag::Manifold &manifold);
   void syncLinksFromRank(const zigzag::Manifold &manifold);
@@ -1145,11 +1289,6 @@ private:
   /// Op map for it cost about nine tenths of a rebuild.
   void replay(const CompactOpNode &node, Version &onto) const;
 
-  /// rebuild(), for a state already known to be in the spool at @p index.
-  /// Split out because a transclusion replays its source the same way, and it
-  /// has the index rather than the name.
-  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
-
   /**
    * @brief The head of @p cell's micro-history chain as of @p parent.
    *
@@ -1161,20 +1300,23 @@ private:
    * futures of the same state.
    */
   [[nodiscard]] std::uint32_t lastOpOnCell(const MicroversionId &parent,
-                                           zigzag::CellRef cell,
-                                           const zigzag::Manifold *known) const;
+                                           zigzag::CellRef cell) const;
 
   /// Spool @p value's rendering and mint or restate a cell carrying both
   /// halves. The one place the scalar overloads above agree on what they mean;
   /// @p cell is noCell to mint rather than to restate.
   MicroversionId applyScalar(const MicroversionId &parent, zigzag::CellRef cell,
                              const ScalarValue &value,
-                             const zigzag::Manifold *known);
+                             const MicroversionId &context = {});
 
   /// @throws std::invalid_argument if @p ref does not name a Structure
   ///         operation, which is what a CellRef is. @p what names the parameter
   ///         in the message.
   void requireCellOp(zigzag::CellRef ref, const char *what) const;
+
+  [[nodiscard]] MicroversionId
+  resolveTextContext(const MicroversionId &parent,
+                     const MicroversionId &context) const;
 
   /// Re-derive homeCell()/dimsDimension() by scanning the spool. What load()
   /// needs: it adopts a segment file as nodes, so putOp() -- where these are
@@ -1211,6 +1353,11 @@ private:
   /// and re-derived by indexGenesisCells() on load.
   zigzag::CellRef homeCell_{zigzag::noCell};
   zigzag::DimRef dimsDimension_{zigzag::noCell};
+  std::uint32_t sliceBirth_{0};
+
+  /// Ephemeral indices for structure birth and container lookups:
+  mutable std::vector<std::uint32_t> editedBirths_;
+  mutable std::vector<std::uint32_t> containerBirths_;
 
   void syncCurrentVersionsFromRank(const zigzag::Manifold &manifold);
   void syncAliasesFromRank(const zigzag::Manifold &manifold);
@@ -1233,6 +1380,7 @@ private:
   mutable std::map<std::string, std::vector<RemoteAuthorChunk>>
       remoteAuthorBuffers_;
   std::unique_ptr<enfilade::Chronofilade> chronofilade_;
+  std::vector<zigzag::Manifold *> activeManifolds_;
 };
 
 } // namespace xanadu

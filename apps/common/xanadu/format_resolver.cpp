@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "publication.hpp"
 #include "store.hpp"
 #include "version.hpp"
 
@@ -62,6 +63,43 @@ FormatResolver::FormatResolver(const Store &store) noexcept {
                    };
                  }) |
                  std::ranges::to<std::vector>();
+}
+
+std::optional<PrimediaSpan> FormatResolver::spanIn(const Store &from,
+                                                   const Store &into,
+                                                   const PrimediaSpan &span) {
+  if (&from == &into) return span;
+  if (span.isLocal()) {
+    return canCarry(from, into, span) ? std::optional{span} : std::nullopt;
+  }
+  const auto scroll = from.scroll(span.scroll);
+  if (!scroll) return std::nullopt;
+  const auto key = scrollKey(*scroll);
+  if (key.empty()) return std::nullopt;
+  for (std::size_t i = 0; i < into.scrolls().size(); ++i) {
+    if (key == scrollKey(into.scrolls()[i])) {
+      return PrimediaSpan{.scroll = static_cast<ScrollId>(i + 1),
+                          .start  = span.start,
+                          .length = span.length};
+    }
+  }
+  return std::nullopt;
+}
+
+void FormatResolver::include(const Store &authority, const Store &target) {
+  for (const auto &[link, attribute] : authority.formatLinks()) {
+    CachedFormatLink cached{.attribute = attribute,
+                            .targets   = {},
+                            .decoration =
+                                decorationFromFormatAttribute(attribute),
+                            .align = textAlignFromFormatAttribute(attribute)};
+    for (const auto &span : link.left) {
+      if (const auto mapped = spanIn(authority, target, span)) {
+        cached.targets.push_back(*mapped);
+      }
+    }
+    if (!cached.targets.empty()) formatLinks_.push_back(std::move(cached));
+  }
 }
 
 FormatResolver::FormattingResult

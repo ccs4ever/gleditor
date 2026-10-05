@@ -68,7 +68,7 @@ TEST(ArenaManifoldTest, everyRefCarriesTheEphemeralBit) {
   // class existed catch a leak from it.
   EXPECT_TRUE(isEphemeral(cell));
   EXPECT_TRUE(arena.m.contains(cell));
-  EXPECT_EQ(arena.m.denseOf(cell), 2U);
+  EXPECT_EQ(arena.m.denseOf(cell), std::optional<std::uint32_t>{2U});
 
   // A real operation index is not a cell of this arena, and vice versa.
   EXPECT_FALSE(arena.m.contains(1U));

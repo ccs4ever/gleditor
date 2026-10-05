@@ -150,7 +150,7 @@ PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler li
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
-GL_CFLAGS := -Ithirdparty/opengl-registry
+GL_CFLAGS := -isystem thirdparty/opengl-registry
 endif
 
 # Vulkan backend is enabled by default if available through pkg-config,
@@ -453,7 +453,22 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include -isystem thirdparty/beman_optional/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+# INFO: -Werror added to combat a rising tide of compiler warnings that Claude/Devin/Gemini/Codex
+# were letting through
+# INFO: switched -Ithirdparty/** to -isystem thirdparty/** to kill all warnings coming from
+# thirdparty vendored code
+# INFO: added -Wno-missing-field-initializers to counteract the flag that -Wextra enables
+# that causes a known warning cycle (redundant-initializer <=> missing-field-initializers
+# in designated initializers) which is known safe, but the compiler doesn't know this as of (2026-09)
+# INFO: added -Wno-deprecated-declarations for std::inplace_vector, which (as of 2026-09) uses
+# a deprecated template
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps \
+-isystem thirdparty/Choreograph/src -isystem thirdparty/argparse/include \
+-isystem thirdparty/merklecpp -isystem thirdparty/nontype_functional/include \
+-isystem thirdparty/beman_optional/include -Werror -Wall -Wextra \
+-Wno-missing-field-initializers -Wno-deprecated-declarations \
+$(shell pkg-config $(STATIC) --cflags $(PKGS) | sed 's|-I\([^ ]*\)|-isystem \1|g') \
+$(GL_CFLAGS)
 override CXXFLAGS += -isystem thirdparty/beman_inplace_vector/include
 ifeq ($(GLEDITOR_CPP26_FORCE_FALLBACK),1)
 override CXXFLAGS += -DGLEDITOR_CPP26_FORCE_FALLBACK=1
@@ -471,7 +486,7 @@ override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
 # Only src/a11y/platform_accesskit.cpp includes the header, but the flags are
 # not per-file here and a stray include path costs nothing.
 override CXXFLAGS += $(A11Y_CFLAGS)
-override CXXFLAGS += $(shell pkg-config --cflags libtorrent-rasterbar)
+override CXXFLAGS += $(shell pkg-config --cflags libtorrent-rasterbar | sed 's|-I\([^ ]*\)|-isystem \1|g')
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif
@@ -491,7 +506,7 @@ ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_ZSTD=1
 # zstd_seekable.h lives only in the vendored submodule (see .gitmodules),
 # not anywhere pkg-config's own --cflags for libzstd would find.
-override CXXFLAGS += -Ithirdparty/zstd/contrib/seekable_format
+override CXXFLAGS += -isystem thirdparty/zstd/contrib/seekable_format
 endif
 ifeq ($(HAVE_DECODE_INDEX_FLAC),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_FLAC=1
@@ -548,7 +563,9 @@ GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang
 # library must not need either of them in order to build, and neither program
 # may need the other; that is the whole of what the boundary is for.
 VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
-LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp'))
+# split out Choreograph from LIB_SRCS into its own build to prevent its warnings from being picked up
+LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find src/ -name '*.cpp'))
+CHOREOGRAPH_SRCS := $(shell find thirdparty/Choreograph/src/ -name '*.cpp')
 ifdef GLEDITOR_ENABLE_VULKAN
 LIB_SRCS += $(VK_SRCS)
 endif
@@ -577,7 +594,7 @@ ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
 # about pkg-config's own -I ordering). lib/common holds the private
 # xxhash.h/mem.h headers these two files need that installed zstd.h never
 # exposes.
-ZSTD_SEEKABLE_CFLAGS := -Ithirdparty/zstd/lib -Ithirdparty/zstd/lib/common \
+ZSTD_SEEKABLE_CFLAGS := -isystem thirdparty/zstd/lib -isystem thirdparty/zstd/lib/common \
                        -I$(ZSTD_SEEKABLE_DIR)
 LIB_SRCS_C :=
 ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
@@ -590,12 +607,8 @@ COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
 COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
-ZIGZAG_CORE_SRCS :=
-ZIGZAG_SRCS      := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
-XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
-                    apps/zigzag/zigzag_visualizer.cpp \
-                    apps/zigzag/zigzag_commands.cpp \
-                    apps/zigzag/unified_transclusion_engine.cpp
+ZIGZAG_SRCS    := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
+XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
@@ -604,16 +617,15 @@ XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
 objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
-LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
+CHOREOGRAPH_OBJS := $(call obj,$(CHOREOGRAPH_SRCS))
+LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C)) $(CHOREOGRAPH_OBJS)
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
-ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
-ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
-XUZZ_OBJS        := $(call obj,$(XUZZ_SRCS))
-XUZZ_XUDU_OBJS   := $(filter-out $(OBJDIR)/apps/xudu/main.o,$(XUDU_OBJS))
+ZIGZAG_OBJS     := $(call obj,$(ZIGZAG_SRCS))
+XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
@@ -737,6 +749,8 @@ $(ALL_OBJ_DIRS): private .UNSANDBOXED = 1
 $(ALL_OBJ_DIRS):
 	[ -d "$@" ] || $(MKDIR) -p "$@"
 
+$(CHOREOGRAPH_OBJS): CXXFLAGS := $(filter-out -Werror, $(CXXFLAGS))
+
 $(ALL_OBJS): | $(ALL_OBJ_DIRS)
 $(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
 $(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(ZIGZAG_TEST_OBJS) $(XUZZ_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
@@ -771,8 +785,7 @@ $(FLAGSTAMP): FORCE | $(OBJDIR)/
 $(ALL_OBJS): $(FLAGSTAMP)
 
 $(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
-$(OBJDIR)/apps/xudu/main.o $(OBJDIR)/apps/xudu/main.dep: $(OBJDIR)/src/config.h
-$(OBJDIR)/apps/zigzag/main.o $(OBJDIR)/apps/zigzag/main.dep: $(OBJDIR)/src/config.h
+$(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
 
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
@@ -821,23 +834,22 @@ $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
 .PHONY: gleditor
 
 xudu: $(OBJDIR)/xudu
-$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xudu: $(OBJDIR)/xuzz
+	rm -f $@ && ln -sf xuzz $@
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
-$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-                $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-	  $(ZIGZAG_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
+	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag
-$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
+$(OBJDIR)/zigzag: $(OBJDIR)/xuzz
+	rm -f $@ && ln -sf xuzz $@
 .PHONY: zigzag
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -887,7 +899,7 @@ $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/main.o,$(ZIGZAG_OBJS)) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
@@ -1024,7 +1036,7 @@ $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK
 ifeq ($(HAVE_DECODE_INDEX_SPIKE),1)
 decode-index-spike: $(OBJDIR)/decode-index-spike
 $(OBJDIR)/tools/decode-index-spike.o: CXXFLAGS += \
-  $(shell pkg-config --cflags $(DECODE_INDEX_SPIKE_PKGS))
+  $(shell pkg-config --cflags $(DECODE_INDEX_SPIKE_PKGS) | sed 's|-I\([^ ]*\)|-isystem \1|g')
 # Links the core library now that the PNG/JPEG/video/MP3 mechanisms this
 # spike verifies live in gleditor::decode_index rather than duplicated here
 # -- see the file's own top comment. Still links DECODE_INDEX_SPIKE_PKGS
@@ -1378,9 +1390,9 @@ analyze: tidy scan-build
 check: format-check lint analyze
 .PHONY: check
 
-clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
+clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test w:xuzz w:xuzz_test w:zigzag w:zigzag_test
 clean:
-	@$(RM) -rf gleditor gleditor_test xudu xudu_test build
+	@$(RM) -rf gleditor gleditor_test xudu xudu_test xuzz xuzz_test zigzag zigzag_test build
 
 # -- installation -------------------------------------------------------------
 
@@ -1394,14 +1406,16 @@ INSTALL_DATADIR := $(DESTDIR)$(appdir)
 # gets installed knows where its data went even if it is later moved somewhere
 # the executable-relative search cannot follow.
 install: GLEDITOR_DATADIR := $(appdir)
-install: $(OBJDIR)/gleditor $(OBJDIR)/xudu
+install: $(OBJDIR)/gleditor $(OBJDIR)/xuzz $(OBJDIR)/xudu $(OBJDIR)/zigzag
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor
-	$(INSTALL) -m 755 $(OBJDIR)/xudu $(DESTDIR)$(bindir)/xudu
+	$(INSTALL) -m 755 $(OBJDIR)/xuzz $(DESTDIR)$(bindir)/xuzz
+	rm -f $(DESTDIR)$(bindir)/xudu && ln -sf xuzz $(DESTDIR)$(bindir)/xudu
+	rm -f $(DESTDIR)$(bindir)/zigzag && ln -sf xuzz $(DESTDIR)$(bindir)/zigzag
 	# The real name is what a program records; the linker name is what a later
 	# build resolves -lgleditor against, so both have to be installed.
 	$(INSTALL) -d $(DESTDIR)$(libdir)
@@ -1447,13 +1461,13 @@ ifdef GLEDITOR_ENABLE_VULKAN
 	$(INSTALL) -d $(INSTALL_DATADIR)/shaders/vulkan
 	$(INSTALL) -m 644 $(SPIRV) $(INSTALL_DATADIR)/shaders/vulkan
 endif
-	$(INSTALL) -m 644 logo.png $(INSTALL_DATADIR)/logo.png
+	$(INSTALL) -m 644 assets/logo.png $(INSTALL_DATADIR)/logo.png
 	$(INSTALL) -d $(DESTDIR)$(datadir)/applications
 	$(INSTALL) -m 644 packaging/gleditor.desktop $(DESTDIR)$(datadir)/applications/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/metainfo
 	$(INSTALL) -m 644 packaging/gleditor.metainfo.xml $(DESTDIR)$(datadir)/metainfo/
 	$(INSTALL) -d $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps
-	$(INSTALL) -m 644 logo.png $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
+	$(INSTALL) -m 644 assets/logo.png $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
 	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
 	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1
@@ -1499,14 +1513,25 @@ $(OBJDIR)/%.o: %.cpp
 # make never builds, so header edits silently produce a stale binary.
 # -MP adds phony targets for the headers so that deleting one does not wedge
 # the build with "No rule to make target".
-$(OBJDIR)/%.dep: %.cpp
+#
+# The .dep is a target of the headers it lists, as the object is. Otherwise a
+# header that moved or was deleted stays listed forever: -MP's phony target
+# for it is always out of date, so every object naming it was rebuilt on
+# every make, and nothing ever regenerated the .dep that named it. Depending
+# on the Makefile as well regenerates every .dep once when this rule changes,
+# which is what clears ones an older rule wrote.
+$(OBJDIR)/%.dep: %.cpp Makefile
 	set -e; $(RM) -f $@; \
 	$(REAL_CXX) -MM -MP $(CXXFLAGS) $< > $@.$$$$; \
-	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
-$(OBJDIR)/%.j: %.cpp
-	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
+# Clang tooling chooses its own frontend action. Keep preprocessing cheap
+# when emitting metadata, but remove that action from the recorded command.
+$(OBJDIR)/%.j: %.cpp Makefile
+	$(REAL_CXX) -MJ $@.tmp $(CXXFLAGS) -E $< > /dev/null
+	$(SED) 's/, "-E"//' $@.tmp > $@
+	$(RM) -f $@.tmp
 
 # Same three rules as above, for the one vendored C source this tree
 # compiles (thirdparty/zstd/contrib/seekable_format, see LIB_SRCS_C). Uses
@@ -1517,14 +1542,16 @@ $(OBJDIR)/%.j: %.cpp
 $(OBJDIR)/%.o: %.c
 	$(CC) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -c -o $@ $<
 
-$(OBJDIR)/%.dep: %.c
+$(OBJDIR)/%.dep: %.c Makefile
 	set -e; $(RM) -f $@; \
 	$(CC) -MM -MP $(ZSTD_SEEKABLE_CFLAGS) $< > $@.$$$$; \
-	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
-$(OBJDIR)/%.j: %.c
-	$(CC) -MJ $@ $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
+$(OBJDIR)/%.j: %.c Makefile
+	$(CC) -MJ $@.tmp $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
+	$(SED) 's/, "-E"//' $@.tmp > $@
+	$(RM) -f $@.tmp
 
 # clang -MJ emits one trailing-comma-terminated object per file, so the comma on
 # the final entry has to go: JSON has no trailing commas and clangd rejects the

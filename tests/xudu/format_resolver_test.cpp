@@ -10,7 +10,9 @@
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -24,6 +26,101 @@ using xanadu::MicroversionId;
 using xanadu::PrimediaSpan;
 using xanadu::Store;
 using xanadu::vocabularySpanFor;
+
+TEST(FormatResolverTest, SharedPermascrollInheritsAcrossAuthorities) {
+  Store source;
+  Store destination(source.userPermascrollPtr());
+  Store unrelated;
+  const auto text  = source.insert({}, 0, "alpha bravo");
+  const auto spans = source.rebuild(text).spansFor(0, 5);
+  source.setFormat(text, spans, FormatAttribute::Bold, true);
+  const auto count = destination.opCount();
+  const auto bytes = destination.userPermascroll().size();
+  FormatResolver inherited(destination);
+  inherited.include(source, destination);
+  const auto result = inherited.resolveSpans(spans);
+  ASSERT_EQ(result.decoratedRanges.size(), 1U);
+  EXPECT_EQ(result.decoratedRanges.front().end, 5U);
+  EXPECT_EQ(destination.opCount(), count);
+  EXPECT_EQ(destination.userPermascroll().size(), bytes);
+
+  // Slot zero and offsets alone must never equate two authors' primedia.
+  unrelated.insert({}, 0, "alpha bravo");
+  FormatResolver isolated(unrelated);
+  isolated.include(source, unrelated);
+  EXPECT_TRUE(isolated.resolveSpans(spans).decoratedRanges.empty());
+}
+
+TEST(FormatResolverTest, ExternalScrollIdsAreTranslatedByIdentity) {
+  Store source;
+  Store destination;
+  xanadu::Scroll shared;
+  shared.publisher     = xanadu::createMutableKeys().publicKey;
+  shared.salt          = "shared";
+  auto other           = shared;
+  other.salt           = "unrelated";
+  const auto from      = source.addScroll(shared);
+  const auto collision = destination.addScroll(other);
+  const auto into      = destination.addScroll(shared);
+  ASSERT_EQ(from, collision);
+  ASSERT_NE(from, into);
+  const PrimediaSpan target{.scroll = from, .start = 42, .length = 5};
+  source.setFormat({}, std::span{&target, 1}, FormatAttribute::Italic, true);
+  FormatResolver resolver(destination);
+  resolver.include(source, destination);
+  const PrimediaSpan wrong{.scroll = collision, .start = 42, .length = 5};
+  EXPECT_TRUE(
+      resolver.resolveSpans(std::span{&wrong, 1}).decoratedRanges.empty());
+  const PrimediaSpan translated{.scroll = into, .start = 42, .length = 5};
+  EXPECT_EQ(
+      resolver.resolveSpans(std::span{&translated, 1}).decoratedRanges.size(),
+      1U);
+  EXPECT_EQ(destination.scrolls().size(), 2U);
+  EXPECT_EQ(destination.opCount(), 0U);
+}
+
+TEST(FormatResolverTest,
+     RemovingPartOfAttributePreservesOtherFormattingAndHistory) {
+  Store store;
+  auto head      = store.insert({}, 0, "alpha bravo");
+  const auto all = store.rebuild(head).spansFor(0, 11);
+  head           = store.setFormat(head, all, FormatAttribute::Overline, true);
+  // Duplicate links and overlapping endsets must all lose the selected range.
+  head = store.setFormat(head, all, FormatAttribute::Overline, true);
+  head = store.setFormat(head, all, FormatAttribute::Bold, true);
+  const auto oldHead  = head;
+  const auto oldFold  = store.rebuildManifold(head);
+  const auto oldLinks = oldFold.links(store);
+  const auto selected = store.rebuild(head).spansFor(2, 5);
+  const auto count    = store.opCount();
+  const auto bytes    = store.userPermascroll().size();
+  head = store.setFormat(head, selected, FormatAttribute::Overline, false);
+  EXPECT_GT(store.opCount(), count);
+  EXPECT_EQ(store.userPermascroll().size(), bytes);
+  EXPECT_EQ(store.rebuild(head).materialize(store), "alpha bravo");
+  EXPECT_EQ(store.rebuildManifold(oldHead).links(store), oldLinks);
+  const auto result = FormatResolver(store).resolveSpans(all);
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> overlines;
+  for (const auto &range : result.decoratedRanges) {
+    if (gleditor::hasDecoration(range.decorations,
+                                gleditor::Decoration::Overline)) {
+      overlines.emplace_back(range.start, range.end);
+    } else {
+      EXPECT_EQ(range.start, 0U);
+      EXPECT_EQ(range.end, 11U);
+      EXPECT_TRUE(gleditor::hasDecoration(range.decorations,
+                                          gleditor::Decoration::Bold));
+    }
+  }
+  EXPECT_THAT(overlines, testing::UnorderedElementsAre(
+                             std::pair{0U, 2U}, std::pair{7U, 11U},
+                             std::pair{0U, 2U}, std::pair{7U, 11U}));
+  head = store.setFormat(head, all, FormatAttribute::Overline, false);
+  EXPECT_EQ(FormatResolver(store).resolveSpans(all).decoratedRanges.size(), 1U);
+  const auto unchanged =
+      store.setFormat(head, all, FormatAttribute::Overline, false);
+  EXPECT_EQ(unchanged, head);
+}
 
 TEST(FormatResolverTest, FormatResolverInitializationAndFiltering) {
   Store store;

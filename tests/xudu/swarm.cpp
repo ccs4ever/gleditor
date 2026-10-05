@@ -21,6 +21,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <tuple>
 
 #include "common/xanadu/mutable_link.hpp"
 #include "common/xanadu/resolver.hpp"
@@ -262,7 +263,7 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
   const auto deadline = std::chrono::steady_clock::now() + 10s;
   while (swarm.bytesFromPeers(hash) <= 0 &&
          std::chrono::steady_clock::now() < deadline) {
-    static_cast<void>(swarm.metainfo(hash)); // pumps the session
+    std::ignore = swarm.metainfo(hash); // pumps the session
     std::this_thread::sleep_for(100ms);
   }
   EXPECT_GE(swarm.bytesFromPeers(hash),

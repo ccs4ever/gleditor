@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -104,7 +105,7 @@ namespace {
 void settleDocLoad(
     std::future<std::expected<void, gleditor::SourceError>> &load) {
   try {
-    static_cast<void>(load.get());
+    std::ignore = load.get();
   } catch (const std::exception &failure) {
     GLEDITOR_LOG_ERROR("render.scene", "background page build failed: {}",
                        failure.what());
@@ -128,8 +129,8 @@ void Renderer::reapFinishedDocLoads() {
 
 void Renderer::pickThen(const int x, const int y, PickAnswer then) {
   runWithState([this, x, y, then = std::move(then)](RenderState &state) {
-    requestPick(state, x, y);
-    pickAnswers.push_back({.x = x, .y = y, .then = then});
+    pickAnswers.push_back(
+        {.x = x, .y = y, .then = then, .requested = requestPick(state, x, y)});
   });
 }
 
@@ -484,24 +485,44 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // !docsLoading(state) together, matching advanceScript()'s own doc
   // comment ("One step per settled frame at most"). When an edit has
   // scheduled a reflow, the script waits for the reflow to settle before
-  // taking the next step.
-  if (settled) {
+  // taking the next step. settled was judged before this frame collected its
+  // picks, and a pick's handler may queue work of its own -- a menu entry
+  // that opens a document and moves the caret into it -- so work that has
+  // appeared since unsettles the frame too; otherwise a scripted click's
+  // next step ran before what the click asked for.
+  // Here, where a frame is being recorded: a backend that copies the tag out
+  // of the frame takes a read only then, and pickThen() asks from the queue,
+  // before the frame begins.
+  for (auto &asked : pickAnswers) {
+    if (!asked.requested) {
+      asked.requested = requestPick(state, asked.x, asked.y);
+    }
+  }
+  if (settled && !hasPendingWork()) {
     const auto serviceClickOrDrag = [&]() {
+      // A press or drag whose read the device refused is left pending, to
+      // be asked about again next frame rather than waited on forever.
       if (this->state->clickPending.exchange(false)) {
-        const auto clickX   = this->state->clickX.load();
-        const auto clickY   = this->state->clickY.load();
+        const auto clickX = this->state->clickX.load();
+        const auto clickY = this->state->clickY.load();
+        if (!requestPick(state, clickX, clickY)) {
+          this->state->clickPending = true;
+          return true;
+        }
         awaitingClick       = std::pair{clickX, clickY};
         awaitingClickButton = this->state->clickButton.load();
         awaitingDrag        = false;
-        requestPick(state, clickX, clickY);
         return true;
       }
       if (this->state->dragPending.exchange(false)) {
         const auto dragX = this->state->dragX.load();
         const auto dragY = this->state->dragY.load();
-        awaitingClick    = std::pair{dragX, dragY};
-        awaitingDrag     = true;
-        requestPick(state, dragX, dragY);
+        if (!requestPick(state, dragX, dragY)) {
+          this->state->dragPending = true;
+          return true;
+        }
+        awaitingClick = std::pair{dragX, dragY};
+        awaitingDrag  = true;
         return true;
       }
       return false;
@@ -533,31 +554,32 @@ bool Renderer::update(RenderState &state, const bool settled) {
     } else if (awaitingStep) {
       // Waiting on a readback: nothing else may issue one, or the answer this
       // step is waiting for would be lost among the others.
-    } else if (this->state->clickPending.exchange(false)) {
+    } else if (this->state->clickPending || this->state->dragPending) {
       // A click takes priority over the hover query: only one read is issued
-      // per frame, and the click is the one somebody is waiting on.
-      const auto clickX   = this->state->clickX.load();
-      const auto clickY   = this->state->clickY.load();
-      awaitingClick       = std::pair{clickX, clickY};
-      awaitingClickButton = this->state->clickButton.load();
-      awaitingDrag        = false;
-      requestPick(state, clickX, clickY);
-    } else if (this->state->dragPending.exchange(false)) {
-      // A drag reuses the click machinery; only what happens with the answer
-      // differs, so the pending pixel is remembered as a drag. The initial
-      // click is deliberately serviced first so extendTo() always has the
-      // press location as its anchor.
-      const auto dragX = this->state->dragX.load();
-      const auto dragY = this->state->dragY.load();
-      awaitingClick    = std::pair{dragX, dragY};
-      awaitingDrag     = true;
-      requestPick(state, dragX, dragY);
+      // per frame, and the click is the one somebody is waiting on. A drag
+      // reuses the click machinery; only what happens with the answer
+      // differs. The initial click is deliberately serviced first so
+      // extendTo() always has the press location as its anchor.
+      std::ignore = serviceClickOrDrag();
     } else if (!this->state->scriptReportsPicks()) {
       requestPick(state, this->state->mouseX, this->state->mouseY);
     }
   }
 
   device->endFrame();
+
+  if (pendingScriptDump) {
+    // After this frame's rebuild, so what is printed is what would be sent
+    // rather than the frame before it.
+    pendingScriptDump = false;
+    if (const auto &publisher = this->state->accessibility; publisher) {
+      std::cout << gleditor::a11y::Publisher::describe(publisher->snapshot());
+    }
+    nextStep++;
+    if (this->state->profiling && scriptFinished()) {
+      this->state->alive = false;
+    }
+  }
 
   if (pendingScriptCapture.has_value()) {
     writeScreenshot(device->captureColorTarget(), *pendingScriptCapture);
@@ -576,16 +598,6 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
-  if (settled && !hasPendingWork() && scriptFinished() &&
-      this->state->dumpAccessibility) {
-    // Once, on the first settled frame, and after the rebuild above so that
-    // what is printed is what would be sent rather than the frame before it.
-    this->state->dumpAccessibility = false;
-    if (const auto &publisher = this->state->accessibility; publisher) {
-      std::cout << gleditor::a11y::Publisher::describe(publisher->snapshot());
-    }
-  }
-
   if (settled && !hasPendingWork() && scriptFinished() &&
       !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
@@ -807,14 +819,15 @@ void Renderer::collectPickingResults(RenderState &state) {
   }
 }
 
-void Renderer::requestPick(RenderState &state, const int x, const int y) {
+bool Renderer::requestPick(RenderState &state, const int x, const int y) {
   const auto requestId = nextPickRequestId++;
   if (!device->requestPickingTag(x, y, requestId)) {
-    return;
+    return false;
   }
   render::PickScene scene = state.overlayPickScene;
   scene.documents         = state.pickTargets;
   pickScenes.emplace(requestId, std::move(scene));
+  return true;
 }
 
 /// Carry out the next step of the automation script, if the one before it has
@@ -833,6 +846,9 @@ void Renderer::advanceScript(RenderState &state) {
   case Kind::Capture:
     pendingScriptCapture = step.text;
     return;
+  case Kind::DumpAccessibility:
+    pendingScriptDump = true;
+    return;
   case Kind::Input:
     // Handled on the event thread, like the platform's own input; the step
     // finishes once that has happened and whatever it asked of this thread
@@ -842,16 +858,28 @@ void Renderer::advanceScript(RenderState &state) {
     return;
   case Kind::Pick:
     // Answered on a later frame; collectPickingResults() reports it and moves
-    // the script on.
-    awaitingPick = std::pair{step.x, step.y};
-    awaitingStep = true;
-    requestPick(state, step.x, step.y);
+    // the script on. A read the device refused leaves the step to be taken
+    // again next frame.
+    if (requestPick(state, step.x, step.y)) {
+      awaitingPick = std::pair{step.x, step.y};
+      awaitingStep = true;
+    }
     return;
   case Kind::Click:
-    awaitingClick = std::pair{step.x, step.y};
-    awaitingDrag  = false;
-    awaitingStep  = true;
-    requestPick(state, step.x, step.y);
+    if (this->state->modal && this->state->modal->grabbing()) {
+      awaitingInput = this->state->queueSynthetic(
+          {.kind   = AppState::SyntheticInput::Kind::ButtonDown,
+           .x      = step.x,
+           .y      = step.y,
+           .button = SDL_BUTTON_LEFT});
+      finishStepWhenSettled();
+      return;
+    }
+    if (requestPick(state, step.x, step.y)) {
+      awaitingClick = std::pair{step.x, step.y};
+      awaitingDrag  = false;
+      awaitingStep  = true;
+    }
     return;
   case Kind::Command:
     // By name, so a script says what it means. The command queues its own
@@ -865,7 +893,7 @@ void Renderer::advanceScript(RenderState &state) {
     if (nullptr == this->state->modal || !this->state->modal->grabbing()) {
       std::cerr << "--key with nothing to press it in; use --do first\n";
     } else {
-      static_cast<void>(this->state->modal->keyPressed(step.key, step.mods));
+      std::ignore = this->state->modal->keyPressed(step.key, step.mods);
     }
     finishStepWhenSettled();
     return;
@@ -903,11 +931,24 @@ void Renderer::advanceScript(RenderState &state) {
     if (state.docs.empty()) {
       std::cerr << "--select with no document to select in\n";
     } else {
-      caret->placeAt(0, step.from);
+      // In the document the caret is in, as a drag would select: a run that
+      // has moved to another document selects there, not in the first one.
+      const bool placed =
+          caret->active() && caret->documentIndex() < state.docs.size();
+      const auto doc = placed ? caret->documentIndex() : 0U;
+      if (!placed && state.docs.size() > 1) {
+        // A click on nothing clears the caret, and a run that went on to
+        // select by offset then edited the first document without a word.
+        std::cerr << "--select with no caret: selecting in document 0\n";
+      }
+      caret->placeAt(doc, step.from);
       caret->anchorSelection();
       caret->extendTo(step.to);
-      std::cout << std::format("select: doc 0 [{},{})\n",
+      std::cout << std::format("select: doc {} [{},{})\n", doc,
                                caret->selectionStart(), caret->selectionEnd());
+      if (this->state->documentSelected) {
+        this->state->documentSelected();
+      }
     }
     finishStepWhenSettled();
     return;
@@ -1019,7 +1060,7 @@ void Renderer::applyTypedText(RenderState &state) {
   if (caret->documentIndex() >= state.docs.size()) {
     return;
   }
-  static_cast<void>(typeAtCaret(state, typed));
+  std::ignore = typeAtCaret(state, typed);
 }
 
 std::uint32_t Renderer::typeAtCaret(RenderState &state,
@@ -1029,8 +1070,8 @@ std::uint32_t Renderer::typeAtCaret(RenderState &state,
   // selection goes first and the text lands where it began.
   if (caret->hasSelection()) {
     const auto start = caret->selectionStart();
-    static_cast<void>(document.erase(
-        state, start, caret->selectionEnd() - start, caret.get()));
+    std::ignore = document.erase(state, start, caret->selectionEnd() - start,
+                                 caret.get());
     caret->placeAt(caret->documentIndex(), start);
   }
   // Read before insert() moves the caret past what it is about to place.

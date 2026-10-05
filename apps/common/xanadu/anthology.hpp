@@ -115,6 +115,9 @@ struct ResolvedAnthologyMember {
 readAnthologyMember(const zigzag::Manifold &manifold, const Store &store,
                     zigzag::CellRef cell);
 
+[[nodiscard]] std::optional<AnthologyMember>
+readAnthologyMember(const zigzag::Manifold &manifold, zigzag::CellRef cell);
+
 /**
  * @brief Collects all members of an anthology rank starting from @p root or
  *        its posward d.anthology neighbors.
@@ -123,11 +126,18 @@ readAnthologyMember(const zigzag::Manifold &manifold, const Store &store,
 anthologyMembers(const zigzag::Manifold &manifold, const Store &store,
                  zigzag::CellRef root);
 
+[[nodiscard]] std::vector<AnthologyMember>
+anthologyMembers(const zigzag::Manifold &manifold, zigzag::CellRef root);
+
 /**
  * @brief Functional traversal over all members of an anthology rank.
  */
 void forEachAnthologyMember(
     const zigzag::Manifold &manifold, const Store &store, zigzag::CellRef root,
+    gleditor::cpp26::function_ref<bool(const AnthologyMember &)> visitor);
+
+void forEachAnthologyMember(
+    const zigzag::Manifold &manifold, zigzag::CellRef root,
     gleditor::cpp26::function_ref<bool(const AnthologyMember &)> visitor);
 
 /**

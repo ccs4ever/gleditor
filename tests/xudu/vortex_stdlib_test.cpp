@@ -9,8 +9,9 @@
 #include <vector>
 
 #include "common/xanadu/store.hpp"
-#include "common/xanadu/vortex/vortex.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 

@@ -16,10 +16,12 @@
 #include <ranges>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
@@ -29,7 +31,6 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/vql/compiler.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
@@ -45,7 +46,7 @@ std::string extractStoreLabel(const std::string &path) {
 }
 
 std::vector<xanadu::ResultRow>
-resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
+resultRows(const xanadu::MultiStoreCoordinator &coordinator,
            const std::vector<zigzag::CellRef> &results,
            const std::string_view transientPath = {}) {
   std::vector<xanadu::ResultRow> rows;
@@ -74,7 +75,29 @@ resultRows(const xanadu::vql::MultiStoreCoordinator &coordinator,
         }
       }
     }
-    rows.push_back({.text = std::move(rendered), .source = std::move(source)});
+    if (source.empty()) {
+      // A cell the query minted -- a line find() read out of a document --
+      // says where it came from along d.source.
+      if (const auto sourceDim = coordinator.core().findDimension("d.source")) {
+        const auto &arena = coordinator.arena();
+        if (const auto origin = arena.linked(cell, *sourceDim);
+            zigzag::noCell != origin) {
+          source = arena.textOf(origin);
+        }
+      }
+    }
+    // The bytes where they already are: a cell of a loaded store, or a line a
+    // search quoted out of a document. A constructed value has none.
+    std::optional<xanadu::QuotedSpans> quote;
+    if (const auto master = coordinator.derefCloneMaster(cell)) {
+      if (const auto quoted = coordinator.arena().quotedContent(*master)) {
+        quote = xanadu::QuotedSpans{.store = quoted->store,
+                                    .spans = std::move(quoted->spans)};
+      }
+    }
+    rows.push_back({.text   = std::move(rendered),
+                    .source = std::move(source),
+                    .quote  = std::move(quote)});
   }
   return rows;
 }
@@ -161,9 +184,16 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
       }
     }
     if (isValueOpt) {
-      options.push_back(arg);
       if (i + 1 < argc) {
-        options.emplace_back(argv[++i]);
+        std::string next = argv[++i];
+        if (next == "-" && (arg == "-o" || arg == "--output-store")) {
+          options.push_back("--output-store=-");
+        } else {
+          options.push_back(arg);
+          options.push_back(std::move(next));
+        }
+      } else {
+        options.push_back(arg);
       }
     } else if (arg.starts_with("-") && arg != "-") {
       options.push_back(arg);
@@ -316,6 +346,12 @@ int main(int argc, char *argv[]) {
   auto permaDir = program.get<std::string>("--permascroll");
   xanadu::UserPermascroll::Config permaConfig;
   if (!permaDir.empty()) {
+    // A named permascroll that is not there is a mistyped path: reading
+    // against it answers every query blank, and opening it would create it.
+    if (!std::filesystem::exists(permaDir)) {
+      std::cerr << "Error: no permascroll at " << permaDir << "\n";
+      return 1;
+    }
     permaConfig.storageDir = permaDir;
   } else if (!storePaths.empty()) {
     std::filesystem::path p(storePaths[0]);
@@ -331,11 +367,20 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  const auto permaSource = permaConfig.storageDir;
   auto permascroll =
-      permaConfig.storageDir.empty()
-          ? xanadu::PermascrollRegistry::instance().defaultUser()
-          : std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
-  xanadu::vql::MultiStoreCoordinator coordinator;
+      std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+  // A store holds no text of its own; read against a permascroll that is
+  // not the one it was written against, every answer comes back blank. Say
+  // so rather than print nothing.
+  if (!storePaths.empty() && 0 == permascroll->size()) {
+    std::cerr << "Warning: the permascroll"
+              << (permaSource.empty() ? std::string{}
+                                      : " at " + permaSource.string())
+              << " holds no text, so results will have none; pass "
+                 "--permascroll with the one the store was written against\n";
+  }
+  xanadu::MultiStoreCoordinator coordinator;
 
   std::string primaryPath;
   if (!storePaths.empty()) {
@@ -345,11 +390,13 @@ int main(int argc, char *argv[]) {
       std::string label       = extractStoreLabel(path);
       std::string role        = (i == 0) ? "primary" : "library";
 
-      if (std::filesystem::exists(path)) {
-        coordinator.loadAndAddStore(label, role, path, permascroll);
-      } else {
-        std::cerr << "Warning: store path does not exist: " << path << "\n";
+      if (!std::filesystem::exists(path)) {
+        // Querying a store that is not there would answer from nothing and
+        // look like an empty result.
+        std::cerr << "Error: store path does not exist: " << path << "\n";
+        return 1;
       }
+      coordinator.loadAndAddStore(label, role, path, permascroll);
     }
   }
 
@@ -367,8 +414,9 @@ int main(int argc, char *argv[]) {
                      (std::istreambuf_iterator<char>()));
   }
 
-  // Query Execution Helper
+  // What the last query found: what -o and :save write.
   std::vector<zigzag::CellRef> lastResults;
+  // Query Execution Helper
   bool hasResults = false;
   auto runQuery   = [&](std::string_view qStr) -> bool {
     // Parse AST
@@ -435,7 +483,12 @@ int main(int argc, char *argv[]) {
     } else {
       // Direct fast-path execution
       xanadu::vql::VQLEngine engine(coordinator);
-      results = engine.execute(ast);
+      try {
+        results = engine.execute(ast);
+      } catch (const std::runtime_error &err) {
+        std::cerr << "Error: " << err.what() << "\n";
+        return false;
+      }
     }
 
     lastResults = results;
@@ -491,13 +544,46 @@ int main(int argc, char *argv[]) {
     bool ok = runQuery(queryText);
     if (!ok) return 1;
 
-    // Handle in-place mutation
+    // In place: what the query minted -- cells that exist only in the arena
+    // -- is promoted into the primary store with everything reachable from
+    // it. A query that only read has nothing to write, and says so rather
+    // than claim a save that changed nothing.
     if (program.get<bool>("--in-place") && !primaryPath.empty()) {
       const auto primStore = coordinator.primaryStore();
-      if (primStore && primStore->store) {
-        primStore->store->save(primaryPath);
-        std::cout << "Saved in-place changes to primary store: " << primaryPath
-                  << "\n";
+      if (!primStore || !primStore->store) {
+        std::cerr << "Error: no primary store to write into\n";
+        return 1;
+      }
+      auto &store         = *primStore->store;
+      const auto &arena   = coordinator.arena();
+      std::size_t written = 0;
+      // From the version the query read, each promotion after the last.
+      // latest() names the greatest branch, which on a store with a second
+      // branch is not where the cells the query reached live, and the store
+      // refused the write as reaching into the future of its parent.
+      auto version = primStore->version;
+      try {
+        for (const auto result : lastResults) {
+          if (!zigzag::isEphemeral(result) || arena.isProxy(result) ||
+              arena.resolveForeign(result)) {
+            continue;
+          }
+          if (const auto promoted =
+                  zigzag::promote(store, version, arena, result)) {
+            version = promoted->version;
+            written += promoted->cells.size();
+          }
+        }
+      } catch (const std::invalid_argument &err) {
+        std::cerr << "Error: cannot write in place: " << err.what() << "\n";
+        return 1;
+      }
+      if (0 == written) {
+        std::cout << "Nothing to write in place: the query minted no cells\n";
+      } else {
+        store.save(primaryPath);
+        std::cout << "Wrote " << written << " cell" << (1 == written ? "" : "s")
+                  << " into " << primaryPath << "\n";
       }
     }
 
@@ -521,6 +607,7 @@ int main(int argc, char *argv[]) {
         std::cout.flush();
         std::cout.rdbuf(originalOutput);
         xanadu::writeStoreStream(destination, std::cout);
+        std::cout.flush();
       } else {
         std::cout << "Result store written to: " << outPath << "\n";
       }
@@ -599,7 +686,10 @@ int main(int argc, char *argv[]) {
       std::cout << "Registered stores on ##/d.stores rank:\n";
       for (const auto &s : coordinator.stores()) {
         std::cout << "  - " << s.label << " (role: " << s.role << ")"
-                  << " [master: #" << s.homeCell << ", rep: #" << s.storeCell
+                  << " [master: #"
+                  << (s.homeCell ? std::to_string(*s.homeCell) : "none")
+                  << ", rep: #"
+                  << (s.storeCell ? std::to_string(*s.storeCell) : "none")
                   << ", path: " << (s.path.empty() ? "(in-memory)" : s.path)
                   << "]\n";
       }

@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 
@@ -56,7 +57,10 @@ void TenuousTetherOverlay::deviceReady(
     [[maybe_unused]] const render::PipelineDesc &documentPipeline) {
   device_ = &device;
   beams_  = std::make_unique<gleditor::Beams>(&device, 256);
-  beams_->createPipeline("assets/shaders", "assets/shaders/vulkan", false);
+  // Through assetDir(), as every other pipeline is: a path relative to the
+  // working directory found the shaders only when run from the source tree.
+  beams_->createPipeline(gleditor::assetPath("shaders"),
+                         gleditor::assetPath("shaders/vulkan"), false);
 }
 
 void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {

@@ -181,6 +181,7 @@ struct Mark {
   std::uint32_t proxyCount{0};
   std::uint32_t quoteOccurrenceCount{0};
   std::uint32_t proxyShadowedEdgeCount{0};
+  std::uint32_t quoteSpaceCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -193,8 +194,11 @@ enum class ArenaRefusal : std::uint8_t {
   MarksOutstanding, ///< compact() inside a choice point would corrupt undo
 };
 
-/// An arena write: nothing on success, the reason it changed nothing if not.
-using ArenaResult = std::expected<void, ArenaRefusal>;
+class ArenaManifold;
+
+/// An arena write: pointer to the arena on success for fluid chaining, refusal
+/// reason if not.
+using ArenaResult = std::expected<ArenaManifold *, ArenaRefusal>;
 
 [[nodiscard]] constexpr std::string_view
 toString(const ArenaRefusal refusal) noexcept {
@@ -278,7 +282,7 @@ public:
   [[nodiscard]] bool isProvenanceCell(CellRef ref) const noexcept {
     return provenanceCells_.contains(ref);
   }
-  void projectProvenance(const xanadu::Store &store);
+  ArenaManifold *projectProvenance(const xanadu::Store &store);
 
   // -- Federation (§5.7) ----------------------------------------------------
 
@@ -324,6 +328,32 @@ public:
       std::pair<const xanadu::Store *, CellRef>>
   resolveForeign(CellRef ref) const noexcept;
 
+  /**
+   * @brief Mint a cell quoting @p content, addressed in @p space's scrolls.
+   *
+   * What a query answers with when what it found is no cell -- a line of a
+   * document's prose: the bytes stay where they are, in the scroll they were
+   * typed into, and this cell names them. Read through that space's reader,
+   * since a span's scroll id means something only in the store it came from.
+   */
+  CellRef makeQuote(std::uint32_t space,
+                    std::span<const xanadu::PrimediaSpan> content);
+
+  /// Spans in a store's own scroll namespace, and the store.
+  struct QuotedContent {
+    const xanadu::Store *store{nullptr};
+    std::vector<xanadu::PrimediaSpan> spans;
+  };
+
+  /**
+   * @brief Where @p ref's content already lives: a proxy's cell in its store,
+   *        a makeQuote() cell's spans, a base cell's in the base document.
+   *
+   * Nothing for content the evaluation constructed -- any scratch span --
+   * which has no address outside this arena until promote() gives it one.
+   */
+  [[nodiscard]] std::optional<QuotedContent> quotedContent(CellRef ref) const;
+
   /// Resolves the corresponding dimension in @p space for @p dim.
   [[nodiscard]] DimRef dimIn(std::uint32_t space, DimRef dim) const noexcept;
 
@@ -332,29 +362,31 @@ public:
                                    DimRef foreignDim) const noexcept;
 
   /// Explicitly bind @p arenaDim to @p foreignDim in @p space.
-  void
+  ArenaManifold *
   bindDimension(DimRef arenaDim, std::uint32_t space, DimRef foreignDim,
                 DimensionBindingMode mode = DimensionBindingMode::Explicit);
 
   /// Groups dimensions across attached spaces sharing the same published
   /// GlobalOpRef into BoundDimensionSet with SharedIdentity mode (§5.11 §5).
-  void bindSharedIdentities();
+  ArenaManifold *bindSharedIdentities();
 
   /// Groups dimensions across attached spaces sharing matching labels
   /// into BoundDimensionSet with NameMatch mode (§5.11 §5).
-  void bindDimensionsByNameMatch();
+  ArenaManifold *bindDimensionsByNameMatch();
 
   [[nodiscard]] gleditor::cpp26::optional<const BoundDimensionSet &>
   boundDimensionSet(DimRef dim) const noexcept;
 
   /// Pre-mints a frontier of canonical proxies along @p foreignDim starting at
   /// @p foreignHead.
-  void materializeFrontier(std::uint32_t space, CellRef foreignHead,
-                           DimRef foreignDim, DimVector dir = DimVector::POS,
-                           std::size_t maxSteps = 100);
+  ArenaManifold *materializeFrontier(std::uint32_t space, CellRef foreignHead,
+                                     DimRef foreignDim,
+                                     DimVector dir        = DimVector::POS,
+                                     std::size_t maxSteps = 100);
 
-  void setAllocationLimitForTesting(std::uint32_t limit) noexcept {
+  ArenaManifold *setAllocationLimitForTesting(std::uint32_t limit) noexcept {
     allocationLimit_ = limit;
+    return this;
   }
   [[nodiscard]] std::uint32_t allocationLimit() const noexcept {
     return allocationLimit_;
@@ -380,9 +412,10 @@ public:
 
   // -- read path: the same questions Manifold answers ------------------------
 
-  /// The dense id for @p ref, or npos. Arithmetic, not a lookup: an arena ref
-  /// is ephemeralBit | dense and there are no chain indices to resolve.
-  [[nodiscard]] std::uint32_t denseOf(CellRef ref) const noexcept;
+  /// The dense id for @p ref, or nullopt. Arithmetic, not a lookup: an arena
+  /// ref is ephemeralBit | dense and there are no chain indices to resolve.
+  [[nodiscard]] std::optional<std::uint32_t>
+  denseOf(CellRef ref) const noexcept;
 
   /// The ref for dense id @p dense. Public because promote() and a test both
   /// need to talk about "the n-th cell this arena minted".
@@ -409,15 +442,28 @@ public:
     return slots_;
   }
 
-  /// The cell @p from's neighbour along @p dim, or noCell.
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               DimVector dir = DimVector::POS) const noexcept;
-  [[nodiscard]] CellRef linked(CellRef from,
-                               DirectedDim target) const noexcept {
+  /**
+   * @brief linked(), minting the proxy for a neighbour in a foreign space
+   *        that has none yet.
+   *
+   * linked() is a read and answers noCell for a foreign neighbour nobody has
+   * proxied, so the first step from a store's cell into the rest of that
+   * store found nothing: a query walking a loaded store stopped at its home.
+   * A query evaluating in the arena is allowed to mint, and walks with this.
+   */
+  OptionalCell linkedMinting(CellRef from, DimRef dim,
+                             DimVector dir = DimVector::POS);
+
+  /// The cell @p from's neighbour along @p dim, or nullopt.
+  [[nodiscard]] OptionalCell
+  linked(CellRef from, DimRef dim,
+         DimVector dir = DimVector::POS) const noexcept;
+  [[nodiscard]] OptionalCell linked(CellRef from,
+                                    DirectedDim target) const noexcept {
     return linked(from, target.dim, target.dir);
   }
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               bool negward) const noexcept {
+  [[nodiscard]] OptionalCell linked(CellRef from, DimRef dim,
+                                    bool negward) const noexcept {
     return linked(from, dim, fromNegward(negward));
   }
 
@@ -509,13 +555,31 @@ public:
    * @return an ArenaRefusal naming the ref this arena does not hold, having
    *         changed nothing.
    */
-  ArenaResult link(CellRef from, DimRef dim, DimVector dir, CellRef to);
-  ArenaResult link(CellRef from, DirectedDim target, CellRef to) {
+  ArenaResult link(CellRef from, DimRef dim, DimVector dir,
+                   std::optional<CellRef> to = std::nullopt);
+  ArenaResult link(CellRef from, DirectedDim target,
+                   std::optional<CellRef> to = std::nullopt) {
     return link(from, target.dim, target.dir, to);
   }
-  ArenaResult link(CellRef from, DimRef dim, bool negward, CellRef to) {
+  ArenaResult link(CellRef from, DimRef dim, bool negward,
+                   std::optional<CellRef> to = std::nullopt) {
     return link(from, dim, fromNegward(negward), to);
   }
+
+  /// Remove link along @p dim in @p dir from @p from.
+  ArenaResult unlink(CellRef from, DimRef dim, DimVector dir) {
+    return link(from, dim, dir, std::nullopt);
+  }
+
+  /// Whether @p cell is a member of @p anchor's rank along @p dim.
+  [[nodiscard]] bool rankContains(CellRef anchor, CellRef cell,
+                                  DimRef dim) const noexcept;
+
+  /// Insert @p cell into @p anchor's rank along @p dim in @p dir without
+  /// severing links. Idempotent if @p cell is already in the rank. Returns this
+  /// pointer for fluent chaining.
+  ArenaManifold *insertIntoRank(CellRef cell, CellRef anchor, DimRef dim,
+                                DimVector dir = DimVector::POS);
 
   // -- choice points ---------------------------------------------------------
 
@@ -524,11 +588,11 @@ public:
 
   /// Undo everything since @p m: replay its trail tail in reverse, then
   /// truncate. Cells minted under the mark are *gone*, not garbage.
-  void release(const Mark &m) noexcept;
+  ArenaManifold *release(const Mark &m) noexcept;
 
   /// Give up a choice point without undoing it -- success, or a cut. The
   /// bindings made under it stand; only the ability to retry is discarded.
-  void discard(const Mark &m) noexcept;
+  ArenaManifold *discard(const Mark &m) noexcept;
 
   /// How many choice points are outstanding. Nonzero forbids compaction.
   [[nodiscard]] std::uint32_t outstandingMarks() const noexcept {
@@ -577,13 +641,13 @@ private:
   void trail(std::uint32_t dense);
 
   /// The dense slot for @p ref, copying the base's cell into the arena if that
-  /// is where it still lives. noDense if @p ref is a cell of neither.
+  /// is where it still lives. nullopt if @p ref is a cell of neither.
   ///
   /// Copy-on-write at cell granularity: the whole slot, its links and its
   /// content, so every later read of it is answered from one place and no read
   /// has to merge an override with what it overrides. An evaluation pays one
   /// copy per cell it writes to and nothing for the ones it only reads.
-  [[nodiscard]] std::uint32_t shadow(CellRef ref);
+  [[nodiscard]] std::optional<std::uint32_t> shadow(CellRef ref);
 
   CellRef mintSlot(xanadu::ValueKind kind, std::uint64_t bits,
                    std::span<const xanadu::PrimediaSpan> content);
@@ -635,6 +699,11 @@ private:
   std::unordered_map<CellRef, QuoteViewId> occurrenceToView_;
   std::map<std::pair<QuoteViewId, CellRef>, CellRef> viewCanonicalToOccurrence_;
   std::vector<CellRef> quoteOccurrenceOrder_;
+
+  /// makeQuote() cells -> the space their spans are addressed in, and the
+  /// order they were minted in, so release() can drop a failed branch's.
+  std::unordered_map<CellRef, std::uint32_t> quoteSpace_;
+  std::vector<CellRef> quoteSpaceOrder_;
 
   std::unordered_map<DimRef, BoundDimensionSet> boundDimensions_;
 

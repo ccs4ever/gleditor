@@ -193,6 +193,10 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return activityBack();
         } else if constexpr (std::is_same_v<Command, nav::ActivityForward>) {
           return activityForward(c.child);
+        } else if constexpr (std::is_same_v<Command, nav::EnterSavedVisit>) {
+          const auto visit = activity.find(c.visit);
+          if (!visit) return std::unexpected(NavigationError::VisitNotFound);
+          return restoreVisit(*visit);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
         } else {
@@ -375,15 +379,18 @@ NavigationResult LinkNavigator::enter() {
     return std::unexpected(NavigationError::NoOccurrenceChosen);
   }
   const auto &target = member.occurrences[*cursor.occurrence].site;
-  current            = activity.append(
+  if (targetReady && !targetReady(target)) {
+    return std::unexpected(NavigationError::TargetUnavailable);
+  }
+  current = activity.append(
       Visit{.parent  = current,
-                       .target  = target,
-                       .arrival = Arrival::EnteredEndpoint,
-                       .link    = LinkVisitContext{.key    = selection.key,
-                                                   .active = selection.active,
-                                                   .left   = selection.left,
-                                                   .right  = selection.right,
-                                                   .origin = selection.origin}});
+            .target  = target,
+            .arrival = Arrival::EnteredEndpoint,
+            .link    = LinkVisitContext{.key    = selection.key,
+                                        .active = selection.active,
+                                        .left   = selection.left,
+                                        .right  = selection.right,
+                                        .origin = selection.origin}});
   return NavigationEffect{.focus = target, .visit = current};
 }
 
@@ -403,6 +410,9 @@ NavigationResult LinkNavigator::enterAt(const nav::EnterAt &command) {
 }
 
 NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
+  if (targetReady && !targetReady(visit.target)) {
+    return std::unexpected(NavigationError::TargetUnavailable);
+  }
   current = visit.id;
   activity.select(visit.id);
   NavigationEffect effect{.focus = visit.target, .visit = visit.id};
@@ -412,7 +422,11 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
     // made the trip.
     return effect;
   }
-  const auto &saved = *visit.link;
+  return reselect(*visit.link, effect);
+}
+
+NavigationEffect LinkNavigator::reselect(const LinkVisitContext &saved,
+                                         NavigationEffect effect) {
   if (selected && saved.key == selected->key && selected->occurrences) {
     selected->active = saved.active;
     selected->left   = saved.left;
@@ -434,16 +448,27 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   return effect;
 }
 
+NavigationResult
+LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
+  return reselect(saved, {});
+}
+
+std::optional<LinkVisitContext> LinkNavigator::selectionContext() const {
+  if (!selected) {
+    return std::nullopt;
+  }
+  return LinkVisitContext{.key    = selected->key,
+                          .active = selected->active,
+                          .left   = selected->left,
+                          .right  = selected->right,
+                          .origin = selected->origin};
+}
+
 NavigationResult LinkNavigator::restoreCurrentSelection() {
   if (!current) return NavigationEffect{};
   const auto visit = activity.find(*current);
   if (!visit || !visit->link) return NavigationEffect{};
-  auto effect = restoreVisit(*visit);
-  if (effect) {
-    effect->focus.reset();
-    effect->visit.reset();
-  }
-  return effect;
+  return reselect(*visit->link, NavigationEffect{});
 }
 
 NavigationResult LinkNavigator::activityBack() {
@@ -483,6 +508,9 @@ NavigationResult LinkNavigator::returnToOrigin() {
   if (!origin) {
     return std::unexpected(NavigationError::NoOrigin);
   }
+  if (targetReady && !targetReady(origin->target)) {
+    return std::unexpected(NavigationError::TargetUnavailable);
+  }
   current = origin->id;
   activity.select(origin->id);
   return NavigationEffect{.focus = origin->target, .visit = current};
@@ -510,12 +538,17 @@ std::string_view name(const NavigationError error) noexcept {
     return "no occurrence chosen";
   case NavigationError::MemberNotInView:
     return "member not in view";
+  case NavigationError::TargetUnavailable:
+    return "target unavailable; reopen its document or slice, or dismiss this "
+           "link";
   case NavigationError::StaleGeneration:
     return "stale resolution";
   case NavigationError::LinkNotFound:
     return "link not found";
   case NavigationError::NoOrigin:
     return "no origin";
+  case NavigationError::VisitNotFound:
+    return "saved visit not found";
   case NavigationError::NoPreviousVisit:
     return "no previous visit";
   case NavigationError::NoCandidates:
@@ -536,6 +569,7 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "enter at",
                                                "activity back",
                                                "activity forward",
+                                               "enter saved visit",
                                                "return to origin",
                                                "dismiss"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);

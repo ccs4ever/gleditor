@@ -9,14 +9,16 @@
 #include <gleditor/logging.hpp>
 
 #include <algorithm> // for min, sort
-#include <cstddef>   // for byte
-#include <cstdlib>   // for getenv
+#include <cmath>
+#include <cstddef> // for byte
+#include <cstdlib> // for getenv
 #include <format>
 #include <ft2build.h>
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
 #include <gleditor/text/font.hpp>          // for FontManager
+#include <gleditor/text/script.hpp>
 #include <hb.h>
 #include <iostream>      // for basic_ostream, operator<<
 #include <numeric>       // for format
@@ -32,6 +34,7 @@
 #include <vector>        // for vector
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
+#include FT_OUTLINE_H
 #include FT_SYNTHESIS_H
 
 namespace gleditor {
@@ -411,6 +414,15 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     return empty;
   }
 
+  // A raised or lowered glyph is drawn smaller; the layout places it.
+  const bool script = decorations.contains(Decoration::Superscript) ||
+                      decorations.contains(Decoration::Subscript);
+  const auto scaled = [script](const int value) {
+    return script ? static_cast<int>(std::lround(static_cast<float>(value) *
+                                                 text::kScriptScale))
+                  : value;
+  };
+
   FT_Face face = useFont->face();
   int penX     = 0;
   int minX     = 0;
@@ -429,9 +441,9 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   for (unsigned int i = 0; i < glyphCount; i++) {
     FT_Face glyphFace = face;
     auto glyphCode    = info[i].codepoint;
-    int advX          = (pos[i].x_advance >> 6);
-    const int offX    = (pos[i].x_offset >> 6);
-    const int offY    = (pos[i].y_offset >> 6);
+    int advX          = scaled(pos[i].x_advance >> 6);
+    const int offX    = scaled(pos[i].x_offset >> 6);
+    const int offY    = scaled(pos[i].y_offset >> 6);
 
     // If the primary face lacks the glyph (.notdef / 0), query the Fontconfig
     // fallback chain for a face that supports the cluster's Unicode codepoint.
@@ -465,7 +477,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
             glyphFace = (*fallback)->face();
             glyphCode = fbIdx;
             if (advX == 0 && glyphFace->glyph) {
-              advX = static_cast<int>(glyphFace->glyph->advance.x >> 6);
+              advX = scaled(static_cast<int>(glyphFace->glyph->advance.x >> 6));
             }
           }
         }
@@ -486,6 +498,15 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     // on the live outline in the slot, so they have to run before
     // FT_Get_Glyph copies it out and before FT_Glyph_To_Bitmap rasterises it
     // -- afterwards there is no outline left to embolden or slant.
+    if (script && FT_GLYPH_FORMAT_OUTLINE == glyphFace->glyph->format) {
+      // A bitmap-only face, colour emoji say, has no outline to scale and is
+      // drawn at its own size.
+      constexpr FT_Fixed one = 0x10000;
+      const auto by =
+          static_cast<FT_Fixed>(std::lround(text::kScriptScale * one));
+      FT_Matrix shrink{.xx = by, .xy = 0, .yx = 0, .yy = by};
+      FT_Outline_Transform(&glyphFace->glyph->outline, &shrink);
+    }
     if (resolved.stillSynthetic.contains(Decoration::Bold)) {
       FT_GlyphSlot_Embolden(glyphFace->glyph);
     }

@@ -5,15 +5,16 @@
 #include "common/xanadu/vql/vql_engine.hpp"
 
 #include <algorithm>
-#include <cctype>
 #include <charconv>
 #include <cmath>
+#include <concepts>
+#include <format>
 #include <iterator>
-#include <limits>
-#include <ranges>
+#include <set>
 #include <stdexcept>
+#include <tuple>
+#include <unordered_set>
 
-#include "common/xanadu/vql/lexer.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/cpp26_concat.hpp>
@@ -89,6 +90,24 @@ VQLEngine::VQLEngine(zigzag::ArenaManifold &arena)
       ownedCoordinator_(std::make_unique<MultiStoreCoordinator>(*ownedCore_)),
       coordinator_(*ownedCoordinator_), core_(ownedCore_.get()) {}
 
+namespace {
+/// A value as the text a comparison or a search reads.
+std::string textOfValue(const zigzag::vortex::CellValue &value) {
+  return std::visit(
+      [](const auto &held) -> std::string {
+        using T = std::remove_cvref_t<decltype(held)>;
+        if constexpr (std::same_as<T, std::string>) {
+          return held;
+        } else if constexpr (std::same_as<T, bool>) {
+          return held ? "true" : "false";
+        } else {
+          return std::format("{}", held);
+        }
+      },
+      value);
+}
+} // namespace
+
 zigzag::DimRef VQLEngine::resolveDimension(std::string_view name) {
   return coordinator_.resolveDimension(name);
 }
@@ -133,7 +152,9 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
 
   switch (anchor.kind) {
   case AnchorKind::Home:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::NamedStore: {
@@ -144,19 +165,23 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   }
 
   case AnchorKind::Root:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::Cursor:
     if (core_->dims().cursors != zigzag::noCell) {
       results.push_back(core_->dims().cursors);
-    } else {
-      results.push_back(coordinator_.homeAnchor());
+    } else if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
     }
     break;
 
   case AnchorKind::NamedCursor:
-    results.push_back(coordinator_.homeAnchor());
+    if (const auto h = coordinator_.homeAnchor()) {
+      results.push_back(*h);
+    }
     break;
 
   case AnchorKind::Variable: {
@@ -204,7 +229,7 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
 
   if (anchor.derefMaster) {
     for (auto &c : results) {
-      c = coordinator_.derefCloneMaster(c);
+      c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
 
@@ -216,12 +241,20 @@ VQLEngine::evaluatePath(const PathExpression &path,
                         const std::vector<zigzag::CellRef> &contextCells) {
   std::vector<zigzag::CellRef> current =
       resolveAnchor(path.anchor, contextCells);
+  std::erase_if(current, [&](const zigzag::CellRef cell) {
+    return !std::ranges::all_of(
+        path.anchorPredicates,
+        [&](const BooleanExpr &pred) { return evaluatePredicate(pred, cell); });
+  });
 
   for (const auto &step : path.steps) {
-    current = evaluateStep(step, current);
-    if (current.empty()) {
+    // Nothing flowing in ends a walk, but not a function: count() of nothing
+    // is zero, and it used to print nothing at all.
+    if (current.empty() &&
+        !std::holds_alternative<FunctionInvocation>(step.selector)) {
       break;
     }
+    current = evaluateStep(step, current);
   }
 
   // Clone joins: leftmost operand is master
@@ -266,26 +299,44 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
   zigzag::DimRef dim    = resolveDimension(dimStep.dimName);
   zigzag::DimVector dir = dimStep.direction;
 
+  auto &arena = core_->arena();
+  // Walks through arena.linkedMinting(), so a step from a loaded store's cell
+  // reaches the rest of that store; a cycle is walked once.
+  const auto walk = [&](const zigzag::CellRef start,
+                        const zigzag::DimVector way, const auto &visit) {
+    std::unordered_set<zigzag::CellRef> seen{start};
+    for (auto cell = arena.linkedMinting(start, dim, way);
+         zigzag::noCell != cell && seen.insert(cell).second;
+         cell = arena.linkedMinting(cell, dim, way)) {
+      visit(cell);
+    }
+  };
+  const auto extreme = [&](const zigzag::CellRef start,
+                           const zigzag::DimVector way) {
+    auto last = start;
+    walk(start, way, [&](const zigzag::CellRef cell) { last = cell; });
+    return last;
+  };
+
   for (zigzag::CellRef in : inputs) {
-    if (!core_->arena().contains(in)) {
+    if (!arena.contains(in)) {
       continue;
     }
 
     switch (dimStep.placement) {
     case Placement::Default:
-    case Placement::From: {
+    case Placement::From:
       // Walk outward from context in step's direction
-      std::ranges::copy(zigzag::rankAfter(core_->arena(), in, dim, dir),
-                        std::back_inserter(results));
+      walk(in, dir,
+           [&](const zigzag::CellRef cell) { results.push_back(cell); });
       break;
-    }
 
     case Placement::Rank: {
       // Seek to head (extreme negward), then stream to tail (extreme posward)
-      const auto head =
-          zigzag::rankTail(core_->arena(), in, dim, zigzag::Negward);
-      auto rankCells = zigzag::rank(core_->arena(), head, dim) |
-                       std::ranges::to<std::vector>();
+      const auto head = extreme(in, zigzag::DimVector::NEG);
+      std::vector<zigzag::CellRef> rankCells{head};
+      walk(head, zigzag::DimVector::POS,
+           [&](const zigzag::CellRef cell) { rankCells.push_back(cell); });
       if (dir == zigzag::DimVector::NEG) {
         std::ranges::reverse(rankCells);
       }
@@ -293,23 +344,74 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       break;
     }
 
-    case Placement::Head: {
-      // Seek to extreme negward
-      results.push_back(
-          zigzag::rankTail(core_->arena(), in, dim, zigzag::Negward));
+    case Placement::Head:
+      results.push_back(extreme(in, zigzag::DimVector::NEG));
       break;
-    }
 
-    case Placement::Tail: {
-      // Seek to extreme posward
-      results.push_back(
-          zigzag::rankTail(core_->arena(), in, dim, zigzag::Posward));
+    case Placement::Tail:
+      results.push_back(extreme(in, zigzag::DimVector::POS));
       break;
-    }
     }
   }
 
   return results;
+}
+
+void VQLEngine::findInDocuments(const StoreInfo &info,
+                                const std::string_view needle,
+                                std::vector<zigzag::CellRef> &out) {
+  // A document's prose is no cell, so a hit is answered with one: a quotation
+  // of the line it is on -- the document's own spans, so the bytes stay in
+  // the scroll they were typed into -- linked along d.source to where that
+  // line was found.
+  const auto identity =
+      info.path.empty() ? "store:" + info.store->documentId().str() : info.path;
+  const auto sourceDim = coordinator_.resolveDimension("d.source");
+  auto &arena          = core_->arena();
+  // Every branch head, not only the ones the store designates current: a
+  // reader searching wants the word wherever it was written. The designated
+  // ones go first, so a line every branch shares is reported from one of
+  // them, and a line is reported once however many branches share it --
+  // which its spans, not its text, decide, so two lines that merely read
+  // alike are both found.
+  auto versions = info.store->currentVersions();
+  for (const auto &head : info.store->branchHeads()) {
+    if (std::ranges::find(versions, head) == versions.end()) {
+      versions.push_back(head);
+    }
+  }
+  using SpanKey =
+      std::vector<std::tuple<xanadu::ScrollId, std::uint64_t, std::uint64_t>>;
+  std::set<SpanKey> found;
+  for (const auto &version : versions) {
+    const auto document = info.store->rebuild(version);
+    const auto text     = info.store->textOf(version);
+    for (auto at = text.find(needle); std::string::npos != at;) {
+      const auto newline = text.rfind('\n', at);
+      const auto begin   = std::string::npos == newline ? 0 : newline + 1;
+      const auto end     = std::min(text.find('\n', at), text.size());
+      const auto spans =
+          document.spansFor(static_cast<std::uint32_t>(begin),
+                            static_cast<std::uint32_t>(end - begin));
+      const auto hitAt = at;
+      at = end < text.size() ? text.find(needle, end) : std::string::npos;
+      SpanKey key;
+      key.reserve(spans.size());
+      for (const auto &span : spans) {
+        key.emplace_back(span.scroll, span.start, span.length);
+      }
+      if (!found.insert(std::move(key)).second) {
+        continue;
+      }
+      const auto hit = arena.makeQuote(info.spaceId, spans);
+      const auto source =
+          arena.makeCell(identity + "#version=" + version.str() +
+                         "&at=" + std::to_string(hitAt));
+      zigzag::expectWritten(
+          arena.link(hit, sourceDim, zigzag::DimVector::POS, source));
+      out.push_back(hit);
+    }
+  }
 }
 
 std::vector<zigzag::CellRef>
@@ -381,7 +483,13 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
 std::vector<zigzag::CellRef>
 VQLEngine::evaluateStep(const PathStep &step,
                         const std::vector<zigzag::CellRef> &currentCells) {
-  if (currentCells.empty()) {
+  // A function has an answer for nothing flowing in -- zero, what a search
+  // finds anywhere, whether one string holds another -- except the two that
+  // act on their inputs. A name nobody knows is still reported below.
+  const auto *const function = std::get_if<FunctionInvocation>(&step.selector);
+  if (currentCells.empty() &&
+      (nullptr == function || "value" == function->name ||
+       "link" == function->name)) {
     return {};
   }
 
@@ -459,10 +567,56 @@ VQLEngine::evaluateStep(const PathStep &step,
           stepOutput.push_back(*res);
         }
       }
+    } else if (fn.name == "find" && !fn.args.empty()) {
+      // Every cell of every loaded store whose text holds the needle: how a
+      // reader finds something without knowing where it is. The audit found
+      // no way to search text at all.
+      const auto needle =
+          textOfValue(evaluateValueExpr(fn.args[0], zigzag::noCell));
+      for (const auto &info : coordinator_.stores()) {
+        if (!info.manifold || !info.store) {
+          continue;
+        }
+        for (const auto &slot : info.manifold->cells()) {
+          if (info.manifold->textOf(slot.birthOp, *info.store).find(needle) !=
+              std::string::npos) {
+            stepOutput.push_back(
+                core_->arena().proxyFor(info.spaceId, slot.birthOp));
+          }
+        }
+        if (!needle.empty()) {
+          findInDocuments(info, needle, stepOutput);
+        }
+      }
+    } else if (fn.name == "contains" && fn.args.size() >= 2) {
+      // The predicate's answer, as a query of its own: true or false.
+      const auto context =
+          currentCells.empty() ? zigzag::noCell : currentCells.front();
+      const auto haystack = textOfValue(evaluateValueExpr(fn.args[0], context));
+      const auto needle   = textOfValue(evaluateValueExpr(fn.args[1], context));
+      stepOutput.push_back(core_->arena().makeScalarCell(
+          std::string::npos != haystack.find(needle)));
     } else if (fn.name == "count") {
-      zigzag::CellRef countCell = core_->arena().makeScalarCell(
-          static_cast<std::int64_t>(currentCells.size()));
-      stepOutput.push_back(countCell);
+      // count(path) counts what the path finds from here; bare count()
+      // counts what flowed into the step.
+      std::size_t counted = currentCells.size();
+      if (!fn.args.empty()) {
+        if (const auto *const path =
+                std::get_if<std::shared_ptr<PathExpression>>(
+                    &fn.args[0].kind)) {
+          counted = evaluatePath(**path, currentCells).size();
+        } else if (const auto *const inner =
+                       std::get_if<std::shared_ptr<FunctionInvocation>>(
+                           &fn.args[0].kind)) {
+          // count(find("x")): a function argument is a one-step path.
+          const PathExpression wrapped{
+              .anchor = AnchorNode{.kind = AnchorKind::Context},
+              .steps  = {PathStep{.selector = **inner}}};
+          counted = evaluatePath(wrapped, currentCells).size();
+        }
+      }
+      stepOutput.push_back(
+          core_->arena().makeScalarCell(static_cast<std::int64_t>(counted)));
     } else if (fn.name == "link" && fn.args.size() >= 2) {
       // Existing-Target Fan-Out (§4.7)
       // Resolve dimension and direction from arg 0
@@ -537,13 +691,17 @@ VQLEngine::evaluateStep(const PathStep &step,
           stepOutput = attachedClones;
         }
       }
+    } else {
+      // Answering nothing for a name it does not know reads as "no match".
+      throw std::runtime_error("no function " + fn.name + " taking " +
+                               std::to_string(fn.args.size()) + " argument(s)");
     }
   }
 
   // Master Dereference >
   if (step.derefMaster) {
     for (auto &c : stepOutput) {
-      c = coordinator_.derefCloneMaster(c);
+      c = coordinator_.derefCloneMaster(c).value_or(c);
     }
   }
 
@@ -646,6 +804,11 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
 
   if (std::holds_alternative<std::shared_ptr<FunctionInvocation>>(expr.kind)) {
     const auto &fn = *std::get<std::shared_ptr<FunctionInvocation>>(expr.kind);
+    if (fn.name == "contains" && fn.args.size() >= 2) {
+      const auto haystack = textOfValue(evaluateValueExpr(fn.args[0], context));
+      const auto needle   = textOfValue(evaluateValueExpr(fn.args[1], context));
+      return std::string::npos != haystack.find(needle);
+    }
     if (fn.name == "count") {
       if (!fn.args.empty()) {
         if (std::holds_alternative<std::shared_ptr<PathExpression>>(

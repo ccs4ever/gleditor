@@ -45,7 +45,7 @@ QuotationBuilderOverlay::QuotationBuilderOverlay(
     Store &localStore, MicroversionId activeVersion, RendererRef renderer,
     SwarmCatalog *catalog, std::string fontName, OpenStoresProvider openStores,
     VersionCommitCallback onCommit)
-    : localStore_(localStore), activeVersion_(activeVersion),
+    : localStore_(&localStore), activeVersion_(activeVersion),
       renderer_(std::move(renderer)), catalog_(catalog),
       fontName_(std::move(fontName)),
       openStoresProvider_(std::move(openStores)),
@@ -63,24 +63,29 @@ void QuotationBuilderOverlay::deviceReady(
 
 bool QuotationBuilderOverlay::busy() const { return false; }
 
-void QuotationBuilderOverlay::setVisible(const bool visible) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setVisible(const bool visible) {
   visible_ = visible;
   if (visible_) {
     if (activeVersion_.isZero() &&
-        !localStore_.primaryCurrentVersion().isZero()) {
-      activeVersion_ = localStore_.primaryCurrentVersion();
+        !localStore_->primaryCurrentVersion().isZero()) {
+      activeVersion_ = localStore_->primaryCurrentVersion();
     }
     refreshSources();
     recomputePreview();
   }
   ++a11yRevision_;
+  return this;
 }
 
-void QuotationBuilderOverlay::toggle() { setVisible(!visible_); }
+QuotationBuilderOverlay *QuotationBuilderOverlay::toggle() {
+  setVisible(!visible_);
+  return this;
+}
 
-void QuotationBuilderOverlay::refreshSources() {
+QuotationBuilderOverlay *QuotationBuilderOverlay::refreshSources() {
   foreignStores_.clear();
-  const auto &reg = localStore_.scrollRegistry();
+  const auto &reg = localStore_->scrollRegistry();
   for (const auto &rec : reg.scrolls) {
     if (!rec.globalKey.empty()) {
       foreignStores_.push_back(rec.globalKey);
@@ -114,11 +119,13 @@ void QuotationBuilderOverlay::refreshSources() {
   }
 
   selectStore(0);
+  return this;
 }
 
-void QuotationBuilderOverlay::selectStore(const std::size_t index) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::selectStore(const std::size_t index) {
   if (index >= foreignStores_.size()) {
-    return;
+    return this;
   }
   selectedStoreIndex_ = index;
   const auto &key     = foreignStores_[index];
@@ -134,7 +141,7 @@ void QuotationBuilderOverlay::selectStore(const std::size_t index) {
     }
   }
   if (targetStore == nullptr) {
-    targetStore = &localStore_;
+    targetStore = localStore_;
   }
   selectedTargetStore_ = targetStore;
 
@@ -147,7 +154,9 @@ void QuotationBuilderOverlay::selectStore(const std::size_t index) {
     candidateRootCells_.emplace_back(home, "home");
   }
 
-  const auto fold = targetStore->rebuildManifold(targetStore->latest());
+  // Where the builder pinned the store, so the candidates are cells it has.
+  const auto fold =
+      targetStore->rebuildManifold(builder_.config().pinnedVersion);
   for (const auto &c : fold.cells()) {
     if (c.birthOp != home && c.birthOp != fold.dimsDimension()) {
       const auto txt = fold.textOf(c.birthOp, *targetStore);
@@ -177,11 +186,13 @@ void QuotationBuilderOverlay::selectStore(const std::size_t index) {
   }
 
   selectRootCell(0);
+  return this;
 }
 
-void QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
   if (index >= candidateRootCells_.size()) {
-    return;
+    return this;
   }
   selectedRootCellIndex_ = index;
   const auto rootCell    = candidateRootCells_[index].first;
@@ -189,34 +200,41 @@ void QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
     builder_.setRootCell(rootCell);
   }
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
   builder_.setMode(mode);
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
   if (selectedCarriedDims_.contains(dim)) {
     selectedCarriedDims_.erase(dim);
   } else {
     selectedCarriedDims_.insert(dim);
   }
   recomputePreview();
+  return this;
 }
 
-void QuotationBuilderOverlay::setVqlQuery(std::string query) {
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setVqlQuery(std::string query) {
   vqlQueryText_ = std::move(query);
   builder_.setVqlQuery(vqlQueryText_);
   recomputePreview();
+  return this;
 }
 
 void QuotationBuilderOverlay::recomputePreview() {
-  const auto *st = selectedTargetStore_ ? selectedTargetStore_ : &localStore_;
+  const auto *st = selectedTargetStore_ ? selectedTargetStore_ : localStore_;
   const auto scrollKey =
       foreignStores_.empty() ? "" : foreignStores_[selectedStoreIndex_];
   const auto scrollId =
-      localStore_.scrollRegistry().scrollIdForKey(scrollKey).value_or(1);
+      localStore_->scrollRegistry().scrollIdForKey(scrollKey).value_or(1);
 
   if (builder_.mode() == Selector::Kind::Closure) {
     std::vector<ExternOpRef> dims;
@@ -261,7 +279,7 @@ bool QuotationBuilderOverlay::commitQuotation() {
   builder_.setQuotationLabel(labelText_);
   builder_.setLocalRankDim(localDimName_);
 
-  auto &st        = localStore_;
+  auto &st        = *localStore_;
   auto curVersion = activeVersion_;
   if (curVersion.isZero()) {
     curVersion = st.primaryCurrentVersion();
@@ -270,10 +288,15 @@ bool QuotationBuilderOverlay::commitQuotation() {
     }
   }
 
-  const auto fold          = st.rebuildManifold(curVersion);
+  MicroversionId baseVer = curVersion;
+  // A quotation is cells on a rank, and a plain document has no slice to
+  // hang them from; minting a dimension there threw on the render thread.
+  if (zigzag::noCell == st.homeCell()) {
+    baseVer = st.sliceGenesis(baseVer);
+  }
+  const auto fold          = st.rebuildManifold(baseVer);
   auto dimLocal            = fold.dimensionNamed(localDimName_, st);
   zigzag::DimRef targetDim = zigzag::noCell;
-  MicroversionId baseVer   = curVersion;
 
   if (!dimLocal) {
     const auto minted = st.makeDimension(baseVer, localDimName_);
@@ -283,11 +306,7 @@ bool QuotationBuilderOverlay::commitQuotation() {
     targetDim = *dimLocal;
   }
 
-  zigzag::CellRef localHead = st.homeCell();
-  if (localHead == zigzag::noCell) {
-    baseVer   = st.makeCell(baseVer, "Quotation Anchor");
-    localHead = st.cellRefOf(baseVer);
-  }
+  const zigzag::CellRef localHead = st.homeCell();
 
   const auto q   = builder_.commit(st, baseVer, localHead, targetDim);
   activeVersion_ = q.version;

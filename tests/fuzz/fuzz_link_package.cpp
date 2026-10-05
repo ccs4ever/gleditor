@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <tuple>
 
 #include "common/xanadu/bencode.hpp"
 #include "common/xanadu/blessing.hpp"
@@ -20,17 +21,17 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   const std::string_view sv(reinterpret_cast<const char *>(data), size);
 
   try {
-    static_cast<void>(xanadu::bencode::decode(sv));
+    std::ignore = xanadu::bencode::decode(sv);
   } catch (...) {
   }
 
-  static_cast<void>(xanadu::decodeLinkPackage(sv));
-  static_cast<void>(xanadu::decodeBlessing(sv));
-  static_cast<void>(xanadu::decodePublication(sv));
-  static_cast<void>(xanadu::decodeMutablePointer(sv));
+  std::ignore = xanadu::decodeLinkPackage(sv);
+  std::ignore = xanadu::decodeBlessing(sv);
+  std::ignore = xanadu::decodePublication(sv);
+  std::ignore = xanadu::decodeMutablePointer(sv);
 
   try {
-    static_cast<void>(xanadu::MutableLink::parse(sv));
+    std::ignore = xanadu::MutableLink::parse(sv);
   } catch (...) {
   }
 

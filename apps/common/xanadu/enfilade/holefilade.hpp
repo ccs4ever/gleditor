@@ -24,11 +24,11 @@
 #include <utility>
 #include <vector>
 
-#include "common/xanadu/enfilade/crum_node.hpp"
 #include "common/xanadu/identity/identity_layout.hpp"
 #include "common/xanadu/merkle_ledger.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/spool.hpp"
+#include <gleditor/enfilade/crum_node.hpp>
 
 namespace xanadu::enfilade {
 
@@ -135,9 +135,9 @@ inline HoleWid HoleDsp::act(const HoleWid &w) const noexcept {
   return res;
 }
 
-static_assert(DisplacementMonoid<HoleDsp>);
-static_assert(WidthMonoid<HoleWid>);
-static_assert(EnfiladeAction<HoleDsp, HoleWid>);
+static_assert(gleditor::enfilade::DisplacementMonoid<HoleDsp>);
+static_assert(gleditor::enfilade::WidthMonoid<HoleWid>);
+static_assert(gleditor::enfilade::EnfiladeAction<HoleDsp, HoleWid>);
 
 /**
  * @enum PermascrollSpanState
@@ -217,7 +217,7 @@ struct HoleSlice {
  * @brief Routing node in the Holefilade B-enfilade tree (branching factor B =
  * 16).
  */
-struct alignas(kCacheLineBytes) HoleCrum {
+struct alignas(gleditor::enfilade::kCacheLineBytes) HoleCrum {
   static constexpr std::size_t BranchingFactor = 16;
 
   HoleDsp dsp{};

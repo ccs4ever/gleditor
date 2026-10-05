@@ -6,12 +6,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/extern_ref.hpp"
@@ -487,10 +489,15 @@ TEST(ArenaFederationTest, PromotingAProxyFilesAPlaceholder) {
 // 13. forkingAnOccurrenceAuthorsLocalStructureWithoutCopyingPrimedia
 TEST(ArenaFederationTest,
      ForkingAnOccurrenceAuthorsLocalStructureWithoutCopyingPrimedia) {
-  const auto dirF   = tempStoreDir("foreign_fork");
-  const auto dirL   = tempStoreDir("local_fork");
-  auto foreignStore = createTestStore(dirF);
-  auto localStore   = createTestStore(dirL);
+  // One author, one permascroll: the foreign document's bytes are at the same
+  // offsets for the local one. Across two permascrolls the promotion would
+  // have to name a scroll the local store cannot read, and is refused
+  // (AQuotationAnotherPermascrollHoldsIsRefused).
+  UserPermascroll::Config cfg;
+  cfg.storageDir    = tempStoreDir("fork") / "permascroll";
+  auto perma        = std::make_shared<UserPermascroll>(cfg);
+  auto foreignStore = std::make_shared<Store>(perma);
+  auto localStore   = std::make_shared<Store>(perma);
 
   auto vF0             = foreignStore->sliceGenesis(MicroversionId{});
   auto vF1             = foreignStore->makeCell(vF0, "shared primedia text");
@@ -512,10 +519,11 @@ TEST(ArenaFederationTest,
   auto localFolded       = localStore->rebuildManifold(promotedOpt->version);
   const CellRef authored = promotedOpt->cells.front();
 
-  // Preserves foreign span without copying into local scratch
-  const auto spans = localFolded.contentOf(authored);
+  // The foreign cell's own bytes, neither copied nor moved to scratch.
+  const auto spans    = localFolded.contentOf(authored);
+  const auto original = foreignManifold.contentOf(fCell);
   ASSERT_FALSE(spans.empty());
-  EXPECT_NE(spans.front().scroll, xanadu::scratchScroll);
+  EXPECT_TRUE(std::ranges::equal(spans, original));
 }
 
 // 14. aBoundDimensionResolvesPerSpace and aBoundDimensionRecordsHowItWasBound
@@ -575,6 +583,90 @@ TEST(ArenaFederationTest, AMintAtTheRefCeilingIsRefused) {
   } catch (const std::runtime_error &e) {
     EXPECT_THAT(e.what(), ::testing::HasSubstr("cannot allocate beyond"));
   }
+}
+
+// A quotation names bytes in a federated store's scrolls; read through that
+// store, whatever reader the caller has.
+TEST(ArenaFederationTest, AQuotationReadsThroughItsSpace) {
+  auto store       = createTestStore(tempStoreDir("quote_read"));
+  const auto typed = store->insert(MicroversionId{}, 0, "hello world");
+  const auto spans = store->rebuild(typed).spansFor(6, 5);
+
+  ArenaManifold arena;
+  const auto sp    = arena.attach(Space{.store = store.get(), .label = "q"});
+  const auto quote = arena.makeQuote(sp, spans);
+
+  EXPECT_EQ(arena.textOf(quote), "world");
+  const auto quoted = arena.quotedContent(quote);
+  ASSERT_TRUE(quoted.has_value());
+  EXPECT_EQ(quoted->store, store.get());
+  EXPECT_EQ(quoted->spans, spans);
+  EXPECT_FALSE(arena.quotedContent(arena.makeCell("constructed")).has_value());
+}
+
+TEST(ArenaFederationTest, AQuotationVanishesWithItsMark) {
+  auto first       = createTestStore(tempStoreDir("quote_mark_first"));
+  auto quoted      = createTestStore(tempStoreDir("quote_mark_quoted"));
+  const auto typed = quoted->insert(MicroversionId{}, 0, "hello");
+  const auto spans = quoted->rebuild(typed).spansFor(0, 5);
+
+  ArenaManifold arena;
+  // The first space attached is the one an ordinary cell's spans are read in.
+  std::ignore     = arena.attach(Space{.store = first.get(), .label = "a"});
+  const auto sp   = arena.attach(Space{.store = quoted.get(), .label = "q"});
+  const auto mark = arena.mark();
+  const auto gone = arena.makeQuote(sp, spans);
+  arena.release(mark);
+
+  // The ref is free again, and what takes it is no quotation of that store.
+  const auto reused = arena.makeCell(spans.front());
+  EXPECT_EQ(reused, gone);
+  const auto content = arena.quotedContent(reused);
+  ASSERT_TRUE(content.has_value());
+  EXPECT_EQ(content->store, first.get());
+}
+
+// Promoted, a quotation is a transclusion: the same bytes, no copy.
+TEST(ArenaFederationTest, PromotingAQuotationTranscludesItsBytes) {
+  const auto dir = tempStoreDir("quote_promote");
+  UserPermascroll::Config cfg;
+  cfg.storageDir   = dir / "permascroll";
+  auto perma       = std::make_shared<UserPermascroll>(cfg);
+  auto source      = std::make_shared<Store>(perma);
+  auto target      = std::make_shared<Store>(perma);
+  const auto typed = source->insert(MicroversionId{}, 0, "hello world");
+  const auto spans = source->rebuild(typed).spansFor(0, 5);
+
+  ArenaManifold arena;
+  const auto sp    = arena.attach(Space{.store = source.get(), .label = "q"});
+  const auto quote = arena.makeQuote(sp, spans);
+
+  const auto promoted =
+      promote(*target, target->sliceGenesis(MicroversionId{}), arena, quote);
+  ASSERT_TRUE(promoted.has_value());
+  const auto folded  = target->rebuildManifold(promoted->version);
+  const auto cell    = promoted->cells.front();
+  const auto content = folded.contentOf(cell);
+  EXPECT_EQ(std::vector<PrimediaSpan>(content.begin(), content.end()), spans);
+  EXPECT_EQ(folded.textOf(cell, *target), "hello");
+}
+
+// Bytes in a permascroll the target cannot read cannot be transcluded, and
+// copying them is not the answer: the promotion is refused, nothing written.
+TEST(ArenaFederationTest, AQuotationAnotherPermascrollHoldsIsRefused) {
+  auto source      = createTestStore(tempStoreDir("quote_foreign_src"));
+  auto target      = createTestStore(tempStoreDir("quote_foreign_dst"));
+  const auto typed = source->insert(MicroversionId{}, 0, "hello");
+  const auto spans = source->rebuild(typed).spansFor(0, 5);
+
+  ArenaManifold arena;
+  const auto sp    = arena.attach(Space{.store = source.get(), .label = "q"});
+  const auto quote = arena.makeQuote(sp, spans);
+
+  const auto genesis = target->sliceGenesis(MicroversionId{});
+  const auto before  = target->opCount();
+  EXPECT_FALSE(promote(*target, genesis, arena, quote).has_value());
+  EXPECT_EQ(target->opCount(), before);
 }
 
 } // namespace

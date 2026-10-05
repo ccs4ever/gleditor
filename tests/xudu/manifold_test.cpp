@@ -20,6 +20,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -30,8 +31,8 @@
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
-#include <common/xanadu/zigzag/arena_manifold.hpp>
 
 namespace {
 
@@ -99,10 +100,10 @@ struct Slice {
 TEST(ManifoldTest, genesisMintsHomeAndTheDimsDimension) {
   Slice slice;
 
-  // Index 1 and index 2, which is what the design describes for a store that
-  // was a slice from its first operation.
-  EXPECT_EQ(slice.store.homeCell(), 1U);
-  EXPECT_EQ(slice.store.dimsDimension(), 2U);
+  // Index 2 and index 3, which is what the design describes for a store that
+  // was a slice from its first operation (Make(Slice) at op 1).
+  EXPECT_EQ(slice.store.homeCell(), 2U);
+  EXPECT_EQ(slice.store.dimsDimension(), 3U);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.cellCount(), 2U);
@@ -309,9 +310,12 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   // Walked with no index at all: each operation names the previous one on the
   // same cell, and the chain ends at the MakeCell whose index is the cell.
   std::vector<std::uint32_t> chain;
-  for (auto step = slot->lastOp; step != 0;
-       step      = slice.store.getCompactOp(step)->sourceOpIndex) {
+  for (auto step = slot->lastOp; step != 0;) {
     chain.push_back(step);
+    if (step == cell) {
+      break;
+    }
+    step = slice.store.getCompactOp(step)->sourceOpIndex;
   }
   EXPECT_THAT(chain, testing::ElementsAre(secondLink, firstLink, cell));
 
@@ -352,7 +356,7 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     slice.at = slice.store.setLink(slice.at, slice.store.homeCell(),
                                    slice.store.dimsDimension(), DimVector::POS,
-                                   dims.back(), &manifold);
+                                   dims.back());
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
   const auto dim  = dims.front();
@@ -367,10 +371,10 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
       // the arena and have to be relocated, which is the part of the CSR
       // arrangement a cold fold would never exercise.
       slice.at = slice.store.setLink(slice.at, rank[rank.size() - 2], dim,
-                                     DimVector::POS, rank.back(), &manifold);
+                                     DimVector::POS, rank.back());
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
       slice.at = slice.store.setLink(slice.at, rank.back(), meta,
-                                     DimVector::NEG, rank.front(), &manifold);
+                                     DimVector::NEG, rank.front());
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
@@ -647,24 +651,24 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
 
   for (int i = 0; i + 1 < cellCount; i++) {
     slice.at = slice.store.setLink(slice.at, cells[i], dims[0], DimVector::POS,
-                                   cells[i + 1], &manifold);
+                                   cells[i + 1]);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     slice.at = slice.store.setLink(slice.at, shuffled[i], dims[1],
-                                   DimVector::POS, shuffled[i + 1], &manifold);
+                                   DimVector::POS, shuffled[i + 1]);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     for (int d = 2; d < dimCount; d++) {
       slice.at =
           slice.store.setLink(slice.at, cells[i], dims[d], DimVector::POS,
-                              cells[(i + d * 977) % cellCount], &manifold);
+                              cells[(i + d * 977) % cellCount]);
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
   // Close both ranks into cycles so a chase never runs off the end.
   slice.at = slice.store.setLink(slice.at, cells.back(), dims[0],
-                                 DimVector::POS, cells.front(), &manifold);
+                                 DimVector::POS, cells.front());
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   slice.at = slice.store.setLink(slice.at, shuffled.back(), dims[1],
-                                 DimVector::POS, shuffled.front(), &manifold);
+                                 DimVector::POS, shuffled.front());
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   manifold.compact();
 
@@ -771,8 +775,8 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   Store reopened(permascroll);
   reopened.load(dir.string());
-  EXPECT_EQ(reopened.homeCell(), 1U);
-  EXPECT_EQ(reopened.dimsDimension(), 2U);
+  EXPECT_EQ(reopened.homeCell(), 2U);
+  EXPECT_EQ(reopened.dimsDimension(), 3U);
 
   const auto manifold =
       reopened.rebuildManifold(reopened.primaryCurrentVersion());
@@ -891,7 +895,7 @@ TEST(ManifoldTest, splicingFoldsTheSameIncrementallyAsCold) {
 
   for (int i = 0; i < 12; i++) {
     slice.at = slice.store.spliceCell(slice.at, cell, (i * 3) % 6, 1,
-                                      "X" + std::to_string(i), &manifold);
+                                      "X" + std::to_string(i));
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
 
@@ -908,11 +912,11 @@ TEST(ManifoldTest, aSplicePublishesSuccessfullyInCompactBinaryV4) {
 
   // In CompactBinaryV4, splice offset and length are carried on the wire, so
   // publishing a spliced slice succeeds.
-  EXPECT_NO_THROW(static_cast<void>(slice.store.exportBinaryOps()));
+  EXPECT_NO_THROW(std::ignore = slice.store.exportBinaryOps());
 
   Slice plain;
-  static_cast<void>(plain.cell("unspliced"));
-  EXPECT_NO_THROW(static_cast<void>(plain.store.exportBinaryOps()));
+  std::ignore = plain.cell("unspliced");
+  EXPECT_NO_THROW(std::ignore = plain.store.exportBinaryOps());
 }
 
 TEST(ManifoldTest, aCellsHistoryIsEveryOperationThatShapedIt) {
@@ -1126,12 +1130,12 @@ TEST(ManifoldTest, aHandleMayNameAnyKindOfOperation) {
 
 TEST(ManifoldTest, anEphemeralTargetIsRefused) {
   Slice slice;
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(
-                   slice.at, zigzag::ephemeralBit | 42)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(
+                   slice.at, zigzag::ephemeralBit | 42),
                std::invalid_argument);
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 0)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(slice.at, 0),
                std::invalid_argument);
-  EXPECT_THROW(static_cast<void>(slice.store.makeOpHandle(slice.at, 999999)),
+  EXPECT_THROW(std::ignore = slice.store.makeOpHandle(slice.at, 999999),
                std::invalid_argument);
 }
 
@@ -1392,7 +1396,7 @@ TEST(ManifoldTest, anUnrootedRegistryDependencyIsRefused) {
   slice.link(cell1, dimScrolls, DimVector::POS, unrootedCell);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_THROW(static_cast<void>(manifold.scrollRegistry(slice.store)),
+  EXPECT_THROW(std::ignore = manifold.scrollRegistry(slice.store),
                zigzag::UnrootedRegistryDependency);
 }
 
@@ -1891,4 +1895,60 @@ TEST(ManifoldTest, anotherAuthorsLinkSetFoldsOverMine) {
 
   const auto manifold = storeMine.rebuildManifold(storeMine.latest());
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(storeMine));
+}
+
+TEST(ManifoldTest, RankContainsAndUnbrokenInsertion) {
+  Slice slice;
+
+  const DimRef d1        = slice.dimension("d.1");
+  const CellRef c1       = slice.cell("c1");
+  const CellRef c2       = slice.cell("c2");
+  const CellRef c3       = slice.cell("c3");
+  const CellRef stranger = slice.cell("stranger");
+  const CellRef splice1  = slice.cell("splice1");
+  const CellRef tailCell = slice.cell("tailCell");
+  const CellRef cA       = slice.cell("cA");
+  const CellRef cB       = slice.cell("cB");
+
+  auto manifold = slice.store.rebuildManifold(slice.at);
+
+  // Link c1 -> c2 -> c3
+  manifold.link(c1, d1, DimVector::POS, c2);
+  manifold.link(c2, d1, DimVector::POS, c3);
+
+  // rankContains
+  EXPECT_TRUE(manifold.rankContains(c1, c1, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, c2, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, c3, d1));
+  EXPECT_TRUE(manifold.rankContains(c3, c1, d1));
+
+  EXPECT_FALSE(manifold.rankContains(c1, stranger, d1));
+  EXPECT_FALSE(manifold.rankContains(noCell, c1, d1));
+  EXPECT_FALSE(manifold.rankContains(c1, noCell, d1));
+
+  // Splice insertion: c1 -> splice1 -> c2 -> c3
+  auto *result = manifold.insertIntoRank(splice1, c1, d1, DimVector::POS);
+  EXPECT_EQ(result, &manifold);
+  EXPECT_TRUE(manifold.rankContains(c1, splice1, d1));
+
+  EXPECT_EQ(manifold.linked(c1, d1, DimVector::POS), splice1);
+  EXPECT_EQ(manifold.linked(splice1, d1, DimVector::POS), c2);
+  EXPECT_EQ(manifold.linked(c2, d1, DimVector::NEG), splice1);
+  EXPECT_EQ(manifold.linked(c2, d1, DimVector::POS), c3);
+
+  // Idempotency: reinserting splice1 does not duplicate or break links
+  manifold.insertIntoRank(splice1, c1, d1, DimVector::POS);
+  EXPECT_EQ(manifold.linked(c1, d1, DimVector::POS), splice1);
+  EXPECT_EQ(manifold.linked(splice1, d1, DimVector::POS), c2);
+
+  // Tail insertion: c3 -> tailCell
+  manifold.insertIntoRank(tailCell, c3, d1, DimVector::POS);
+  EXPECT_EQ(manifold.linked(c3, d1, DimVector::POS), tailCell);
+  EXPECT_EQ(manifold.linked(tailCell, d1, DimVector::NEG), c3);
+
+  // Fluent chaining
+  manifold.insertIntoRank(cA, tailCell, d1, DimVector::POS)
+      ->insertIntoRank(cB, cA, d1, DimVector::POS);
+  EXPECT_TRUE(manifold.rankContains(c1, cA, d1));
+  EXPECT_TRUE(manifold.rankContains(c1, cB, d1));
 }

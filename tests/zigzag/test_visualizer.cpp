@@ -3,6 +3,7 @@
  * @brief Unit tests for ZigzagVisualizer navigation and state management.
  */
 #include <filesystem>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <gleditor/doc.hpp>
@@ -812,8 +813,8 @@ TEST(ZigzagVisualizerTest, CommandOmnibarQuickPathNavigation) {
 
 TEST(ZigzagVisualizerTest, CommandOmnibarScriptExecution) {
   ZigzagVisualizer viz("Sans 12");
-  const auto initialFocus   = viz.focusCellId();
-  const auto initialOpCount = viz.operationCount();
+  [[maybe_unused]] const auto initialFocus   = viz.focusCellId();
+  [[maybe_unused]] const auto initialOpCount = viz.operationCount();
 
   viz.setCommandBarVisible(true);
   viz.setCommandBarText("weave { /d.step%ScriptNode }");
@@ -916,6 +917,104 @@ TEST(ZigzagVisualizerTest, CommandOmnibarViewAndLibraryCommands) {
   EXPECT_FALSE(viz.commandBarFeedbackIsError());
 
   fs::remove_all(tmpDir);
+}
+
+TEST(ZigzagVisualizerTest, DimensionBundlesAndViewModesDispatching) {
+  ZigzagVisualizer viz("Sans 12");
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-topology"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+
+  EXPECT_TRUE(viz.dispatchAction("std:ui/view_mode_content_1"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-topology-t"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+
+  EXPECT_TRUE(viz.dispatchAction("view-mode-content-v"));
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-execution"));
+  EXPECT_EQ(viz.dimensionBundle(),
+            ZigzagVisualizer::DimensionBundle::Execution);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.spin");
+
+  EXPECT_TRUE(viz.dispatchAction("std:ui/bundle_scope"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Scope);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.lexical");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-contract"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Contract);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.require");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-logic"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Logic);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.clause");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-stdlib"));
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Stdlib);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.stdlib");
+
+  EXPECT_TRUE(viz.dispatchAction("bundle-cycle"));
+  EXPECT_EQ(viz.dimensionBundle(),
+            ZigzagVisualizer::DimensionBundle::Execution);
+}
+
+TEST(ZigzagVisualizerTest, VPLExecutionAndLogicQueries) {
+  ZigzagVisualizer viz("Sans 12");
+
+  auto vplRes = viz.executeVPL("10 + 20");
+  EXPECT_TRUE(vplRes.success) << vplRes.message;
+  EXPECT_THAT(vplRes.message, testing::HasSubstr("30"));
+
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":vpl 6 * 7");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("42"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(") 5 + 3");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("8"));
+}
+
+TEST(ZigzagVisualizerTest, BridgeCommandOmnibarCommands) {
+  ZigzagVisualizer viz("Sans 12");
+  viz.setCommandBarVisible(true);
+
+  viz.setCommandBarText(":bridge-version");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(),
+              testing::HasSubstr("Document version:"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-text");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("text:"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-to-doc test-doc-target");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("test-doc-target"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  const auto focus = viz.focusCellId();
+  viz.setCommandBarText(std::format(":bridge-to-cell {}", focus));
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_EQ(viz.focusCellId(), focus);
+  EXPECT_THAT(
+      viz.commandBarFeedback(),
+      testing::HasSubstr(std::format("Bridged focus to cell {}", focus)));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-royalty");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_THAT(viz.commandBarFeedback(), testing::HasSubstr("royalty"));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":bridge-unlock");
+  std::ignore = viz.executeCommandBar();
+  EXPECT_FALSE(viz.commandBarFeedback().empty());
 }
 
 TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
@@ -1057,70 +1156,6 @@ TEST(ZigzagVisualizerTest, ZigzagVisualizerTranscopyrightSettlement) {
   EXPECT_FALSE(viz.isCellLocked(static_cast<CellRef>(focus)));
 }
 
-TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
-  ZigzagVisualizer viz("Sans 12");
-  const auto root = viz.focusCellId();
-  ASSERT_NE(root, 0U);
-  const auto cell = static_cast<CellRef>(root);
-
-  viz.setCellHighlights({{.cell = cell, .start = 0, .end = 2, .chosen = false},
-                         {.cell = cell, .start = 2, .end = 4, .chosen = true}},
-                        0xFACC15FFU);
-
-  const auto &shown = viz.visibleCells().at(root);
-  EXPECT_TRUE(shown.link_highlighted);
-  ASSERT_EQ(shown.decorated_ranges.size(), 2U);
-  const auto &member = shown.decorated_ranges[0];
-  const auto &chosen = shown.decorated_ranges[1];
-  EXPECT_EQ(member.start, 0U);
-  EXPECT_EQ(member.end, 2U);
-  EXPECT_TRUE(gleditor::hasDecoration(member.decorations,
-                                      gleditor::Decoration::Underline));
-  EXPECT_FALSE(gleditor::hasDecoration(member.decorations,
-                                       gleditor::Decoration::Overline));
-  EXPECT_EQ(chosen.start, 2U);
-  EXPECT_EQ(chosen.end, 4U);
-  EXPECT_TRUE(gleditor::hasDecoration(chosen.decorations,
-                                      gleditor::Decoration::Overline));
-
-  viz.setCellHighlights({}, 0xFACC15FFU);
-  EXPECT_FALSE(viz.visibleCells().at(root).link_highlighted);
-  EXPECT_TRUE(viz.visibleCells().at(root).decorated_ranges.empty());
-}
-
-TEST(ZigzagVisualizerTest, FocusingAnUnconnectedCellShowsIt) {
-  ZigzagVisualizer viz("Sans 12");
-  const auto home = viz.focusCellId();
-  // Minted through the store directly, so no rank connects it to home.
-  auto &store     = *viz.store();
-  const auto made = store.makeCell(store.latest(), "island");
-  const auto cell = store.cellRefOf(made);
-  viz.engine()->syncTo(made);
-
-  viz.focusCell(cell);
-
-  EXPECT_EQ(viz.focusCellId(), cell);
-  const auto &shown = viz.visibleCells();
-  ASSERT_TRUE(shown.contains(cell)) << "the focused cell has no card";
-  EXPECT_GT(shown.at(cell).target_alpha, 0.0F);
-  EXPECT_EQ(shown.at(cell).text, "island");
-  if (shown.contains(home)) {
-    EXPECT_EQ(shown.at(home).target_alpha, 0.0F) << "home should fade out";
-  }
-}
-
-TEST(ZigzagVisualizerTest, ReadableScaleOnlyEnlargesInQuarterSteps) {
-  // The default overview draws a line of card text about 6 px tall.
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 14.0F), 2.5F);
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(7.0F, 14.0F), 2.0F);
-  // Already readable, or zoomed in: never shrunk.
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(14.0F, 14.0F), 1.0F);
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(40.0F, 14.0F), 1.0F);
-  // Turned off, or nothing measurable yet.
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 0.0F), 1.0F);
-  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(0.0F, 14.0F), 1.0F);
-}
-
 TEST(ZigzagVisualizerTest, QuotationCellInspectionAndBadge) {
   xanadu::Store foreignStore;
   const auto fGenesis = foreignStore.sliceGenesis(xanadu::MicroversionId{});
@@ -1243,4 +1278,118 @@ TEST(ZigzagVisualizerTest, QuoteBuilderOmnibarAndReloadStoreVersion) {
   const auto curVer = viz.store()->primaryCurrentVersion();
   viz.reloadStoreVersion(curVer);
   EXPECT_NE(viz.focusCellId(), 0U);
+}
+
+TEST(ZigzagVisualizerTest, LinkHighlightsMarkExactBytesAndBorder) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+  const auto cell = static_cast<CellRef>(root);
+
+  viz.setCellHighlights({{.cell = cell, .start = 0, .end = 2, .chosen = false},
+                         {.cell = cell, .start = 2, .end = 4, .chosen = true}},
+                        0xFACC15FFU);
+
+  const auto &shown = viz.visibleCells().at(root);
+  EXPECT_TRUE(shown.link_highlighted);
+  ASSERT_EQ(shown.decorated_ranges.size(), 2U);
+  const auto &member = shown.decorated_ranges[0];
+  const auto &chosen = shown.decorated_ranges[1];
+  EXPECT_EQ(member.start, 0U);
+  EXPECT_EQ(member.end, 2U);
+  EXPECT_TRUE(gleditor::hasDecoration(member.decorations,
+                                      gleditor::Decoration::Underline));
+  EXPECT_FALSE(gleditor::hasDecoration(member.decorations,
+                                       gleditor::Decoration::Overline));
+  EXPECT_EQ(chosen.start, 2U);
+  EXPECT_EQ(chosen.end, 4U);
+  EXPECT_TRUE(gleditor::hasDecoration(chosen.decorations,
+                                      gleditor::Decoration::Overline));
+
+  viz.setCellHighlights({}, 0xFACC15FFU);
+  EXPECT_FALSE(viz.visibleCells().at(root).link_highlighted);
+  EXPECT_TRUE(viz.visibleCells().at(root).decorated_ranges.empty());
+}
+
+TEST(ZigzagVisualizerTest, FocusingAnUnconnectedCellShowsIt) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto home = viz.focusCellId();
+  // Minted through the store directly, so no rank connects it to home.
+  auto &store     = *viz.store();
+  const auto made = store.makeCell(store.latest(), "island");
+  const auto cell = store.cellRefOf(made);
+  viz.engine()->syncTo(made);
+
+  viz.focusCell(cell);
+
+  EXPECT_EQ(viz.focusCellId(), cell);
+  const auto &shown = viz.visibleCells();
+  ASSERT_TRUE(shown.contains(cell)) << "the focused cell has no card";
+  EXPECT_GT(shown.at(cell).target_alpha, 0.0F);
+  EXPECT_EQ(shown.at(cell).text, "island");
+  if (shown.contains(home)) {
+    EXPECT_EQ(shown.at(home).target_alpha, 0.0F) << "home should fade out";
+  }
+}
+
+TEST(ZigzagVisualizerTest, ReadableScaleOnlyEnlargesInQuarterSteps) {
+  // The default overview draws a line of card text about 6 px tall.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 14.0F), 2.5F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(7.0F, 14.0F), 2.0F);
+  // Already readable, or zoomed in: never shrunk.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(14.0F, 14.0F), 1.0F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(40.0F, 14.0F), 1.0F);
+  // Turned off, or nothing measurable yet.
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(6.0F, 0.0F), 1.0F);
+  EXPECT_FLOAT_EQ(ZigzagVisualizer::readableScaleFor(0.0F, 14.0F), 1.0F);
+}
+
+// A slice whose home links along neither view dimension -- a query's result
+// store, on d.result -- opens along the dimension it does use rather than
+// as a lone home cell; one whose home the view already shows keeps it.
+TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
+  xanadu::Store results;
+  auto at         = results.sliceGenesis(xanadu::MicroversionId{});
+  const auto rank = results.makeDimension(at, "d.result");
+  at              = results.makeCell(rank.version, "first result");
+  at = results.setLink(at, results.homeCell(), rank.dim, zigzag::DimVector::POS,
+                       results.cellRefOf(at));
+
+  ZigzagVisualizer viz("Sans 12");
+  viz.bindXuduStore(results, at);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.result");
+
+  xanadu::Store sequence;
+  auto seq       = sequence.sliceGenesis(xanadu::MicroversionId{});
+  const auto two = sequence.makeDimension(seq, "d.2");
+  seq            = sequence.makeCell(two.version, "below");
+  seq            = sequence.setLink(seq, sequence.homeCell(), two.dim,
+                                    zigzag::DimVector::POS, sequence.cellRefOf(seq));
+  viz.bindXuduStore(sequence, seq);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.result")
+      << "home links along d.2, which the view still shows";
+}
+
+// In xuzz the documents describe themselves first and take the focus at the
+// caret; ZigZag used to take it after them whatever had the keyboard, so an
+// assistive technology always reported a cell while the reader typed.
+TEST(ZigzagVisualizerTest, theFocusIsTakenOnlyWithTheKeyboard) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto before = viz.accessibilityRevision();
+
+  viz.setHasKeyboard(false);
+  EXPECT_NE(viz.accessibilityRevision(), before)
+      << "a change of pane has to reach the accessibility tree";
+  gleditor::a11y::Tree elsewhere;
+  elsewhere.focus = 7U;
+  gleditor::a11y::Builder away(elsewhere, 3);
+  viz.describe(away);
+  EXPECT_EQ(elsewhere.focus, 7U) << "the document keeps the focus";
+
+  viz.setHasKeyboard(true);
+  gleditor::a11y::Tree here;
+  here.focus = 7U;
+  gleditor::a11y::Builder home(here, 3);
+  viz.describe(home);
+  EXPECT_NE(here.focus, 7U) << "ZigZag's focused cell takes it";
 }

@@ -12,8 +12,10 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "link_navigation.hpp"
 #include "microversion.hpp"
 
 namespace xanadu {
@@ -52,6 +54,9 @@ struct ReadingPlace {
   std::string zigzagVersion;
   std::int64_t zigzagFocus{};
   bool zigzagHasKeyboard{};
+  /// The link selected when the session stopped, with the member and
+  /// occurrence chosen on each side.
+  std::optional<LinkVisitContext> link;
 
   bool operator==(const ReadingPlace &) const = default;
 };
@@ -63,8 +68,8 @@ struct ReadingPlace {
  * end of the home cell's d.places rank, with its documents along
  * d.documents, each document's version, caret and anchor along d.version,
  * d.caret and d.anchor, the camera along d.camera, the ZigZag store,
- * version, focus and keyboard along d.zigzag and the active document along
- * d.active. Earlier places stay,
+ * version, focus and keyboard along d.zigzag, the active document along
+ * d.active and the selected link along d.selected-link. Earlier places stay,
  * which is what a history of visits needs later. Starts the slice if the
  * store has none.
  */
@@ -72,6 +77,16 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place);
 
 /// The newest place in @p store, or nothing for a store with none.
 [[nodiscard]] std::optional<ReadingPlace> latestPlace(const Store &store);
+
+/// Unique store paths from all recorded sessions and closed checkpoints,
+/// including slice views. Reading the history appends no operations.
+[[nodiscard]] std::vector<std::string> recordedStorePaths(const Store &store);
+
+/// A closed document's checkpoint, separate from the open session's d.places.
+/// Earlier checkpoints survive; only the latest for this path is restored.
+MicroversionId recordClosedPlace(Store &store, const ReadingPlace &place);
+[[nodiscard]] std::optional<ReadingPlace> closedPlaceFor(const Store &store,
+                                                         std::string_view path);
 
 /**
  * @brief Where the reader's activity store lives:

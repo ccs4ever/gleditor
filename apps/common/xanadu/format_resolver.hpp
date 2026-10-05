@@ -38,6 +38,13 @@ public:
 
   explicit FormatResolver(const Store &store) noexcept;
 
+  /// Include an authority's formatting in the target store's coordinates.
+  /// Unknown scrolls are ignored; rendering never registers or copies content.
+  void include(const Store &authority, const Store &target);
+
+  [[nodiscard]] static std::optional<PrimediaSpan>
+  spanIn(const Store &from, const Store &into, const PrimediaSpan &span);
+
   /// Resolve formatting over an arbitrary sequence of primedia spans.
   [[nodiscard]] FormattingResult
   resolveSpans(std::span<const PrimediaSpan> spans) const;

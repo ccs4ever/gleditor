@@ -4,6 +4,8 @@
  */
 #include <gtest/gtest.h>
 
+#include <tuple>
+
 #include "common/xanadu/quotation_builder.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -55,6 +57,20 @@ TEST(QuotationBuilderTest, ConfigureForeignStoreAndRootCell) {
   EXPECT_EQ(builder.config().rootRef.produces,
             alice.store->segmentedOps().idOf(sName));
   EXPECT_EQ(builder.config().rootLabel, "SettingName");
+}
+
+// A store whose newest state is typed text, on a branch that holds none of
+// its slice: pinned at latest() the quotation found not even the home cell.
+TEST(QuotationBuilderTest, ASlicedStoreIsPinnedWhereItsSliceIs) {
+  TestStore alice("btpk:aaaa:alice");
+  const auto sliced = alice.head;
+  std::ignore = alice.store->insert(MicroversionId{}, 0, "prose, no cells");
+  ASSERT_NE(alice.store->latest(), sliced);
+
+  QuotationBuilder builder;
+  builder.setForeignStore(alice.scrollKey, alice.store.get());
+  EXPECT_EQ(builder.config().pinnedVersion, alice.store->structureHead());
+  EXPECT_EQ(builder.config().rootLabel, "home");
 }
 
 TEST(QuotationBuilderTest, PreviewRankMode) {
@@ -225,7 +241,7 @@ TEST(QuotationBuilderTest, PreviewNavigation) {
 
 TEST(QuotationBuilderTest, CommitQuotationAppliesToLocalStore) {
   TestStore alice("btpk:aaaa:alice");
-  const auto dimA = alice.makeDim("d.items");
+  [[maybe_unused]] const auto dimA = alice.makeDim("d.items");
 
   auto atA      = alice.head;
   atA           = alice.store->makeCell(atA, "target_cell");

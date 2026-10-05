@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
@@ -32,7 +33,6 @@
 #include "common/xanadu/vpl/view.hpp"
 #include "common/xanadu/vpl/vpl_engine.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
@@ -132,8 +132,8 @@ std::string formatView(const VplView &view, const ArenaManifold &arena) {
 
 std::vector<xanadu::ResultRow>
 resultRows(const VplView &view, const ArenaManifold &arena,
-           const xanadu::vql::MultiStoreCoordinator &coordinator,
-           const std::optional<xanadu::vql::StoreInfo> &currentStore,
+           const xanadu::MultiStoreCoordinator &coordinator,
+           const std::optional<xanadu::StoreInfo> &currentStore,
            const std::string_view transientPath = {}) {
   std::vector<xanadu::ResultRow> rows;
   if (view.isScalar()) {
@@ -159,8 +159,14 @@ resultRows(const VplView &view, const ArenaManifold &arena,
         }
       }
     }
-    rows.push_back(
-        {.text = persistedCellText(arena, cell), .source = std::move(source)});
+    std::optional<xanadu::QuotedSpans> quote;
+    if (const auto quoted = arena.quotedContent(cell)) {
+      quote = xanadu::QuotedSpans{.store = quoted->store,
+                                  .spans = std::move(quoted->spans)};
+    }
+    rows.push_back({.text   = persistedCellText(arena, cell),
+                    .source = std::move(source),
+                    .quote  = std::move(quote)});
   }
   return rows;
 }
@@ -243,11 +249,20 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
       }
     }
     if (isValueOpt) {
-      options.push_back(arg);
       if (i + 1 < argc) {
-        options.emplace_back(argv[++i]);
+        std::string next = argv[++i];
+        if (next == "-" && (arg == "-o" || arg == "--output-store")) {
+          options.push_back("--output-store=-");
+        } else if (next == "-" && arg == "--store") {
+          options.push_back("--store=-");
+        } else {
+          options.push_back(arg);
+          options.push_back(std::move(next));
+        }
+      } else {
+        options.push_back(arg);
       }
-    } else if (arg.starts_with("-")) {
+    } else if (arg.starts_with("-") && arg != "-") {
       options.push_back(arg);
     } else {
       positionals.push_back(arg);
@@ -370,7 +385,7 @@ int main(int argc, char *argv[]) {
   vortex::VortexVM vm(core);
   VPLEngine directEngine(core);
   VPLCompiler compiler(core, vm);
-  xanadu::vql::MultiStoreCoordinator coordinator(core);
+  xanadu::MultiStoreCoordinator coordinator(core);
 
   // Optional store loading
   auto inputStore = program.get<std::string>("--store");
@@ -386,7 +401,7 @@ int main(int argc, char *argv[]) {
           : std::make_shared<xanadu::UserPermascroll>(
                 xanadu::UserPermascroll::Config{.storageDir = permascrollPath});
   xanadu::Store store(permascroll);
-  std::optional<xanadu::vql::StoreInfo> currentStore;
+  std::optional<xanadu::StoreInfo> currentStore;
   if (!inputStore.empty() &&
       std::filesystem::exists(inputStore + "/ops.nodes")) {
     coordinator.loadAndAddStore(
@@ -399,9 +414,9 @@ int main(int argc, char *argv[]) {
       const auto first = currentStore->manifold->linked(
           currentStore->manifold->home(), *dim, DimVector::POS);
       if (first != noCell) {
-        for (auto cell = first, remaining = static_cast<CellRef>(
-                                    currentStore->manifold->cellCount());
-             cell != noCell && remaining-- > 0;
+        auto remaining =
+            static_cast<CellRef>(currentStore->manifold->cellCount());
+        for (auto cell = first; cell != noCell && remaining-- > 0;
              cell =
                  currentStore->manifold->linked(cell, *dim, DimVector::POS)) {
           arena.proxyFor(currentStore->spaceId, cell);
@@ -519,6 +534,7 @@ int main(int argc, char *argv[]) {
         std::cout.flush();
         std::cout.rdbuf(originalOutput);
         xanadu::writeStoreStream(destination, std::cout);
+        std::cout.flush();
       } else {
         std::cout << "Successfully saved to " << outStore << "\n";
       }

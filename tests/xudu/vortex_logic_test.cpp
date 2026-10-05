@@ -12,8 +12,9 @@
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
-#include "common/xanadu/vortex/vortex.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {

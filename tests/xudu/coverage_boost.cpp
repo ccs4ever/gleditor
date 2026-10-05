@@ -7,6 +7,7 @@
 
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/bencode.hpp"
@@ -284,15 +285,12 @@ TEST(CoverageBoostTest, mutableLinkAndHexParsers) {
   EXPECT_TRUE(pkZero.isZero());
 
   // fromHex errors
-  EXPECT_THROW(static_cast<void>(PublicKey::fromHex("short")),
-               std::runtime_error);
-  EXPECT_THROW(static_cast<void>(SecretKey::fromHex("short")),
-               std::runtime_error);
-  EXPECT_THROW(static_cast<void>(Signature::fromHex("short")),
-               std::runtime_error);
+  EXPECT_THROW(std::ignore = PublicKey::fromHex("short"), std::runtime_error);
+  EXPECT_THROW(std::ignore = SecretKey::fromHex("short"), std::runtime_error);
+  EXPECT_THROW(std::ignore = Signature::fromHex("short"), std::runtime_error);
 
   // MutableLink::parse with non-magnet
-  EXPECT_THROW(static_cast<void>(MutableLink::parse("http://example.com")),
+  EXPECT_THROW(std::ignore = MutableLink::parse("http://example.com"),
                std::runtime_error);
 
   // MutableLink with display name & trackers

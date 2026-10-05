@@ -38,7 +38,8 @@ template <typename Hop>
     auto cursor = startCell;
     for (std::size_t i = 0; i < hopCount; ++i) {
       const auto next = hop(cursor);
-      cursor          = next == zigzag::noCell ? startCell : next;
+      cursor          = (next == zigzag::noCell) ? startCell
+                                                 : static_cast<zigzag::CellRef>(next);
     }
     sink ^= cursor;
   }
@@ -102,7 +103,7 @@ TEST(StructureHyperopBenchmark, DISABLED_ColdFoldAndArenaSubstrate) {
       nsPerHop(cells.front(), cellCount, [&](const auto proxy) {
         const auto foreign = proxyToForeign.at(proxy);
         const auto next    = base.linked(foreign, dim, zigzag::DimVector::POS);
-        return next == zigzag::noCell ? next : foreignToProxy.at(next);
+        return next ? foreignToProxy.at(*next) : zigzag::noCell;
       });
   std::cout << "hop baseline/model: direct_ns=" << directNs
             << " arena_readthrough_ns=" << arenaNs

@@ -138,7 +138,7 @@ CellRef UnifiedTransclusionEngine::addCellFromSpans(
   const auto cell  = store_.cellRefOf(head_);
   std::uint64_t at = spans.front().length;
   for (const auto &span : spans.subspan(1)) {
-    head_ = store_.spliceCellSpan(head_, cell, at, 0, span, &manifold_);
+    head_ = store_.spliceCellSpan(head_, cell, at, 0, span);
     syncIncremental();
     at += span.length;
   }
@@ -151,7 +151,7 @@ void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
     return;
   }
   ensureSliceBegun();
-  head_ = store_.setCellText(head_, cell, text, &manifold_);
+  head_ = store_.setCellText(head_, cell, text);
   syncIncremental();
 }
 
@@ -244,7 +244,7 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  head_ = store_.setLink(head_, a, dim, dir, b, &manifold_);
+  head_ = store_.setLink(head_, a, dim, dir, b);
   syncIncremental();
 }
 
@@ -286,23 +286,27 @@ UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
   return manifold_.slot(cell);
 }
 
-std::vector<DimRef>
+gleditor::cpp26::inplace_vector<DimRef, 64>
 UnifiedTransclusionEngine::metaDimensionsOf(const CellRef cell) const {
-  std::vector<DimRef> dims;
+  gleditor::cpp26::inplace_vector<DimRef, 64> dims;
   if (cell == noCell) {
     return dims;
   }
   for (const auto &link : manifold_.dimensionsOf(cell)) {
     if (link.pos != noCell || link.neg != noCell) {
       if (std::ranges::find(dims, link.dim) == dims.end()) {
-        dims.push_back(link.dim);
+        if (dims.size() < dims.capacity()) {
+          dims.push_back(link.dim);
+        }
       }
     }
   }
   // d.meta-dims enumerates itself too, so that walking it from a cell reaches
   // every dimension the cell participates in including this one.
   if (std::ranges::find(dims, metaDimension()) == dims.end()) {
-    dims.push_back(metaDimension());
+    if (dims.size() < dims.capacity()) {
+      dims.push_back(metaDimension());
+    }
   }
   return dims;
 }

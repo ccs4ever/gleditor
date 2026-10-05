@@ -745,6 +745,29 @@ std::optional<GlobalSpan> globalise(const Store &store,
       .scroll = std::move(key), .start = span.start, .length = span.length};
 }
 
+bool canCarry(const Store &from, const Store &into, const PrimediaSpan &span) {
+  if (&from == &into) {
+    return true;
+  }
+  if (span.isLocal()) {
+    return &from.userPermascroll() == &into.userPermascroll();
+  }
+  return span.scroll <= from.scrolls().size();
+}
+
+std::optional<PrimediaSpan> carrySpan(const Store &from, Store &into,
+                                      const PrimediaSpan &span) {
+  if (!canCarry(from, into, span)) {
+    return std::nullopt;
+  }
+  if (&from == &into || span.isLocal()) {
+    return span;
+  }
+  return PrimediaSpan{.scroll = into.addScroll(from.scrolls()[span.scroll - 1]),
+                      .start  = span.start,
+                      .length = span.length};
+}
+
 std::optional<PrimediaSpan>
 localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls) {

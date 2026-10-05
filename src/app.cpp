@@ -232,6 +232,10 @@ parseTypeValue(const std::string &value) {
   if (value.empty() || '[' != value.front()) {
     return {0, value};
   }
+  // "[[" is a literal bracket, so text that opens with one can be typed.
+  if (value.starts_with("[[")) {
+    return {0, value.substr(1)};
+  }
   const auto close = value.find(']');
   if (std::string::npos == close) {
     return {0, value};
@@ -270,6 +274,16 @@ std::string defaultBackendName() {
   }
   return GLEDITOR_DEFAULT_BACKEND;
 }
+
+/// Every option that adds a step to the automation script. One list, read by
+/// both readAutomationScript() and wantsFrames(): a program deciding whether a
+/// run needs its render loop by its own list of options is how --chord came to
+/// be dropped without a word under --headless.
+constexpr std::array scriptedOptions = {
+    "--pick",        "--click",      "--capture",    "--type",
+    "--select",      "--do",         "--key",        "--chord",
+    "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
+    "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
 
 } // namespace
 
@@ -426,17 +440,17 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   };
 
-  static constexpr std::array scripted = {
-      "--pick",        "--click",      "--capture",    "--type",
-      "--select",      "--do",         "--key",        "--chord",
-      "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
-      "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
     }
     const std::string_view arg{argv[i]};
-    for (const auto *const option : scripted) {
+    // The one step that takes no value.
+    if ("--dump-a11y" == arg) {
+      script.push_back(Step{.kind = Step::Kind::DumpAccessibility});
+      continue;
+    }
+    for (const auto *const option : scriptedOptions) {
       if (arg == option) {
         // "--click 3,4": the value is the argument after it.
         if (i + 1 < argc && nullptr != argv[i + 1]) {
@@ -455,6 +469,17 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   }
   return script;
+}
+
+bool wantsFrames(const argparse::ArgumentParser &parser) {
+  const bool scripted =
+      std::ranges::any_of(scriptedOptions, [&parser](const char *option) {
+        return parser.is_used(option);
+      });
+  return scripted || parser.is_used("--dump-a11y") ||
+         !parser.get<std::string>("--screenshot").empty() ||
+         parser.get<std::string>("--benchmark") != "0" ||
+         parser.get<int>("--record-frames") > 0;
 }
 
 void CommandTable::bind(const int scancode, const Mod mods, std::string name,
@@ -495,7 +520,9 @@ bool CommandTable::run(const std::string_view name) const {
   return true;
 }
 
-bool CommandTable::dispatch(const int scancode, const Mod mods) const {
+bool CommandTable::dispatch(
+    const int scancode, const Mod mods,
+    const std::function<bool(std::string_view)> &permit) const {
   const auto active  = scopeResolver ? scopeResolver() : std::string{};
   const auto inScope = [&](const std::string_view scope) {
     return std::ranges::find_if(bindings, [&](const Command &cmd) {
@@ -510,7 +537,7 @@ bool CommandTable::dispatch(const int scancode, const Mod mods) const {
   if (found == bindings.end()) {
     return false;
   }
-  found->run();
+  if (!permit || permit(found->name)) found->run();
   return true;
 }
 
@@ -859,14 +886,15 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "collect and record times and exit. The median is reported rather "
              "than the mean, because a software rasteriser produces occasional "
              "hundred-millisecond frames no average removes.");
-  automation(parser.add_argument("--dump-a11y").flag(),
-             "print what a screen reader would be told, then carry on",
-             "Print the accessibility tree once the frame has settled: every "
-             "node this program reports to the platform, indented, with its "
-             "role, its name, its value and where the caret is. What an "
-             "assistive technology is handed, in the one form that can be "
-             "read without running one. Pairs with --profile to print it and "
-             "quit.");
+  automation(parser.add_argument("--dump-a11y").flag().append(),
+             "print what a screen reader would be told here; repeatable",
+             "Print the accessibility tree at this point in the script, once "
+             "the frame has settled: every node this program reports to the "
+             "platform, indented, with its role, its name, its value and "
+             "where the caret is. What an assistive technology is handed, in "
+             "the one form that can be read without running one. Repeatable "
+             "and ordered with the other automation options, like --capture, "
+             "so a tree can be printed before a step that quits.");
   automation(parser.add_argument("--screenshot").default_value(std::string{}),
              "write the first settled frame to this path as a PPM",
              "Write the first fully drawn frame to this path as a binary PPM. "
@@ -909,9 +937,10 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "caret there, and print where it landed. Repeatable.");
   automation(parser.add_argument("--select").append(),
              "select the document byte range START,END; repeatable",
-             "Select the document byte range START,END, as a click and drag "
-             "would. Carried out in the order it was written among the other "
-             "automation options.");
+             "Select the byte range START,END of the document the caret is "
+             "in -- the first, before anything has placed it -- as a click "
+             "and drag would. Carried out in the order it was written among "
+             "the other automation options.");
   automation(parser.add_argument("--type").append().default_value(
                  std::vector<std::string>{}),
              "insert text at the caret; repeatable",
@@ -921,7 +950,9 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "the sequence it reads as. The document is spliced immediately "
              "and the layout that follows is scheduled off the render "
              "thread. Goes to whatever has the keyboard, so while a dialog is "
-             "up this fills in the field it is on rather than the document.");
+             "up this fills in the field it is on rather than the document. "
+             "A leading [NAME,...] decorates the inserted text with those "
+             "decorations; \"[[\" at the start types one literal \"[\".");
   automation(parser.add_argument("--do").append(),
              "run the command called NAME; repeatable",
              "Run the bound command called NAME -- the names are the ones "
@@ -1017,7 +1048,6 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->screenshotPath  = parser.get<std::string>("--screenshot");
   state->recordFrames    = parser.get<int>("--record-frames");
   state->recordPrefix    = parser.get<std::string>("--record-prefix");
-  state->dumpAccessibility = parser["--dump-a11y"] == true;
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
   {
@@ -1312,8 +1342,8 @@ int Application::run() {
       } else if (render::DiagnosticSeverity::Warning == dialog.severity) {
         kind = sdl::MessageKind::Warning;
       }
-      static_cast<void>(sdl::showMessageBox(window.window, kind, dialog.title,
-                                            dialog.message, {"OK"}));
+      std::ignore = sdl::showMessageBox(window.window, kind, dialog.title,
+                                        dialog.message, {"OK"});
     }
   };
 
@@ -1331,7 +1361,11 @@ int Application::run() {
         return;
       }
     }
-    commandTable.dispatch(scancode, mods);
+    std::ignore =
+        commandTable.dispatch(scancode, mods, [this](const auto name) {
+          return !state->modal || !state->modal->grabbing() ||
+                 state->modal->permitsCommand(name);
+        });
   };
   const auto onMotion = [&](const int x, const int y,
                             const std::uint32_t held) {
@@ -1354,9 +1388,14 @@ int Application::run() {
   };
   const auto onButtonDown = [&](const int x, const int y,
                                 const std::uint8_t button) {
-    // Held while a modal is up, along with the drag above: the caret is not
-    // what is being moved when there is a question on screen.
+    // A press is where the pointer is, even with no motion before it -- a
+    // touch, a tablet tap, a scripted press -- and what opens at the pointer
+    // (the radial menu) reads it from here.
+    state->mouseX = x;
+    state->mouseY = y;
+    // A modal owns the press; the document behind it must not receive it.
     if (nullptr != state->modal && state->modal->grabbing()) {
+      if (button == SDL_BUTTON_LEFT) state->modal->pointerPressed(x, y);
       return;
     }
     if (state->mouseDownHandler && state->mouseDownHandler(x, y, button)) {
@@ -1376,7 +1415,7 @@ int Application::run() {
       return;
     }
     if (state->mouseUpHandler) {
-      static_cast<void>(state->mouseUpHandler(x, y, button));
+      std::ignore = state->mouseUpHandler(x, y, button);
     }
   };
   const auto onWheel = [&](const float wx, const float wy,
@@ -1415,7 +1454,7 @@ int Application::run() {
     // requires; publishing costs a comparison when nothing has changed.
     if (const auto &publisher = state->accessibility; publisher) {
       publisher->publish();
-      static_cast<void>(publisher->pumpActions());
+      std::ignore = publisher->pumpActions();
     }
 
     // Text entry follows whatever has the keyboard. A modal is typed into even

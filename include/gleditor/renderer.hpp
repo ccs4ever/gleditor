@@ -321,6 +321,10 @@ protected:
     int x{};
     int y{};
     PickAnswer then;
+    /// Whether the device took the read. One it refused -- a backend with a
+    /// result still uncollected drops the request -- is asked again next
+    /// frame, or it would wait for an answer that never comes.
+    bool requested{};
   };
   std::vector<PendingPickAnswer> pickAnswers;
   std::vector<gleditor::PickObserver *> pickObservers;
@@ -427,6 +431,8 @@ private:
   bool draggingSelection{false};
   /// A scripted capture waits until endFrame(), when the target can be read.
   std::optional<std::string> pendingScriptCapture;
+  /// A scripted --dump-a11y, printed after this frame's rebuild.
+  bool pendingScriptDump{};
   /// Wall time of each settled frame, of collecting its page draws, and of
   /// handing them to the device. Gathered only when --benchmark asked for it.
   std::vector<std::chrono::nanoseconds> benchFrame;
@@ -453,7 +459,9 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
-  void requestPick(RenderState &state, int x, int y);
+  /// Whether the device took the read; one it refused is the caller's to
+  /// ask again.
+  bool requestPick(RenderState &state, int x, int y);
 
 public:
   void pickThen(int x, int y, PickAnswer then) override;

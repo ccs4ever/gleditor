@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 #include <gleditor/a11y/platform.hpp>
@@ -52,8 +53,28 @@ const char *roleName(const Role role) {
   return "?";
 }
 
+/// Where @p point is in the whole of @p node's text, in characters.
+///
+/// A caret is a run and a character within it, which is what a platform is
+/// handed; read out here, a person checking it compares it against an offset
+/// into the document, and the character within the run alone read as one --
+/// the end of a three-paragraph document as its last line's length.
+std::size_t textOffset(const Tree &tree, const Node &node,
+                       const TextPoint &point) {
+  std::size_t before = 0;
+  for (const auto child : node.children) {
+    if (child == point.node) {
+      return before + point.character;
+    }
+    if (const auto run = tree.find(child)) {
+      before += run->characterLengths.size();
+    }
+  }
+  return point.character;
+}
+
 /// One line of describe(), without the children.
-void describeNode(std::ostringstream &out, const Node &node,
+void describeNode(std::ostringstream &out, const Tree &tree, const Node &node,
                   const std::size_t depth) {
   out << std::string(depth * 2, ' ') << roleName(node.role);
   if (!node.label.empty()) {
@@ -84,9 +105,9 @@ void describeNode(std::ostringstream &out, const Node &node,
     out << (Live::Assertive == node.live ? " [assertive]" : " [polite]");
   }
   if (node.selection) {
-    out << " [caret " << node.selection->focus.character;
+    out << " [caret " << textOffset(tree, node, node.selection->focus);
     if (node.selection->anchor != node.selection->focus) {
-      out << " from " << node.selection->anchor.character;
+      out << " from " << textOffset(tree, node, node.selection->anchor);
     }
     out << "]";
   }
@@ -99,7 +120,7 @@ void describeFrom(std::ostringstream &out, const Tree &tree,
   if (!node) {
     return;
   }
-  describeNode(out, *node, depth);
+  describeNode(out, tree, *node, depth);
   for (const auto child : node->children) {
     describeFrom(out, tree, child, depth + 1);
   }
@@ -181,7 +202,7 @@ void Publisher::rebuild(const int width, const int height) {
   // its children are whatever the sources turn out to contribute. Held by
   // index rather than by reference, because adding nodes moves the vector.
   Builder rootBuilder(tree, Ids::window);
-  static_cast<void>(rootBuilder.add(0, Role::Window));
+  std::ignore          = rootBuilder.add(0, Role::Window);
   const auto rootIndex = tree.nodes.size() - 1;
   tree.focus           = tree.nodes[rootIndex].id;
 

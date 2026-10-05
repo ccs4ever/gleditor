@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -602,7 +603,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWrittenBeforeHeadersExistedIsRefused) {
 
   SegmentedOpsSpool spool;
   try {
-    static_cast<void>(spool.addSealedSegment(path));
+    std::ignore = spool.addSealedSegment(path);
     FAIL() << "a file written before headers existed must not be read as one";
   } catch (const xanadu::OpsSegmentUnreadable &e) {
     // Naming the signature is the point: the message has to say what kind of
@@ -616,7 +617,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWrittenBeforeHeadersExistedIsRefused) {
   // And the same file offered as an active segment, which is the path
   // Store::load() actually takes.
   SegmentedOpsSpool opening;
-  EXPECT_THROW(static_cast<void>(opening.openActiveSegment(path)),
+  EXPECT_THROW(std::ignore = opening.openActiveSegment(path),
                xanadu::OpsSegmentUnreadable);
 }
 
@@ -640,7 +641,7 @@ TEST(SegmentedOpsSpoolTest, aSegmentWhoseNodesAreADifferentSizeIsRefused) {
 
   SegmentedOpsSpool spool;
   try {
-    static_cast<void>(spool.addSealedSegment(dir / "wide.ops"));
+    std::ignore = spool.addSealedSegment(dir / "wide.ops");
     FAIL() << "operations of another size must not be read as these ones";
   } catch (const xanadu::OpsSegmentUnreadable &e) {
     // Both numbers, because "this file says 72 and mine are 64" is what makes
@@ -668,7 +669,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
   writeSegmentFileByHand(dir / "future.ops", nodes, 1, later);
 
   SegmentedOpsSpool spool;
-  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "future.ops")),
+  EXPECT_THROW(std::ignore = spool.addSealedSegment(dir / "future.ops"),
                xanadu::OpsSegmentUnreadable);
 
   // A file cut short mid-operation. The nodes that are left cannot be trusted
@@ -676,7 +677,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
   writeSegmentFileByHand(dir / "ragged.ops", nodes, 1);
   std::filesystem::resize_file(
       dir / "ragged.ops", std::filesystem::file_size(dir / "ragged.ops") - 7);
-  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "ragged.ops")),
+  EXPECT_THROW(std::ignore = spool.addSealedSegment(dir / "ragged.ops"),
                xanadu::OpsSegmentUnreadable);
 
   // A file whose header promises more operations than are in it: bytes went
@@ -691,7 +692,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
   overclaiming.firstOpIndex  = 1;
   overclaiming.nodeCount     = 9;
   writeSegmentFileByHand(dir / "short.ops", two, 1, overclaiming);
-  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "short.ops")),
+  EXPECT_THROW(std::ignore = spool.addSealedSegment(dir / "short.ops"),
                xanadu::OpsSegmentUnreadable);
 
   // Too short to hold a header at all, which is what an empty file that
@@ -700,7 +701,7 @@ TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
     std::ofstream out(dir / "stub.ops", std::ios::binary);
     out << "no";
   }
-  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "stub.ops")),
+  EXPECT_THROW(std::ignore = spool.addSealedSegment(dir / "stub.ops"),
                xanadu::OpsSegmentUnreadable);
 
   EXPECT_EQ(spool.size(), 0U) << "nothing was read out of any of them";

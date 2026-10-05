@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/uncommitted_op_log.hpp"
@@ -68,7 +69,7 @@ TEST(SpanIdentityTest, TypingOverExistingTextStillAppends) {
   Store store;
   const std::string quote =
       "Project Xanadu is a computer network with universal transclusion.";
-  static_cast<void>(store.insert(MicroversionId{}, 0, quote));
+  std::ignore               = store.insert(MicroversionId{}, 0, quote);
   const auto sizeAfterFirst = store.primedia().size();
 
   UncommittedOpLog log;

@@ -8,18 +8,11 @@
 
 namespace xanadu {
 
-namespace {
-
-/// Whether @p at is the start of a character in @p text, so cutting there
-/// leaves valid UTF-8 on both sides. Continuation bytes are 10xxxxxx.
-bool isUtf8Boundary(const std::string &text, const std::size_t at) noexcept {
-  if (at >= text.size()) {
-    return at == text.size();
-  }
-  return (static_cast<unsigned char>(text[at]) & 0xC0U) != 0x80U;
-}
-
-} // namespace
+// UncommittedOpLog is written in C++ rather than Vortex because it operates
+// directly on raw character input keystrokes on the interactive frame loop and
+// input callback path (Session::textInserted / Session::textErased /
+// Session::tick), requiring zero-allocation compaction and deterministic tight
+// latency before committing transactions to the Xanadu store.
 
 void UncommittedOpLog::recordInsert(const std::uint32_t at,
                                     const std::string_view utf8) {
@@ -75,82 +68,45 @@ std::vector<CompactedOp> UncommittedOpLog::compact() const {
       continue;
     }
 
-    // Delete handling
-    bool handled = false;
-    while (!out.empty() && entry.length > 0) {
-      if (out.back().kind == OpKind::Insert) {
-        const auto insAt  = out.back().at;
-        const auto insLen = static_cast<std::uint32_t>(out.back().text.size());
-        const auto insEnd = insAt + insLen;
-        const auto delEnd = entry.at + entry.length;
-
-        // Check if delete hits within the tail of the recent insert
-        if (delEnd == insEnd && entry.at >= insAt) {
-          const auto remainingLen = entry.at - insAt;
-          // These offsets are byte offsets -- recordInsert takes length from
-          // utf8.size() -- so a cut can land inside a multi-byte character.
-          // Coalescing is an optimisation, and an optimisation that can
-          // produce invalid UTF-8 is not one: leave the ops uncombined and
-          // let them apply in sequence, which is always correct.
-          if (isUtf8Boundary(out.back().text, remainingLen)) {
-            out.back().text.resize(remainingLen);
-            if (out.back().text.empty()) {
-              out.pop_back();
-            }
-            handled = true;
-          }
-          break;
-        }
-
-        // Check if delete completely subsumes the insert
-        if (entry.at <= insAt && delEnd >= insEnd) {
-          const auto extraBefore = insAt - entry.at;
-          const auto extraAfter  = delEnd - insEnd;
-          out.pop_back();
-          entry.length = extraBefore + extraAfter;
-          if (entry.length == 0) {
-            handled = true;
-            break;
-          }
-          // Continue looping to merge remaining delete into earlier ops
-          continue;
-        }
-
-        break;
-      }
-
-      if (out.back().kind == OpKind::Delete) {
-        // Sequential left-delete (Backspace): e.g. Backspace at 9 then at 8
-        if (entry.at + entry.length == out.back().at) {
-          out.back().at = entry.at;
-          out.back().length += entry.length;
-          handled = true;
-          break;
-        }
-
-        // Sequential right-delete (Delete key): e.g. Delete at 5 then Delete at
-        // 5
-        if (entry.at == out.back().at) {
-          out.back().length += entry.length;
-          handled = true;
-          break;
-        }
-
-        break;
-      }
-
-      break;
+    // Delete handling: consolidate contiguous and sequential deletes into
+    // single delete ranges without truncating or annihilating preceding
+    // inserts. In Xanadu's hypertime and permascroll model, every typed
+    // character belongs to immutable history so that users can scrub backward
+    // in hypertime to retrieve deleted text. Truncating inserts during playback
+    // compaction would destroy that history.
+    if (entry.length == 0) {
+      continue;
     }
 
-    if (!handled && entry.length > 0) {
-      out.push_back(CompactedOp{
-          .kind       = OpKind::Delete,
-          .at         = entry.at,
-          .text       = {},
-          .length     = entry.length,
-          .reusedSpan = std::nullopt,
-      });
+    if (!out.empty() && out.back().kind == OpKind::Delete) {
+      // Sequential left-delete (Backspace): e.g. Backspace at 9 then at 8
+      if (entry.at + entry.length == out.back().at) {
+        out.back().at = entry.at;
+        out.back().length += entry.length;
+        continue;
+      }
+
+      // Sequential right-delete (Delete key): e.g. Delete at 5 then Delete at 5
+      if (entry.at == out.back().at) {
+        out.back().length += entry.length;
+        continue;
+      }
+
+      // Adjacent forward delete: e.g. delete range [at, at+len) followed by
+      // [at+len, ...)
+      if (out.back().at + out.back().length == entry.at) {
+        out.back().length += entry.length;
+        continue;
+      }
     }
+
+    out.push_back(CompactedOp{
+        .kind       = OpKind::Delete,
+        .at         = entry.at,
+        .text       = {},
+        .length     = entry.length,
+        .reusedSpan = std::nullopt,
+    });
   }
 
   return out;

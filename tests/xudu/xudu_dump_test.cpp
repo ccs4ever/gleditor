@@ -17,6 +17,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/binary_ops.hpp"
@@ -89,8 +90,8 @@ Sample savedStore(const fs::path &root) {
   Store store(sample.scroll());
   const auto one = store.insert(MicroversionId{}, 0, "hello");
   const auto two = store.insert(one, 5, " world");
-  static_cast<void>(store.erase(two, 0, 1));
-  static_cast<void>(store.insert(one, 5, " there"));
+  std::ignore    = store.erase(two, 0, 1);
+  std::ignore    = store.insert(one, 5, " there");
   store.save(sample.store.string());
   return sample;
 }
@@ -153,15 +154,18 @@ TEST_F(XuduDumpTest, aSlicesStructureOperationsSayWhatTheyDid) {
   // The verb decoded beside the raw flags byte, because "flags=0x01" is not
   // what an operation means -- and a cell's content read back through the
   // permascroll, which is the check that nothing shifted underneath it.
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"home\""));
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"d.doc\""));
-  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"a cell\""));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("[make cell ctx=1] text=\"home\""));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("[make cell ctx=1] text=\"d.doc\""));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("[make cell ctx=1] text=\"a cell\""));
   // A link says which way, along which dimension, to what -- and whose it is,
   // which is the chain rather than a field.
   EXPECT_THAT(run.output, testing::HasSubstr("[setLink posward dim=" +
                                              std::to_string(dim) + " -> "));
   EXPECT_THAT(run.output,
-              testing::HasSubstr(" cell@" + std::to_string(head) + "]"));
+              testing::HasSubstr(" cell@" + std::to_string(head) + " ctx="));
   EXPECT_THAT(run.output, testing::HasSubstr("kind=structure"));
 }
 
@@ -325,6 +329,53 @@ TEST_F(XuduDumpTest, aBareSegmentFileCanBePointedAtDirectly) {
   EXPECT_THAT(run.output, testing::HasSubstr("op 1  produces=1 "));
   // No permascroll named, so nothing to quote from and no text= to render.
   EXPECT_THAT(run.output, testing::Not(testing::HasSubstr("text=")));
+}
+
+TEST_F(XuduDumpTest, renameAnnotationsAndStructureKindsAreRendered) {
+  const auto root = scratch("renamedump");
+  const Sample sample{root / "store", root / "permascroll"};
+  {
+    Store store(sample.scroll());
+    auto at = store.sliceGenesis(MicroversionId{});
+    at      = store.renameStructure(at, 1, "renamed_slice");
+    store.save(sample.store.string());
+  }
+
+  const auto run = runDump("--section=ops " + sample.args());
+  EXPECT_EQ(run.exitCode, 0) << run.output;
+  EXPECT_THAT(run.output, testing::HasSubstr("[make slice]"));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("[make cell ctx=1] text=\"home\""));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr("rename target=1 name=\"renamed_slice\""));
+}
+
+TEST_F(XuduDumpTest, reservedStructureKindReportedAsInvalid) {
+  const auto root = scratch("reservedkind");
+  const Sample sample{root / "store", root / "permascroll"};
+  {
+    Store store(sample.scroll());
+    static_cast<void>(store.sliceGenesis(MicroversionId{}));
+    store.save(sample.store.string());
+  }
+
+  // Corrupt op 1's flags to StructureKind::Reserved (verb=0, reserved=0x88)
+  {
+    const auto nodesPath = sample.store / "ops.nodes";
+    std::fstream file(nodesPath,
+                      std::ios::in | std::ios::out | std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+    file.seekg(xanadu::opsSegmentHeaderBytes);
+    CompactOpNode node;
+    file.read(reinterpret_cast<char *>(&node), sizeof(node));
+    node.flags = 0x88; // verb=Make, kind=Reserved
+    file.seekp(xanadu::opsSegmentHeaderBytes);
+    file.write(reinterpret_cast<const char *>(&node), sizeof(node));
+  }
+
+  const auto run = runDump("--section=ops " + sample.args());
+  EXPECT_NE(run.exitCode, 0) << run.output;
+  EXPECT_THAT(run.output, testing::HasSubstr("invalid (reserved)"));
 }
 
 } // namespace

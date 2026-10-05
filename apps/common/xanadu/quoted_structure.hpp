@@ -245,6 +245,9 @@ struct ResolvedQuotation {
 readQuotation(const zigzag::Manifold &manifold, const Store &store,
               zigzag::CellRef qCell);
 
+[[nodiscard]] std::optional<Quotation>
+readQuotation(const zigzag::Manifold &manifold, zigzag::CellRef qCell);
+
 /**
  * @brief Evaluates a selector against a folded foreign store and manifold.
  */
@@ -253,6 +256,11 @@ evaluateSelector(const Selector &selector,
                  const zigzag::Manifold &foreignManifold,
                  const Store &foreignStore, const QuotationBudget &budget,
                  QuotationState &outState);
+
+[[nodiscard]] std::vector<zigzag::CellRef>
+evaluateSelector(const Selector &selector,
+                 const zigzag::Manifold &foreignManifold,
+                 const QuotationBudget &budget, QuotationState &outState);
 
 /**
  * @brief Resolves all quotations in @p base into @p arena.

@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 
 #include <stdexcept>
+#include <tuple>
 #include <variant>
 
 #include "common/xanadu/link_package.hpp"
@@ -303,7 +304,7 @@ TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
   segLocked.holeRecord = hole2;
   extScroll.segments.push_back(segLocked);
 
-  const auto scrollId = store.addScroll(extScroll);
+  std::ignore = store.addScroll(extScroll);
 
   const auto v2 = store.transcludeExternal(v1, 14, extScroll, 0, 30);
   const auto v3 = store.transcludeExternal(v2, 14 + 30, extScroll, 30, 40);
@@ -427,7 +428,10 @@ TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {
   const auto minted   = sliceToStore(doc, store, xanadu::MicroversionId{});
   const auto manifold = store.rebuildManifold(minted.version);
 
-  const auto back = storeToSlice(store, manifold, minted.focus);
+  const auto back       = storeToSlice(store, manifold, minted.focus);
+  const auto backDirect = storeToSlice(manifold, minted.focus);
+  EXPECT_EQ(backDirect.cells.size(), back.cells.size());
+  EXPECT_EQ(backDirect.focus, back.focus);
 
   // Same number of cells: the dimension cells and the attribute cells are
   // structure, so they do not come back as content cells. Without that, a round

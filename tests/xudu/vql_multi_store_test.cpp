@@ -7,19 +7,24 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <tuple>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
+#include "common/xanadu/vql/vql_engine.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
+using xanadu::MultiStoreCoordinator;
 using xanadu::Store;
 using xanadu::UserPermascroll;
-using xanadu::vql::MultiStoreCoordinator;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -35,11 +40,11 @@ fs::path tempStoreDir(const std::string &name) {
 TEST(VQLMultiStoreTest, CoordinatorGenesis) {
   MultiStoreCoordinator coord;
 
-  EXPECT_NE(coord.coordinatorHome(), noCell);
-  EXPECT_NE(coord.dimStores(), noCell);
-  EXPECT_NE(coord.dimClone(), noCell);
-  EXPECT_NE(coord.dimName(), noCell);
-  EXPECT_NE(coord.dimRole(), noCell);
+  EXPECT_TRUE(coord.coordinatorHome().has_value());
+  EXPECT_NE(coord.dimStores(), 0u);
+  EXPECT_NE(coord.dimClone(), 0u);
+  EXPECT_NE(coord.dimName(), 0u);
+  EXPECT_NE(coord.dimRole(), 0u);
   EXPECT_EQ(coord.storeCount(), 0u);
 }
 
@@ -51,14 +56,16 @@ TEST(VQLMultiStoreTest, SingleSliceRegistration) {
   CellRef storeCell   = coord.addSlice("primary_slice", "primary", mySliceHome);
 
   EXPECT_EQ(coord.storeCount(), 1u);
-  EXPECT_EQ(coord.homeAnchor(), mySliceHome);
+  EXPECT_EQ(coord.homeAnchor(), std::optional<CellRef>{mySliceHome});
   EXPECT_NE(storeCell, noCell);
 
   // The representative cell on d.stores clones mySliceHome
-  EXPECT_EQ(coord.derefCloneMaster(storeCell), mySliceHome);
+  EXPECT_EQ(coord.derefCloneMaster(storeCell),
+            std::optional<CellRef>{mySliceHome});
 
   // Resolves via ##NAME shorthand
-  EXPECT_EQ(coord.resolveNamedStore("primary_slice"), mySliceHome);
+  EXPECT_EQ(coord.resolveNamedStore("primary_slice"),
+            std::optional<CellRef>{mySliceHome});
   EXPECT_EQ(coord.resolveNamedStore("non_existent"), std::nullopt);
 }
 
@@ -80,8 +87,8 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
 
   // Verify d.stores rank posward walk: coordHome -> storeUsers -> storeMath ->
   // storeGeo
-  CellRef step1 =
-      arena.linked(coord.coordinatorHome(), coord.dimStores(), false);
+  CellRef step1 = arena.linked(coord.coordinatorHome().value_or(noCell),
+                               coord.dimStores(), false);
   EXPECT_EQ(step1, storeUsers);
 
   CellRef step2 = arena.linked(step1, coord.dimStores(), false);
@@ -93,9 +100,11 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(arena.linked(step3, coord.dimStores(), false), noCell);
 
   // Test the universal '>' clone master dereference on each storeCell
-  EXPECT_EQ(coord.derefCloneMaster(storeUsers), homeUsers);
-  EXPECT_EQ(coord.derefCloneMaster(storeMath), homeMath);
-  EXPECT_EQ(coord.derefCloneMaster(storeGeo), homeGeo);
+  EXPECT_EQ(coord.derefCloneMaster(storeUsers),
+            std::optional<CellRef>{homeUsers});
+  EXPECT_EQ(coord.derefCloneMaster(storeMath),
+            std::optional<CellRef>{homeMath});
+  EXPECT_EQ(coord.derefCloneMaster(storeGeo), std::optional<CellRef>{homeGeo});
 
   // Verify metadata on slice home cells
   CellRef nameUsers = arena.linked(homeUsers, coord.dimName(), false);
@@ -111,9 +120,10 @@ TEST(VQLMultiStoreTest, MultiSliceTopologyAndDerefMaster) {
   EXPECT_EQ(arena.textOf(nameMath), "math");
 
   // Test ##NAME shorthand resolution
-  EXPECT_EQ(coord.resolveNamedStore("users"), homeUsers);
-  EXPECT_EQ(coord.resolveNamedStore("math"), homeMath);
-  EXPECT_EQ(coord.resolveNamedStore("geo"), homeGeo);
+  EXPECT_EQ(coord.resolveNamedStore("users"),
+            std::optional<CellRef>{homeUsers});
+  EXPECT_EQ(coord.resolveNamedStore("math"), std::optional<CellRef>{homeMath});
+  EXPECT_EQ(coord.resolveNamedStore("geo"), std::optional<CellRef>{homeGeo});
   EXPECT_EQ(coord.resolveNamedStore("missing"), std::nullopt);
 }
 
@@ -135,9 +145,9 @@ TEST(VQLMultiStoreTest, UniversalCloneMasterDereferenceChain) {
   EXPECT_TRUE(arena.link(cellC, coord.dimClone(), DimVector::NEG, cellB));
 
   // Dereferencing any cell in the chain via '>' lands on Master A
-  EXPECT_EQ(coord.derefCloneMaster(cellA), cellA);
-  EXPECT_EQ(coord.derefCloneMaster(cellB), cellA);
-  EXPECT_EQ(coord.derefCloneMaster(cellC), cellA);
+  EXPECT_EQ(coord.derefCloneMaster(cellA), std::optional<CellRef>{cellA});
+  EXPECT_EQ(coord.derefCloneMaster(cellB), std::optional<CellRef>{cellA});
+  EXPECT_EQ(coord.derefCloneMaster(cellC), std::optional<CellRef>{cellA});
 }
 
 TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
@@ -187,6 +197,183 @@ TEST(VQLMultiStoreTest, StoreImportAndCrossStoreNavigation) {
     }
   }
   EXPECT_TRUE(foundStep);
+}
+
+// A document branch forked from the root before the slice existed has the
+// greatest name, so latest() names it; the store's home is on branch 0. Folded
+// at latest(), `##` answered with a cell holding the store's label.
+TEST(VQLMultiStoreTest, AGuessedVersionFoldsWhereTheHomeIs) {
+  const auto dir = tempStoreDir("forked_document");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto scroll       = std::make_shared<UserPermascroll>(config);
+  auto store        = std::make_shared<Store>(scroll);
+
+  const auto typed  = store->insert(xanadu::MicroversionId{}, 0, "a document");
+  const auto sliced = store->sliceGenesis(typed);
+  const auto cell   = store->makeCell(sliced, "a cell");
+  std::ignore = store->insert(xanadu::MicroversionId{}, 0, "another branch");
+  ASSERT_FALSE(store->latest().isAncestorOf(cell)) << "latest is the fork";
+
+  MultiStoreCoordinator coord;
+  coord.addStore("forked", "primary", store);
+
+  const auto folded = coord.findStore("forked");
+  ASSERT_TRUE(folded.has_value());
+  EXPECT_NE(folded->manifold->home(), noCell);
+  EXPECT_EQ(coord.arena().textOf(coord.homeAnchor().value_or(noCell), *store),
+            "home");
+}
+
+// A document's prose is no cell; find() answers a hit in it with the line,
+// linked along d.source to where the line was found. Before, a store's own
+// visible text was invisible to every query.
+TEST(VQLMultiStoreTest, FindReadsDocumentProse) {
+  const auto dir = tempStoreDir("find_prose");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto scroll       = std::make_shared<UserPermascroll>(config);
+  auto store        = std::make_shared<Store>(scroll);
+  std::ignore       = store->insert(xanadu::MicroversionId{}, 0,
+                                    "first line\nthe needle line\nlast line");
+
+  MultiStoreCoordinator coord;
+  coord.addStore("prose", "primary", store);
+  xanadu::vql::VQLEngine engine(coord);
+
+  const auto hits = engine.execute(R"(find("needle"))");
+  ASSERT_EQ(hits.size(), 1U);
+  const auto &arena = coord.arena();
+  EXPECT_EQ(arena.textOf(hits[0]), "the needle line");
+  // The document's own bytes, not a copy of them.
+  const auto quoted = arena.quotedContent(hits[0]);
+  ASSERT_TRUE(quoted.has_value());
+  EXPECT_EQ(quoted->store, store.get());
+  EXPECT_EQ(quoted->spans,
+            store->rebuild(store->primaryCurrentVersion()).spansFor(11, 15));
+  const auto sourceDim = coord.core().findDimension("d.source");
+  ASSERT_TRUE(sourceDim.has_value());
+  const auto origin = arena.linked(hits[0], *sourceDim);
+  ASSERT_NE(origin, noCell);
+  EXPECT_THAT(arena.textOf(origin), ::testing::EndsWith("&at=15"));
+
+  // And reached by the query a reader would type, not only from C++.
+  const auto sources = engine.execute(R"(find("needle")/d.source)");
+  ASSERT_EQ(sources.size(), 1U);
+  EXPECT_EQ(arena.textOf(sources[0]), arena.textOf(origin));
+
+  // A call a step follows is a path inside an argument too.
+  const auto counted = engine.execute(R"(count(find("needle")/d.source))");
+  ASSERT_EQ(counted.size(), 1U);
+  EXPECT_EQ(coord.core().render(counted[0]),
+            zigzag::vortex::CellValue(std::int64_t{1}));
+}
+
+// A word written on a branch the store does not designate current is still
+// written; and a line two branches share is one line, found once.
+TEST(VQLMultiStoreTest, FindReadsEveryBranchAndReportsASharedLineOnce) {
+  const auto dir = tempStoreDir("find_branches");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto store =
+      std::make_shared<Store>(std::make_shared<UserPermascroll>(config));
+  const auto shared =
+      store->insert(xanadu::MicroversionId{}, 0, "shared needle line");
+  const auto alpha = store->insert(shared, 18, "\nalpha needle");
+  std::ignore      = store->insert(shared, 18, "\nbeta needle");
+  store->setCurrentVersions({alpha});
+
+  MultiStoreCoordinator coord;
+  coord.addStore("branched", "primary", store);
+  xanadu::vql::VQLEngine engine(coord);
+
+  const auto hits = engine.execute(R"(find("needle"))");
+  std::vector<std::string> lines;
+  for (const auto hit : hits) {
+    lines.push_back(coord.arena().textOf(hit));
+  }
+  EXPECT_THAT(lines, ::testing::UnorderedElementsAre(
+                         "shared needle line", "alpha needle", "beta needle"));
+}
+
+TEST(VQLMultiStoreTest, ContainsAnswersAtTheTopLevel) {
+  MultiStoreCoordinator coord;
+  xanadu::vql::VQLEngine engine(coord);
+  const auto yes = engine.execute(R"(contains("abc", "b"))");
+  ASSERT_EQ(yes.size(), 1U);
+  EXPECT_EQ(coord.core().render(yes[0]), zigzag::vortex::CellValue(true));
+  const auto no = engine.execute(R"(contains("abc", "z"))");
+  ASSERT_EQ(no.size(), 1U);
+  EXPECT_EQ(coord.core().render(no[0]), zigzag::vortex::CellValue(false));
+}
+
+// Answering nothing for a function nobody defined reads as "no match".
+TEST(VQLMultiStoreTest, AnUnknownFunctionIsRefusedByName) {
+  MultiStoreCoordinator coord;
+  xanadu::vql::VQLEngine engine(coord);
+  EXPECT_THROW(std::ignore = engine.execute("frob(1)"), std::runtime_error);
+}
+
+TEST(VQLMultiStoreTest, StoreLoaderLoadStorePathways) {
+  const auto dir = tempStoreDir("loader_pathway");
+  auto scroll    = std::make_shared<UserPermascroll>();
+  Store originalStore(scroll);
+  const auto v1 =
+      originalStore.insert(xanadu::MicroversionId{}, 0, "Test Store Content");
+  originalStore.save(dir.string());
+
+  // Pathway 1: loadStore(Store &store, path)
+  Store destStore(scroll);
+  xanadu::loadStore(destStore, dir);
+  EXPECT_EQ(destStore.allVersions().size(), 1u);
+  EXPECT_EQ(destStore.rebuild(v1).materialize(*scroll), "Test Store Content");
+
+  // Pathway 2: loadStore(path, permascroll) -> std::unique_ptr<Store>
+  auto loadedPtr = xanadu::loadStore(dir, scroll);
+  ASSERT_NE(loadedPtr, nullptr);
+  EXPECT_EQ(loadedPtr->allVersions().size(), 1u);
+  EXPECT_EQ(loadedPtr->rebuild(v1).materialize(*scroll), "Test Store Content");
+}
+
+TEST(VQLMultiStoreTest, StoreLoaderImportFileStore) {
+  const auto tempDir = tempStoreDir("import_file_test");
+  const auto srcFile = tempDir / "sample_import.txt";
+  const auto dstDir  = tempDir / "saved_store";
+
+  {
+    std::ofstream out(srcFile);
+    out << "Singular Store Loader File Import Test Content\nLine 2";
+  }
+
+  auto scroll        = std::make_shared<UserPermascroll>();
+  auto importedStore = xanadu::importFileStore(srcFile, scroll, dstDir);
+  ASSERT_NE(importedStore, nullptr);
+  EXPECT_TRUE(fs::exists(dstDir / "ops.nodes"));
+
+  const auto versions = importedStore->allVersions();
+  ASSERT_FALSE(versions.empty());
+  EXPECT_EQ(importedStore->rebuild(versions.front()).materialize(*scroll),
+            "Singular Store Loader File Import Test Content\nLine 2");
+}
+
+// A store with a slice is the arena's base; a dimension the query minted
+// must be found again by name, or a step along it walks a fresh, empty one.
+TEST(VQLMultiStoreTest, AMintedDimensionIsFoundAgainOverASlice) {
+  const auto dir = tempStoreDir("minted_dimension");
+  UserPermascroll::Config config;
+  config.storageDir = dir / "permascroll";
+  auto store =
+      std::make_shared<Store>(std::make_shared<UserPermascroll>(config));
+  const auto typed = store->insert(xanadu::MicroversionId{}, 0, "a needle");
+  std::ignore      = store->sliceGenesis(typed);
+
+  MultiStoreCoordinator coord;
+  coord.addStore("sliced", "primary", store);
+  EXPECT_EQ(coord.resolveDimension("d.source"),
+            coord.resolveDimension("d.source"));
+
+  xanadu::vql::VQLEngine engine(coord);
+  EXPECT_EQ(engine.execute(R"(find("needle")/d.source)").size(), 1U);
 }
 
 } // namespace

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/anthology.hpp"
@@ -128,6 +129,18 @@ TEST(AnthologyTest, anAnthologyMixesLocalAndForeignMembersOnOneRank) {
   EXPECT_EQ(members[0].cell, entryA.entryCell);
   EXPECT_EQ(members[1].cell, localCell);
   EXPECT_EQ(members[2].cell, entryB.entryCell);
+
+  // Consolidated manifold-only overloads
+  const auto m1Direct = readAnthologyMember(manifold, visited[0]);
+  EXPECT_EQ(m1Direct, m1);
+  const auto membersDirect = anthologyMembers(manifold, home);
+  EXPECT_EQ(membersDirect, members);
+  std::vector<AnthologyMember> visitedIter;
+  forEachAnthologyMember(manifold, home, [&](const AnthologyMember &m) {
+    visitedIter.push_back(m);
+    return true;
+  });
+  EXPECT_EQ(visitedIter, members);
 }
 
 TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
@@ -137,8 +150,8 @@ TEST(AnthologyTest, anAnthologyMemberPinsItsState) {
   Store foreignStore(perma);
   auto atF = foreignStore.sliceGenesis(MicroversionId{});
   atF      = foreignStore.makeCell(atF, "Alice Chapter 3 Draft 1");
-  const auto foreignCell = foreignStore.cellRefOf(atF);
-  const auto verA        = atF;
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  const auto verA                         = atF;
 
   // Advance foreign store past that state
   atF =
@@ -382,19 +395,19 @@ TEST(AnthologyTest, invalidAncestryThrows) {
   const GlobalDocumentState pinnedState{.scroll  = foreignKey,
                                         .version = MicroversionId::parse("2")};
 
-  EXPECT_THROW(
-      store.appendAnthologyEntry(at, store.homeCell(), memberRef, pinnedState),
-      std::invalid_argument);
+  EXPECT_THROW(std::ignore = store.appendAnthologyEntry(at, store.homeCell(),
+                                                        memberRef, pinnedState),
+               std::invalid_argument);
 }
 
 TEST(AnthologyTest, arenaResolutionAttachesForeignProxyWithoutCopying) {
   const auto perma = std::make_shared<UserPermascroll>();
 
   Store foreignStore(perma);
-  auto atF               = foreignStore.sliceGenesis(MicroversionId{});
-  atF                    = foreignStore.makeCell(atF, "Foreign Cell Content");
-  const auto foreignCell = foreignStore.cellRefOf(atF);
-  const auto foreignBirthVersion = atF;
+  auto atF = foreignStore.sliceGenesis(MicroversionId{});
+  atF      = foreignStore.makeCell(atF, "Foreign Cell Content");
+  [[maybe_unused]] const auto foreignCell = foreignStore.cellRefOf(atF);
+  const auto foreignBirthVersion          = atF;
 
   Scroll sealedAs;
   sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'f'));

@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "common/xanadu/vql/lexer.hpp"
@@ -171,7 +172,18 @@ CompilationResult VQLCompiler::compile(const QueryExpression &query,
   varBindings_.clear();
   lastResultCells_.clear();
 
-  CellRef resultCell = compileQuery(query);
+  CellRef resultCell = noCell;
+  try {
+    resultCell = compileQuery(query);
+  } catch (const std::invalid_argument &unsupported) {
+    return CompilationResult{
+        .success          = false,
+        .entryOpcode      = noCell,
+        .errorMessage     = unsupported.what(),
+        .generatedOpcodes = {},
+        .disassembly      = "",
+    };
+  }
   if (lastResultCells_.empty() && resultCell != noCell) {
     lastResultCells_.push_back(resultCell);
   }
@@ -347,6 +359,13 @@ CellRef VQLCompiler::compileExecutionBlock(const ExecutionBlock &block) {
 
 CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
                                            CellRef ctxCell) {
+  if (!path.anchorPredicates.empty()) {
+    // Refused rather than compiled without them, which would answer every
+    // anchor cell whatever the predicate said.
+    throw std::invalid_argument(
+        "predicates on an anchor are not compiled to Vortex yet; run the "
+        "query with --engine direct");
+  }
   CellRef start = compileAnchor(path.anchor);
   if (start == noCell) {
     start = ctxCell != noCell ? ctxCell : core_.home();
@@ -496,6 +515,12 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
         } else {
           nextStream = attachedClones;
         }
+      } else {
+        // Refused rather than compiled to nothing, which answered find(),
+        // count() and the rest with an empty result and a zero exit.
+        throw std::invalid_argument(
+            fn.name + "() is not compiled to Vortex yet; run the query with "
+                      "--engine direct");
       }
     }
 
@@ -961,7 +986,7 @@ VQLCompiler::exportToStore(xanadu::Store &store,
       ver = store.makeCell(ver, arena.textOf(c));
     }
     cellMap[c] = store.cellRefOf(ver);
-    static_cast<void>(manifold.advance(store, ver));
+    manifold.advanceOrRefold(store, ver);
   }
 
   // 3. Link edges (posward links only)
@@ -973,9 +998,8 @@ VQLCompiler::exportToStore(xanadu::Store &store,
       CellRef target = arena.linked(c, dimRef, DimVector::POS);
       if (target != zigzag::noCell && cellMap.contains(target)) {
         CellRef to = cellMap.at(target);
-        ver =
-            store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);
-        static_cast<void>(manifold.advance(store, ver));
+        ver        = store.setLink(ver, from, mappedDim, DimVector::POS, to);
+        manifold.advanceOrRefold(store, ver);
       }
     }
   }

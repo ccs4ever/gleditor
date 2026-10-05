@@ -660,11 +660,11 @@ TEST(LinkLayout, symmetricMultiPageFramingZoomScaling) {
 }
 
 TEST(LinkLayout, asymmetricMultiPageCentroidAlignmentAndFraming) {
-  const float pageH      = 40.0F; // world units
-  const float pageGapH   = 2.0F;
-  const float aspect     = 16.0F / 9.0F;
-  const float fovDeg     = 15.0F;
-  const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
+  const float pageH                   = 40.0F; // world units
+  const float pageGapH                = 2.0F;
+  [[maybe_unused]] const float aspect = 16.0F / 9.0F;
+  const float fovDeg                  = 15.0F;
+  const float tanHalfFov              = std::tan(glm::radians(fovDeg) * 0.5F);
 
   // Case 1: 3-page Doc A vs 8-page Doc B
   {

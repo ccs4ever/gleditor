@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -32,7 +34,7 @@ public:
 
   [[nodiscard]] std::string str() const {
     static constexpr char hex[] = "0123456789abcdef";
-    std::string out{"local:"};
+    std::string out{kPrefix};
     out.reserve(out.size() + bytes_.size() * 2U);
     for (const auto byte : bytes_) {
       out.push_back(hex[byte >> 4U]);
@@ -51,9 +53,34 @@ public:
     return true;
   }
 
+  /// The id @ref str wrote, with or without its "local:" prefix.
+  [[nodiscard]] static std::optional<DocumentId> parse(std::string_view text) {
+    text.remove_prefix(text.starts_with(kPrefix) ? kPrefix.size() : 0);
+    DocumentId out;
+    if (text.size() != out.bytes_.size() * 2U) {
+      return std::nullopt;
+    }
+    const auto nibble = [](const char digit) -> int {
+      if (digit >= '0' && digit <= '9') return digit - '0';
+      if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
+      return -1;
+    };
+    for (std::size_t i = 0; i < out.bytes_.size(); ++i) {
+      const auto high = nibble(text[2 * i]);
+      const auto low  = nibble(text[(2 * i) + 1]);
+      if (high < 0 || low < 0) {
+        return std::nullopt;
+      }
+      out.bytes_[i] = static_cast<std::uint8_t>((high << 4) | low);
+    }
+    return out;
+  }
+
   bool operator==(const DocumentId &) const = default;
 
 private:
+  static constexpr std::string_view kPrefix = "local:";
+
   void generate() {
     std::random_device random;
     for (auto &byte : bytes_) {

@@ -318,6 +318,38 @@ inline constexpr std::string_view kKeymapPageBreak  = "std:xudu/page_break";
 inline constexpr std::string_view kKeymapHypertimeMap =
     "std:xudu/hypertime_map";
 inline constexpr std::string_view kKeymapRadialMenu = "std:xudu/radial_menu";
+inline constexpr std::string_view kKeymapFormatBold = "std:xudu/format_bold";
+inline constexpr std::string_view kKeymapFormatItalic =
+    "std:xudu/format_italic";
+inline constexpr std::string_view kKeymapFormatUnderline =
+    "std:xudu/format_underline";
+inline constexpr std::string_view kKeymapFormatStrikethrough =
+    "std:xudu/format_strikethrough";
+inline constexpr std::string_view kKeymapFormatSuperscript =
+    "std:xudu/format_superscript";
+inline constexpr std::string_view kKeymapFormatSubscript =
+    "std:xudu/format_subscript";
+inline constexpr std::string_view kKeymapFormatOverline =
+    "std:xudu/format_overline";
+inline constexpr std::string_view kKeymapAlignLeft   = "std:xudu/align_left";
+inline constexpr std::string_view kKeymapAlignCentre = "std:xudu/align_centre";
+inline constexpr std::string_view kKeymapAlignRight  = "std:xudu/align_right";
+inline constexpr std::string_view kKeymapAlignJustify =
+    "std:xudu/align_justify";
+inline constexpr std::string_view kKeymapStoreManager =
+    "std:xuzz/store_manager_toggle";
+inline constexpr std::string_view kKeymapViewModeCycle =
+    "std:xuzz/cycle_view_mode";
+inline constexpr std::string_view kKeymapViewUnified = "std:xuzz/view_unified";
+inline constexpr std::string_view kKeymapViewXanadocOnly =
+    "std:xuzz/view_xanadoc";
+inline constexpr std::string_view kKeymapViewZigzagOnly =
+    "std:xuzz/view_zigzag";
+inline constexpr std::string_view kKeymapSaveDocument =
+    "std:xudu/save_document";
+inline constexpr std::string_view kKeymapExportOsmic = "std:xudu/export_osmic";
+inline constexpr std::string_view kKeymapInsertBreak = "std:xudu/insert_break";
+inline constexpr std::string_view kKeymapClearBench  = "std:xudu/clear_bench";
 inline constexpr std::string_view kKeymapQuotationToggle =
     "std:xudu/quotation_toggle";
 inline constexpr std::string_view kKeymapQuotationToggleF9 =
@@ -464,6 +496,7 @@ inline constexpr std::string_view kKeymapLinkOrigin  = "std:xuzz/link_origin";
 inline constexpr std::string_view kKeymapLinkDismiss = "std:xuzz/link_dismiss";
 inline constexpr std::string_view kKeymapOverviewToggle =
     "std:xudu/overview_toggle";
+inline constexpr std::string_view kKeymapWalks = "std:xuzz/walks";
 inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapActivityForward =
@@ -746,13 +779,11 @@ public:
   static MicroversionId updateSetting(Store &store,
                                       const MicroversionId &parent,
                                       std::string_view name,
-                                      std::span<const CellValue> values,
-                                      const zigzag::Manifold *known = nullptr);
+                                      std::span<const CellValue> values);
 
   static MicroversionId resetToDefault(Store &store,
                                        const MicroversionId &parent,
-                                       std::string_view name,
-                                       const zigzag::Manifold *known = nullptr);
+                                       std::string_view name);
 
 private:
   bool isValid_{true};
@@ -767,8 +798,7 @@ private:
 
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
                           std::string_view name,
-                          std::span<const CellValue> values,
-                          const zigzag::Manifold *known = nullptr);
+                          std::span<const CellValue> values);
 
 template <typename... Args>
 MicroversionId setSetting(Store &store, const MicroversionId &parent,
@@ -780,15 +810,13 @@ MicroversionId setSetting(Store &store, const MicroversionId &parent,
 }
 
 MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
-                                     std::string_view name,
-                                     const zigzag::Manifold *known = nullptr);
+                                     std::string_view name);
 
 MicroversionId initializeSystemStoreGenesis(Store &store, SystemDocKind kind,
                                             const MicroversionId &parent = {});
 
 MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
-                             const SettingSpec &spec,
-                             const zigzag::Manifold *known = nullptr);
+                             const SettingSpec &spec);
 
 MicroversionId ensureAllSettings(Store &store, const MicroversionId &parent,
                                  SystemDocKind kind);
@@ -806,11 +834,11 @@ inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
 /**
  * @brief The scope @p action's binding is live in; empty for anywhere.
  *
- * ZigZag's bare-key set (std:nav/*, std:ui/*, std:zigzag/*) steps, edits and
+ * ZigZag's bare-key set (std:nav/\*, std:ui/\*, std:zigzag/\*) steps, edits and
  * cycles cells with the arrows, letters and Space a document needs for text,
  * so in xuzz it only reaches the keyboard while ZigZag has it. Its
  * Alt-prefixed zigzag_* twins are how a reader in a document reaches ZigZag,
- * and are live anywhere. std:edit/* is caret movement, a document's.
+ * and are live anywhere. std:edit/\* is caret movement, a document's.
  */
 [[nodiscard]] std::string_view keymapScope(std::string_view action);
 

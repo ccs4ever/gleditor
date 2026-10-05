@@ -29,7 +29,7 @@ TEST(MerkleLedgerTest, EntryNormalizationAndLeafHashing) {
   link1.timestamp = 1700000000;
   link1.sequence  = 0;
 
-  const auto hash1 = link1.leafHash();
+  [[maybe_unused]] const auto hash1 = link1.leafHash();
   EXPECT_THAT(link1.leafHashHex().size(), Eq(64U));
 
   // Same content with different case/spaces in fingerprint and email must

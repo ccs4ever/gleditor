@@ -3,6 +3,6 @@
   each glyph is what bounds the chain -- so the detailed path starts aliasing
   again if --coarse-below is lowered past the default. Page backgrounds and the
   caret are untextured quads and alias at every size.
-* Replace logo.png with something cooler
+* Replace assets/logo.png with something cooler
 * port over the gleditor code, enable glyph by glyph creation
 * document everything

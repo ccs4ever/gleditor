@@ -16,12 +16,14 @@
 #include <iostream>
 #include <optional>
 #include <ranges>
+#include <tuple>
 #include <utility>
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
 #include <gleditor/color.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/logging.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/diagnostics.hpp>
@@ -84,15 +86,16 @@ void ZigzagVisualizer::setCellRadius(const int radius) noexcept {
   invalidateAccessibility();
 }
 
-void ZigzagVisualizer::setPresentationConfig(
+ZigzagVisualizer *ZigzagVisualizer::setPresentationConfig(
     xanadu::ZigzagPresentationConfig config) {
   if (presentation_config_ == config) {
-    return;
+    return this;
   }
   presentation_config_ = config;
   cell_layouts_dirty_  = true;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::deviceReady(
@@ -120,7 +123,9 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
-  if (!presentation_visible_) return false;
+  if (!presentation_visible_) {
+    return false;
+  }
   return std::ranges::any_of(visible_cells_, [](const auto &entry) {
     const auto &cell = entry.second;
     return std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
@@ -252,7 +257,7 @@ void ZigzagVisualizer::adoptDocument(
        {current_view_.x_dimension, current_view_.y_dimension,
         current_view_.z_dimension, DimID{"d.clone"}}) {
     if (!wellKnown.empty()) {
-      static_cast<void>(engine_->dimensionFor(wellKnown));
+      std::ignore = engine_->dimensionFor(wellKnown);
     }
   }
 
@@ -267,6 +272,7 @@ void ZigzagVisualizer::adoptDocument(
 
   preview_cell_.reset();
   visible_cells_.clear();
+  fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
     cell.current_pos   = cell.target_pos;
@@ -274,6 +280,50 @@ void ZigzagVisualizer::adoptDocument(
   }
   ensureVortexHost();
   invalidateAccessibility();
+}
+
+void ZigzagVisualizer::fitViewToHome() {
+  if (!engine_ || nullptr == store_) {
+    return;
+  }
+  const auto &manifold = engine_->manifold();
+  const auto home      = manifold.home();
+  if (zigzag::noCell == home) {
+    return;
+  }
+  const auto linksOn = [&](const DimID &name) {
+    const auto dim = manifold.dimensionNamed(name, *store_);
+    return dim && (zigzag::noCell != manifold.linked(home, *dim) ||
+                   zigzag::noCell !=
+                       manifold.linked(home, *dim, zigzag::DimVector::NEG));
+  };
+  if (linksOn(current_view_.x_dimension) ||
+      linksOn(current_view_.y_dimension)) {
+    GLEDITOR_LOG_DEBUG("zigzag.view", "home already links along {} or {}",
+                       current_view_.x_dimension, current_view_.y_dimension);
+    return;
+  }
+  // A slice whose home links along neither view dimension -- a result store
+  // on d.result, say -- would open as a lone home cell. Show it along the
+  // dimensions it does use instead, d.dims aside, which every slice has.
+  std::vector<DimID> used;
+  for (const auto &link : manifold.dimensionsOf(home)) {
+    auto name = manifold.textOf(link.dim, *store_);
+    GLEDITOR_LOG_TRACE("zigzag.view", "home links along #{} \"{}\"", link.dim,
+                       name);
+    if ("d.dims" != name && !name.empty()) {
+      used.push_back(std::move(name));
+    }
+  }
+  GLEDITOR_LOG_DEBUG("zigzag.view",
+                     "home links along {} dimension(s) off the view",
+                     used.size());
+  if (!used.empty()) {
+    current_view_.x_dimension = used[0];
+  }
+  if (used.size() > 1) {
+    current_view_.y_dimension = used[1];
+  }
 }
 
 void ZigzagVisualizer::adoptXuduStore(
@@ -301,6 +351,7 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   preview_cell_.reset();
   visible_cells_.clear();
+  fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
     cell.current_pos   = cell.target_pos;
@@ -588,13 +639,14 @@ bool ZigzagVisualizer::deleteFocusCell() {
   return true;
 }
 
-void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
+ZigzagVisualizer *
+ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if (!engine_ || accursed_cell_focus_ == 0) {
-    return;
+    return this;
   }
   const auto focus = static_cast<CellRef>(accursed_cell_focus_);
   if (!engine_->findCell(focus)) {
-    return;
+    return this;
   }
   const CellRef targetCell = engine_->manifold()
                                  .dimensionNamed("d.clone", engine_->store())
@@ -605,11 +657,12 @@ void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if ((targetCell == engine_->manifold().home() ||
        targetCell == engine_->manifold().dimsDimension()) &&
       text.empty()) {
-    return;
+    return this;
   }
   engine_->updateCellText(targetCell, text);
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 bool ZigzagVisualizer::saveStore(const std::string &filePath) const {
@@ -773,6 +826,8 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
       return "extern / " + key + " @ " + target->produces.str();
     }
     return "extern / unresolved";
+  case xanadu::ValueKind::Timestamp:
+    return "timestamp";
   case xanadu::ValueKind::None:
     return std::string(role);
   }
@@ -1334,12 +1389,14 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   }
 }
 
-void ZigzagVisualizer::setPreviewCell(std::optional<CellRef> cell) {
+ZigzagVisualizer *
+ZigzagVisualizer::setPreviewCell(std::optional<CellRef> cell) {
   if (cell && (!engine_ || !engine_->findCell(*cell))) cell.reset();
-  if (cell == preview_cell_) return;
+  if (cell == preview_cell_) return this;
   preview_cell_ = cell;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
@@ -1401,25 +1458,29 @@ void ZigzagVisualizer::navigateFocusTo(const CellID id) {
   invalidateAccessibility();
 }
 
-void ZigzagVisualizer::setViewMode(const ViewMode mode) {
+ZigzagVisualizer *ZigzagVisualizer::setViewMode(const ViewMode mode) {
   view_mode_ = mode;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::toggleViewMode() {
+ZigzagVisualizer *ZigzagVisualizer::toggleViewMode() {
   setViewMode(view_mode_ == ViewMode::CellContent ? ViewMode::Topology
                                                   : ViewMode::CellContent);
+  return this;
 }
 
-void ZigzagVisualizer::setPresentationVisible(const bool visible) {
-  if (presentation_visible_ == visible) return;
+ZigzagVisualizer *ZigzagVisualizer::setPresentationVisible(const bool visible) {
+  if (presentation_visible_ == visible) return this;
   presentation_visible_ = visible;
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
-                                    const float opacityMultiplier) {
+ZigzagVisualizer *
+ZigzagVisualizer::setDepthTier(const float baseDepthZ,
+                               const float opacityMultiplier) {
   const float deltaZ  = baseDepthZ - depth_tier_;
   depth_tier_         = baseDepthZ;
   depth_tier_opacity_ = std::clamp(opacityMultiplier, 0.0F, 1.0F);
@@ -1428,14 +1489,17 @@ void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
   }
   rebuildActiveViewTopology();
   invalidateAccessibility();
+  return this;
 }
 
-void ZigzagVisualizer::setPresentationOrigin(const glm::vec3 origin) {
+ZigzagVisualizer *
+ZigzagVisualizer::setPresentationOrigin(const glm::vec3 origin) {
   presentation_origin_ = origin;
   presentation_transform_ =
       glm::translate(glm::mat4{1.0F}, origin) *
       glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
   invalidateAccessibility();
+  return this;
 }
 
 void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {
@@ -1593,7 +1657,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // --- 1. Draw 3D Connection Beams ---
   beams_->clear();
-  std::vector<std::pair<CellID, CellID>> drawnEdges;
+  drawnEdges_.clear();
 
   if (engine_) {
     const auto &manifold = engine_->manifold();
@@ -1635,10 +1699,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
           const auto edge =
               std::pair{std::min(id, static_cast<CellID>(neighborId)),
                         std::max(id, static_cast<CellID>(neighborId))};
-          if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+          if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
             continue;
           }
-          drawnEdges.push_back(edge);
+          drawnEdges_.push_back(edge);
 
           const auto &neighborCell = visible_cells_.at(neighborId);
           const auto visual        = dimensionVisual(dimName);
@@ -1671,10 +1735,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
             const auto edge =
                 std::pair{std::min(id, static_cast<CellID>(neighborId)),
                           std::max(id, static_cast<CellID>(neighborId))};
-            if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+            if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
               continue;
             }
-            drawnEdges.push_back(edge);
+            drawnEdges_.push_back(edge);
 
             const auto &neighborCell = visible_cells_.at(neighborId);
             const float edgeAlpha =
@@ -1709,6 +1773,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     pickTargets_.clear();
     pickTargetVersion_ = pickVersion;
   }
+
+  const auto vpPresentation = ctx.viewProjection * presentation_transform_;
 
   for (const auto &[id, cell] : visible_cells_) {
     if (!shown(cell)) {
@@ -1752,6 +1818,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const auto &layout     = cellLayout(id, cell, isFocus);
     const float nodeWidth  = layout.width;
     const float nodeHeight = layout.height;
+
+    const auto cellMvp =
+        vpPresentation * glm::translate(glm::mat4(1.0F), cell.current_pos);
+    if (!isFocus &&
+        outsideFrustum(cellMvp, nodeWidth / 2.0F, nodeHeight / 2.0F, 10.0F)) {
+      continue;
+    }
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -2186,7 +2259,10 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
                          gleditor::a11y::bit(gleditor::a11y::Action::Focus);
       rootChildren.push_back(into.id(nextNodeId));
 
-      if (isFocus) {
+      // Only while ZigZag has the keyboard: otherwise the document's caret
+      // is where an assistive technology should be, and describing this
+      // after the documents took that focus away from the text.
+      if (isFocus && keyboardHere_.load()) {
         into.takeFocus(into.id(nextNodeId));
       }
 
@@ -2207,7 +2283,9 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
                          gleditor::a11y::bit(gleditor::a11y::Action::Focus);
       rootChildren.push_back(into.id(nextNodeId));
-      into.takeFocus(into.id(nextNodeId));
+      if (keyboardHere_.load()) {
+        into.takeFocus(into.id(nextNodeId));
+      }
       nextNodeId++;
     }
   }
@@ -2420,7 +2498,7 @@ ZigzagVisualizer::cellAnchor(const CellRef cell) const {
   };
 }
 
-void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
+ZigzagVisualizer *ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
   dimension_bundle_ = bundle;
   if (bundle != DimensionBundle::Custom) {
     current_view_ = dimensionBundleAxes(bundle);
@@ -2429,7 +2507,7 @@ void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
            {current_view_.x_dimension, current_view_.y_dimension,
             current_view_.z_dimension}) {
         if (!dName.empty()) {
-          static_cast<void>(engine_->dimensionFor(dName));
+          std::ignore = engine_->dimensionFor(dName);
         }
       }
     }
@@ -2437,9 +2515,10 @@ void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
     rebuildActiveViewTopology();
     invalidateAccessibility();
   }
+  return this;
 }
 
-void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
+ZigzagVisualizer *ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
   auto current = static_cast<int>(dimension_bundle_);
   if (forward) {
     current = (current >= 5) ? 1 : current + 1;
@@ -2447,11 +2526,13 @@ void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
     current = (current <= 1) ? 5 : current - 1;
   }
   setDimensionBundle(static_cast<DimensionBundle>(current));
+  return this;
 }
 
-void ZigzagVisualizer::attachVortexHost(
-    std::shared_ptr<vortex::VortexHost> host) {
+ZigzagVisualizer *
+ZigzagVisualizer::attachVortexHost(std::shared_ptr<vortex::VortexHost> host) {
   vortex_host_ = std::move(host);
+  return this;
 }
 
 std::shared_ptr<vortex::VortexHost> ZigzagVisualizer::vortexHost() noexcept {
@@ -2461,7 +2542,7 @@ std::shared_ptr<vortex::VortexHost> ZigzagVisualizer::vortexHost() noexcept {
   return vortex_host_;
 }
 
-void ZigzagVisualizer::ensureVortexHost() {
+ZigzagVisualizer *ZigzagVisualizer::ensureVortexHost() {
   if (engine_) {
     vortex_host_ = std::make_shared<vortex::VortexHost>(&engine_->manifold());
     if (store_) {
@@ -2470,12 +2551,72 @@ void ZigzagVisualizer::ensureVortexHost() {
       vortex_host_->bindStore(&engine_->store());
     }
   }
+  return this;
 }
 
 bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
   if (!vortex_host_) {
     ensureVortexHost();
   }
+
+  const auto canonical = xanadu::canonicalKeymapAction(actionName);
+  if (actionName == "bundle-execution" ||
+      canonical == "std:ui/bundle_execution") {
+    setDimensionBundle(DimensionBundle::Execution);
+    return true;
+  }
+  if (actionName == "bundle-scope" || canonical == "std:ui/bundle_scope") {
+    setDimensionBundle(DimensionBundle::Scope);
+    return true;
+  }
+  if (actionName == "bundle-contract" ||
+      canonical == "std:ui/bundle_contract") {
+    setDimensionBundle(DimensionBundle::Contract);
+    return true;
+  }
+  if (actionName == "bundle-logic" || canonical == "std:ui/bundle_logic") {
+    setDimensionBundle(DimensionBundle::Logic);
+    return true;
+  }
+  if (actionName == "bundle-stdlib" || canonical == "std:ui/bundle_stdlib") {
+    setDimensionBundle(DimensionBundle::Stdlib);
+    return true;
+  }
+  if (actionName == "bundle-cycle" || canonical == "std:ui/bundle_cycle") {
+    cycleDimensionBundle(true);
+    return true;
+  }
+  if (actionName == "view-mode-content-1" ||
+      actionName == "view-mode-content-v" ||
+      canonical == "std:ui/view_mode_content_1" ||
+      canonical == "std:ui/view_mode_content_v" ||
+      canonical == "std:ui/zigzag_view_mode_content") {
+    setViewMode(ViewMode::CellContent);
+    return true;
+  }
+  if (actionName == "view-mode-topology" ||
+      actionName == "view-mode-topology-t" ||
+      canonical == "std:ui/view_mode_topology" ||
+      canonical == "std:ui/view_mode_topology_t" ||
+      canonical == "std:ui/zigzag_view_mode_topology") {
+    setViewMode(ViewMode::Topology);
+    return true;
+  }
+  if (actionName == "toggle-palette" || canonical == "std:ui/toggle_palette" ||
+      canonical == "std:ui/zigzag_toggle_palette") {
+    togglePalette();
+    return true;
+  }
+  if (actionName == "toggle-command-bar" ||
+      canonical == "std:ui/toggle_command_bar" ||
+      canonical == "std:ui/zigzag_toggle_command_bar") {
+    toggleCommandBar();
+    return true;
+  }
+  if (actionName == "save-store" || canonical == "std:zigzag/save_store") {
+    return saveStore("");
+  }
+
   if (vortex_host_ && accursed_cell_focus_ != 0) {
     if (vortex_host_->hasCustomAction(actionName)) {
       CellRef newFocus   = zigzag::noCell;
@@ -2802,38 +2943,48 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
     cycleDimensions(false);
     return true;
   }
+
+  if (vortex_host_) {
+    return vortex_host_->dispatchAction(actionName);
+  }
   return false;
 }
 
-void ZigzagVisualizer::togglePalette() { setPaletteVisible(!paletteVisible_); }
+ZigzagVisualizer *ZigzagVisualizer::togglePalette() {
+  setPaletteVisible(!paletteVisible_);
+  return this;
+}
 
-void ZigzagVisualizer::setPaletteVisible(const bool visible) {
+ZigzagVisualizer *ZigzagVisualizer::setPaletteVisible(const bool visible) {
   paletteVisible_ = visible;
   if (visible) {
     paletteSelectedIndex_ = 0;
   }
+  return this;
 }
 
-void ZigzagVisualizer::paletteNext() {
+ZigzagVisualizer *ZigzagVisualizer::paletteNext() {
   const auto items = paletteItems();
   if (items.empty()) {
     paletteSelectedIndex_ = 0;
-    return;
+    return this;
   }
   paletteSelectedIndex_ = (paletteSelectedIndex_ + 1) % items.size();
+  return this;
 }
 
-void ZigzagVisualizer::palettePrev() {
+ZigzagVisualizer *ZigzagVisualizer::palettePrev() {
   const auto items = paletteItems();
   if (items.empty()) {
     paletteSelectedIndex_ = 0;
-    return;
+    return this;
   }
   if (paletteSelectedIndex_ == 0) {
     paletteSelectedIndex_ = items.size() - 1;
   } else {
     --paletteSelectedIndex_;
   }
+  return this;
 }
 
 bool ZigzagVisualizer::paletteCloneSelectedToFocus() {
@@ -2886,7 +3037,7 @@ bool ZigzagVisualizer::translateVQLAndAttachToFocus(std::string_view vqlQuery,
          {std::string(attachDim), std::string("d.spin"), std::string("d.step"),
           std::string("d.grab"), std::string("d.vars"), std::string("d.values"),
           std::string("d.branch")}) {
-      static_cast<void>(engine_->dimensionFor(dim));
+      std::ignore = engine_->dimensionFor(dim);
     }
   }
 
@@ -2939,21 +3090,25 @@ ZigzagVisualizer::compileVQL(std::string_view vqlQuery) const {
   return vortex_host_->vqlCompiler().compile(vqlQuery, options);
 }
 
-void ZigzagVisualizer::setPaletteFilter(std::string filter) {
+ZigzagVisualizer *ZigzagVisualizer::setPaletteFilter(std::string filter) {
   paletteFilter_        = std::move(filter);
   paletteSelectedIndex_ = 0;
+  return this;
 }
 
-void ZigzagVisualizer::paletteInputText(const std::string_view text) {
+ZigzagVisualizer *
+ZigzagVisualizer::paletteInputText(const std::string_view text) {
   paletteFilter_.append(text);
   paletteSelectedIndex_ = 0;
+  return this;
 }
 
-void ZigzagVisualizer::paletteBackspace() {
+ZigzagVisualizer *ZigzagVisualizer::paletteBackspace() {
   if (!paletteFilter_.empty()) {
     paletteFilter_.pop_back();
     paletteSelectedIndex_ = 0;
   }
+  return this;
 }
 
 std::vector<std::string> ZigzagVisualizer::paletteItems() const {
@@ -3015,43 +3170,52 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
   return filtered;
 }
 
-void ZigzagVisualizer::toggleCommandBar() {
+ZigzagVisualizer *ZigzagVisualizer::toggleCommandBar() {
   setCommandBarVisible(!commandBarVisible_);
+  return this;
 }
 
-void ZigzagVisualizer::setCommandBarVisible(const bool visible) {
+ZigzagVisualizer *ZigzagVisualizer::setCommandBarVisible(const bool visible) {
   commandBarVisible_ = visible;
   if (commandBarVisible_) {
     commandBarFeedback_.clear();
     commandBarFeedbackIsError_ = false;
   }
+  return this;
 }
 
-void ZigzagVisualizer::commandBarInputChar(const char ch) {
+ZigzagVisualizer *ZigzagVisualizer::commandBarInputChar(const char ch) {
   commandBarText_.push_back(ch);
+  return this;
 }
 
-void ZigzagVisualizer::commandBarInputText(const std::string_view text) {
+ZigzagVisualizer *
+ZigzagVisualizer::commandBarInputText(const std::string_view text) {
   commandBarText_.append(text);
+  return this;
 }
 
-void ZigzagVisualizer::setKeyHints(std::string here, std::string elsewhere) {
+ZigzagVisualizer *ZigzagVisualizer::setKeyHints(std::string here,
+                                                std::string elsewhere) {
   keyHintsHere_      = std::move(here);
   keyHintsElsewhere_ = std::move(elsewhere);
+  return this;
 }
 
-void ZigzagVisualizer::beginCellEdit() {
+ZigzagVisualizer *ZigzagVisualizer::beginCellEdit() {
   if (!engine_ || 0 == accursed_cell_focus_ ||
       !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
-    return;
+    return this;
   }
   cellEditText_  = inspectCell(static_cast<CellRef>(accursed_cell_focus_)).text;
   cellEditing_   = true;
   cellEditWhole_ = !cellEditText_.empty();
+  return this;
 }
 
-void ZigzagVisualizer::markFocus() noexcept {
+ZigzagVisualizer *ZigzagVisualizer::markFocus() noexcept {
   markedCell_ = accursed_cell_focus_;
+  return this;
 }
 
 bool ZigzagVisualizer::linkMarkedAlongX(const bool positive) {
@@ -3066,20 +3230,23 @@ bool ZigzagVisualizer::linkMarkedAlongX(const bool positive) {
   return linked;
 }
 
-void ZigzagVisualizer::commandBarBackspace() {
+ZigzagVisualizer *ZigzagVisualizer::commandBarBackspace() {
   if (!commandBarText_.empty()) {
     commandBarText_.pop_back();
   }
+  return this;
 }
 
-void ZigzagVisualizer::commandBarClear() {
+ZigzagVisualizer *ZigzagVisualizer::commandBarClear() {
   commandBarText_.clear();
   commandBarFeedback_.clear();
   commandBarFeedbackIsError_ = false;
+  return this;
 }
 
-void ZigzagVisualizer::setCommandBarText(std::string text) {
+ZigzagVisualizer *ZigzagVisualizer::setCommandBarText(std::string text) {
   commandBarText_ = std::move(text);
+  return this;
 }
 
 bool ZigzagVisualizer::navigateVQL(const std::string_view pathExpr) {
@@ -3124,6 +3291,55 @@ ZigzagVisualizer::executeVQLScript(const std::string_view script) {
   return res;
 }
 
+vortex::VortexHost::ScriptResult
+ZigzagVisualizer::executeVPL(const std::string_view expr) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    return {.success = false, .message = "VortexHost unavailable"};
+  }
+  auto res                   = vortex_host_->executeVPL(expr);
+  commandBarFeedback_        = res.message;
+  commandBarFeedbackIsError_ = !res.success;
+  if (res.success) {
+    if (!res.affectedCells.empty()) {
+      navigateFocusTo(static_cast<CellID>(res.affectedCells.back()));
+    } else {
+      refreshCellLayouts();
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
+  }
+  return res;
+}
+
+std::vector<vortex::LogicSolution>
+ZigzagVisualizer::executeLogicQuery(const std::string_view query) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    commandBarFeedback_        = "VortexHost unavailable";
+    commandBarFeedbackIsError_ = true;
+    return {};
+  }
+  auto solutions = vortex_host_->solveLogic(query);
+  if (!solutions.empty()) {
+    commandBarFeedback_ =
+        std::format("Logic query succeeded ({} solution(s))", solutions.size());
+    commandBarFeedbackIsError_ = false;
+    for (const auto &sol : solutions) {
+      for (const auto &[_, cell] : sol.bindings) {
+        if (const auto optCell = gleditor::fromSentinel<zigzag::noCell>(cell)) {
+          navigateFocusTo(static_cast<CellID>(*optCell));
+          break;
+        }
+      }
+    }
+  } else {
+    commandBarFeedback_        = "Logic query failed: no solutions";
+    commandBarFeedbackIsError_ = true;
+  }
+  return solutions;
+}
+
 bool ZigzagVisualizer::defineMacro(const std::string_view name,
                                    const std::string_view vqlExpr,
                                    const std::string_view keyBinding) {
@@ -3134,8 +3350,8 @@ bool ZigzagVisualizer::defineMacro(const std::string_view name,
     return false;
   }
   if (store_) {
-    static_cast<void>(
-        vortex_host_->saveMacroToStore(name, vqlExpr, keyBinding, *store_));
+    std::ignore =
+        vortex_host_->saveMacroToStore(name, vqlExpr, keyBinding, *store_);
   } else {
     vortex_host_->defineMacro(name, vqlExpr, nullptr);
   }
@@ -3470,9 +3686,8 @@ bool ZigzagVisualizer::executeCommandBar() {
         engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
 
     try {
-      const auto q =
-          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
-                        selector, engine_ ? &engine_->manifold() : nullptr);
+      const auto q = store_->quote(commitParent, tailRef, dimRef, label,
+                                   pinnedState, selector);
       reloadStoreVersion(q.version, q.quotationCell);
       commandBarFeedback_ = std::format(
           "Quoted structure '{}' minted as cell #{}", label, q.quotationCell);
@@ -3597,9 +3812,8 @@ bool ZigzagVisualizer::executeCommandBar() {
         engine_ ? engine_->dimensionFor(localDim) : zigzag::noCell;
 
     try {
-      const auto q =
-          store_->quote(commitParent, tailRef, dimRef, label, pinnedState,
-                        selector, engine_ ? &engine_->manifold() : nullptr);
+      const auto q = store_->quote(commitParent, tailRef, dimRef, label,
+                                   pinnedState, selector);
       reloadStoreVersion(q.version, q.quotationCell);
       commandBarFeedback_ = std::format("Quoted query '{}' minted as cell #{}",
                                         label, q.quotationCell);
@@ -3745,6 +3959,112 @@ bool ZigzagVisualizer::executeCommandBar() {
   // 13. List overlays (:overlay-list)
   if (text == ":overlay-list") {
     commandBarFeedback_ = "Active overlays: 0 attached, 0 applied claims";
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+
+  // 14. VPL mode: starts with ')' or ':vpl '
+  if (text.starts_with(')') || text.starts_with(":vpl ") ||
+      text.starts_with(":vpl\t")) {
+    std::string_view vplExpr = text;
+    if (text.starts_with(":vpl ") || text.starts_with(":vpl\t")) {
+      vplExpr = text.substr(5);
+    }
+    auto res = executeVPL(vplExpr);
+    return res.success;
+  }
+
+  // 15. Logic mode: starts with ':logic ', ':query ', or '?-'
+  if (text.starts_with(":logic ") || text.starts_with(":logic\t") ||
+      text.starts_with(":query ") || text.starts_with(":query\t") ||
+      text.starts_with("?-")) {
+    std::string_view query = text;
+    if (text.starts_with(":logic ") || text.starts_with(":logic\t")) {
+      query = text.substr(7);
+    } else if (text.starts_with(":query ") || text.starts_with(":query\t")) {
+      query = text.substr(7);
+    }
+    auto solutions = executeLogicQuery(query);
+    return !solutions.empty();
+  }
+
+  // 16. Bridge commands
+  if (text.starts_with(":bridge-to-cell ") ||
+      text.starts_with(":bridge-to-cell\t")) {
+    std::string_view rest = text.substr(16);
+    std::istringstream iss{std::string(rest)};
+    std::uint64_t cellVal{};
+    if (iss >> cellVal) {
+      focusCell(static_cast<CellRef>(cellVal));
+      commandBarFeedback_ = std::format("Bridged focus to cell {}", cellVal);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Usage: :bridge-to-cell <cell>";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+  if (text.starts_with(":bridge-to-doc ") ||
+      text.starts_with(":bridge-to-doc\t")) {
+    std::string docName = std::string(text.substr(15));
+    commandBarFeedback_ = std::format(
+        "Bridge target document: {} (current: {})", docName, documentId());
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-royalty" || text.starts_with(":bridge-royalty ") ||
+      text.starts_with(":bridge-royalty\t")) {
+    CellRef target = focusCell();
+    if (text.size() > 15) {
+      std::istringstream iss{std::string(text.substr(16))};
+      std::uint64_t cellVal{};
+      if (iss >> cellVal) {
+        target = static_cast<CellRef>(cellVal);
+      }
+    }
+    auto royalty = cellRoyalty(target);
+    if (royalty) {
+      commandBarFeedback_ =
+          std::format("Cell {} royalty: {} {}", target,
+                      royalty->priceAtomicUnits, royalty->currencySymbol);
+    } else {
+      commandBarFeedback_ =
+          std::format("Cell {} has no royalty restriction", target);
+    }
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-unlock" || text.starts_with(":bridge-unlock ") ||
+      text.starts_with(":bridge-unlock\t")) {
+    CellRef target = focusCell();
+    if (text.size() > 14) {
+      std::istringstream iss{std::string(text.substr(15))};
+      std::uint64_t cellVal{};
+      if (iss >> cellVal) {
+        target = static_cast<CellRef>(cellVal);
+      }
+    }
+    bool ok = unlockCell(target);
+    commandBarFeedback_ =
+        ok ? std::format("Unlocked cell {}", target)
+           : std::format("Cell {} is already unlocked or invalid", target);
+    commandBarFeedbackIsError_ = !ok;
+    return ok;
+  }
+  if (text == ":bridge-text") {
+    std::string t;
+    if (engine_) {
+      t = engine_->manifold().textOf(focusCell(), engine_->store());
+    } else if (vortex_host_ && vortex_host_->arena().contains(focusCell())) {
+      t = vortex_host_->arena().textOf(focusCell());
+    }
+    commandBarFeedback_ = std::format("Cell {} text: \"{}\"", focusCell(), t);
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  if (text == ":bridge-version") {
+    commandBarFeedback_ =
+        std::format("Document version: {}", documentVersion());
     commandBarFeedbackIsError_ = false;
     return true;
   }

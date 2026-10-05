@@ -65,6 +65,7 @@ bool DeviceVK::beginFrame() {
   // Wait for the frame slot this submission will reuse.
   check(vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, UINT64_MAX),
         "vkWaitForFences");
+  drainRetiredBuffers(frame);
 
   const auto acquired =
       vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, frame.imageAvailable,
@@ -111,7 +112,7 @@ bool DeviceVK::beginFrame() {
   passInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   passInfo.renderPass  = renderPass;
   passInfo.framebuffer = framebuffer;
-  passInfo.renderArea = {.offset = {.x = 0, .y = 0}, .extent = swapchainExtent};
+  passInfo.renderArea  = {.offset = {.x = 0, .y = 0}, .extent = renderExtent};
   passInfo.clearValueCount = clears.size();
   passInfo.pClearValues    = clears.data();
   // Every draw of the pass goes into a secondary command buffer, whether or
@@ -159,14 +160,13 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   // A secondary buffer inherits the render pass and framebuffer and nothing
   // else: no viewport, no bound pipeline, no descriptor sets. Each one
   // therefore re-establishes the state its draws need.
-  const VkViewport viewport{.x     = 0.0F,
-                            .y     = 0.0F,
-                            .width = static_cast<float>(swapchainExtent.width),
-                            .height =
-                                static_cast<float>(swapchainExtent.height),
+  const VkViewport viewport{.x        = 0.0F,
+                            .y        = 0.0F,
+                            .width    = static_cast<float>(renderExtent.width),
+                            .height   = static_cast<float>(renderExtent.height),
                             .minDepth = 0.0F,
                             .maxDepth = 1.0F};
-  const VkRect2D scissor{.offset = {.x = 0, .y = 0}, .extent = swapchainExtent};
+  const VkRect2D scissor{.offset = {.x = 0, .y = 0}, .extent = renderExtent};
   vkCmdSetViewport(commands, 0, 1, &viewport);
   vkCmdSetScissor(commands, 0, 1, &scissor);
 
@@ -487,8 +487,8 @@ bool DeviceVK::requestPickingTag(const int coordX, const int coordY,
     return false;
   }
   if (coordX < 0 || coordY < 0 ||
-      std::cmp_greater_equal(coordX, swapchainExtent.width) ||
-      std::cmp_greater_equal(coordY, swapchainExtent.height)) {
+      std::cmp_greater_equal(coordX, renderExtent.width) ||
+      std::cmp_greater_equal(coordY, renderExtent.height)) {
     return false;
   }
 
@@ -611,11 +611,13 @@ void DeviceVK::endFrame() {
                          .mipLevel       = 0,
                          .baseArrayLayer = 0,
                          .layerCount     = 1};
-  blit.srcOffsets[1]  = {.x = static_cast<std::int32_t>(swapchainExtent.width),
-                         .y = static_cast<std::int32_t>(swapchainExtent.height),
+  blit.srcOffsets[1]  = {.x = static_cast<std::int32_t>(renderExtent.width),
+                         .y = static_cast<std::int32_t>(renderExtent.height),
                          .z = 1};
   blit.dstSubresource = blit.srcSubresource;
-  blit.dstOffsets[1]  = blit.srcOffsets[1];
+  blit.dstOffsets[1]  = {.x = static_cast<std::int32_t>(swapchainExtent.width),
+                         .y = static_cast<std::int32_t>(swapchainExtent.height),
+                         .z = 1};
   vkCmdBlitImage(frame.commands, colourImage,
                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapImage,
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
@@ -670,11 +672,11 @@ void DeviceVK::endFrame() {
 
 FrameImage DeviceVK::captureColorTarget() {
   FrameImage image;
-  image.width  = static_cast<int>(swapchainExtent.width);
-  image.height = static_cast<int>(swapchainExtent.height);
+  image.width  = static_cast<int>(renderExtent.width);
+  image.height = static_cast<int>(renderExtent.height);
 
   const auto pixels =
-      static_cast<VkDeviceSize>(swapchainExtent.width) * swapchainExtent.height;
+      static_cast<VkDeviceSize>(renderExtent.width) * renderExtent.height;
   const auto bytes = pixels * 4;
   image.rgba.resize(bytes);
 
@@ -694,9 +696,8 @@ FrameImage DeviceVK::captureColorTarget() {
                              .mipLevel       = 0,
                              .baseArrayLayer = 0,
                              .layerCount     = 1};
-  region.imageExtent      = {.width  = swapchainExtent.width,
-                             .height = swapchainExtent.height,
-                             .depth  = 1};
+  region.imageExtent      = {
+           .width = renderExtent.width, .height = renderExtent.height, .depth = 1};
   vkCmdCopyImageToBuffer(commands, colourImage,
                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staging.buffer,
                          1, &region);

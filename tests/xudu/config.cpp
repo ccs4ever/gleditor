@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <tuple>
 
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/provenance.hpp"
@@ -178,7 +179,7 @@ TEST(ConfigTest, aFileThatCannotBeUnderstoodIsAnError) {
     std::ofstream out(path);
     out << "not a configuration at all\n";
   }
-  EXPECT_THROW(static_cast<void>(xanadu::loadConfig(path.string())),
+  EXPECT_THROW(std::ignore = xanadu::loadConfig(path.string()),
                std::runtime_error);
   std::filesystem::remove(path);
 }
@@ -213,9 +214,9 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
   };
   if (!make("Ada Lovelace <ada@example.org>") ||
       !make("Grace Hopper <grace@example.org>")) {
-    static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
-                                   " --kill gpg-agent >/dev/null 2>&1")
-                                      .c_str()));
+    std::ignore = std::system(("gpgconf --homedir " + dir.string() +
+                               " --kill gpg-agent >/dev/null 2>&1")
+                                  .c_str());
     std::filesystem::remove_all(dir);
     GTEST_SKIP() << "no gpg keyring could be made here";
   }
@@ -239,9 +240,9 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
       1)
       << "exactly one key is the one gpg would use";
 
-  static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
-                                 " --kill gpg-agent >/dev/null 2>&1")
-                                    .c_str()));
+  std::ignore = std::system(("gpgconf --homedir " + dir.string() +
+                             " --kill gpg-agent >/dev/null 2>&1")
+                                .c_str());
   std::filesystem::remove_all(dir);
 }
 
@@ -288,8 +289,8 @@ TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
   EXPECT_TRUE(
       xanadu::verifyProvenance(signed_, config.signing()).signatureValid);
 
-  static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
-                                 " --kill gpg-agent >/dev/null 2>&1")
-                                    .c_str()));
+  std::ignore = std::system(("gpgconf --homedir " + dir.string() +
+                             " --kill gpg-agent >/dev/null 2>&1")
+                                .c_str());
   std::filesystem::remove_all(dir);
 }

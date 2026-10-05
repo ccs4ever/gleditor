@@ -10,6 +10,7 @@
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
+#include <tuple>
 
 #include "common/xanadu/identity/identity_network_controller.hpp"
 #include "common/xanadu/identity/payment_verifier.hpp"
@@ -153,8 +154,8 @@ TEST(TranscopyrightWireTest, WithoutASettlementBackendNoKeyIsDelivered) {
                                 std::uint64_t,
                                 std::string_view) { delivered = true; });
 
-  static_cast<void>(pair.reader->beginTranscopyrightPurchase(
-      keyId, 512, payerWallet(), "unpaid"));
+  std::ignore = pair.reader->beginTranscopyrightPurchase(
+      keyId, 512, payerWallet(), "unpaid");
 
   EXPECT_FALSE(delivered);
 }
@@ -170,8 +171,8 @@ TEST(TranscopyrightWireTest, ANodeWithNoOfferDoesNotInvoice) {
                                 std::uint64_t,
                                 std::string_view) { delivered = true; });
 
-  static_cast<void>(pair.reader->beginTranscopyrightPurchase(
-      keyIdFilled(0xC3), 512, payerWallet(), "paid"));
+  std::ignore = pair.reader->beginTranscopyrightPurchase(keyIdFilled(0xC3), 512,
+                                                         payerWallet(), "paid");
 
   EXPECT_FALSE(delivered);
 }
@@ -327,8 +328,8 @@ TEST(IdentityLookupWireTest, AProvenIdentityIsAccepted) {
 
   // Both ends follow the same ledger, so their roots agree.
   for (auto *ctl : {&pair.authorCtl, &pair.readerCtl}) {
-    static_cast<void>(ctl->pipeline().appendIdentity(alice));
-    static_cast<void>(ctl->pipeline().appendIdentity(bob));
+    std::ignore = ctl->pipeline().appendIdentity(alice);
+    std::ignore = ctl->pipeline().appendIdentity(bob);
   }
   ASSERT_THAT(pair.readerCtl.pipeline().root(),
               Eq(pair.authorCtl.pipeline().root()));
@@ -352,10 +353,10 @@ TEST(IdentityLookupWireTest, RejectsAnIdentityFromAnotherLedger) {
 
   const auto alice =
       identityFor("1111222233334444555566667777888899990001", "a@test.org");
-  static_cast<void>(pair.authorCtl.pipeline().appendIdentity(alice));
+  std::ignore = pair.authorCtl.pipeline().appendIdentity(alice);
   // The reader's ledger has someone else in it, so its root differs.
-  static_cast<void>(pair.readerCtl.pipeline().appendIdentity(
-      identityFor("1111222233334444555566667777888899990009", "z@test.org")));
+  std::ignore = pair.readerCtl.pipeline().appendIdentity(
+      identityFor("1111222233334444555566667777888899990009", "z@test.org"));
   ASSERT_THAT(pair.readerCtl.pipeline().root(),
               Ne(pair.authorCtl.pipeline().root()));
 
@@ -376,7 +377,7 @@ TEST(IdentityLookupWireTest, RejectsATamperedEntry) {
   Pair pair;
   const auto alice =
       identityFor("1111222233334444555566667777888899990001", "a@test.org");
-  static_cast<void>(pair.readerCtl.pipeline().appendIdentity(alice));
+  std::ignore = pair.readerCtl.pipeline().appendIdentity(alice);
 
   const auto proof = pair.readerCtl.pipeline().generateProof(0);
   ASSERT_TRUE(proof.has_value());
@@ -395,9 +396,9 @@ TEST(IdentityLookupWireTest, RejectsATamperedEntry) {
 TEST(IdentityLookupWireTest, ProofSurvivesEncodingIntact) {
   IdentityNetworkController ctl;
   for (int i = 0; i < 5; i++) {
-    static_cast<void>(ctl.pipeline().appendIdentity(identityFor(
+    std::ignore = ctl.pipeline().appendIdentity(identityFor(
         "111122223333444455556666777788889999000" + std::to_string(i),
-        "u" + std::to_string(i) + "@test.org")));
+        "u" + std::to_string(i) + "@test.org"));
   }
 
   IdentityResponseMsg resp;

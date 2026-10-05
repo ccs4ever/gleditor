@@ -81,53 +81,66 @@ public:
   [[nodiscard]] const std::string &label() const noexcept {
     return config_.label;
   }
-  void setLabel(std::string label) { config_.label = std::move(label); }
+  DropZone *setLabel(std::string label) {
+    config_.label = std::move(label);
+    return this;
+  }
 
   [[nodiscard]] zigzag::CellRef cell() const noexcept { return config_.cell; }
-  void setCell(const zigzag::CellRef cell) noexcept { config_.cell = cell; }
+  DropZone *setCell(const zigzag::CellRef cell) noexcept {
+    config_.cell = cell;
+    return this;
+  }
 
   [[nodiscard]] const glm::vec4 &backgroundColor() const noexcept {
     return config_.backgroundColor;
   }
-  void setBackgroundColor(const glm::vec4 &color) noexcept {
+  DropZone *setBackgroundColor(const glm::vec4 &color) noexcept {
     config_.backgroundColor = color;
+    return this;
   }
 
   [[nodiscard]] std::uint32_t auraColor() const noexcept {
     return config_.auraColor;
   }
-  void setAuraColor(const std::uint32_t color) noexcept {
+  DropZone *setAuraColor(const std::uint32_t color) noexcept {
     config_.auraColor = color;
+    return this;
   }
 
   [[nodiscard]] float heightWeight() const noexcept {
     return config_.heightWeight;
   }
-  void setHeightWeight(const float weight) noexcept {
+  DropZone *setHeightWeight(const float weight) noexcept {
     config_.heightWeight = weight;
+    return this;
   }
 
   [[nodiscard]] const DropZoneConfig &config() const noexcept {
     return config_;
   }
 
-  void setRect(float x, float y, float width, float height) noexcept;
+  DropZone *setRect(float x, float y, float width, float height) noexcept;
   [[nodiscard]] bool contains(float screenX, float screenY) const noexcept;
 
-  void addItem(PouchItem item);
+  DropZone *addItem(PouchItem item);
   bool removeItem(std::uint64_t itemId);
-  void clear();
+  DropZone *clear();
 
   [[nodiscard]] const std::vector<PouchItem> &items() const noexcept {
     return items_;
   }
   [[nodiscard]] std::vector<PrimediaSpan> allSpans() const;
 
-  void setHovered(const bool hovered) noexcept { isHovered_ = hovered; }
+  DropZone *setHovered(const bool hovered) noexcept {
+    isHovered_ = hovered;
+    return this;
+  }
   [[nodiscard]] bool isHovered() const noexcept { return isHovered_; }
 
-  void setTagOffset(const std::uint32_t offset) noexcept {
+  DropZone *setTagOffset(const std::uint32_t offset) noexcept {
     tagOffset_ = offset;
+    return this;
   }
   [[nodiscard]] std::uint32_t tagOffset() const noexcept { return tagOffset_; }
 
@@ -170,12 +183,12 @@ public:
   }
 
   /// Populate with default Nelsonian partitions.
-  void initDefaultZones();
+  PouchManager *initDefaultZones();
   /// zoneById(), or the first zone when there is none by that name.
   DropZone &zoneOrDefault(std::string_view id);
 
   /// Ensure backing zone cell exists on d.vars in the store.
-  void ensureZoneCell(DropZone &zone);
+  PouchManager *ensureZoneCell(DropZone &zone);
 
   /// Drop a span into a zone, recording item cell on d.items in backing store
   /// (§5.8).
@@ -214,8 +227,8 @@ public:
   }
 
   /// Serialization of drop zone manifest into root microversion metadata.
-  void saveManifest();
-  void loadManifest();
+  PouchManager *saveManifest();
+  PouchManager *loadManifest();
 
 private:
   Store *systemStore_{nullptr};

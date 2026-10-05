@@ -283,6 +283,48 @@ TEST(A11yPublisherTest, aTreeCanBeReadAsText) {
   EXPECT_TRUE(text.contains("focus: Xudu")) << text;
 }
 
+namespace {
+/// A two-line text whose caret is on its second line.
+class TwoLines : public a11y::Source {
+public:
+  void describe(a11y::Builder &into) override {
+    for (const auto &[local, text] : {std::pair{1U, std::string_view{"ab\n"}},
+                                      std::pair{2U, std::string_view{"cde"}}}) {
+      auto &run            = into.add(local, a11y::Role::TextRun);
+      run.value            = text;
+      run.characterLengths = a11y::characterLengths(text);
+    }
+    auto &input    = into.add(0, a11y::Role::MultilineTextInput);
+    input.children = {into.id(1), into.id(2)};
+    input.selection =
+        a11y::TextSelection{.anchor = {.node = into.id(1), .character = 1},
+                            .focus  = {.node = into.id(2), .character = 2}};
+    into.contribute(into.id(0));
+  }
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override {
+    return 1;
+  }
+  bool performAction(std::uint64_t /*nodeId*/, a11y::Action /*action*/,
+                     std::string_view /*value*/) override {
+    return false;
+  }
+};
+} // namespace
+
+// The tree names a run and a character in it, as the platforms want; the
+// text a person reads names the offset in the whole text. The run's own
+// character read as the caret put the end of a document at its last line's
+// length.
+TEST(A11yPublisherTest, aCaretIsReadAsAnOffsetIntoTheWholeText) {
+  a11y::Publisher publisher("Xudu", "gleditor", "0");
+  TwoLines source;
+  publisher.addSource(&source);
+  publisher.rebuild(800, 600);
+
+  const auto text = a11y::Publisher::describe(publisher.snapshot());
+  EXPECT_TRUE(text.contains("[caret 5 from 1]")) << text;
+}
+
 TEST(A11yPublisherTest, withNoPlatformThereIsNothingToDoAndNothingBreaks) {
   // A build without AccessKit, and a machine with no assistive technology
   // running, are the same case here: the tree is still built, and everything

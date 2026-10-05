@@ -342,6 +342,49 @@ silently replacing the selected one; a distant cell unreachable because it is ou
 radius; a Forward choice erasing its sibling; a preview writing a visit; or an unavailable target
 silently resolving to another occurrence.
 
+### J17. A full edit session: write, cut, paginate, link and format
+
+1. Launch with no arguments, create a xanadoc and type several paragraphs. Insert text in the middle
+   of a word and of a line, and at the start and end of the document, moving the caret by arrows,
+   Home/End and Ctrl+arrows and by clicking.
+1. Delete by every route: Backspace and Delete one character at a time, each held across a paragraph
+   boundary so that two paragraphs join, and both keys over a selection made with the pointer and
+   another made with Shift+arrows. Typing over a selection must replace it.
+1. Make pages: create a new page (document) through its menu or key binding, and split the text into
+   a further page by hovering between two paragraphs and pressing the gap's "+ Split to New Page"
+   control. Split once more by Ctrl+Return at the caret. Read every page and confirm no text was
+   lost or duplicated at a split.
+1. Link pages in the link forge: put a passage from one page on the clasp bench's left (Homestead)
+   slot and a passage from another on its right (Toward) slot, by dragging into the drawer and by
+   the bench's key bindings, then forge the link (the bench's control and Ctrl+Alt+L). Forge a
+   second link between two other pages. Select each from its passage and read both endsets in the
+   link panel.
+1. Apply every format link the program has — italic, bold, underline, overline, strikethrough,
+   superscript, subscript, and align left, centre, right and justify — first by key binding, then
+   through the radial menu, each to its own passage. Apply two to one passage, toggle one off again,
+   and format a range that crosses a split.
+1. Transclude formatted passages: a passage carrying several format links into a new page (Ctrl+T or
+   the radial menu's transclude), into an existing page at the caret, into a pouch and from its card
+   into a third page, and by dragging into empty space. Then format the source passage further and
+   reread every occurrence.
+1. Save, close, relaunch with no arguments and reread every page, link and occurrence.
+
+Evidence: a frame and accessibility dump after each step; for every format link, a frame of the
+formatted passage in its source and in each transcluded occurrence, which must look identical;
+`xudu-dump --section=ops` before closing and after reopening, showing deletes as their own
+operations rather than rewritten text, splits as page breaks over unchanged primedia, the forged
+links as links whose endsets name the bench's passages, each format link once over its span, and
+every transcluded occurrence addressing the source's primedia, not copied bytes. Record the control
+used for every step, keyboard and radial menu separately.
+
+Watch for: a format link with no key binding or no menu entry; Backspace or Delete that does nothing
+at a paragraph boundary or leaves a selection behind; typing over a selection that inserts beside it
+instead; a split that drops or repeats the characters at its edge, or a hover control that never
+appears or covers the text; a forged link whose endsets are not what was on the bench; formatting
+that a transcluded occurrence loses, keeps only in some places, or gains only after a reload;
+formatting applied after a transclusion that reaches the source but not its occurrences, or the
+reverse; and anything lost at the relaunch.
+
 ## Findings
 
 Each step ends in exactly one of:

@@ -155,6 +155,18 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     curX += tabW + 2.0F;
   }
 
+  // [= Store Objects] button
+  constexpr float mgrButtonW = 28.0F;
+  if (curX + mgrButtonW <= width) {
+    const float tabH = barHeight - 2.0F;
+    const float tabY = barY + 2.0F;
+    canvas->setTag(render::tagKindOverlay, kManagerTag);
+    canvas->addRect(curX, tabY, mgrButtonW, tabH, tabInactiveBg);
+    canvas->addText(ctx.state, curX + 9.0F, top - 7.0F, "=", tabTextInactive,
+                    tabInactiveBg);
+    curX += mgrButtonW + 2.0F;
+  }
+
   // [+ New Document] button
   constexpr float newButtonW = 28.0F;
   if (curX + newButtonW <= width) {
@@ -177,6 +189,12 @@ bool DocumentSwitcher::picked(const render::PickingResult &pick,
   }
 
   const auto rawTag = pick.tag.clusterIndex;
+  if (rawTag == kManagerTag) {
+    if (managerHandler) {
+      managerHandler();
+    }
+    return true;
+  }
   if (rawTag == kNewDocTag) {
     if (newDocHandler) {
       newDocHandler();
@@ -211,10 +229,10 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
   if (!visible || currentTabs.empty()) {
     return;
   }
-  constexpr std::uint64_t barId = 1;
-  auto &bar                     = into.add(barId, a11y::Role::List);
-  bar.label                     = "Open Documents";
-
+  // The bar is added after its entries: add() may move every node already
+  // added, and the bar's children were once pushed through a reference that
+  // the next add() had left dangling.
+  std::vector<std::uint64_t> entries;
   for (std::size_t i = 0; i < currentTabs.size(); ++i) {
     const auto &tab      = currentTabs[i];
     const auto tabNodeId = 100U + i;
@@ -223,15 +241,25 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
     node.value           = tab.active ? "selected" : "";
     node.toggled         = tab.active;
     node.actions         = a11y::bit(a11y::Action::Click);
-    bar.children.push_back(into.id(tabNodeId));
+    entries.push_back(into.id(tabNodeId));
   }
+
+  const auto mgrNodeId = 98U;
+  auto &mgrNode        = into.add(mgrNodeId, a11y::Role::Button);
+  mgrNode.label        = "Store Object Manager";
+  mgrNode.actions      = a11y::bit(a11y::Action::Click);
+  entries.push_back(into.id(mgrNodeId));
 
   const auto newDocNodeId = 99U;
   auto &newNode           = into.add(newDocNodeId, a11y::Role::Button);
   newNode.label           = "New Document";
   newNode.actions         = a11y::bit(a11y::Action::Click);
-  bar.children.push_back(into.id(newDocNodeId));
+  entries.push_back(into.id(newDocNodeId));
 
+  constexpr std::uint64_t barId = 1;
+  auto &bar                     = into.add(barId, a11y::Role::List);
+  bar.label                     = "Open Documents";
+  bar.children                  = std::move(entries);
   into.contribute(into.id(barId));
 }
 

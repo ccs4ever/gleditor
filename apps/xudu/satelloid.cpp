@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <tuple>
 #include <utility>
 
 #include <gleditor/spatial.hpp>
@@ -444,11 +445,11 @@ bool SatelloidOverlay::picked(const render::PickingResult &pick,
     if (selected && selected->key.id == card.occurrence->link) {
       const auto side = card.occurrence->side == 0 ? xanadu::LinkSide::Left
                                                    : xanadu::LinkSide::Right;
-      linkContext_->execute(
+      std::ignore     = linkContext_->execute(
           xanadu::nav::EnterAt{.key        = selected->key,
-                               .side       = side,
-                               .member     = card.occurrence->member,
-                               .occurrence = card.occurrence->occurrence});
+                                   .side       = side,
+                                   .member     = card.occurrence->member,
+                                   .occurrence = card.occurrence->occurrence});
       return true;
     }
   }

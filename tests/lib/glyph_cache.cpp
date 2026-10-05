@@ -393,8 +393,9 @@ TEST_F(GlyphCacheTest, superscriptAndSubscriptRaiseNoDecorationSpecificCode) {
   const auto cache = makeCache(1024, 2);
   const auto face  = font("Serif 60");
 
-  EXPECT_NO_THROW(cache->put("A", face, {Decoration::Superscript}));
-  EXPECT_NO_THROW(cache->put("A", face, {Decoration::Subscript}));
+  EXPECT_NO_THROW(std::ignore =
+                      cache->put("A", face, {Decoration::Superscript}));
+  EXPECT_NO_THROW(std::ignore = cache->put("A", face, {Decoration::Subscript}));
 }
 
 // Beyond this point: resolveRealVariant() preferring a genuine bold/italic

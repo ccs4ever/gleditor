@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 
 #include "common/xanadu/torrent.hpp"
 
@@ -24,7 +25,8 @@ zigzag::CellRef traceMakeCell(const Store &store,
     if (nullptr == node || OpKind::Structure != node->kind) {
       break;
     }
-    if (structureVerbOf(node->flags) == StructureVerb::MakeCell) {
+    if (structureVerbOf(node->flags) == StructureVerb::Make &&
+        structureKindOf(node->flags) == StructureKind::Cell) {
       return curr;
     }
     if (node->sourceOpIndex >= curr || node->sourceOpIndex == 0) {
@@ -48,7 +50,7 @@ OverlayTargetResult declareOverlayTarget(Store &store,
   auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
     auto dim = fold.dimensionNamed(name, store);
     if (!dim) {
-      const auto minted = store.makeDimension(curHead, name, &fold);
+      const auto minted = store.makeDimension(curHead, name);
       curHead           = minted.version;
       fold              = store.rebuildManifold(curHead);
       return minted.dim;
@@ -60,7 +62,7 @@ OverlayTargetResult declareOverlayTarget(Store &store,
   const auto dimScrollRefs     = ensureDim("d.scroll-refs");
 
   if (!store.scrollRegistry().scrollIdForKey(targetState.scroll)) {
-    curHead = store.registerScroll(curHead, targetState.scroll, &fold);
+    curHead = store.registerScroll(curHead, targetState.scroll);
     fold    = store.rebuildManifold(curHead);
   }
 
@@ -78,7 +80,7 @@ OverlayTargetResult declareOverlayTarget(Store &store,
   const auto targetsTail =
       zigzag::rankTail(fold, releaseCell, dimOverlayTargets);
   curHead = store.setLink(curHead, targetsTail, dimOverlayTargets,
-                          zigzag::DimVector::POS, targetCell, &fold);
+                          zigzag::DimVector::POS, targetCell);
   fold    = store.rebuildManifold(curHead);
 
   auto reg = fold.scrollRegistry(store);
@@ -88,7 +90,7 @@ OverlayTargetResult declareOverlayTarget(Store &store,
         rec.has_value() && rec->cell != zigzag::noCell) {
       const auto scrollTail = zigzag::rankTail(fold, rec->cell, dimScrollRefs);
       curHead               = store.setLink(curHead, scrollTail, dimScrollRefs,
-                                            zigzag::DimVector::POS, targetCell, &fold);
+                                            zigzag::DimVector::POS, targetCell);
     }
   }
 
@@ -117,7 +119,7 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
   auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
     auto d = fold.dimensionNamed(name, store);
     if (!d) {
-      const auto minted = store.makeDimension(curHead, name, &fold);
+      const auto minted = store.makeDimension(curHead, name);
       curHead           = minted.version;
       fold              = store.rebuildManifold(curHead);
       return minted.dim;
@@ -133,7 +135,7 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
     fold        = store.rebuildManifold(curHead);
   }
 
-  curHead              = store.setLink(curHead, from, dim, dir, to, &fold);
+  curHead              = store.setLink(curHead, from, dim, dir, to);
   const auto setLinkOp = store.segmentedOps().indexOf(curHead);
   fold                 = store.rebuildManifold(curHead);
 
@@ -143,7 +145,7 @@ authorOverlayClaim(Store &store, const MicroversionId &parent,
 
   const auto claimsTail = zigzag::rankTail(fold, releaseCell, dimOverlayClaims);
   curHead               = store.setLink(curHead, claimsTail, dimOverlayClaims,
-                                        zigzag::DimVector::POS, handleCell, &fold);
+                                        zigzag::DimVector::POS, handleCell);
 
   return OverlayClaimResult{
       .version = curHead, .handleCell = handleCell, .releaseCell = releaseCell};
@@ -181,20 +183,19 @@ OverlayReleaseResult sealOverlayRelease(Store &store,
                                         zigzag::CellRef releaseCell,
                                         const std::string_view label) {
   auto curHead = parent.isZero() ? store.latest() : parent;
-  auto fold    = store.rebuildManifold(curHead);
   if (releaseCell == zigzag::noCell) {
     curHead     = store.makeCell(curHead, label.empty() ? "release" : label);
     releaseCell = store.cellRefOf(curHead);
   } else {
     curHead = store.setCellText(curHead, releaseCell,
-                                label.empty() ? "release" : label, &fold);
+                                label.empty() ? "release" : label);
   }
   return OverlayReleaseResult{.version = curHead, .releaseCell = releaseCell};
 }
 
 RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
                            const zigzag::CellRef releaseCell,
-                           const Store &targetStore,
+                           const Store & /*targetStore*/,
                            const GlobalDocumentState &newTargetState,
                            const std::string_view newReleaseLabel) {
   auto curHead = parent.isZero() ? overlayStore.latest() : parent;
@@ -203,7 +204,7 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
   auto ensureDim = [&](const std::string_view name) -> zigzag::DimRef {
     auto d = fold.dimensionNamed(name, overlayStore);
     if (!d) {
-      const auto minted = overlayStore.makeDimension(curHead, name, &fold);
+      const auto minted = overlayStore.makeDimension(curHead, name);
       curHead           = minted.version;
       fold              = overlayStore.rebuildManifold(curHead);
       return minted.dim;
@@ -211,8 +212,10 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
     return *d;
   };
 
-  const auto dimTargets = ensureDim(kDimOverlayTargets);
-  const auto dimClaims  = ensureDim(kDimOverlayClaims);
+  // Minted here even though a rebase links nothing on it, so the store has
+  // both overlay dimensions whichever operation came first.
+  std::ignore          = ensureDim(kDimOverlayTargets);
+  const auto dimClaims = ensureDim(kDimOverlayClaims);
 
   // Mint new release cell to preserve hypertime history of old release
   const auto newRelOp = overlayStore.makeCell(
@@ -232,7 +235,7 @@ RebaseResult rebaseOverlay(Store &overlayStore, const MicroversionId &parent,
       fold.linked(releaseCell, dimClaims, zigzag::DimVector::POS);
   if (firstClaim != zigzag::noCell) {
     curHead = overlayStore.setLink(curHead, newRelCell, dimClaims,
-                                   zigzag::DimVector::POS, firstClaim, &fold);
+                                   zigzag::DimVector::POS, firstClaim);
     fold    = overlayStore.rebuildManifold(curHead);
   }
 

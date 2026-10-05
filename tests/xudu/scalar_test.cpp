@@ -17,12 +17,14 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/result_slice.hpp"
 #include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
@@ -133,13 +135,15 @@ TEST(ScalarTest, aSignallingNaNIsRefusedRatherThanQuieted) {
       xanadu::isSignallingNaN(std::numeric_limits<double>::infinity()));
   EXPECT_FALSE(xanadu::isSignallingNaN(1.0));
 
-  EXPECT_THROW(xanadu::scalarValue(signalling), std::invalid_argument);
+  EXPECT_THROW(std::ignore = xanadu::scalarValue(signalling),
+               std::invalid_argument);
 
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
-  EXPECT_THROW(store.makeScalarCell(at, signalling), std::invalid_argument);
+  EXPECT_THROW(std::ignore = store.makeScalarCell(at, signalling),
+               std::invalid_argument);
   // And nothing was recorded, so the document is the one it was.
-  EXPECT_EQ(store.opCount(), 3U);
+  EXPECT_EQ(store.opCount(), 4U);
 }
 
 TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {
@@ -347,6 +351,41 @@ TEST(ScalarTest, quotedNumericTextCarriesAValueAndKeepsItsAddress) {
   const auto after     = store.rebuildManifold(at);
   EXPECT_THAT(after.asInt64(quotation), testing::Optional(std::int64_t{12}));
   EXPECT_EQ(after.contentOf(quotation).front(), quoted);
+}
+
+// A row that quotes bytes is written as a transclusion of them, not a copy.
+TEST(ScalarTest, aResultRowQuotingAStoreTranscludesItsBytes) {
+  auto perma = std::make_shared<xanadu::UserPermascroll>();
+  Store source(perma);
+  Store output(perma);
+  const auto typed = source.insert(MicroversionId{}, 0, "quoted line");
+  const auto spans = source.rebuild(typed).spansFor(0, 6);
+  const std::vector<xanadu::ResultRow> rows{
+      {.text   = "quoted",
+       .source = "/tmp/source#version=1&at=0",
+       .quote  = xanadu::QuotedSpans{.store = &source, .spans = spans}},
+  };
+  const auto version = xanadu::writeResultSlice(output, rows);
+  const auto read    = xanadu::readResultSlice(output, version);
+  ASSERT_EQ(read.size(), 1U);
+  EXPECT_EQ(read[0], rows[0]);
+  ASSERT_TRUE(read[0].quote.has_value());
+  EXPECT_EQ(read[0].quote->spans, spans);
+}
+
+TEST(ScalarTest, aResultRowQuotingAnUnreachableScrollIsRefused) {
+  Store source(std::make_shared<xanadu::UserPermascroll>());
+  Store output(std::make_shared<xanadu::UserPermascroll>());
+  const auto typed = source.insert(MicroversionId{}, 0, "quoted");
+  const std::vector<xanadu::ResultRow> rows{
+      {.text = "quoted",
+       .quote =
+           xanadu::QuotedSpans{.store = &source,
+                               .spans = source.rebuild(typed).spansFor(0, 6)}},
+  };
+  EXPECT_THROW(std::ignore = xanadu::writeResultSlice(output, rows),
+               std::invalid_argument);
+  EXPECT_EQ(output.opCount(), 0U);
 }
 
 TEST(ScalarTest, resultSliceKeepsRowsValuesAndSourceReferences) {

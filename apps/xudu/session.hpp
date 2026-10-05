@@ -43,6 +43,7 @@
 
 #include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/config.hpp"
+#include "common/xanadu/focus_target.hpp"
 #include "common/xanadu/media_manager.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/mutable_link.hpp"
@@ -112,9 +113,9 @@ public:
         ranges(std::move(aDecoratedRanges)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
-  [[nodiscard]] std::string name() const override {
-    return customName.empty() ? id.str() : customName;
-  }
+  /// The document's title, empty for an untitled one -- never the version
+  /// name, which changes with every edit; version() says which version.
+  [[nodiscard]] std::string name() const override { return customName; }
   [[nodiscard]] const MicroversionId &version() const { return id; }
   [[nodiscard]] std::shared_ptr<const render::PickSemanticTarget>
   pickSemanticTarget() const override {
@@ -160,6 +161,8 @@ private:
 struct OpenView {
   MicroversionId version;
   std::size_t storeIndex{0};
+  std::uint32_t focusedBirth{0};
+  std::vector<std::uint32_t> containmentPath;
   /// The version rebuilt, kept so that decorating does not replay the whole
   /// history once per frame per document.
   Version pieces;
@@ -490,6 +493,9 @@ public:
    * over it would lose that. Said once, on stderr.
    */
   void rememberPlace(const xanadu::ReadingPlace &place);
+  void rememberClosedPlace(const xanadu::ReadingPlace &place);
+  [[nodiscard]] std::optional<xanadu::ReadingPlace>
+  closedPlace(const std::string &path);
 
   /// The reader-owned store shared by places and branching navigation visits.
   Store *activityForNavigation() { return activity(); }
@@ -522,22 +528,36 @@ public:
    * linear in the operations behind it. Meant to be asked once when a link
    * first needs following, not per frame.
    *
-   * @param except States to pass over, which is how the documents already open
-   *        are excluded.
+   * @param except States to pass over, by store, which is how the documents
+   *        already open are excluded.
+   * @return The state and the store it is a state of: version names are only
+   *         unique within one store.
    */
-  [[nodiscard]] std::optional<MicroversionId>
-  versionShowing(const std::vector<PrimediaSpan> &ends,
-                 const std::vector<MicroversionId> &except) const;
+  struct VersionInStore {
+    std::size_t storeIndex{};
+    MicroversionId version;
+  };
+  [[nodiscard]] std::optional<VersionInStore> versionShowing(
+      const std::vector<PrimediaSpan> &ends,
+      const std::vector<std::pair<std::size_t, MicroversionId>> &except) const;
 
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.
-  void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0);
+  void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0,
+                  std::uint32_t focusedBirth = 0);
 
   /**
    * @brief Close an open document view. Flushes any uncommitted edits,
    * removes the view from open list, and invalidates decorations.
    */
   void viewClosed(std::uint32_t docIndex);
+
+  /// Resolve an ephemeral FocusTarget for view @p docIndex.
+  [[nodiscard]] std::optional<FocusTarget>
+  focusTargetForView(std::size_t docIndex) const;
+
+  /// Update the focused birth target for view @p docIndex.
+  void setFocusTarget(std::size_t docIndex, std::uint32_t birthOp);
 
   /**
    * @brief Create a new sovereign store bound to the author's UserPermascroll.
@@ -599,7 +619,8 @@ public:
    * line pitch it is flowing into.
    */
   [[nodiscard]] std::shared_ptr<VersionTextSource>
-  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
+  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0,
+            std::uint32_t scopedBirth = 0) const;
 
   struct MediaSpanInfo {
     PrimediaSpan span;
@@ -705,7 +726,8 @@ public:
   void markDecorated(Doc &doc, std::uint32_t at, std::uint32_t length,
                      gleditor::DecorationMask mask);
   void markDecorated(std::size_t docIndex, std::uint32_t at,
-                     std::uint32_t length, gleditor::DecorationMask mask);
+                     std::uint32_t length, gleditor::DecorationMask mask,
+                     bool toggle = false);
 
   /**
    * @brief Apply paragraph alignment over [@p at, @p at + @p length).
@@ -719,7 +741,17 @@ public:
                     std::uint32_t length, gleditor::TextAlign align);
 
   // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
-  static constexpr auto idleFlushTimeout = std::chrono::seconds(5);
+  /**
+   * @brief How long typing may sit idle before it is written to the store,
+   *        from system://settings' autoSaveSeconds.
+   *
+   * Typed text is held in a replay log and compacted before it is written,
+   * so a burst of typing costs one operation rather than one per key; this
+   * bounds how much of it an unexpected exit can lose.
+   */
+  void setAutoSave(std::chrono::seconds idle) noexcept {
+    idleFlushTimeout = idle;
+  }
 
   /**
    * @brief Flush any uncommitted edits in the replay log for @p docIndex (or
@@ -810,6 +842,21 @@ private:
     std::size_t opsWhenOpened{};
   };
   std::vector<StoreEntry> stores;
+  struct FormattingAuthority {
+    std::filesystem::file_time_type modified;
+    std::filesystem::file_time_type opsModified;
+    std::unique_ptr<Store> store;
+  };
+  // Disk authorities never join saveAll() just because a quote is rendered.
+  mutable std::map<std::filesystem::path, FormattingAuthority>
+      formattingAuthorities_;
+  mutable std::optional<std::size_t> recordedAuthorityOps_;
+  mutable std::vector<std::string> recordedAuthorityPaths_;
+  [[nodiscard]] std::vector<std::pair<std::string, const Store *>>
+  localFormattingAuthorities() const;
+  /// See setAutoSave(); the settings' own default until they are read.
+  std::chrono::seconds idleFlushTimeout{
+      xanadu::SettingsConfig{}.autoSaveSeconds};
 
   /// system://activity, opened on first use; see activity().
   std::unique_ptr<Store> activityStore;

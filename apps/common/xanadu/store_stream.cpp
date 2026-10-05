@@ -116,6 +116,7 @@ void writeStoreStream(const std::filesystem::path &directory,
   const Block end{};
   out.write(end.data(), end.size());
   out.write(end.data(), end.size());
+  out.flush();
   if (!out) throw std::runtime_error("cannot finish store stream");
 }
 

@@ -310,7 +310,7 @@ TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
   // What matters is that they are refused *by number*. A stream this build
   // cannot read must say which version it is, or the next person reading the
   // error has to go and find out what "cannot read" meant.
-  for (const char version : {'\x01', '\x02', '\x03'}) {
+  for (const char version : {'\x01', '\x02', '\x03', '\x04'}) {
     std::string bytes;
     bytes += "\x7fXOP";
     bytes.push_back(version);
@@ -329,7 +329,7 @@ TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
       EXPECT_THAT(std::string{e.what()},
                   testing::HasSubstr(
                       "version " + std::to_string(static_cast<int>(version))));
-      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("version 4"));
+      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("version 5"));
     }
     EXPECT_TRUE(decoded.empty())
         << "nothing may be read out of a refused spool";
@@ -370,28 +370,34 @@ TEST(BinaryOpsTest, versioningAndDetection) {
 
   EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::StandardOsmicText),
                "OSMIC text (v0)");
-  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV4),
-               "Compact binary (v4)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::OsmicTextV1),
+               "OSMIC text (v1)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV5),
+               "Compact binary (v5)");
 
   // Standard OSMIC text is Version 0
   std::stringstream textStream("1 insert 0 5 0 0 5 0 0 0 0 0\n");
   EXPECT_EQ(detectOpsSpoolVersion(textStream),
             OpsSpoolVersion::StandardOsmicText);
 
-  // Binary stream is Version 4 -- what is written now.
-  std::stringstream binStreamV4("\x7fXOP\x04\x00\x00\x00\x00");
-  EXPECT_EQ(detectOpsSpoolVersion(binStreamV4),
-            OpsSpoolVersion::CompactBinaryV4);
+  // Version 1 OSMIC text with explicit version
+  std::stringstream textStreamV1(
+      "# osmic 1\n1 insert 0 5 0 0 5 0 0 0 0 0 0 0 0 0\n");
+  EXPECT_EQ(detectOpsSpoolVersion(textStreamV1), OpsSpoolVersion::OsmicTextV1);
+
+  // Binary stream is Version 5 -- what is written now.
+  std::stringstream binStreamV5("\x7fXOP\x05\x00\x00\x00\x00");
+  EXPECT_EQ(detectOpsSpoolVersion(binStreamV5),
+            OpsSpoolVersion::CompactBinaryV5);
 
   // Truncated magic header throws
   std::stringstream truncMagic("\x7fXOP");
   EXPECT_THROW(detectOpsSpoolVersion(truncMagic), std::runtime_error);
 
-  // Versions that existed and were deleted, and one that never existed: all
-  // refused the same way, because "I do not read this" is the whole of what
-  // this build has to say about any of them.
-  for (const char *const bytes :
-       {"\x7fXOP\x01", "\x7fXOP\x02", "\x7fXOP\x03", "\x7fXOP\x09"}) {
+  // Versions that existed and were deleted (including V4), and one that never
+  // existed: all refused the same way.
+  for (const char *const bytes : {"\x7fXOP\x01", "\x7fXOP\x02", "\x7fXOP\x03",
+                                  "\x7fXOP\x04", "\x7fXOP\x09"}) {
     std::stringstream stream(bytes);
     EXPECT_THROW(detectOpsSpoolVersion(stream), std::runtime_error) << bytes;
   }
@@ -399,26 +405,27 @@ TEST(BinaryOpsTest, versioningAndDetection) {
 
 TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
   // Structure operations carry their fields through binary encoding
-  // (CompactBinaryV4) and OSMIC text. In V4 binary encoding, addresses (source,
-  // dimension, target) travel as MicroversionIds; in OSMIC text, local indices
-  // and source travel.
+  // (CompactBinaryV5) and OSMIC text. In V5 binary encoding, addresses (source,
+  // dimension, target, context) travel as MicroversionIds.
   Op setLink;
-  setLink.kind   = OpKind::Structure;
-  setLink.flags  = xanadu::structureFlags(xanadu::StructureVerb::SetLink, true,
-                                          xanadu::ValueKind::Double);
-  setLink.to     = 41;
-  setLink.link   = 9;
-  setLink.source = MicroversionId::parse("1a1");
-  setLink.span   = PrimediaSpan{localScroll, 100, 2};
-  setLink.value  = 0x4045000000000000ULL; // the bits of 42.0
+  setLink.kind    = OpKind::Structure;
+  setLink.flags   = xanadu::structureFlags(xanadu::StructureVerb::SetLink, true,
+                                           xanadu::ValueKind::Double);
+  setLink.to      = 41;
+  setLink.link    = 9;
+  setLink.source  = MicroversionId::parse("1a1");
+  setLink.context = MicroversionId::parse("1a2");
+  setLink.span    = PrimediaSpan{localScroll, 100, 2};
+  setLink.value   = 0x4045000000000000ULL; // the bits of 42.0
 
   Op splice;
-  splice.kind   = OpKind::Structure;
-  splice.flags  = xanadu::structureFlags(xanadu::StructureVerb::Splice);
-  splice.at     = 5;
-  splice.length = 10;
-  splice.source = MicroversionId::parse("1a2");
-  splice.span   = PrimediaSpan{localScroll, 200, 4};
+  splice.kind    = OpKind::Structure;
+  splice.flags   = xanadu::structureFlags(xanadu::StructureVerb::Splice);
+  splice.at      = 5;
+  splice.length  = 10;
+  splice.source  = MicroversionId::parse("1a2");
+  splice.context = MicroversionId::parse("1a3");
+  splice.span    = PrimediaSpan{localScroll, 200, 4};
 
   const auto dimId    = MicroversionId::parse("1a10");
   const auto targetId = MicroversionId::parse("1a20");
@@ -428,12 +435,14 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
                        .op                   = setLink,
                        .structureDimension   = dimId,
                        .structureTarget      = targetId,
-                       .structureValueTarget = MicroversionId{}},
+                       .structureValueTarget = MicroversionId{},
+                       .context              = setLink.context},
       xanadu::OpRecord{.produces             = MicroversionId::parse("1a4"),
                        .op                   = splice,
                        .structureDimension   = MicroversionId{},
                        .structureTarget      = MicroversionId{},
-                       .structureValueTarget = MicroversionId{}},
+                       .structureValueTarget = MicroversionId{},
+                       .context              = splice.context},
   };
 
   {
@@ -456,6 +465,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     EXPECT_EQ(decoded[0].structureTarget, targetId);
     EXPECT_EQ(decoded[0].op.span, setLink.span);
     EXPECT_EQ(decoded[0].op.value, setLink.value);
+    EXPECT_EQ(decoded[0].context, setLink.context);
+    EXPECT_EQ(decoded[0].op.context, setLink.context);
 
     EXPECT_EQ(decoded[1].produces.str(), "1a4");
     EXPECT_EQ(decoded[1].op.kind, OpKind::Structure);
@@ -466,6 +477,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     EXPECT_EQ(decoded[1].op.length, 10U);
     EXPECT_EQ(decoded[1].op.source, splice.source);
     EXPECT_EQ(decoded[1].op.span, splice.span);
+    EXPECT_EQ(decoded[1].context, splice.context);
+    EXPECT_EQ(decoded[1].op.context, splice.context);
   }
   {
     std::stringstream text;
@@ -483,6 +496,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     EXPECT_EQ(decoded[0].op.source, setLink.source);
     EXPECT_EQ(decoded[0].op.span, setLink.span);
     EXPECT_EQ(decoded[0].op.value, setLink.value);
+    EXPECT_EQ(decoded[0].context, setLink.context);
+    EXPECT_EQ(decoded[0].op.context, setLink.context);
 
     EXPECT_EQ(decoded[1].produces.str(), "1a4");
     EXPECT_EQ(decoded[1].op.kind, OpKind::Structure);
@@ -491,6 +506,8 @@ TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
     EXPECT_EQ(decoded[1].op.length, 10U);
     EXPECT_EQ(decoded[1].op.source, splice.source);
     EXPECT_EQ(decoded[1].op.span, splice.span);
+    EXPECT_EQ(decoded[1].context, splice.context);
+    EXPECT_EQ(decoded[1].op.context, splice.context);
   }
 }
 
@@ -728,6 +745,161 @@ TEST(BinaryOpsTest, anOsmicTextLineWithoutItsOptionalColumnsStillReads) {
   std::stringstream ragged("1 insert 0\n");
   std::vector<xanadu::OpRecord> nothing;
   EXPECT_THROW(readOsmicTextOpsSpool(ragged, nothing), std::runtime_error);
+}
+
+TEST(BinaryOpsTest, opsExportV5RoundTripsContextAcrossAllKinds) {
+  // Construct a comprehensive series of operations carrying context
+  const auto sliceBirth = MicroversionId::parse("1");
+  const auto cellBirth  = MicroversionId::parse("2");
+  const auto ins1       = MicroversionId::parse("3");
+  const auto del1       = MicroversionId::parse("4");
+  const auto rear1      = MicroversionId::parse("5");
+  const auto transInt   = MicroversionId::parse("6");
+  const auto transExt   = MicroversionId::parse("7");
+  const auto linkOp     = MicroversionId::parse("8");
+  const auto pbOp       = MicroversionId::parse("9");
+  const auto setLinkOp  = MicroversionId::parse("10");
+
+  Op makeSlice;
+  makeSlice.kind    = OpKind::Structure;
+  makeSlice.flags   = xanadu::makeStructureFlags(xanadu::StructureKind::Slice);
+  makeSlice.context = MicroversionId{}; // root birth
+
+  Op makeCell;
+  makeCell.kind    = OpKind::Structure;
+  makeCell.flags   = xanadu::makeStructureFlags(xanadu::StructureKind::Cell);
+  makeCell.context = sliceBirth;
+
+  Op insertOp;
+  insertOp.kind    = OpKind::Insert;
+  insertOp.at      = 0;
+  insertOp.span    = PrimediaSpan{localScroll, 10, 5};
+  insertOp.context = cellBirth;
+
+  Op deleteOp;
+  deleteOp.kind    = OpKind::Delete;
+  deleteOp.at      = 2;
+  deleteOp.length  = 3;
+  deleteOp.context = ins1;
+
+  Op rearrangeOp;
+  rearrangeOp.kind    = OpKind::Rearrange;
+  rearrangeOp.at      = 0;
+  rearrangeOp.length  = 2;
+  rearrangeOp.to      = 4;
+  rearrangeOp.context = del1;
+
+  Op transInternal;
+  transInternal.kind         = OpKind::Transclude;
+  transInternal.at           = 1;
+  transInternal.source       = MicroversionId::parse("1a1");
+  transInternal.sourceAt     = 0;
+  transInternal.sourceLength = 5;
+  transInternal.context      = rear1;
+
+  Op transExternal;
+  transExternal.kind    = OpKind::Transclude;
+  transExternal.at      = 6;
+  transExternal.span    = PrimediaSpan{99, 100, 20};
+  transExternal.context = transInt;
+
+  Op link;
+  link.kind    = OpKind::Link;
+  link.link    = 42;
+  link.context = transExt;
+
+  Op pageBreak;
+  pageBreak.kind    = OpKind::PageBreak;
+  pageBreak.at      = 15;
+  pageBreak.context = linkOp;
+
+  Op setLink;
+  setLink.kind    = OpKind::Structure;
+  setLink.flags   = xanadu::structureFlags(xanadu::StructureVerb::SetLink);
+  setLink.to      = 2;
+  setLink.link    = 1;
+  setLink.source  = cellBirth;
+  setLink.context = pbOp;
+
+  const std::vector<xanadu::OpRecord> original = {
+      {.produces = sliceBirth, .op = makeSlice, .context = makeSlice.context},
+      {.produces = cellBirth, .op = makeCell, .context = makeCell.context},
+      {.produces = ins1, .op = insertOp, .context = insertOp.context},
+      {.produces = del1, .op = deleteOp, .context = deleteOp.context},
+      {.produces = rear1, .op = rearrangeOp, .context = rearrangeOp.context},
+      {.produces = transInt,
+       .op       = transInternal,
+       .context  = transInternal.context},
+      {.produces = transExt,
+       .op       = transExternal,
+       .context  = transExternal.context},
+      {.produces = linkOp, .op = link, .context = link.context},
+      {.produces = pbOp, .op = pageBreak, .context = pageBreak.context},
+      {.produces           = setLinkOp,
+       .op                 = setLink,
+       .structureDimension = MicroversionId::parse("1"),
+       .structureTarget    = MicroversionId::parse("2"),
+       .context            = setLink.context},
+  };
+
+  std::stringstream ss;
+  writeBinaryOpsSpool(ss, original);
+  std::vector<xanadu::OpRecord> decoded;
+  readOpsSpool(ss, decoded);
+
+  ASSERT_EQ(decoded.size(), original.size());
+  for (std::size_t i = 0; i < original.size(); ++i) {
+    EXPECT_EQ(decoded[i].produces, original[i].produces) << "index " << i;
+    EXPECT_EQ(decoded[i].op.kind, original[i].op.kind) << "index " << i;
+    EXPECT_EQ(decoded[i].context, original[i].context) << "index " << i;
+    EXPECT_EQ(decoded[i].op.context, original[i].op.context) << "index " << i;
+  }
+  EXPECT_EQ(decoded[5].op.source, MicroversionId::parse("1a1"));
+  EXPECT_EQ(decoded[9].op.source, cellBirth);
+  EXPECT_EQ(decoded[9].structureDimension, MicroversionId::parse("1"));
+  EXPECT_EQ(decoded[9].structureTarget, MicroversionId::parse("2"));
+}
+
+TEST(BinaryOpsTest, osmicTextV1RoundTripsContextAndV0RejectsNonCellMake) {
+  Op makeSlice;
+  makeSlice.kind    = OpKind::Structure;
+  makeSlice.flags   = xanadu::makeStructureFlags(xanadu::StructureKind::Slice);
+  makeSlice.context = MicroversionId{};
+
+  Op insertOp;
+  insertOp.kind    = OpKind::Insert;
+  insertOp.at      = 0;
+  insertOp.span    = PrimediaSpan{localScroll, 0, 5};
+  insertOp.context = MicroversionId::parse("1");
+
+  const std::vector<xanadu::OpRecord> records = {
+      {.produces = MicroversionId::parse("1"),
+       .op       = makeSlice,
+       .context  = makeSlice.context},
+      {.produces = MicroversionId::parse("2"),
+       .op       = insertOp,
+       .context  = insertOp.context},
+  };
+
+  std::stringstream out;
+  writeOsmicTextOpsSpool(out, records);
+  EXPECT_THAT(out.str(), testing::StartsWith("# osmic 1\n"));
+
+  std::vector<xanadu::OpRecord> decoded;
+  readOsmicTextOpsSpool(out, decoded);
+  ASSERT_EQ(decoded.size(), 2U);
+  EXPECT_EQ(decoded[0].op.kind, OpKind::Structure);
+  EXPECT_EQ(xanadu::structureKindOf(decoded[0].op.flags),
+            xanadu::StructureKind::Slice);
+  EXPECT_EQ(decoded[1].op.kind, OpKind::Insert);
+  EXPECT_EQ(decoded[1].context, MicroversionId::parse("1"));
+
+  // Unversioned text (v0) with non-cell Make flags is rejected
+  std::stringstream unversionedV0(
+      "1 structure 0 0 0 0 0 0 0 0 0 0 8 0\n"); // flags 8 = Make(Slice)
+  std::vector<xanadu::OpRecord> failRecords;
+  EXPECT_THROW(readOsmicTextOpsSpool(unversionedV0, failRecords),
+               std::runtime_error);
 }
 
 } // namespace

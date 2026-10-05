@@ -1,4 +1,5 @@
 #include <gleditor/text/layout.hpp>
+#include <gleditor/text/script.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -843,15 +844,20 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
       const auto decorations = decorationsAt(byteOff, options.decoratedRanges);
       float yShift           = 0.0F;
+      // The glyph cache rasterises a script glyph at kScriptScale, so it is
+      // advanced past at that size too.
+      float advanceScale = 1.0F;
       if (hasDecoration(decorations, Decoration::Superscript)) {
-        yShift = -ascent * 0.35F;
+        yShift       = -superscriptRise(ascent);
+        advanceScale = kScriptScale;
       } else if (hasDecoration(decorations, Decoration::Subscript)) {
-        yShift = lineHeight * 0.2F;
+        yShift       = subscriptDrop(ascent, lineHeight);
+        advanceScale = kScriptScale;
       }
 
       shaping.glyphs.push_back(PageShaping::GlyphEntry{
           .chr          = std::string{clusterStr},
-          .clusterLeft  = line.left + penX + g.xOffset,
+          .clusterLeft  = line.left + penX + (g.xOffset * advanceScale),
           .clusterTop   = line.top + yShift,
           .clusterIndex = clusterBoxIdx,
           .lineIndex    = lineIdx,
@@ -867,7 +873,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
                            text[byteOff] == ' ')
                               ? line.extraPerSpace
                               : 0.0F;
-      penX += g.xAdvance + extra;
+      penX += (g.xAdvance * advanceScale) + extra;
     }
   }
 

@@ -147,6 +147,17 @@ TEST_F(VQueryE2ETest, OutputStoreCreation) {
   EXPECT_FALSE(store.primaryCurrentVersion().isZero());
 }
 
+// A named permascroll that is not there answered every query blank and
+// exited 0, and opening it created it.
+TEST_F(VQueryE2ETest, AMissingPermascrollIsRefused) {
+  const auto missing = testDir / "no-such-permascroll";
+  auto res = runVQuery("--permascroll " + missing.string() + " -e \"##\"");
+  EXPECT_EQ(res.exitCode, 1) << res.output;
+  EXPECT_NE(res.output.find("no permascroll at"), std::string::npos)
+      << res.output;
+  EXPECT_FALSE(fs::exists(missing));
+}
+
 TEST_F(VQueryE2ETest, InPlaceStoreMutation) {
   fs::path sampleSrc = "tests/samples/xudu/core_hypertext/xanadoc_a";
   if (!fs::exists(sampleSrc)) {
@@ -156,16 +167,44 @@ TEST_F(VQueryE2ETest, InPlaceStoreMutation) {
   fs::path copyStore = testDir / "inplace_store";
   fs::copy(sampleSrc, copyStore, fs::copy_options::recursive);
 
+  const auto opsBefore = [&] {
+    xanadu::Store before(std::make_shared<xanadu::UserPermascroll>());
+    before.load(copyStore.string());
+    return before.opCount();
+  }();
+
+  // The create mints a cell, which in place writes into the store itself;
+  // a query that only read would say there was nothing to write.
   auto res = runVQuery(copyStore.string() +
                        " -e \"##/d.mutated%'CellData'\" --in-place");
   EXPECT_EQ(res.exitCode, 0) << res.output;
-  EXPECT_NE(res.output.find("Saved in-place changes to primary store:"),
-            std::string::npos);
+  EXPECT_NE(res.output.find("Wrote "), std::string::npos) << res.output;
 
-  // Load and verify store is valid
+  // Load and verify store is valid, and holds what was written
   auto perma = std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store store(perma);
   EXPECT_NO_THROW(store.load(copyStore.string()));
+  EXPECT_GT(store.opCount(), opsBefore);
+}
+
+// A store with a second branch: in place once promoted at latest(), the
+// short branch, and the store refused the write as reaching into the future
+// of its parent -- an uncaught exception and exit 134.
+TEST_F(VQueryE2ETest, InPlaceOnAStoreWithTwoBranches) {
+  const fs::path sampleSrc = "tests/samples/xudu/beams/01_one_to_many";
+  if (!fs::exists(sampleSrc)) {
+    GTEST_SKIP() << "Sample fixture 01_one_to_many not present";
+  }
+  const auto copyStore = testDir / "two_branches";
+  fs::copy(sampleSrc, copyStore, fs::copy_options::recursive);
+  fs::copy("tests/samples/xudu/permascroll", testDir / "permascroll",
+           fs::copy_options::recursive);
+
+  auto res = runVQuery(copyStore.string() + " --permascroll " +
+                       (testDir / "permascroll").string() +
+                       " -e \"##/d.mutated%'CellData'\" --in-place");
+  EXPECT_EQ(res.exitCode, 0) << res.output;
+  EXPECT_NE(res.output.find("Wrote "), std::string::npos) << res.output;
 }
 
 TEST_F(VQueryE2ETest, QueryFileExecution) {

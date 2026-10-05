@@ -12,6 +12,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <gleditor/state.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -25,11 +27,14 @@
 #include <tuple>
 #include <vector>
 
+#include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/link_package.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -278,7 +283,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  static_cast<void>(std::system(py.c_str()));
+  std::ignore = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -741,6 +746,14 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
       ppmPath.string() + " " + (testRoot / "store").string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
+  // Pointer coordinates are drawable pixels, even if Vulkan presentation
+  // forces a different swapchain extent (SwiftShader offscreen does).
+  const AppState::ViewPerspective view;
+  const auto image = inspectPpm(ppmPath);
+  ASSERT_TRUE(image.valid) << image.errorMessage;
+  EXPECT_EQ(image.width, view.screenWidth);
+  EXPECT_EQ(image.height, view.screenHeight);
+
   const auto pitch = medianLinePitch(ppmPath);
   EXPECT_GE(pitch, 14) << "lines too close together to read";
   EXPECT_LE(pitch, 40) << "more than two lines apart";
@@ -786,6 +799,340 @@ TEST(E2EBinaryOrchestrationTest, newDocumentTakesTypingInView) {
 // is work: it outlives the session in the xanadocs folder, where it used to be
 // deleted from a temporary directory on quit. One opened and never touched is
 // removed rather than left as clutter.
+// --headless with a script runs the script: the fused xuzz once returned
+// before its renderer whenever --headless was given, so a chord and a dump
+// did nothing and the run still exited 0.
+TEST(E2EBinaryOrchestrationTest, aHeadlessScriptRuns) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_headless";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+      xuduBin.string() + " --backend " + activeBackend() + " --headless " +
+      (testRoot / "notes").string() + " --type 'typed headless' --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, ::testing::HasSubstr("typed headless"));
+}
+
+TEST(E2EBinaryOrchestrationTest, closeAndOpenRestoresTheSelection) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_reopen";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path   = root / "notes";
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") + " --backend " +
+      activeBackend() + " --headless --profile " + path.string() +
+      " --type 'Camera and caret restoration probe alpha bravo charlie.'"
+      " --select 10,30 --chord Ctrl+W --chord Ctrl+O --key tab --type " +
+      path.string() + " --key enter --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 30 from 10]"));
+  EXPECT_THAT(result.output, testing::HasSubstr("(store 0)"));
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  // Closing and reopening are reader movement, so only the typing earns an op.
+  EXPECT_EQ(reopened.opCount(), 1U);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     repeatedOverlineCommandPreservesOtherAttributes) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_toggle";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path   = root / "notes";
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") + " --backend " +
+      activeBackend() + " --headless --profile " + path.string() +
+      " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+U"
+      " --chord Ctrl+Alt+O --chord Ctrl+Alt+O --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  const auto spans = reopened.rebuild(reopened.latest()).spansFor(0, 5);
+  const auto resultFormat =
+      xanadu::FormatResolver(reopened).resolveSpans(spans);
+  ASSERT_EQ(resultFormat.decoratedRanges.size(), 1U);
+  EXPECT_TRUE(
+      gleditor::hasDecoration(resultFormat.decoratedRanges.front().decorations,
+                              gleditor::Decoration::Underline));
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     closedReadingContextSurvivesDismissAndRestart) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_closed_context";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto path    = root / "notes";
+  const auto command = "XDG_CONFIG_HOME=" + (root / "config").string() +
+                       " XDG_DATA_HOME=" + (root / "data").string() +
+                       " timeout 120 " + binary.string() +
+                       permascrollFlag(root / "permascroll") + " --backend " +
+                       activeBackend() + " --headless --profile ";
+  const auto opening =
+      " --chord Ctrl+O --key tab --type " + path.string() + " --key enter";
+  const auto first = executeProcess(
+      command + path.string() +
+      " --type 'alpha bravo charlie delta echo.' --select 0,5 --chord "
+      "Ctrl+Alt+["
+      " --select 12,19 --chord Ctrl+Alt+[ --select 6,11 --chord Ctrl+Alt+]"
+      " --select 20,25 --chord Ctrl+Alt+] --select 26,30 --chord Ctrl+Alt+]"
+      " --chord Ctrl+Alt+L --select 2,10 --chord Alt+Shift+N"
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Alt+Shift+X"
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Ctrl+W"
+      " --chord Alt+Shift+D" +
+      opening +
+      " --dump-a11y"
+      " --chord Ctrl+W --chord Alt+Shift+D");
+  ASSERT_EQ(first.exitCode, 0) << first.output;
+  EXPECT_THAT(first.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(first.output, testing::HasSubstr("[caret 10 from 2]"));
+  Store source(permascrollAt(root / "permascroll"));
+  source.load(path.string());
+  const auto count  = source.opCount();
+  const auto second = executeProcess(command + opening + " --dump-a11y");
+  ASSERT_EQ(second.exitCode, 0) << second.output;
+  EXPECT_THAT(second.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(second.output, testing::HasSubstr("[caret 10 from 2]"));
+  Store reopened(permascrollAt(root / "permascroll"));
+  reopened.load(path.string());
+  EXPECT_EQ(reopened.opCount(), count);
+  Store activity(permascrollAt(root / "permascroll"));
+  activity.load((root / "data/xudu/activity").string());
+  const auto closed  = xanadu::closedPlaceFor(activity, path.string());
+  const auto resumed = xanadu::latestPlace(activity);
+  ASSERT_TRUE(closed && resumed && closed->link);
+  EXPECT_EQ(resumed->documents.size(), 1U);
+  EXPECT_EQ(closed->link->left.member, 1U);
+  EXPECT_EQ(closed->link->right.member, 1U);
+  EXPECT_EQ(closed->link->active, xanadu::LinkSide::Right);
+  EXPECT_EQ(resumed->link, closed->link);
+}
+
+TEST(E2EBinaryOrchestrationTest, enteringAClosedEndpointRecordsNoVisit) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_closed_endpoint";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto command = "XDG_CONFIG_HOME=" + (root / "config").string() +
+                       " XDG_DATA_HOME=" + (root / "data").string() +
+                       " timeout 120 " + binary.string() +
+                       permascrollFlag(root / "permascroll") + " --backend " +
+                       activeBackend() + " --headless --profile ";
+  const auto result = executeProcess(
+      command + (root / "notes").string() +
+      " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+      " --chord Ctrl+N --type 'one two' --select 0,3 --chord Ctrl+Alt+]"
+      " --chord Ctrl+1 --chord Ctrl+Alt+L --chord Alt+Shift+N"
+      " --chord Alt+Shift+X --chord Ctrl+2 --chord Ctrl+W"
+      " --select 2,2 --chord Alt+Shift+Return --dump-a11y");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(result.output, testing::HasSubstr("target unavailable"));
+  EXPECT_THAT(result.output, testing::HasSubstr("[caret 2]"));
+  Store activity(permascrollAt(root / "permascroll"));
+  const auto directory = root / "data/xudu/activity";
+  activity.load(directory.string());
+  xanadu::StoreActivityLog log(&activity, directory);
+  std::size_t entered = 0;
+  for (std::uint64_t id = 1; const auto visit = log.find({id}); ++id) {
+    entered += visit->arrival == xanadu::Arrival::EnteredEndpoint;
+  }
+  EXPECT_EQ(entered, 0U);
+}
+
+TEST(E2EBinaryOrchestrationTest, coincidentLinksRemainReachableByPointer) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_coincident";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto run = [&](const std::string &script) {
+    return executeProcess(
+        "SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+        "LIBGL_ALWAYS_SOFTWARE=1 XDG_CONFIG_HOME=" +
+        (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --backend " + activeBackend() + " --headless --profile " + script);
+  };
+  const auto prepare =
+      run((root / "source").string() +
+          " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+          " --chord Ctrl+N --type 'one two' --select 0,3 --chord Ctrl+Alt+]"
+          " --chord Ctrl+1 --chord Ctrl+Alt+L --select 0,5 --chord Ctrl+Alt+["
+          " --chord Ctrl+2 --select 0,3 --chord Ctrl+Alt+] --chord Ctrl+1"
+          " --chord Ctrl+Alt+L --select 2,2");
+  ASSERT_EQ(prepare.exitCode, 0) << prepare.output;
+  const auto picked = run("--click 400,300 --dump-a11y");
+  ASSERT_EQ(picked.exitCode, 0) << picked.output;
+  EXPECT_THAT(picked.output, testing::HasSubstr("Selected link"));
+  EXPECT_THAT(picked.output, testing::HasSubstr("Link 2/2"));
+  std::vector<zigzag::CellRef> links;
+  std::vector<std::pair<std::string, std::size_t>> counts;
+  std::size_t visits{};
+  std::optional<xanadu::VisitId> current;
+  const auto inspect = [&](const auto &check) {
+    Store activity(permascrollAt(root / "permascroll"));
+    const auto directory = root / "data/xudu/activity";
+    activity.load(directory.string());
+    xanadu::StoreActivityLog log(&activity, directory);
+    const auto place = xanadu::latestPlace(activity);
+    ASSERT_TRUE(place && place->link);
+    check(log, *place);
+  };
+  {
+    Store source(permascrollAt(root / "permascroll"));
+    source.load((root / "source").string());
+    ASSERT_EQ(source.links().size(), 2U);
+    for (const auto &[id, link] : source.links()) links.push_back(id);
+    EXPECT_EQ(source.links().at(links[0]).left,
+              source.links().at(links[1]).left);
+    EXPECT_EQ(source.links().at(links[0]).right,
+              source.links().at(links[1]).right);
+  }
+  inspect([&](const auto &log, const auto &place) {
+    visits  = log.allVisits().size();
+    current = log.current();
+    EXPECT_EQ(place.link->key.id, links[1]);
+    for (const auto &document : place.documents) {
+      Store store(permascrollAt(root / "permascroll"));
+      store.load(document.storePath);
+      counts.emplace_back(document.storePath, store.opCount());
+    }
+  });
+  const auto previous = run("--click 550,236 --dump-a11y --capture " +
+                            (root / "previous.ppm").string());
+  ASSERT_EQ(previous.exitCode, 0) << previous.output;
+  EXPECT_THAT(previous.output, testing::HasSubstr("Link 1/2"));
+  EXPECT_THAT(previous.output, testing::HasSubstr("[caret 2]"));
+  inspect([&](const auto &log, const auto &place) {
+    EXPECT_EQ(place.link->key.id, links[0]);
+    EXPECT_EQ(log.allVisits().size(), visits);
+    EXPECT_EQ(log.current(), current);
+    ASSERT_TRUE(place.active);
+    EXPECT_EQ(place.documents[*place.active].caret, 2U);
+  });
+  const auto next = run("--click 625,236 --dump-a11y --capture " +
+                        (root / "next.ppm").string());
+  ASSERT_EQ(next.exitCode, 0) << next.output;
+  EXPECT_THAT(next.output, testing::HasSubstr("Link 2/2"));
+  EXPECT_THAT(next.output, testing::HasSubstr("[caret 2]"));
+  inspect([&](const auto &log, const auto &place) {
+    EXPECT_EQ(place.link->key.id, links[1]);
+    EXPECT_EQ(log.allVisits().size(), visits);
+    EXPECT_EQ(log.current(), current);
+  });
+  for (const auto &[path, count] : counts) {
+    Store store(permascrollAt(root / "permascroll"));
+    store.load(path);
+    EXPECT_EQ(store.opCount(), count);
+  }
+}
+
+TEST(E2EBinaryOrchestrationTest, walksPreviewAndMetadataSurviveRestart) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build/integration_workspace_walks";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto run = [&](const std::string &script) {
+    return executeProcess(
+        "SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+        "LIBGL_ALWAYS_SOFTWARE=1 XDG_CONFIG_HOME=" +
+        (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --backend " + activeBackend() + " --headless --profile " + script);
+  };
+  const auto inspect = [&](const auto &check) {
+    Store activity(permascrollAt(root / "permascroll"));
+    const auto directory = root / "data/xudu/activity";
+    activity.load(directory.string());
+    xanadu::StoreActivityLog log(&activity, directory);
+    check(log);
+  };
+  const auto documentOps = [&] {
+    Store document(permascrollAt(root / "permascroll"));
+    document.load((root / "notes").string());
+    return document.opCount();
+  };
+  const auto prepared =
+      run((root / "notes").string() +
+          " --type 'alpha bravo' --select 0,5 --chord Ctrl+Alt+["
+          " --select 6,11 --chord Ctrl+Alt+] --chord Ctrl+Alt+L"
+          " --chord Alt+Shift+N --chord Alt+Shift+X --chord Alt+Shift+Return"
+          " --chord Alt+Shift+B --chord Alt+Shift+X --chord Alt+Shift+Return");
+  ASSERT_EQ(prepared.exitCode, 0) << prepared.output;
+  inspect([](const auto &log) {
+    ASSERT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{3}));
+    EXPECT_EQ(log.find({2})->parent, log.find({3})->parent);
+  });
+  const auto before = documentOps();
+  const auto annotated =
+      run("--chord Alt+Shift+W --key home --key down --chord Ctrl+N --chord "
+          "Ctrl+Alt+B --chord Delete --type n"
+          " --chord Backspace --type 'Branch note' --key enter --click 300,310 "
+          "--dump-a11y"
+          " --capture " +
+          (root / "annotated.ppm").string() + " --key escape");
+  ASSERT_EQ(annotated.exitCode, 0) << annotated.output;
+  EXPECT_THAT(annotated.output, testing::HasSubstr("Visit referenced"));
+  EXPECT_THAT(annotated.output, testing::HasSubstr("Preview Visit 2"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{3}));
+    EXPECT_EQ(log.annotation({2}), "Branch note");
+    EXPECT_TRUE(log.referenced({2}));
+  });
+  EXPECT_EQ(documentOps(), before);
+  const auto restored = run("--chord Alt+Shift+W --key home --key down"
+                            " --dump-a11y --key enter --dump-a11y");
+  ASSERT_EQ(restored.exitCode, 0) << restored.output;
+  EXPECT_THAT(restored.output, testing::HasSubstr("Branch note"));
+  EXPECT_THAT(restored.output, testing::HasSubstr("Selected link"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{2}));
+  });
+  EXPECT_EQ(documentOps(), before);
+  fs::rename(root / "notes", root / "offline-notes");
+  const auto unavailable =
+      run("--chord Alt+Shift+W --key home --key down --type n"
+          " --type ' offline' --key enter --key enter --dump-a11y");
+  ASSERT_EQ(unavailable.exitCode, 0) << unavailable.output;
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("Target unavailable"));
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("target unavailable"));
+  EXPECT_THAT(unavailable.output, testing::HasSubstr("Branch note offline"));
+  inspect([](const auto &log) {
+    EXPECT_EQ(log.allVisits().size(), 3U);
+    EXPECT_EQ(log.current(), (xanadu::VisitId{2}));
+    EXPECT_EQ(log.annotation({2}), "Branch note offline");
+    EXPECT_TRUE(log.referenced({2}));
+  });
+}
+
 TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
@@ -823,6 +1170,29 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   ASSERT_EQ(kept.size(), 1U) << written.output;
   EXPECT_TRUE(fs::exists(kept.front() / "ops.nodes"));
   EXPECT_THAT(written.output, ::testing::HasSubstr("kept untitled xanadoc"));
+}
+
+// A tab names its document, not its version: it read "1", then "3" once a
+// transclusion reloaded it. Branches of one store are told apart by branch,
+// which an edit does not change.
+TEST(E2EBinaryOrchestrationTest, aTabKeepsItsNameThroughEdits) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_tab_names";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() + " XDG_DATA_HOME=" +
+      (testRoot / "data").string() + " timeout 120 " + xuduBin.string() +
+      " --backend " + activeBackend() + " " + (testRoot / "notes").string() +
+      " --type 'first words' --select 0,5 --chord Ctrl+T --type 'more'"
+      " --dump-a11y --profile");
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, ::testing::HasSubstr("list item \"notes\""));
+  EXPECT_THAT(result.output,
+              ::testing::HasSubstr("list item \"notes \u00b7 a\""));
 }
 
 // Editing from the keyboard: the audit found no key moved the caret, Return
@@ -1699,6 +2069,90 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
                                             xanadu::FormatAttribute::Italic))
       << "--type '[bold,italic]...' should have recorded both as Format "
          "links over the typed text";
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     unopenedLocalFormattingAuthorityRendersAndCanBeEditedThroughQuote) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = fs::current_path() / "build" /
+                    "integration_workspace_unopened_formatting";
+  fs::remove_all(root);
+  const auto documents = root / "data/xudu/xanadocs";
+  fs::create_directories(documents);
+  const auto sourcePath = documents / "source";
+  const auto quotePath  = documents / "quote";
+  const auto perma      = permascrollAt(root / "permascroll");
+  Store source(perma);
+  auto version     = source.makeXanadoc({}, "source");
+  version          = source.insert(version, 0, "Bold shared passage");
+  const auto spans = source.rebuild(version).pieces();
+  version =
+      source.setFormat(version, spans, xanadu::FormatAttribute::Bold, true);
+  source.save(sourcePath.string());
+  Store quote(perma);
+  auto quoted = quote.makeXanadoc({}, "quote");
+  for (const auto &span : spans) {
+    quoted = quote.insertSpan(quoted, quote.textOf(quoted).size(), span);
+  }
+  quote.save(quotePath.string());
+  const auto originalOps = source.opCount();
+  const auto originalTablesTime =
+      fs::last_write_time(sourcePath / "store.tables");
+  const auto render = [&](const std::string &name,
+                          const std::string &gestures) {
+    const auto capture = root / (name + ".ppm");
+    const auto result  = executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(root / "permascroll") +
+        " --headless --backend " + activeBackend() + " --profile " +
+        quotePath.string() + " --chord Ctrl+Home " + gestures + " --capture " +
+        capture.string() + " --dump-a11y --chord Ctrl+Q");
+    EXPECT_EQ(result.exitCode, 0) << result.output;
+    EXPECT_TRUE(inspectPpm(capture).valid) << result.output;
+    return countInkOnPaper(capture);
+  };
+  const auto inheritedInk = render("inherited", "");
+  EXPECT_EQ(fs::last_write_time(sourcePath / "store.tables"),
+            originalTablesTime)
+      << "Reading the quotation must not save the authority";
+  const auto externalSource = root / "external-source";
+  fs::rename(sourcePath, externalSource);
+  const auto plainInk = render("unavailable", "");
+  EXPECT_GT(plainInk, 0U);
+  EXPECT_NE(inheritedInk, plainInk)
+      << "The unopened authority's bold glyphs must be visible";
+  // Opening and closing this authority makes its explicit path part of
+  // reader history. A later empty session must not forget that path.
+  const auto remember = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") +
+      " --headless --backend " + activeBackend() + " --profile " +
+      externalSource.string() + " --chord Ctrl+W --chord Ctrl+Q");
+  ASSERT_EQ(remember.exitCode, 0) << remember.output;
+  const auto externalTablesTime =
+      fs::last_write_time(externalSource / "store.tables");
+  EXPECT_EQ(render("known-external", ""), inheritedInk);
+  EXPECT_EQ(fs::last_write_time(externalSource / "store.tables"),
+            externalTablesTime);
+  fs::rename(externalSource, root / "unavailable-source");
+  EXPECT_EQ(render("missing-external", ""), plainInk);
+  fs::rename(root / "unavailable-source", externalSource);
+  const auto toggledInk =
+      render("removed", "--select 0,19 --chord Ctrl+Alt+B --chord Ctrl+Home");
+  EXPECT_NE(toggledInk, inheritedInk);
+  // Rebuilding after a selection changes caret rasterization slightly.
+  EXPECT_NEAR(static_cast<double>(toggledInk), static_cast<double>(plainInk),
+              static_cast<double>(plainInk) * 0.1);
+  Store changed(perma);
+  changed.load(externalSource.string());
+  EXPECT_GT(changed.opCount(), originalOps);
+  EXPECT_TRUE(xanadu::FormatResolver(changed)
+                  .resolveSpans(spans)
+                  .decoratedRanges.empty());
+  EXPECT_EQ(render("restarted", ""), plainInk);
 }
 
 TEST(E2EBinaryOrchestrationTest,

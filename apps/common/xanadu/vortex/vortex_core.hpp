@@ -177,6 +177,10 @@ public:
   /// multi-store coordinator) does for a dimension it has no fixed slot for.
   DimRef findOrMintDimension(std::string_view name);
 
+  /// The dimension called @p name on the d.dims rank, minting nothing.
+  [[nodiscard]] std::optional<DimRef>
+  findDimension(std::string_view name) const;
+
   // -- Library modules
   // ---------------------------------------------------------
 

@@ -84,36 +84,42 @@ class QuotationBuilder {
 public:
   QuotationBuilder() = default;
 
-  void
+  QuotationBuilder *
   setForeignStore(std::string scrollKey, const Store *store,
                   const Scroll *sealedAs                      = nullptr,
                   std::optional<MicroversionId> pinnedVersion = std::nullopt);
 
-  void setRootCell(zigzag::CellRef cell);
-  void setRootRef(ExternOpRef ref, std::string label = {});
+  QuotationBuilder *setRootCell(zigzag::CellRef cell);
+  QuotationBuilder *setRootRef(ExternOpRef ref, std::string label = {});
 
-  void setMode(const Selector::Kind mode) noexcept { config_.mode = mode; }
+  QuotationBuilder *setMode(const Selector::Kind mode) noexcept {
+    config_.mode = mode;
+    return this;
+  }
   [[nodiscard]] Selector::Kind mode() const noexcept { return config_.mode; }
 
   // Rank mode settings
-  void setRankStep(ExternOpRef dimRef,
-                   zigzag::DimVector dir = zigzag::DimVector::POS);
+  QuotationBuilder *setRankStep(ExternOpRef dimRef,
+                                zigzag::DimVector dir = zigzag::DimVector::POS);
 
   // Closure mode settings
-  void setCarriedDimensions(std::vector<ExternOpRef> carryRefs);
-  void addCarriedDimension(ExternOpRef dimRef);
-  void removeCarriedDimension(const ExternOpRef &dimRef);
+  QuotationBuilder *setCarriedDimensions(std::vector<ExternOpRef> carryRefs);
+  QuotationBuilder *addCarriedDimension(ExternOpRef dimRef);
+  QuotationBuilder *removeCarriedDimension(const ExternOpRef &dimRef);
 
   // Query mode settings
-  void setVqlQuery(std::string query,
-                   std::uint32_t version = kSupportedVqlLanguageVersion);
+  QuotationBuilder *
+  setVqlQuery(std::string query,
+              std::uint32_t version = kSupportedVqlLanguageVersion);
 
   // Local placement and label
-  void setLocalRankDim(std::string dimName) {
+  QuotationBuilder *setLocalRankDim(std::string dimName) {
     config_.localRankDimName = std::move(dimName);
+    return this;
   }
-  void setQuotationLabel(std::string label) {
+  QuotationBuilder *setQuotationLabel(std::string label) {
     config_.quotationLabel = std::move(label);
+    return this;
   }
 
   [[nodiscard]] const QuotationBuilderConfig &config() const noexcept {
@@ -125,14 +131,15 @@ public:
     return preview_;
   }
 
-  void recomputePreview(const QuotationBudget &budget = QuotationBudget{
-                            .maxCells   = 500,
-                            .maxDepth   = 50,
-                            .maxOpBytes = 10 * 1024 * 1024,
-                        });
+  QuotationBuilder *
+  recomputePreview(const QuotationBudget &budget = QuotationBudget{
+                       .maxCells   = 500,
+                       .maxDepth   = 50,
+                       .maxOpBytes = 10 * 1024 * 1024,
+                   });
 
-  void focusPreviewCell(std::size_t index) noexcept;
-  void navigatePreview(int delta) noexcept;
+  QuotationBuilder *focusPreviewCell(std::size_t index) noexcept;
+  QuotationBuilder *navigatePreview(int delta) noexcept;
 
   [[nodiscard]] AppendedQuotation commit(Store &localStore,
                                          const MicroversionId &parent,

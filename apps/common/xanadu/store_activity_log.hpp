@@ -2,6 +2,9 @@
 #define COMMON_XANADU_STORE_ACTIVITY_LOG_HPP
 
 #include <filesystem>
+#include <map>
+#include <set>
+#include <span>
 
 #include "common/xanadu/link_navigation.hpp"
 
@@ -23,6 +26,12 @@ public:
   }
   void select(VisitId id) override;
 
+  [[nodiscard]] std::span<const Visit> allVisits() const { return visits; }
+  [[nodiscard]] std::string annotation(VisitId id) const;
+  [[nodiscard]] bool referenced(VisitId id) const;
+  void annotate(VisitId id, std::string text);
+  void reference(VisitId id);
+
 private:
   void appendRecord(std::string_view dimension, std::string_view text);
 
@@ -30,6 +39,8 @@ private:
   std::filesystem::path directory;
   std::vector<Visit> visits;
   std::optional<VisitId> selected;
+  std::map<std::uint64_t, std::string> notes;
+  std::set<std::uint64_t> references;
 };
 
 } // namespace xanadu

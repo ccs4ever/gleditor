@@ -16,6 +16,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -40,6 +41,23 @@
 namespace xudu {
 
 namespace {
+
+/// The branch @p version is on, as its name spells it without the state
+/// number: "3b2" is on "3b", "a1" on "a", and the main line on nothing.
+std::string branchOf(const MicroversionId &version) {
+  const auto segments = version.segments();
+  std::string out;
+  for (std::size_t i = 0; i < segments.size(); ++i) {
+    const auto &segment = segments[i];
+    if (MicroversionId::noBranch != segment.branch) {
+      out += MicroversionId::branchLetters(segment.branch);
+    }
+    if (i + 1 < segments.size()) {
+      out += std::to_string(segment.number);
+    }
+  }
+  return out;
+}
 constexpr std::uint32_t kCollaboratorColors[] = {
     0x38BDF8FF, // Sky 400
     0xF43F5EFF, // Rose 500
@@ -167,6 +185,10 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
                                     const std::string &mimeType,
                                     std::string filePath) {
   if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto focus = focusTargetForView(docIndex);
+  if (!focus.has_value() || !focus->isValid()) {
     return MicroversionId{};
   }
   const auto sIdx = open[docIndex].storeIndex;
@@ -775,12 +797,9 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
-  // Piece by piece rather than one whole-file insert(), the same way and for
-  // the same reason as the very first --import (see main.cpp): a plain file
-  // is one plain-text piece and this changes nothing for it, but a PDF's
-  // embedded figures only reach the store as classifiable primedia spans
-  // through insertMedia(), which pieces() is what makes reachable here.
-  MicroversionId imported;
+  const auto docName      = std::filesystem::path(filePath).stem().string();
+  MicroversionId imported = newStore->makeXanadoc(
+      MicroversionId{}, docName.empty() ? "document" : docName);
   std::uint32_t at = 0;
   // Indexed by piece position, parallel to source.pieces(): the span each
   // piece landed at, so a later piece naming an earlier one via
@@ -844,12 +863,97 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
 }
 
 std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
+  const auto requested = std::filesystem::weakly_canonical(aPath);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (!path(i).empty() &&
+        std::filesystem::weakly_canonical(path(i)) == requested) {
+      return i;
+    }
+  }
   auto perma    = (stores.empty() || !stores[0].store)
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
   newStore->load(aPath);
   return addStore(std::move(newStore), aPath, false);
+}
+
+std::vector<std::pair<std::string, const Store *>>
+Session::localFormattingAuthorities() const {
+  namespace fs = std::filesystem;
+  std::vector<std::pair<std::string, const Store *>> result;
+  if (stores.empty() || !stores[0].store) return result;
+  std::error_code error;
+  std::set<fs::path> candidates;
+  fs::directory_iterator entries(xanadocsDirectory(), error);
+  for (auto end = fs::directory_iterator{}; !error && entries != end;
+       entries.increment(error)) {
+    const auto &entry = *entries;
+    std::error_code entryError;
+    if (entry.is_symlink(entryError) || entryError ||
+        !entry.is_directory(entryError) || entryError)
+      continue;
+    candidates.insert(entry.path());
+  }
+  // The reader's own history supplies explicit paths outside the default
+  // directory. It does not grant discovery of arbitrary neighboring stores.
+  if (auto *history = const_cast<Session *>(this)->activity()) {
+    if (recordedAuthorityOps_ != history->opCount()) {
+      recordedAuthorityPaths_ = xanadu::recordedStorePaths(*history);
+      recordedAuthorityOps_   = history->opCount();
+    }
+    candidates.insert(recordedAuthorityPaths_.begin(),
+                      recordedAuthorityPaths_.end());
+  }
+  std::set<fs::path> present;
+  for (const auto &candidate : candidates) {
+    const auto nativePath = fs::weakly_canonical(candidate, error);
+    if (error) continue;
+    const auto tables = nativePath / "store.tables";
+    if (!fs::is_regular_file(tables, error) || error) continue;
+    const auto modified = fs::last_write_time(tables, error);
+    if (error) continue;
+    const auto opsModified =
+        fs::last_write_time(nativePath / "ops.nodes", error);
+    if (error) continue;
+    present.insert(nativePath);
+    if (std::ranges::any_of(stores, [&](const auto &loaded) {
+          return !loaded.path.empty() &&
+                 fs::weakly_canonical(loaded.path, error) == nativePath &&
+                 !error;
+        })) {
+      formattingAuthorities_.erase(nativePath);
+      continue;
+    }
+    auto found = formattingAuthorities_.find(nativePath);
+    if (found == formattingAuthorities_.end() ||
+        found->second.modified != modified ||
+        found->second.opsModified != opsModified) {
+      auto authority =
+          std::make_unique<Store>(stores[0].store->userPermascrollPtr());
+      try {
+        authority->load(nativePath.string());
+      } catch (const std::exception &failure) {
+        GLEDITOR_LOG_WARN("xudu.links", "Formatting authority refused: {}",
+                          failure.what());
+        authority.reset();
+      }
+      found = formattingAuthorities_
+                  .insert_or_assign(
+                      nativePath,
+                      FormattingAuthority{.modified    = modified,
+                                          .opsModified = opsModified,
+                                          .store       = std::move(authority)})
+                  .first;
+    }
+    if (found->second.store) {
+      result.emplace_back(nativePath.string(), found->second.store.get());
+    }
+  }
+  std::erase_if(formattingAuthorities_, [&](const auto &entry) {
+    return !present.contains(entry.first);
+  });
+  return result;
 }
 
 std::size_t Session::createNewStore(const std::string &aPath) {
@@ -867,6 +971,7 @@ std::size_t Session::createNewStore(const std::string &aPath) {
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
+  newStore->makeXanadoc(MicroversionId{}, "document");
   newStore->save(targetDir);
   return addStore(std::move(newStore), targetDir, isTemporary);
 }
@@ -946,10 +1051,30 @@ void Session::rememberPlace(const xanadu::ReadingPlace &place) {
   if (nullptr == store) {
     return;
   }
-  static_cast<void>(xanadu::recordPlace(*store, place));
+  std::ignore    = xanadu::recordPlace(*store, place);
   const auto dir = xanadu::activityDirectory();
   std::filesystem::create_directories(dir);
   store->save(dir.string());
+}
+
+void Session::rememberClosedPlace(const xanadu::ReadingPlace &place) {
+  auto *const st = activity();
+  if (!st) return;
+  std::ignore = xanadu::recordClosedPlace(*st, place);
+  st->save(xanadu::activityDirectory().string());
+}
+
+std::optional<xanadu::ReadingPlace>
+Session::closedPlace(const std::string &path) {
+  auto *const st = activity();
+  if (!st) return std::nullopt;
+  try {
+    return xanadu::closedPlaceFor(*st, path);
+  } catch (const std::exception &err) {
+    GLEDITOR_LOG_WARN("xudu.activity", "cannot read closed document place: {}",
+                      err.what());
+    return std::nullopt;
+  }
 }
 
 void Session::saveAll() const {
@@ -970,25 +1095,26 @@ std::size_t Session::storeIndexOf(const std::uint32_t docIndex) const {
   return docIndex < open.size() ? open[docIndex].storeIndex : 0U;
 }
 
-std::optional<MicroversionId>
-Session::versionShowing(const std::vector<PrimediaSpan> &ends,
-                        const std::vector<MicroversionId> &except) const {
+std::optional<Session::VersionInStore> Session::versionShowing(
+    const std::vector<PrimediaSpan> &ends,
+    const std::vector<std::pair<std::size_t, MicroversionId>> &except) const {
   if (ends.empty()) {
     return std::nullopt;
   }
-  for (const auto &entry : stores) {
+  for (std::size_t index = 0; index < stores.size(); ++index) {
+    const auto &entry = stores[index];
     if (!entry.store) {
       continue;
     }
     auto candidates = entry.store->allVersions();
     for (const auto &id : std::ranges::reverse_view(candidates)) {
-      if (std::ranges::find(except, id) != except.end()) {
+      if (std::ranges::find(except, std::pair{index, id}) != except.end()) {
         continue;
       }
       const auto pieces = entry.store->rebuild(id);
       for (const auto &span : ends) {
         if (!pieces.occurrencesOf(span).empty()) {
-          return id;
+          return VersionInStore{.storeIndex = index, .version = id};
         }
       }
     }
@@ -997,14 +1123,23 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 }
 
 void Session::viewOpened(const MicroversionId &version,
-                         const std::size_t storeIndex) {
+                         const std::size_t storeIndex,
+                         const std::uint32_t focusedBirth) {
   const auto &st = store(storeIndex);
-  open.push_back(OpenView{.version        = version,
-                          .storeIndex     = storeIndex,
-                          .pieces         = st.rebuild(version),
-                          .decorations    = {},
-                          .decoratedAt    = 0,
-                          .uncommittedLog = {}});
+  const auto targetBirth =
+      (focusedBirth != 0) ? focusedBirth : st.activeXanadocOnBranch(version);
+  std::vector<std::uint32_t> path;
+  if (targetBirth != 0) {
+    path = st.containmentPath(targetBirth);
+  }
+  open.push_back(OpenView{.version         = version,
+                          .storeIndex      = storeIndex,
+                          .focusedBirth    = targetBirth,
+                          .containmentPath = std::move(path),
+                          .pieces          = st.rebuild(version, targetBirth),
+                          .decorations     = {},
+                          .decoratedAt     = 0,
+                          .uncommittedLog  = {}});
   invalidate();
 }
 
@@ -1015,6 +1150,57 @@ void Session::viewClosed(const std::uint32_t docIndex) {
   flushUncommitted(docIndex);
   open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
   invalidate();
+}
+
+std::optional<FocusTarget>
+Session::focusTargetForView(const std::size_t docIndex) const {
+  if (docIndex >= open.size()) {
+    return std::nullopt;
+  }
+  const auto &view = open[docIndex];
+  const auto &st   = store(view.storeIndex);
+  if (view.focusedBirth != 0) {
+    if (!st.validateContainment(view.focusedBirth)) {
+      return std::nullopt;
+    }
+    const auto kind = st.structureKindOfOp(view.focusedBirth);
+    return FocusTarget{
+        .kind            = kind,
+        .birthOp         = view.focusedBirth,
+        .containmentPath = view.containmentPath,
+    };
+  }
+  const auto activeXanadoc = st.activeXanadocOnBranch(view.version);
+  if (activeXanadoc != 0 && st.validateContainment(activeXanadoc)) {
+    return FocusTarget{
+        .kind            = StructureKind::Xanadoc,
+        .birthOp         = activeXanadoc,
+        .containmentPath = st.containmentPath(activeXanadoc),
+    };
+  }
+  return FocusTarget{
+      .kind            = StructureKind::Xanadoc,
+      .birthOp         = 0,
+      .containmentPath = {},
+  };
+}
+
+void Session::setFocusTarget(const std::size_t docIndex,
+                             const std::uint32_t birthOp) {
+  if (docIndex >= open.size()) {
+    return;
+  }
+  auto &view     = open[docIndex];
+  const auto &st = store(view.storeIndex);
+  if (birthOp == 0) {
+    view.focusedBirth = 0;
+    view.containmentPath.clear();
+    return;
+  }
+  if (st.validateContainment(birthOp)) {
+    view.focusedBirth    = birthOp;
+    view.containmentPath = st.containmentPath(birthOp);
+  }
 }
 
 std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
@@ -1233,8 +1419,10 @@ void Session::refresh(const std::uint32_t docIndex,
   // most of the answer. Only a move that is not one step on -- travelling in
   // hypertime, or several edits recorded before anything asked to see them --
   // has to replay the history from the null document.
-  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version)) {
-    open[docIndex].pieces = st.rebuild(version);
+  const auto birth = open[docIndex].focusedBirth;
+  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version,
+                  birth)) {
+    open[docIndex].pieces = st.rebuild(version, birth);
   }
   open[docIndex].version = version;
   invalidate();
@@ -1492,10 +1680,10 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
 } // namespace
 
 std::shared_ptr<VersionTextSource>
-Session::sourceFor(const MicroversionId &version,
-                   const std::size_t storeIndex) const {
+Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
+                   const std::uint32_t scopedBirth) const {
   const auto &st     = store(storeIndex);
-  const auto rebuilt = st.rebuild(version);
+  const auto rebuilt = st.rebuild(version, scopedBirth);
   gleditor::MagicMimeDetector magic;
 
   std::string concatext;
@@ -1582,7 +1770,13 @@ Session::sourceFor(const MicroversionId &version,
   }
 
   // Extract presentation formatting and paragraph alignment from Format links
-  const FormatResolver formatResolver(st);
+  FormatResolver formatResolver(st);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (i != storeIndex) formatResolver.include(store(i), st);
+  }
+  for (const auto &[authorityPath, authority] : localFormattingAuthorities()) {
+    formatResolver.include(*authority, st);
+  }
   auto formattingResult = formatResolver.resolveVersion(rebuilt);
   std::vector<gleditor::DecoratedRange> decoratedRanges =
       std::move(formattingResult.decoratedRanges);
@@ -1592,7 +1786,10 @@ Session::sourceFor(const MicroversionId &version,
       std::make_move_iterator(formattingResult.blockStyles.end()));
 
   std::string title;
-  if (st.isSystem()) {
+  if (scopedBirth != 0) {
+    title = st.resolveStructureName(version, scopedBirth);
+  }
+  if (title.empty() && st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
       title = std::string(systemDocUri(*kind));
     }
@@ -1602,6 +1799,36 @@ Session::sourceFor(const MicroversionId &version,
         ann && !ann->alias.empty()) {
       title = ann->alias;
     }
+  }
+  if (title.empty() && scopedBirth != 0) {
+    title =
+        (st.structureKindOfOp(scopedBirth) == StructureKind::Slice ? "Slice "
+                                                                   : "Doc ") +
+        std::to_string(scopedBirth);
+  }
+  // The store's own name, which does not change as it is edited. The version
+  // name used to stand in, so a tab read "1", then "3" once a transclusion
+  // reloaded it. An untitled store has no name of its own yet; the tab bar
+  // numbers those.
+  if (title.empty() && !isTemporaryStore(storeIndex)) {
+    const auto named =
+        std::filesystem::path(path(storeIndex)).lexically_normal();
+    auto base = named.filename().string();
+    if (base.empty()) {
+      base = named.parent_path().filename().string();
+    }
+    if (!base.starts_with("untitled-")) {
+      title = std::move(base);
+    }
+  }
+  // Two views of one store on different branches would read alike; the
+  // branch -- the version name without its last number -- tells them apart
+  // and, unlike the version, stays put while either is edited. An untitled
+  // store has no name to qualify, and its tabs are numbered already: a
+  // suffix read "Doc 2" live and "Untitled · a" after a relaunch.
+  if (const auto branch = branchOf(version);
+      !branch.empty() && !title.empty()) {
+    title += " · " + branch;
   }
 
   auto target =
@@ -1856,9 +2083,22 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       return;
     }
 
-    const auto sIdx = view.storeIndex;
-    auto &st        = store(sIdx);
-    auto curVersion = view.version;
+    const auto focus = focusTargetForView(which);
+    if (!focus.has_value() || !focus->isValid()) {
+      view.uncommittedLog.clear();
+      return;
+    }
+
+    const auto sIdx        = view.storeIndex;
+    auto &st               = store(sIdx);
+    auto curVersion        = view.version;
+    const auto targetBirth = focus->birthOp;
+    MicroversionId ctxId{};
+    if (targetBirth != 0) {
+      const auto lastOp = st.lastOpOnStructure(curVersion, targetBirth);
+      ctxId             = (lastOp != 0) ? st.segmentedOps().idOf(lastOp)
+                                        : st.segmentedOps().idOf(targetBirth);
+    }
 
     for (const auto &op : compacted) {
       if (op.kind == OpKind::Insert) {
@@ -1872,7 +2112,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           // and under transcopyright it would have routed royalties to
           // whoever typed the line first. Storage economy is a real goal, but
           // it belongs below the address layer, not at it.
-          curVersion = st.insert(curVersion, op.at, op.text);
+          curVersion = st.insert(curVersion, op.at, op.text, ctxId);
           GLEDITOR_LOG_DEBUG("xudu.edit", "{} insert {} bytes at {}",
                              curVersion.str(), op.text.size(), op.at);
           if (swarmSource && !st.isSystem()) {
@@ -1886,7 +2126,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
         }
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
-          curVersion = st.erase(curVersion, op.at, op.length);
+          curVersion = st.erase(curVersion, op.at, op.length, ctxId);
           GLEDITOR_LOG_DEBUG("xudu.edit", "{} delete {} bytes at {}",
                              curVersion.str(), op.length, op.at);
           if (swarmSource && !st.isSystem()) {
@@ -1942,6 +2182,10 @@ void Session::textInserted(Doc &doc, const std::uint32_t at,
   if (which >= open.size()) {
     return;
   }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
+    return;
+  }
   open[which].uncommittedLog.recordInsert(at, utf8);
   if (swarmSource) {
     flushUncommitted(static_cast<std::uint32_t>(which));
@@ -1952,6 +2196,10 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
                          const std::string &removed) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
+    return;
+  }
+  const auto focus = focusTargetForView(which);
+  if (!focus.has_value() || !focus->isValid()) {
     return;
   }
   open[which].uncommittedLog.recordErase(at, removed);
@@ -1968,7 +2216,8 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
 
 void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
                             const std::uint32_t length,
-                            const gleditor::DecorationMask mask) {
+                            const gleditor::DecorationMask mask,
+                            const bool toggle) {
   if (docIndex >= open.size()) {
     return;
   }
@@ -1999,7 +2248,28 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
   if (content.empty()) {
     return;
   }
+  // A formatting edit must reach the saved authority as well as its quote.
+  // Rendering alone keeps these stores out of the session's save lifecycle.
+  for (const auto &[authorityPath, authority] : localFormattingAuthorities()) {
+    auto formats       = authority->formatLinks();
+    const bool touches = std::ranges::any_of(formats, [&](const auto &format) {
+      return std::ranges::any_of(format.first.left, [&](const auto &span) {
+        const auto mapped = FormatResolver::spanIn(*authority, st, span);
+        return mapped && std::ranges::any_of(content, [&](const auto &run) {
+                 return !run.intersect(*mapped).empty();
+               });
+      });
+    });
+    if (touches) {
+      loadAuxiliaryStore(authorityPath);
+    }
+  }
   auto version = open[docIndex].version;
+  FormatResolver resolver(st);
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (i != sIdx) resolver.include(store(i), st);
+  }
+  const auto formatted = resolver.resolveSpans(content);
   for (const auto decoration :
        {gleditor::Decoration::Bold, gleditor::Decoration::Italic,
         gleditor::Decoration::Underline, gleditor::Decoration::Overline,
@@ -2011,6 +2281,47 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     const auto attribute = xudu::formatAttributeFromDecoration(decoration);
     if (!attribute) {
       continue;
+    }
+    if (toggle) {
+      std::vector<std::pair<std::uint32_t, std::uint32_t>> ranges;
+      for (const auto &range : formatted.decoratedRanges) {
+        if (gleditor::hasDecoration(range.decorations, decoration)) {
+          ranges.emplace_back(range.start, range.end);
+        }
+      }
+      std::ranges::sort(ranges);
+      std::uint64_t covered = 0;
+      for (const auto &[first, last] : ranges) {
+        if (first > covered) break;
+        covered = std::max(covered, static_cast<std::uint64_t>(last));
+      }
+      std::uint64_t total = 0;
+      for (const auto &span : content) total += span.length;
+      if (covered >= total) {
+        for (std::size_t i = 0; i < stores.size(); ++i) {
+          auto &authority = store(i);
+          std::vector<PrimediaSpan> mapped;
+          for (const auto &span : content) {
+            if (const auto address =
+                    FormatResolver::spanIn(st, authority, span)) {
+              mapped.push_back(*address);
+            }
+          }
+          auto parent = i == sIdx ? version : authority.latest();
+          const auto next =
+              authority.setFormat(parent, mapped, *attribute, false);
+          if (next != parent) {
+            for (std::size_t view = 0; view < open.size(); ++view) {
+              if (open[view].storeIndex == i && open[view].version == parent) {
+                refresh(static_cast<std::uint32_t>(view), next);
+              }
+            }
+            if (i == sIdx) version = next;
+            save(i);
+          }
+        }
+        continue;
+      }
     }
     Link link;
     link.type  = LinkType::Format;

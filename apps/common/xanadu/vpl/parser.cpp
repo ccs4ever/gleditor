@@ -72,6 +72,11 @@ std::shared_ptr<Program> Parser::parseProgram() {
     auto stmt = parseStatement();
     if (stmt) {
       stmts.push_back(std::move(stmt));
+    } else if (!isAtEnd()) {
+      throw std::runtime_error(
+          "Unexpected token '" + std::string(peek().text) + "' at line " +
+          std::to_string(peek().location.line) + ", column " +
+          std::to_string(peek().location.column));
     }
 
     // Statements may be delimited by newlines or semicolons

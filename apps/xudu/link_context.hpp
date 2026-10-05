@@ -16,6 +16,7 @@
 #ifndef XUDU_LINK_CONTEXT_HPP
 #define XUDU_LINK_CONTEXT_HPP
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -67,6 +68,8 @@ public:
   explicit LinkContext(Session &session)
       : session(session),
         activity(session.activityForNavigation(), xanadu::activityDirectory()) {
+    navigator.setTargetReady(
+        [this](const auto &site) { return canFocus(site); });
   }
 
   void setFocusDocument(FocusDocument handler) {
@@ -89,11 +92,19 @@ public:
   }
 
   /// The links on screen, in the stable order Next/Previous link walk.
-  void setCandidates(const std::vector<zigzag::CellRef> &linkIds);
+  void setCandidates(std::vector<xanadu::LinkKey> keys) {
+    if (std::ranges::equal(keys, navigator.candidateKeys())) return;
+    navigator.setCandidates(std::move(keys));
+    ++changes;
+  }
 
-  /// The key of link @p id in the primary store, which holds every link the
-  /// beams draw; federated links need their own authority design.
-  [[nodiscard]] xanadu::LinkKey keyOf(zigzag::CellRef id) const;
+  [[nodiscard]] std::span<const xanadu::LinkKey> candidateKeys() const {
+    return navigator.candidateKeys();
+  }
+
+  /// The key of link @p id in open store @p store, the one it was forged in.
+  [[nodiscard]] xanadu::LinkKey keyOf(std::size_t store,
+                                      zigzag::CellRef id) const;
 
   /**
    * @brief Carry out @p command. Render thread only: it may move the caret.
@@ -103,8 +114,15 @@ public:
    */
   xanadu::NavigationResult execute(const xanadu::NavigationCommand &command);
 
-  /// Rehydrate the selected link after reopened views can resolve its ends.
-  void restoreCurrentSelection();
+  /// Reselect the link a session was left on, once its reopened views can
+  /// resolve the link's ends.
+  void restoreSelection(const xanadu::LinkVisitContext &saved);
+
+  /// The selection as a session keeps it across a relaunch.
+  [[nodiscard]] std::optional<xanadu::LinkVisitContext>
+  selectionContext() const {
+    return navigator.selectionContext();
+  }
 
   [[nodiscard]] gleditor::cpp26::optional<const xanadu::SelectedLink &>
   selection() const noexcept {
@@ -116,6 +134,29 @@ public:
   }
   [[nodiscard]] ReadingStamp readingStamp() const;
   [[nodiscard]] std::vector<xanadu::Visit> forwardChoices() const;
+  [[nodiscard]] std::span<const xanadu::Visit> savedVisits() const {
+    return activity.allVisits();
+  }
+  [[nodiscard]] std::optional<xanadu::VisitId> currentVisit() const {
+    return activity.current();
+  }
+  [[nodiscard]] std::string visitNote(xanadu::VisitId id) const {
+    return activity.annotation(id);
+  }
+  [[nodiscard]] bool visitReferenced(xanadu::VisitId id) const {
+    return activity.referenced(id);
+  }
+  void annotateVisit(xanadu::VisitId id, std::string text) {
+    activity.annotate(id, std::move(text));
+    ++changes;
+  }
+  void referenceVisit(xanadu::VisitId id) {
+    activity.reference(id);
+    ++changes;
+  }
+  [[nodiscard]] bool visitAvailable(const xanadu::Visit &visit) const {
+    return canFocus(visit.target);
+  }
 
   /**
    * @brief Where the reader is, for the panel.
@@ -138,6 +179,10 @@ public:
 
   /// Bumped by every change a reader of selection() might care about.
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
+  [[nodiscard]] std::optional<xanadu::NavigationError>
+  refusal() const noexcept {
+    return refused;
+  }
 
 private:
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
@@ -148,6 +193,7 @@ private:
   cellSite(zigzag::CellRef cell) const;
   void apply(xanadu::NavigationEffect effect);
   void focus(const xanadu::OccurrenceSite &site);
+  [[nodiscard]] bool canFocus(const xanadu::OccurrenceSite &site) const;
 
   Session &session;
   const zigzag::Manifold *manifold{};
@@ -161,6 +207,7 @@ private:
   CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;
   std::uint64_t changes{};
+  std::optional<xanadu::NavigationError> refused;
 };
 
 } // namespace xudu

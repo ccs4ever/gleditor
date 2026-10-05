@@ -12,12 +12,14 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vql/ast.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {
+
+using xanadu::MultiStoreCoordinator;
 
 class VQLEngine {
 public:
@@ -82,6 +84,11 @@ private:
   std::vector<zigzag::CellRef>
   performCreates(const SignedDimensionStep &dimStep,
                  const std::vector<zigzag::CellRef> &inputs);
+
+  /// find()'s second half: the lines of @p info's current documents that
+  /// hold @p needle, each a cell linked along d.source to where it was found.
+  void findInDocuments(const StoreInfo &info, std::string_view needle,
+                       std::vector<zigzag::CellRef> &out);
 
   // Predicate & Boolean Evaluation
   bool evaluatePredicate(const BooleanExpr &expr, zigzag::CellRef context);

@@ -21,7 +21,9 @@
 #include <compare>
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -196,6 +198,10 @@ struct ActivityForward {
   VisitId child;
   bool operator==(const ActivityForward &) const = default;
 };
+struct EnterSavedVisit {
+  VisitId visit;
+  bool operator==(const EnterSavedVisit &) const = default;
+};
 struct ReturnToOrigin {
   bool operator==(const ReturnToOrigin &) const = default;
 };
@@ -209,7 +215,8 @@ using NavigationCommand =
     std::variant<nav::SelectLink, nav::StepLink, nav::SelectMember,
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
-                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss>;
+                 nav::ActivityForward, nav::EnterSavedVisit,
+                 nav::ReturnToOrigin, nav::Dismiss>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -221,11 +228,13 @@ enum class NavigationError : std::uint8_t {
   NoOccurrenceChosen,
   /// The chosen member has no occurrence in the views resolved against.
   MemberNotInView,
+  TargetUnavailable,
   /// Occurrences supplied for a selection that has since been replaced.
   StaleGeneration,
   LinkNotFound,
   NoOrigin,
   NoPreviousVisit,
+  VisitNotFound,
   NoCandidates,
 };
 
@@ -291,11 +300,24 @@ public:
   explicit LinkNavigator(ActivityLog &activity) noexcept
       : activity(activity), current(activity.current()) {}
 
+  /// The host confirms it can focus a cached occurrence before a visit is
+  /// appended or selected. A closed view must not earn a completed transition.
+  void setTargetReady(std::function<bool(const OccurrenceSite &)> ready) {
+    targetReady = std::move(ready);
+  }
+
   NavigationResult dispatch(const NavigationCommand &command);
 
   /// Rebuild the saved link context after the host has reopened its views.
   /// The returned resolution request changes no reading place or visit.
   NavigationResult restoreCurrentSelection();
+
+  /// Reselect the link @p saved names, as a session resuming does; the
+  /// reader's place and visits are left as they are.
+  NavigationResult restoreSelection(const LinkVisitContext &saved);
+
+  /// The selection as a session keeps it, or nothing with no link selected.
+  [[nodiscard]] std::optional<LinkVisitContext> selectionContext() const;
 
   /**
    * @brief Deliver the occurrences a ResolveRequest asked for.
@@ -307,6 +329,10 @@ public:
   NavigationResult
   supply(std::uint64_t generation,
          std::expected<LinkOccurrences, LinkQueryError> occurrences);
+
+  [[nodiscard]] std::span<const LinkKey> candidateKeys() const noexcept {
+    return candidates;
+  }
 
   /// Record arriving at @p site by some means other than a link.
   VisitId recordArrival(const OccurrenceSite &site);
@@ -341,12 +367,16 @@ private:
   /// The selection, once its occurrences have been supplied.
   std::expected<SelectedLink *, NavigationError> resolved();
   NavigationResult restoreVisit(const Visit &visit);
+  /// Make @p saved the selection, keeping a resolved one's occurrences.
+  NavigationEffect reselect(const LinkVisitContext &saved,
+                            NavigationEffect effect);
 
   ActivityLog &activity;
   std::optional<SelectedLink> selected;
   std::optional<VisitId> current;
   std::vector<LinkKey> candidates;
   std::uint64_t generations{};
+  std::function<bool(const OccurrenceSite &)> targetReady;
 };
 
 // -- input adapters --------------------------------------------------------

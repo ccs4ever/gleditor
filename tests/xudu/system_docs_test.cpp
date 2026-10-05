@@ -12,6 +12,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -110,6 +111,28 @@ TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
     EXPECT_TRUE(fresh) << chord << " is bound to both " << where->second
                        << " and " << spec.name;
   }
+}
+
+// Every format link the document model has is reachable from the keyboard:
+// J17 found the seven decorations without defaults and alignment with no
+// command at all.
+TEST(SystemDocsTest, EveryFormatLinkHasADefaultChord) {
+  std::set<std::string> bound;
+  for (const auto &spec : xanadu::defaultSettingSpecs(SystemDocKind::Keymap)) {
+    bound.insert(spec.name);
+  }
+  namespace keys = xanadu::settings;
+  for (const auto action :
+       {keys::kKeymapFormatItalic, keys::kKeymapFormatBold,
+        keys::kKeymapFormatUnderline, keys::kKeymapFormatOverline,
+        keys::kKeymapFormatStrikethrough, keys::kKeymapFormatSuperscript,
+        keys::kKeymapFormatSubscript, keys::kKeymapAlignLeft,
+        keys::kKeymapAlignCentre, keys::kKeymapAlignRight,
+        keys::kKeymapAlignJustify}) {
+    EXPECT_TRUE(bound.contains(std::string(action))) << action;
+  }
+  EXPECT_EQ(xanadu::allFormatAttributes.size(), 11U)
+      << "a format link was added: give it a default chord here too";
 }
 
 TEST(SystemDocsTest, KeymapScopesFollowTheActionFamily) {
@@ -583,7 +606,7 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   ASSERT_NE(variable, 0U);
   const auto value = manifold.linked(variable, values);
   const auto revised =
-      store.setScalar(store.primaryCurrentVersion(), value, 9.5, &manifold);
+      store.setScalar(store.primaryCurrentVersion(), value, 9.5);
   store.repointCurrentVersion(revised);
   EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store).zigzag.connectionBeamWidthPx,
                   9.5F);
@@ -602,6 +625,39 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/new_doc"),
             "std:xudu/new_doc");
   EXPECT_EQ(xanadu::legacyKeymapAction("new-doc"), "new-doc");
+
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-bold"),
+            "std:xudu/format_bold");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_bold"), "format-bold");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-italic"),
+            "std:xudu/format_italic");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_italic"),
+            "format-italic");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("format-underline"),
+            "std:xudu/format_underline");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/format_underline"),
+            "format-underline");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("save-document"), "std:xudu/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/save_document"),
+            "std:xudu/save");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("insert-break"),
+            "std:xudu/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("std:xudu/insert_break"),
+            "std:xudu/page_break");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("clear-bench"),
+            "std:xudu/clear_bench");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:xudu/clear_bench"), "clear-bench");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("bundle-execution"),
+            "std:ui/bundle_execution");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/bundle_execution"),
+            "bundle-execution");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("bundle-cycle"),
+            "std:ui/bundle_cycle");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/bundle_cycle"), "bundle-cycle");
+  EXPECT_EQ(xanadu::canonicalKeymapAction("view-mode-topology"),
+            "std:ui/view_mode_topology");
+  EXPECT_EQ(xanadu::legacyKeymapAction("std:ui/view_mode_topology"),
+            "view-mode-topology");
 
   Store setStore;
   xanadu::initializeSystemStore(setStore, SystemDocKind::Settings);

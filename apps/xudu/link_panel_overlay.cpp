@@ -5,6 +5,9 @@
 #include "link_panel_overlay.hpp"
 
 #include <algorithm>
+#include <functional>
+#include <string>
+#include <tuple>
 #include <type_traits>
 #include <variant>
 
@@ -17,6 +20,16 @@
 #include <gleditor/spatial.hpp>
 
 namespace xudu {
+
+namespace {
+
+// Node ids, local to this source: the panel, then its lines, then its
+// buttons, each family far enough apart that neither runs into the next.
+constexpr std::uint64_t kA11yPanel      = 1;
+constexpr std::uint64_t kA11yLineBase   = 0x100;
+constexpr std::uint64_t kA11yButtonBase = 0x200;
+
+} // namespace
 
 void LinkPanelOverlay::setConfig(const xanadu::LinkPanelConfig &next) {
   if (next == config) {
@@ -112,11 +125,17 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     return;
   }
   const auto origin = context.originSite();
-  const auto lines =
+  auto lines =
       xanadu::linkPanelLines(*selected, origin, context.reading(),
                              [this](const xanadu::OccurrenceSite &site) {
                                return context.describe(site);
                              });
+  lines.front().text += " · " + xanadu::linkCandidateLabel(
+                                    selected->key, context.candidateKeys());
+  if (const auto error = context.refusal()) {
+    lines.push_back({.text = std::string(xanadu::name(*error)),
+                     .tone = xanadu::PanelLine::Tone::Muted});
+  }
   buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
 
   // The active side's marker sits in a gutter as wide as itself, so both
@@ -199,11 +218,11 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                             ? config.mutedColour
                             : config.textColour;
     if (lines[i].active) {
-      static_cast<void>(canvas->addText(ctx.state, x0, y, marker, colour,
-                                        config.backgroundColour));
+      std::ignore = canvas->addText(ctx.state, x0, y, marker, colour,
+                                    config.backgroundColour);
     }
-    static_cast<void>(canvas->addText(ctx.state, x0 + gutter, y, lines[i].text,
-                                      colour, config.backgroundColour));
+    std::ignore = canvas->addText(ctx.state, x0 + gutter, y, lines[i].text,
+                                  colour, config.backgroundColour);
     y -= lineSizes[i].height + gap;
   }
 
@@ -218,9 +237,9 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     canvas->setTag(render::tagKindOverlay,
                    kTagPanelBase + 1U + static_cast<std::uint32_t>(i));
     canvas->addRect(bLeft, bTop - height, width, height, config.buttonColour);
-    static_cast<void>(canvas->addText(ctx.state, bLeft + gap, bTop - gap,
-                                      buttons[i].label, colour,
-                                      config.buttonColour));
+    std::ignore =
+        canvas->addText(ctx.state, bLeft + gap, bTop - gap, buttons[i].label,
+                        colour, config.buttonColour);
   }
   canvas->setTag(render::tagKindOverlay, 0);
   canvas->commit();
@@ -294,6 +313,107 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
       0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
       static_cast<float>(ctx.screenHeight), -1.0F, 1.0F);
   canvas->draw(ctx.state, ortho);
+}
+
+void LinkPanelOverlay::describe(gleditor::a11y::Builder &into) {
+  using gleditor::a11y::Action;
+  using gleditor::a11y::bit;
+  using gleditor::a11y::Role;
+  const auto selected = context.selection();
+  if (!selected) {
+    return;
+  }
+  const auto origin = context.originSite();
+  auto lines =
+      xanadu::linkPanelLines(*selected, origin, context.reading(),
+                             [this](const xanadu::OccurrenceSite &site) {
+                               return context.describe(site);
+                             });
+  lines.front().text += " · " + xanadu::linkCandidateLabel(
+                                    selected->key, context.candidateKeys());
+  if (const auto error = context.refusal()) {
+    lines.push_back({.text = std::string(xanadu::name(*error)),
+                     .tone = xanadu::PanelLine::Tone::Muted});
+  }
+  const auto controls = xanadu::linkPanelButtons(*selected, origin.has_value());
+
+  // A parent is added after its children: add() may move every node already
+  // added, so a reference to one is not held across another add().
+  std::vector<std::uint64_t> children;
+  children.reserve(lines.size() + controls.size());
+  for (std::size_t i = 0; i < lines.size(); ++i) {
+    auto &line = into.add(kA11yLineBase + i, Role::Label);
+    // The drawn marker is a glyph; the words say which side is active.
+    line.label = lines[i].active ? "active: " + lines[i].text : lines[i].text;
+    children.push_back(into.id(kA11yLineBase + i));
+  }
+  for (std::size_t i = 0; i < controls.size(); ++i) {
+    auto &button = into.add(kA11yButtonBase + i, Role::Button);
+    // The drawn "×" would be read out as a multiplication sign.
+    button.label =
+        std::holds_alternative<xanadu::nav::Dismiss>(controls[i].command)
+            ? "Dismiss"
+            : controls[i].label;
+    button.actions = bit(Action::Click);
+    if (!controls[i].enabled) {
+      button.description = "not available now";
+    }
+    children.push_back(into.id(kA11yButtonBase + i));
+  }
+  auto &panel    = into.add(kA11yPanel, Role::Group);
+  panel.label    = "Selected link";
+  panel.value    = lines.empty() ? std::string{} : lines.front().text;
+  panel.children = std::move(children);
+  into.contribute(into.id(kA11yPanel));
+}
+
+std::uint64_t LinkPanelOverlay::accessibilityRevision() const {
+  // Asked every frame, so built from counters and the reading stamp rather
+  // than from the lines themselves; every input the lines are made from
+  // moves one of them.
+  const auto stamp   = context.readingStamp();
+  std::uint64_t seed = context.revision();
+  const auto mix     = [&seed](const std::uint64_t value) {
+    seed ^= std::hash<std::uint64_t>{}(value) + 0x9e3779b97f4a7c15ULL +
+            (seed << 6U) + (seed >> 2U);
+  };
+  mix(session.generation());
+  mix(context.selection() ? 1U : 0U);
+  if (stamp.caret) {
+    mix(stamp.caret->view);
+    mix(stamp.caret->offset);
+    mix(stamp.caret->selection ? stamp.caret->selection->start : ~0U);
+    mix(stamp.caret->selection ? stamp.caret->selection->end : ~0U);
+  }
+  mix(stamp.cell);
+  mix(stamp.visit ? stamp.visit->value : 0U);
+  return seed;
+}
+
+bool LinkPanelOverlay::performAction(const std::uint64_t nodeId,
+                                     const gleditor::a11y::Action action,
+                                     std::string_view /*value*/) {
+  const auto local = gleditor::a11y::Ids::localOf(nodeId);
+  if (gleditor::a11y::Action::Click != action || local < kA11yButtonBase ||
+      !renderer) {
+    return false;
+  }
+  // Asked on the event thread; the selection is the render thread's, and
+  // the buttons are rebuilt there from the selection as it is then, so a
+  // button that has gone by the time this runs does nothing.
+  renderer->runWithState([this,
+                          index = local - kA11yButtonBase](RenderState &) {
+    const auto selected = context.selection();
+    if (!selected) {
+      return;
+    }
+    const auto controls =
+        xanadu::linkPanelButtons(*selected, context.originSite().has_value());
+    if (index < controls.size()) {
+      std::ignore = context.execute(controls[index].command);
+    }
+  });
+  return true;
 }
 
 } // namespace xudu
