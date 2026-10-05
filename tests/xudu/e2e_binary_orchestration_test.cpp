@@ -1911,7 +1911,8 @@ TEST(E2EBinaryOrchestrationTest,
   const auto quotePath  = documents / "quote";
   const auto perma      = permascrollAt(root / "permascroll");
   Store source(perma);
-  auto version     = source.insert({}, 0, "Bold shared passage");
+  auto version     = source.makeXanadoc({}, "source");
+  version          = source.insert(version, 0, "Bold shared passage");
   const auto spans = source.rebuild(version).pieces();
   version =
       source.setFormat(version, spans, xanadu::FormatAttribute::Bold, true);
@@ -1943,12 +1944,29 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_EQ(fs::last_write_time(sourcePath / "store.tables"),
             originalTablesTime)
       << "Reading the quotation must not save the authority";
-  fs::rename(sourcePath, root / "unavailable-source");
+  const auto externalSource = root / "external-source";
+  fs::rename(sourcePath, externalSource);
   const auto plainInk = render("unavailable", "");
   EXPECT_GT(plainInk, 0U);
   EXPECT_NE(inheritedInk, plainInk)
       << "The unopened authority's bold glyphs must be visible";
-  fs::rename(root / "unavailable-source", sourcePath);
+  // Opening and closing this authority makes its explicit path part of
+  // reader history. A later empty session must not forget that path.
+  const auto remember = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(root / "permascroll") +
+      " --headless --backend " + activeBackend() + " --profile " +
+      externalSource.string() + " --chord Ctrl+W --chord Ctrl+Q");
+  ASSERT_EQ(remember.exitCode, 0) << remember.output;
+  const auto externalTablesTime =
+      fs::last_write_time(externalSource / "store.tables");
+  EXPECT_EQ(render("known-external", ""), inheritedInk);
+  EXPECT_EQ(fs::last_write_time(externalSource / "store.tables"),
+            externalTablesTime);
+  fs::rename(externalSource, root / "unavailable-source");
+  EXPECT_EQ(render("missing-external", ""), plainInk);
+  fs::rename(root / "unavailable-source", externalSource);
   const auto toggledInk =
       render("removed", "--select 0,19 --chord Ctrl+Alt+B --chord Ctrl+Home");
   EXPECT_NE(toggledInk, inheritedInk);
@@ -1956,7 +1974,7 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_NEAR(static_cast<double>(toggledInk), static_cast<double>(plainInk),
               static_cast<double>(plainInk) * 0.1);
   Store changed(perma);
-  changed.load(sourcePath.string());
+  changed.load(externalSource.string());
   EXPECT_GT(changed.opCount(), originalOps);
   EXPECT_TRUE(xanadu::FormatResolver(changed)
                   .resolveSpans(spans)

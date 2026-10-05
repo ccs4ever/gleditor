@@ -176,11 +176,13 @@ multiple discontinuous spans; a stored link does not pair each left member with 
 Links attach to content addresses, so quotations can reveal the same link in another manifestation.
 The Spanfilade indexes span occurrences across documents and cells for transclusion discovery.
 
-Quotations inherit content-addressed formatting from loaded stores and unopened native stores
-directly under `$XDG_DATA_HOME/xudu/xanadocs`. Unopened authorities are cached for reading without
-opening tabs or saving their stores; loaded authorities take precedence. Toggling a decoration
-through a quotation loads the matching local authority so the edit persists there. Discovery does
-not yet cover unopened stores saved elsewhere or remote authorities.
+Quotations inherit content-addressed formatting from loaded stores, unopened native stores directly
+under `$XDG_DATA_HOME/xudu/xanadocs`, and local store paths remembered in the reader's activity
+history. Unopened authorities are cached for reading without opening tabs or saving their stores;
+loaded authorities take precedence. Changes to `ops.nodes` or `store.tables` refresh a cached
+authority on the next text-source resolution. Toggling a decoration through a quotation loads the
+matching local authority so the edit persists there. Discovery does not yet cover remote authorities
+or stores outside the default directory that the reader has never opened.
 
 Xudu renders explicit links as cyan/magenta ribbons and shared-content transclusions as gold prisms.
 Its beam layout and margin brackets help distinguish dense, overlapping passages. Xuzz's

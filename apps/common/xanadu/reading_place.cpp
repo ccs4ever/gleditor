@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -333,6 +334,38 @@ std::optional<ReadingPlace> closedPlaceFor(const Store &store,
     here = manifold.linked(here, *places);
   }
   return found;
+}
+
+std::vector<std::string> recordedStorePaths(const Store &store) {
+  if (store.latest().isZero() || zigzag::noCell == store.homeCell()) return {};
+  const auto manifold  = store.rebuildManifold(store.latest());
+  const auto documents = manifold.dimensionNamed(kDocuments, store);
+  const auto slices    = manifold.dimensionNamed(kZigzag, store);
+  std::set<std::string> paths;
+  const auto remember = [&](const zigzag::CellRef cell) {
+    if (cell != zigzag::noCell) {
+      auto path = manifold.textOf(cell, store);
+      if (!path.empty()) paths.insert(std::move(path));
+    }
+  };
+  for (const auto name : {kPlaces, kClosedPlaces}) {
+    const auto rank = manifold.dimensionNamed(name, store);
+    if (!rank) continue;
+    auto place = manifold.linked(store.homeCell(), *rank);
+    for (auto left = manifold.cellCount(); place != zigzag::noCell && left > 0;
+         --left, place = manifold.linked(place, *rank)) {
+      if (documents) {
+        auto document = manifold.linked(place, *documents);
+        for (auto remaining = manifold.cellCount();
+             document != zigzag::noCell && remaining > 0;
+             --remaining, document = manifold.linked(document, *documents)) {
+          remember(document);
+        }
+      }
+      if (slices) remember(manifold.linked(place, *slices));
+    }
+  }
+  return {paths.begin(), paths.end()};
 }
 
 std::filesystem::path activityDirectory() {

@@ -12,6 +12,7 @@
 #include <string>
 #include <tuple>
 #include <unistd.h>
+#include <vector>
 
 #include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/store.hpp"
@@ -93,6 +94,7 @@ xanadu::ReadingPlace twoDocuments() {
 TEST_F(ReadingPlaceTest, anEmptyStoreHasNoPlace) {
   const xanadu::Store store(perma);
   EXPECT_FALSE(xanadu::latestPlace(store).has_value());
+  EXPECT_TRUE(xanadu::recordedStorePaths(store).empty());
 }
 
 TEST_F(ReadingPlaceTest, thePlaceRecordedIsThePlaceReadBack) {
@@ -180,6 +182,29 @@ TEST_F(ReadingPlaceTest,
   std::ignore                    = xanadu::recordClosedPlace(reopened, closed);
   EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/b"), closed);
   EXPECT_EQ(xanadu::closedPlaceFor(reopened, "/data/c"), another);
+}
+
+TEST_F(ReadingPlaceTest, recordedPathsIncludeOlderSessionsAndClosedSlices) {
+  xanadu::Store store(perma);
+  std::ignore = xanadu::recordPlace(store, twoDocuments());
+  xanadu::ReadingPlace closed{
+      .documents   = {{.storePath = "/data/closed", .version = "1"}},
+      .active      = 0,
+      .zigzagStore = "/data/slice-only"};
+  std::ignore          = xanadu::recordClosedPlace(store, closed);
+  std::ignore          = xanadu::recordClosedPlace(store, closed);
+  std::ignore          = xanadu::recordPlace(store, xanadu::ReadingPlace{});
+  const auto directory = root / "activity";
+  store.save(directory.string());
+  xanadu::Store reopened(perma);
+  reopened.load(directory.string());
+  const auto count = reopened.opCount();
+  EXPECT_EQ(xanadu::recordedStorePaths(reopened),
+            (std::vector<std::string>{"/data/a", "/data/b", "/data/closed",
+                                      "/data/slice-only"}));
+  EXPECT_EQ(reopened.opCount(), count);
+  ASSERT_TRUE(xanadu::latestPlace(reopened));
+  EXPECT_TRUE(xanadu::latestPlace(reopened)->documents.empty());
 }
 
 } // namespace

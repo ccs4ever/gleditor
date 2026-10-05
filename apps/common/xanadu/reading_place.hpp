@@ -78,6 +78,10 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place);
 /// The newest place in @p store, or nothing for a store with none.
 [[nodiscard]] std::optional<ReadingPlace> latestPlace(const Store &store);
 
+/// Unique store paths from all recorded sessions and closed checkpoints,
+/// including slice views. Reading the history appends no operations.
+[[nodiscard]] std::vector<std::string> recordedStorePaths(const Store &store);
+
 /// A closed document's checkpoint, separate from the open session's d.places.
 /// Earlier checkpoints survive; only the latest for this path is restored.
 MicroversionId recordClosedPlace(Store &store, const ReadingPlace &place);

@@ -884,32 +884,51 @@ Session::localFormattingAuthorities() const {
   std::vector<std::pair<std::string, const Store *>> result;
   if (stores.empty() || !stores[0].store) return result;
   std::error_code error;
-  const auto directory = xanadocsDirectory();
-  fs::directory_iterator entries(directory, error);
-  if (error) return result;
-  std::set<fs::path> present;
-  for (const auto &entry : entries) {
-    // Only native documents in the user's own document directory are
-    // discoverable here; arbitrary siblings and remote stores are not scanned.
-    if (entry.is_symlink(error) || error || !entry.is_directory(error) || error)
+  std::set<fs::path> candidates;
+  fs::directory_iterator entries(xanadocsDirectory(), error);
+  for (auto end = fs::directory_iterator{}; !error && entries != end;
+       entries.increment(error)) {
+    const auto &entry = *entries;
+    std::error_code entryError;
+    if (entry.is_symlink(entryError) || entryError ||
+        !entry.is_directory(entryError) || entryError)
       continue;
-    const auto nativePath = fs::weakly_canonical(entry.path(), error);
+    candidates.insert(entry.path());
+  }
+  // The reader's own history supplies explicit paths outside the default
+  // directory. It does not grant discovery of arbitrary neighboring stores.
+  if (auto *history = const_cast<Session *>(this)->activity()) {
+    if (recordedAuthorityOps_ != history->opCount()) {
+      recordedAuthorityPaths_ = xanadu::recordedStorePaths(*history);
+      recordedAuthorityOps_   = history->opCount();
+    }
+    candidates.insert(recordedAuthorityPaths_.begin(),
+                      recordedAuthorityPaths_.end());
+  }
+  std::set<fs::path> present;
+  for (const auto &candidate : candidates) {
+    const auto nativePath = fs::weakly_canonical(candidate, error);
     if (error) continue;
     const auto tables = nativePath / "store.tables";
     if (!fs::is_regular_file(tables, error) || error) continue;
     const auto modified = fs::last_write_time(tables, error);
     if (error) continue;
+    const auto opsModified =
+        fs::last_write_time(nativePath / "ops.nodes", error);
+    if (error) continue;
     present.insert(nativePath);
     if (std::ranges::any_of(stores, [&](const auto &loaded) {
           return !loaded.path.empty() &&
-                 fs::weakly_canonical(loaded.path) == nativePath;
+                 fs::weakly_canonical(loaded.path, error) == nativePath &&
+                 !error;
         })) {
       formattingAuthorities_.erase(nativePath);
       continue;
     }
     auto found = formattingAuthorities_.find(nativePath);
     if (found == formattingAuthorities_.end() ||
-        found->second.modified != modified) {
+        found->second.modified != modified ||
+        found->second.opsModified != opsModified) {
       auto authority =
           std::make_unique<Store>(stores[0].store->userPermascrollPtr());
       try {
@@ -922,8 +941,9 @@ Session::localFormattingAuthorities() const {
       found = formattingAuthorities_
                   .insert_or_assign(
                       nativePath,
-                      FormattingAuthority{.modified = modified,
-                                          .store    = std::move(authority)})
+                      FormattingAuthority{.modified    = modified,
+                                          .opsModified = opsModified,
+                                          .store       = std::move(authority)})
                   .first;
     }
     if (found->second.store) {

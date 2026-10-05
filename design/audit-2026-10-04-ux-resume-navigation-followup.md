@@ -167,3 +167,7 @@ runs overwrite those frames. The separately retained UI captures above use OpenG
 
 Visit annotation/reference controls, fully coincident link choice, and native assistive-technology
 delivery remain open.
+
+The [2026-10-05 follow-up](audit-2026-10-05-ux-known-authorities.md) extends discovery to previously
+opened local authorities outside the default directory. Unseen external paths and remote authorities
+remain outside discovery.
