@@ -287,16 +287,49 @@ publication namespace/UI integration also passed after that fix. The final Docke
 smoke tests with networking disabled. Repository formatting and lint gates passed. Final build, test
 and image identity logs are retained under `build/publication-download/`.
 
+## Signed author catalogs and topic discovery (2026-10-06)
+
+A publication sent to the test swarm now also updates the author's signed catalog at
+`bep46:<key>/catalog`. The catalog has its own durable sequence, independent of each document's
+publication sequence. Its versioned canonical bencode lists document salts, immutable roots, titles,
+topics and the author's selected microversions. Publishing a different microversion does not infer
+an edition change. Completion waits for remote DHT acknowledgement of both the document pointer and
+the catalog pointer; immutable catalog seeds remain available after restart.
+
+`Ctrl+Shift+D` opens discovery by topic or publishing key. Telescope accepts Return on a simple
+keyword such as `Ideas`, `#Ideas`, or `author:<64-hex-key>`. Author discovery resolves the signed
+catalog pointer and fetches its torrent. Topic discovery joins the deterministic
+`SHA1("xudu:topic:" + canonical-topic)` rendezvous and exchanges signed catalogs through the
+`xudu_publications` BitTorrent extension. No separate service, direct reader peer address or
+preloaded search record is needed. Discovery and download sessions stay on their workers.
+
+Readers verify catalog signatures, requested publisher/topic, canonical encoding and observed
+sequence high-water marks before ingestion. Forged metadata, conflicting equal-sequence snapshots
+and document rollback are refused. Verified snapshots and explicitly followed keys persist privately
+across restart. Catalog records are search metadata, not proof of Oracle enrollment, availability or
+complete content; these distinctions are visible in the interface. Choosing a result starts the
+existing signed-name download and complete-store verification path.
+
+The new wire/catalog format is version 1. Native store format 4 and publication format 2 are
+unchanged. The default Docker smoke filters include the catalog and worker regression suites.
+
+Validation and remaining limitations are recorded in
+[the discovery report](ux_publication_discovery_validation_2026-10-06.md). This adds author-key and
+keyword discovery prerequisites for P2/P3; subscriptions, commentary discovery and link packages
+still require their own interface journeys.
+
+The final focused run passed 53 cases; the final namespace run passed 12 transport/mutable-name
+cases and both publication integrations. The local publication UI runner passed with evidence in
+`build/publication-local/run-9e43ava2/`. The rebuilt Docker image `gleditor-swarm-test:local`
+(`cae7ecc8eda4`) passed 104 smoke tests with networking disabled, and its publication sources match
+the host tree. Repository format-check and lint passed; clang-format 19 comparison found no new
+deviations, while unchanged regions retain the baseline differences described in the report.
+
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
-1. Add signed author catalog publication/ingestion and topic rendezvous exchange for author-key
-   following and keyword search. Feed verified results into the asynchronous download/opening path.
-   Known publication magnets now resolve/download on a worker, and completed snapshots reopen
-   offline; the complete P2 catalog/follow and P3 search journeys remain pending. An empty catalog
-   stays empty until data is learned.
 1. Add persisted update subscriptions, sequence polling, dependency verification, retry and
    acknowledgement, including missed updates after reconnect.
 1. Add commentary/backlink and independent link-package creation, review, announcement and

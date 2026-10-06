@@ -314,6 +314,8 @@ inline constexpr std::string_view kKeymapSworph     = "std:xudu/sworph";
 inline constexpr std::string_view kKeymapPublish    = "std:xudu/publish";
 inline constexpr std::string_view kKeymapPublicationStatus =
     "std:xudu/publication_status";
+inline constexpr std::string_view kKeymapPublicationDiscovery =
+    "std:xudu/publication_discovery";
 inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";
 inline constexpr std::string_view kKeymapDelete    = "std:xudu/delete";
 inline constexpr std::string_view kKeymapPageBreak = "std:xudu/page_break";

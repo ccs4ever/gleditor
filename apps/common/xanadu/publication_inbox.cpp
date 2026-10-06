@@ -107,6 +107,12 @@ public:
                                    hash.hex());
       } while (true);
     }
+    const auto flushDeadline = std::chrono::steady_clock::now() + timeout_;
+    while (!source_.flushDownload(hash, 250ms)) {
+      checkCancelled(stop);
+      if (std::chrono::steady_clock::now() >= flushDeadline)
+        throw std::runtime_error("Publication files did not finish flushing");
+    }
     checkCancelled(stop);
     std::ofstream retained(directory / "metainfo.torrent", std::ios::binary);
     retained << *encoded;

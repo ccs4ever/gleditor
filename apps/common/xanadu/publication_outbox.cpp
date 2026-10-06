@@ -1,4 +1,5 @@
 #include "publication_outbox.hpp"
+#include "author_catalog.hpp"
 
 #include <lmdb.h>
 
@@ -188,8 +189,10 @@ class SwarmTransport final : public PublicationTransport {
 public:
   SwarmTransport(
       MutableKeys keys, SwarmContentSource::Options options,
-      const std::vector<std::pair<std::string, std::uint16_t>> &nodes)
-      : keys_(keys), source_(options), nodes_(nodes) {
+      const std::vector<std::pair<std::string, std::uint16_t>> &nodes,
+      std::filesystem::path catalogDirectory)
+      : keys_(keys), source_(options), nodes_(nodes),
+        catalogDirectory_(std::move(catalogDirectory)) {
     for (const auto &[host, port] : nodes) source_.addDhtNode(host, port);
   }
   void seed(const PublicationSeed &seed) override {
@@ -207,19 +210,75 @@ public:
     // starts may be lost; retry only the explicitly configured nodes.
     for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
     source_.publishMutable(keys_, pub.salt, hash, pub.sequence);
+    auto &retained = announcements_[pub.salt];
+    if (pub.sequence >= retained.second) retained = {hash, pub.sequence};
   }
   bool acknowledged(const Publication &pub, const InfoHash &hash) override {
     return source_.publicationAcknowledged(pub.publisher, pub.salt, hash,
                                            pub.sequence);
   }
-  void poll() override { source_.poll(); }
+  void poll() override {
+    source_.poll();
+    const auto now = std::chrono::steady_clock::now();
+    if (announcements_.empty() || now < nextRefresh_) return;
+    // Newly joined DHT nodes did not witness the initial acknowledged put.
+    // Rotate retained names, preserving exactly the author's signed sequence.
+    auto next = announcements_.upper_bound(lastRefresh_);
+    if (next == announcements_.end()) next = announcements_.begin();
+    for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
+    source_.publishMutable(keys_, next->first, next->second.first,
+                           next->second.second);
+    lastRefresh_ = next->first;
+    nextRefresh_ = now + std::chrono::seconds{5};
+  }
+  bool advertise(const Publication &pub, const InfoHash &hash) override {
+    const auto catalog =
+        updateAuthorCatalog(catalogDirectory_ / "state", pub, hash, keys_);
+    if (!catalog_ || catalog.sequence > catalog_->sequence) {
+      catalog_ = catalog;
+      const std::vector<TorrentContent> files{
+          {.path = "author.catalog", .data = encodeAuthorCatalog(catalog)}};
+      const auto torrent = makeTorrent(files, "author-catalog");
+      const auto root    = catalogDirectory_ / "seeds";
+      (void)writeTorrentSeed(root, torrent, files);
+      seed(reviewPublicationSeed(torrent.hash, root / torrent.hash.hex()));
+      catalogHash_              = torrent.hash;
+      nextCatalogAttempt_       = {};
+      announcements_["catalog"] = {catalogHash_, catalog_->sequence};
+    }
+    if (source_.publicationAcknowledged(keys_.publicKey, "catalog",
+                                        catalogHash_, catalog_->sequence)) {
+      const auto encoded = encodeAuthorCatalog(*catalog_);
+      for (const auto &entry : catalog_->entries)
+        for (const auto &topic : entry.topics)
+          source_.joinPublicationTopic(
+              topic, (catalogDirectory_ / "topics").string(), encoded);
+      return true;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now >= nextCatalogAttempt_) {
+      for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
+      source_.publishMutable(keys_, "catalog", catalogHash_,
+                             catalog_->sequence);
+      nextCatalogAttempt_ = now + std::chrono::seconds{2};
+    }
+    return false;
+  }
   std::uint16_t listenPort() const override { return source_.listenPort(); }
 
 private:
   MutableKeys keys_;
   SwarmContentSource source_;
+  std::map<std::string, std::pair<InfoHash, std::int64_t>> announcements_;
+  std::string lastRefresh_;
+  std::chrono::steady_clock::time_point nextRefresh_{
+      std::chrono::steady_clock::now() + std::chrono::seconds{5}};
   std::vector<std::pair<std::string, std::uint16_t>> nodes_;
   std::set<InfoHash> seeded_;
+  std::filesystem::path catalogDirectory_;
+  std::optional<SignedAuthorCatalog> catalog_;
+  InfoHash catalogHash_;
+  std::chrono::steady_clock::time_point nextCatalogAttempt_;
 };
 } // namespace
 
@@ -606,7 +665,8 @@ struct PublicationOutbox::Impl {
           if (job.status.phase == PublicationPhase::AwaitingDht &&
               transport->acknowledged(job.publication,
                                       job.status.manifestHash)) {
-            update(job, PublicationPhase::Published);
+            if (transport->advertise(job.publication, job.status.manifestHash))
+              update(job, PublicationPhase::Published);
             continue;
           }
           if (now < job.nextAttempt) continue;
@@ -641,8 +701,8 @@ std::string
 PublicationOutbox::submit(const Publication &pub,
                           const std::vector<std::filesystem::path> &roots,
                           bool announce) {
-  if (pub.sequence < 0 || pub.salt.empty() || pub.salt.size() > 64 ||
-      !verifyPublication(pub))
+  if (pub.sequence < 0 || pub.salt.empty() || pub.salt == "catalog" ||
+      pub.salt.size() > 64 || !verifyPublication(pub))
     throw std::invalid_argument("invalid publication outbox request");
   Job job;
   job.publication     = pub;
@@ -697,11 +757,14 @@ std::uint16_t PublicationOutbox::listenPort() const {
 std::function<std::unique_ptr<PublicationTransport>()>
 publicationSwarmTransport(
     MutableKeys keys, SwarmContentSource::Options options,
-    std::vector<std::pair<std::string, std::uint16_t>> nodes) {
+    std::vector<std::pair<std::string, std::uint16_t>> nodes,
+    std::filesystem::path catalogDirectory) {
   options.enableLocalDiscovery = false;
   options.enableTrackers       = false;
-  return [keys, options, nodes = std::move(nodes)] {
-    return std::make_unique<SwarmTransport>(keys, options, nodes);
+  return [keys, options, nodes = std::move(nodes),
+          catalogDirectory = std::move(catalogDirectory)] {
+    return std::make_unique<SwarmTransport>(keys, options, nodes,
+                                            catalogDirectory);
   };
 }
 } // namespace xanadu

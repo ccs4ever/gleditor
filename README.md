@@ -202,7 +202,12 @@ dependencies cached beside the manifest, and accepts a BEP 46 publication magnet
 fetch on a worker. The Download publication panel offers progress refresh, open, cancel and retry;
 completed snapshots remain in the Open picker across restart and open offline. Downloads check the
 manifest's author key, salt and sequence against the signed DHT pointer, then verify every
-dependency before installation. Topic and author-catalog discovery remain pending. See
+dependency before installation. `Ctrl+Shift+D` discovers signed publications from an author's 64-hex
+publishing key or a topic. In Telescope, Return on a simple topic such as `Ideas` starts a DHT
+rendezvous query; `author:<key>` follows that publishing key. Readers review the signed catalog,
+choose a publication, and use the same download/open controls. Author signatures do not establish
+Oracle enrollment. Catalogs and followed keys persist across restart; update notifications and
+background subscription polling remain pending. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
 repaired prerequisites and remaining network/UI work.
 

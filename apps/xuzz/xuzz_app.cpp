@@ -499,9 +499,22 @@ int XuzzApp::run(const int argc, char **argv) {
                     docSwitcher);
 
   xudu::SwarmCatalog swarmCatalog;
+  views.setPublicationCatalog(&swarmCatalog);
+  try {
+    for (const auto &key : session->publicationDiscovery().followedAuthors())
+      swarmCatalog.followAuthor(key);
+    for (const auto &catalog : session->publicationDiscovery().cachedCatalogs())
+      swarmCatalog.ingestAuthorCatalog(catalog);
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_DEBUG("xudu.discovery", "Cached catalog refused: {}",
+                       error.what());
+  }
   xudu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "Sans 10");
   swarmTelescope.setOnSummon([&views](const xudu::PublicationEntry &entry) {
     views.summonPublication(entry);
+  });
+  swarmTelescope.setOnDiscover([&views](const std::string &query) {
+    views.discoverPublications(query);
   });
   if (opts.telescopeVisible) {
     swarmTelescope.setVisible(true);
@@ -1847,6 +1860,13 @@ int XuzzApp::run(const int argc, char **argv) {
   const auto toggleTelescopeAction = [&swarmTelescope] {
     swarmTelescope.toggle();
   };
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPublicationDiscovery),
+      "discover signed publications by topic or author key",
+      [&views, &swarmTelescope] {
+        swarmTelescope.setVisible(false);
+        views.discoverPublications();
+      });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTelescopeToggle),
       "toggle decentralized swarm telescope overlay", toggleTelescopeAction);

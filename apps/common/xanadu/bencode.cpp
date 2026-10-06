@@ -154,7 +154,11 @@ std::string Value::encode() const {
   throw std::runtime_error("bencode: unknown kind");
 }
 
-Value decode(const std::string_view input, std::size_t &pos) {
+Value decode(const std::string_view input, std::size_t &pos,
+             const std::size_t depth) {
+  // Unauthenticated network metadata must not turn nesting into stack use.
+  constexpr std::size_t maximumNestingDepth = 128;
+  if (depth > maximumNestingDepth) fail("nesting limit exceeded", pos);
   if (pos >= input.size()) {
     fail("unexpected end of input", pos);
   }
@@ -171,7 +175,7 @@ Value decode(const std::string_view input, std::size_t &pos) {
     pos++;
     List items;
     while (pos < input.size() && 'e' != input[pos]) {
-      items.push_back(decode(input, pos));
+      items.push_back(decode(input, pos, depth + 1));
     }
     if (pos >= input.size()) {
       fail("unterminated list", began);
@@ -187,7 +191,7 @@ Value decode(const std::string_view input, std::size_t &pos) {
     bool havePrevious = false;
     while (pos < input.size() && 'e' != input[pos]) {
       const auto keyAt = pos;
-      auto key         = decode(input, pos);
+      auto key         = decode(input, pos, depth + 1);
       if (!key.isString()) {
         fail("dictionary key is not a string", keyAt);
       }
@@ -199,7 +203,7 @@ Value decode(const std::string_view input, std::size_t &pos) {
       }
       previousKey  = key.asString();
       havePrevious = true;
-      entries.emplace(previousKey, decode(input, pos));
+      entries.emplace(previousKey, decode(input, pos, depth + 1));
     }
     if (pos >= input.size()) {
       fail("unterminated dictionary", began);
@@ -229,6 +233,9 @@ Value decode(const std::string_view input, std::size_t &pos) {
   return value;
 }
 
+Value decode(const std::string_view input, std::size_t &pos) {
+  return decode(input, pos, 0);
+}
 Value decode(const std::string_view input) {
   std::size_t pos = 0;
   auto value      = decode(input, pos);

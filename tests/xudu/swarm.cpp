@@ -204,6 +204,8 @@ TEST_F(SwarmTest,
     received = swarm.readStream(hash, 0, meta.totalLength());
   } while (received.empty() && std::chrono::steady_clock::now() < deadline);
   ASSERT_EQ(received, peer.text);
+  ASSERT_TRUE(swarm.flushDownload(hash, 30s));
+  EXPECT_EQ(readWholeFile((downloads / meta.name()).string()), peer.text);
   swarm.discardCachedPieces(hash);
   // Discarding the copied read buffers leaves retained disk pieces available.
   EXPECT_EQ(swarm.readStream(hash, 0, meta.totalLength()), peer.text);

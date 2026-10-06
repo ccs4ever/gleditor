@@ -17,6 +17,7 @@ struct SwarmCatalog::Impl {
   std::vector<AuthorNode> authors;
   std::vector<TopicSwarmNode> topics;
   std::map<std::string, PublicationEntry> pubsByHash;
+  std::map<std::string, std::string> signedCatalogs;
 
   explicit Impl(const std::string &dbPath) : index(dbPath) {}
 };
@@ -38,6 +39,56 @@ void SwarmCatalog::addPublication(PublicationEntry entry, const int seeders,
   impl_->index.indexPublication(entry, seeders, peers, verified);
   impl_->pubsByHash[entry.infoHash] = entry;
   impl_->ledger.appendPublication(std::move(entry));
+}
+
+void SwarmCatalog::followAuthor(const PublicKey &key) {
+  if (key.isZero())
+    throw std::invalid_argument("Cannot follow an empty author key");
+  const auto name = key.hex();
+  if (std::ranges::find(impl_->authors, name, &AuthorNode::pubKeyHex) ==
+      impl_->authors.end())
+    impl_->authors.push_back(
+        {.name = name.substr(0, 12), .fingerprint = name, .pubKeyHex = name});
+  if (const auto found = impl_->signedCatalogs.find(name);
+      found != impl_->signedCatalogs.end())
+    std::ranges::find(impl_->authors, name, &AuthorNode::pubKeyHex)
+        ->publicationCount = decodeAuthorCatalog(found->second).entries.size();
+}
+void SwarmCatalog::ingestAuthorCatalog(const SignedAuthorCatalog &catalog) {
+  const auto bytes = encodeAuthorCatalog(catalog);
+  (void)decodeAuthorCatalog(bytes);
+  const auto key = catalog.publisher.hex();
+  if (const auto previous = impl_->signedCatalogs.find(key);
+      previous != impl_->signedCatalogs.end()) {
+    const auto prior = decodeAuthorCatalog(previous->second);
+    if (prior.sequence > catalog.sequence) return;
+    if (prior.sequence == catalog.sequence) {
+      if (bytes != previous->second)
+        throw AuthorCatalogUnreadable(
+            "Conflicting catalog at observed sequence");
+      return;
+    }
+  }
+  for (auto it = impl_->pubsByHash.begin(); it != impl_->pubsByHash.end();) {
+    if (it->second.authorFingerprint == key) {
+      impl_->index.removePublication(it->first);
+      it = impl_->pubsByHash.erase(it);
+    } else
+      ++it;
+  }
+  for (const auto &entry : catalog.entries)
+    // Key ownership is checked; Oracle/ledger enrollment is still unverified.
+    addPublication(catalogPublicationEntry(catalog, entry), 0, 0, false);
+  impl_->signedCatalogs[key] = bytes;
+  const auto author =
+      std::ranges::find(impl_->authors, key, &AuthorNode::pubKeyHex);
+  if (author != impl_->authors.end())
+    author->publicationCount = catalog.entries.size();
+  impl_->topics.clear();
+  for (const auto &[topic, count] : impl_->index.topTopics())
+    impl_->topics.push_back({.topic    = topic,
+                             .infoHash = publicationTopicTarget(topic).hex(),
+                             .publicationCount = count});
 }
 
 std::vector<AuthorNode> SwarmCatalog::followedAuthors() const {

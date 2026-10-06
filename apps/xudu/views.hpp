@@ -172,6 +172,11 @@ public:
                                 float screenX = 0.0F, float screenY = 0.0F);
   void summonPublication(const PublicationEntry &entry);
   void publicationDownloadStatus(const std::string &id);
+  void discoverPublications(const std::string &query = {});
+  void publicationDiscoveryStatus(const std::string &id);
+  void setPublicationCatalog(SwarmCatalog *catalog) {
+    publicationCatalog_ = catalog;
+  }
 
   void insertPageBreak(std::uint32_t docIndex, std::uint32_t charOffset);
   void insertPageBreakAtCaret();
@@ -234,6 +239,7 @@ private:
   render::RenderDevice *device_{nullptr};
   render::PipelineDesc documentDesc_;
   WireframeHullOverlay *wireframeOverlay_{nullptr};
+  SwarmCatalog *publicationCatalog_{};
 };
 
 } // namespace xudu

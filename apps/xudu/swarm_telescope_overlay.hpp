@@ -81,6 +81,7 @@ public:
   void selectItem(std::size_t index);
 
   void setOnSummon(SummonHandler handler);
+  void setOnDiscover(std::function<void(const std::string &)> handler);
   void setSampleForceVisible(bool force);
 
 private:
@@ -91,6 +92,7 @@ private:
   std::string fontName_;
   std::unique_ptr<gleditor::Canvas> canvas_;
   SummonHandler onSummon_;
+  std::function<void(const std::string &)> onDiscover_;
 
   mutable std::recursive_mutex guard_;
   std::uint64_t revision_{1};

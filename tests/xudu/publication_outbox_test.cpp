@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "common/xanadu/bencode.hpp"
+#include "common/xanadu/publication_discovery.hpp"
 #include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
@@ -537,6 +538,99 @@ TEST_F(PublicationInboxTest, ShutdownCancelsWorkerAndQueuedRequests) {
 class PublicationOutboxNetworkTest : public PublicationOutboxTest {};
 
 TEST_F(PublicationOutboxNetworkTest,
+       AuthorKeyAndTopicDiscoveryOpenFromEmptyReaderProfiles) {
+  const auto host            = std::getenv("XUDU_PEER_HOST");
+  const auto port            = std::getenv("XUDU_PEER_PORT");
+  const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
+  const auto readerHost      = std::getenv("XUDU_READER_HOST");
+  const auto topicHost       = std::getenv("XUDU_DISCOVERY_HOST");
+  const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
+  if (!host || !port || !publisherHost || !readerNamespace || !readerHost ||
+      !topicHost)
+    GTEST_SKIP() << "run make test/publication-swarm";
+  xanadu::SwarmContentSource::Options network;
+  network.listenInterfaces               = std::string(publisherHost) + ":0";
+  network.enableLocalDiscovery           = false;
+  network.enableTrackers                 = false;
+  network.restrictDhtToDistinctNetworks  = false;
+  network.allowManyConnectionsPerAddress = true;
+  network.dhtPacketsPerSecond            = 100;
+  auto configured                        = options();
+  configured.makeTransport               = xanadu::publicationSwarmTransport(
+      keys, network, {{host, static_cast<std::uint16_t>(std::stoul(port))}},
+      root / "catalog");
+  xanadu::PublicationOutbox publisher(configured);
+  const auto id = publisher.submit(publication, roots, true);
+  ASSERT_TRUE(publisher.waitFor(id, xanadu::PublicationPhase::Published, 60s))
+      << status(publisher, id).error;
+  const auto quote = [](const std::string &value) {
+    std::string result{"'"};
+    for (char ch : value) result += ch == '\'' ? "'\\''" : std::string(1, ch);
+    return result + "'";
+  };
+  const auto evidence =
+      fs::current_path() / "build/publication-discovery/network-ui";
+  fs::create_directories(evidence);
+  for (const bool author : {true, false}) {
+    const std::string name = author ? "bob" : "carl";
+    const auto profile     = root / name;
+    const auto logPath     = evidence / (name + ".log");
+    const auto script =
+        author ? " --chord Ctrl+Shift+D --chord Right --chord Tab --type " +
+                     quote(keys.publicKey.hex()) + " --chord Tab --chord Return"
+               : " --chord F3 --type Ideas --chord Return";
+    // Only Alice's key is typed for Bob. Carl supplies just the topic. No
+    // manifest, publication magnet, cache or direct BT peer is supplied.
+    const auto command =
+        "ip netns exec " + quote(readerNamespace) +
+        " env SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+        "LIBGL_ALWAYS_SOFTWARE=1" +
+        " XDG_DATA_HOME=" + quote((profile / "data").string()) +
+        " XDG_CONFIG_HOME=" + quote((profile / "config").string()) +
+        " XDG_CACHE_HOME=" + quote((profile / "cache").string()) +
+        " ./build/xuzz " + quote((profile / "workspace").string()) +
+        " --permascroll " + quote((profile / "permascroll").string()) +
+        " --backend opengl --profile --test-publication-swarm " +
+        quote(std::string(author ? readerHost : topicHost) + ":0") +
+        " --dht-node " + quote(std::string(host) + ":" + port) + script +
+        " --dump-a11y --capture " +
+        quote((evidence / (name + "-queued.ppm")).string()) +
+        " --wait-ms 35000 --chord Return --dump-a11y --capture " +
+        quote((evidence / (name + "-catalog.ppm")).string()) +
+        " --chord Right --chord Return --wait-ms 35000 --chord Return "
+        "--dump-a11y --capture " +
+        quote((evidence / (name + "-download.ppm")).string()) +
+        " --chord Right --chord Return --dump-a11y --capture " +
+        quote((evidence / (name + "-opened.ppm")).string()) + " > " +
+        quote(logPath.string()) + " 2>&1";
+    ASSERT_EQ(std::system(command.c_str()), 0)
+        << std::ifstream(logPath).rdbuf();
+    std::ifstream output(logPath);
+    const std::string log{std::istreambuf_iterator<char>(output),
+                          std::istreambuf_iterator<char>()};
+    EXPECT_THAT(log, testing::HasSubstr("signed metadata received"));
+    EXPECT_THAT(
+        log, testing::HasSubstr("opened downloaded publication Story Ideas"));
+    xanadu::PublicationDiscovery offline(
+        {.directory = profile / "data/xudu/publication-discovery"});
+    ASSERT_EQ(offline.cachedCatalogs().size(), 1U);
+    EXPECT_EQ(offline.cachedCatalogs().front().publisher, keys.publicKey);
+    EXPECT_EQ(offline.cachedCatalogs().front().entries.front().hash,
+              status(publisher, id).manifestHash);
+    EXPECT_EQ(offline.followedAuthors().size(), author ? 1U : 0U);
+    const auto copies =
+        fs::directory_iterator(profile / "data/xudu/publication-inbox");
+    ASSERT_NE(copies, fs::directory_iterator{});
+    xanadu::Store reader(std::make_shared<xanadu::UserPermascroll>());
+    reader.load((copies->path() / "store").string());
+    EXPECT_EQ(reader.documentId(), publication.storeId);
+    EXPECT_EQ(reader.opCount(), publication.opsSegments.front().length);
+    EXPECT_EQ(reader.textOf(publication.version), "Story Ideas");
+    EXPECT_EQ(reader.userPermascroll().spool().size(), 0U);
+  }
+}
+
+TEST_F(PublicationOutboxNetworkTest,
        RemoteDhtAcknowledgesAndRetainsTheSignedPointer) {
   const auto host = std::getenv("XUDU_PEER_HOST");
   const auto port = std::getenv("XUDU_PEER_PORT");
@@ -549,10 +643,12 @@ TEST_F(PublicationOutboxNetworkTest,
   network.enableTrackers                 = false;
   network.restrictDhtToDistinctNetworks  = false;
   network.allowManyConnectionsPerAddress = true;
+  network.dhtPacketsPerSecond            = 100;
   auto configured                        = options();
   configured.retryInterval               = 2s;
   configured.makeTransport               = xanadu::publicationSwarmTransport(
-      keys, network, {{host, static_cast<std::uint16_t>(std::stoul(port))}});
+      keys, network, {{host, static_cast<std::uint16_t>(std::stoul(port))}},
+      root / "author-catalog");
   xanadu::InfoHash expected;
   std::string id;
   {
@@ -597,6 +693,8 @@ TEST_F(PublicationOutboxNetworkTest,
   // only inputs are the author publication link and a named DHT bootstrap node.
   const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
   const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
+  const auto readerHost      = std::getenv("XUDU_READER_HOST");
+  ASSERT_NE(readerHost, nullptr);
   ASSERT_NE(readerNamespace, nullptr);
   ASSERT_NE(publisherHost, nullptr);
   const auto cache  = root / "remote-reader";
@@ -610,8 +708,8 @@ TEST_F(PublicationOutboxNetworkTest,
   const auto command =
       std::string("ip netns exec ") + quote(readerNamespace) +
       " ./build/xudu-swarm-peer --download-publication " + quote(link.uri()) +
-      " " + quote(publisherHost) + " " + std::to_string(reopened.listenPort()) +
-      " " + quote(cache.string()) + " > " + quote(report.string()) + " 2>&1";
+      " " + quote(host) + " " + quote(port) + " " + quote(cache.string()) +
+      " " + quote(readerHost) + " > " + quote(report.string()) + " 2>&1";
   ASSERT_EQ(std::system(command.c_str()), 0) << std::ifstream(report).rdbuf();
   std::ifstream restoredReport(report);
   std::string line;
@@ -646,10 +744,10 @@ TEST_F(PublicationOutboxNetworkTest,
       " ./build/xuzz " + quote((uiRoot / "workspace").string()) +
       " --permascroll " + quote((uiRoot / "permascroll").string()) +
       " --backend opengl --profile --test-publication-swarm " +
-      quote(std::string(host) + ":0") + " --dht-node " +
-      quote(std::string(publisherHost) + ":" +
-            std::to_string(reopened.listenPort())) +
+      quote(std::string(readerHost) + ":0") + " --dht-node " +
+      quote(std::string(host) + ":" + port) +
       " --chord Ctrl+O --chord Tab --type " + quote(link.uri()) +
+      " --dump-a11y --capture " + quote((evidence / "input.ppm").string()) +
       " --chord Return" + " --dump-a11y --capture " +
       quote((evidence / "queued.ppm").string()) +
       " --wait-ms 30000 --chord Return --dump-a11y --capture " +

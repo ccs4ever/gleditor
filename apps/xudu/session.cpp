@@ -303,6 +303,7 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
 // the same unavoidable risk any other noexcept-adjacent code accepts.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
+  publicationDiscovery_.reset();
   publicationInbox_.reset();
   try {
     flushUncommitted();
@@ -585,7 +586,7 @@ const MutableKeys &Session::identity() {
 void Session::configureTestPublicationSwarm(
     const std::string &listen,
     std::vector<std::pair<std::string, std::uint16_t>> nodes) {
-  if (publicationOutbox_ || publicationInbox_)
+  if (publicationOutbox_ || publicationInbox_ || publicationDiscovery_)
     throw std::logic_error("publication outbox is already running");
   testPublicationSwarm_ = true;
   publicationListen_    = listen;
@@ -607,8 +608,11 @@ PublicationOutbox &Session::publicationOutbox() {
       swarm.listenInterfaces               = publicationListen_;
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      options.makeTransport =
-          publicationSwarmTransport(keys, swarm, publicationNodes_);
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationSwarmTransport(
+          keys, swarm, publicationNodes_,
+          xanadocsDirectory().parent_path() / "author-catalog" /
+              keys.publicKey.hex());
     }
     publicationOutbox_ =
         std::make_unique<PublicationOutbox>(std::move(options));
@@ -626,12 +630,34 @@ PublicationInbox &Session::publicationInbox() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
       options.makeTransport =
           publicationDownloadSwarmTransport(swarm, publicationNodes_);
     }
     publicationInbox_ = std::make_unique<PublicationInbox>(std::move(options));
   }
   return *publicationInbox_;
+}
+
+PublicationDiscovery &Session::publicationDiscovery() {
+  if (!publicationDiscovery_) {
+    PublicationDiscovery::Options options;
+    options.directory =
+        xanadocsDirectory().parent_path() / "publication-discovery";
+    if (testPublicationSwarm_) {
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationDiscoverySwarmTransport(
+          swarm, publicationNodes_, options.directory / "scratch");
+    }
+    publicationDiscovery_ =
+        std::make_unique<PublicationDiscovery>(std::move(options));
+  }
+  return *publicationDiscovery_;
 }
 
 std::pair<std::size_t, MicroversionId>

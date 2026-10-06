@@ -144,7 +144,7 @@ void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->addText(ctx.state, deckX + 16.0F, topY - 18.0F,
                    "DOCUVERSE SWARM TELESCOPE", 0x38BDF8FF, 0);
   canvas_->addText(ctx.state, deckX + 275.0F, topY - 18.0F,
-                   "| BEP 46 Author Catalogs & DHT Topic Swarms", 0x94A3B8CC,
+                   "| Topics / author:<key> | Browse Ctrl+Shift+D", 0x94A3B8CC,
                    0);
 
   // Close [Esc X] Button
@@ -290,7 +290,9 @@ void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
     // Author & Seeders
     std::string metaStr = res.entry.authorName + " | " +
-                          std::to_string(res.seederCount) + " seeds";
+                          (res.seederCount == 0 && res.peerCount == 0
+                               ? "availability unchecked"
+                               : std::to_string(res.seederCount) + " seeds");
     canvas_->addText(ctx.state, col2X + 8.0F, cardY + cardH - 36.0F, metaStr,
                      0x94A3B8CC, 0);
 
@@ -332,23 +334,37 @@ void SwarmTelescopeOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
     // Fingerprint
     std::string fpShort = sel.entry.authorFingerprint;
-    if (fpShort.size() > 20) {
-      fpShort = fpShort.substr(0, 16) + "...";
+    if (fpShort.size() == 64) {
+      canvas_->addText(ctx.state, col3X, inspY, "Key: " + fpShort.substr(0, 32),
+                       0x94A3B8AA, 0);
+      inspY -= 18.0F;
+      canvas_->addText(ctx.state, col3X, inspY, "     " + fpShort.substr(32),
+                       0x94A3B8AA, 0);
+      inspY -= 18.0F;
+    } else {
+      if (fpShort.size() > 20) {
+        fpShort = fpShort.substr(0, 16) + "...";
+      }
+      canvas_->addText(ctx.state, col3X, inspY, "Key: " + fpShort, 0x94A3B8AA,
+                       0);
+      inspY -= 18.0F;
     }
-    canvas_->addText(ctx.state, col3X, inspY, "Key: " + fpShort, 0x94A3B8AA, 0);
-    inspY -= 18.0F;
 
     // Metrics
-    std::string sizeStr = "Size: " + formatBytes(sel.entry.totalBytes) + " (" +
-                          std::to_string(sel.entry.microversions) +
-                          " microversions)";
+    std::string sizeStr =
+        sel.entry.microversions == 0
+            ? "Size/history checked on download"
+            : "Size: " + formatBytes(sel.entry.totalBytes) + " (" +
+                  std::to_string(sel.entry.microversions) + " microversions)";
     canvas_->addText(ctx.state, col3X, inspY, sizeStr, 0x94A3B8AA, 0);
     inspY -= 18.0F;
 
     // Swarm Health
-    std::string healthStr = "Health: " + std::to_string(sel.seederCount) +
-                            " seeders | " + std::to_string(sel.peerCount) +
-                            " peers";
+    std::string healthStr = sel.seederCount == 0 && sel.peerCount == 0
+                                ? "Availability: check on download"
+                                : "Health: " + std::to_string(sel.seederCount) +
+                                      " seeders | " +
+                                      std::to_string(sel.peerCount) + " peers";
     canvas_->addText(ctx.state, col3X, inspY, healthStr, 0x10B981CC, 0);
     inspY -= 22.0F;
 
@@ -443,6 +459,11 @@ void SwarmTelescopeOverlay::setOnSummon(SummonHandler handler) {
   const std::scoped_lock lock(guard_);
   onSummon_ = std::move(handler);
 }
+void SwarmTelescopeOverlay::setOnDiscover(
+    std::function<void(const std::string &)> handler) {
+  const std::scoped_lock lock(guard_);
+  onDiscover_ = std::move(handler);
+}
 
 void SwarmTelescopeOverlay::setSampleForceVisible(const bool force) {
   const std::scoped_lock lock(guard_);
@@ -467,6 +488,13 @@ bool SwarmTelescopeOverlay::keyPressed(const gleditor::Key key,
     if (searchFocused_) {
       refreshSearch();
       searchFocused_ = false;
+      if (onDiscover_ && !searchQuery_.empty() &&
+          (searchQuery_.starts_with("author:") ||
+           searchQuery_.find_first_of(" :\t\n()\"") == std::string::npos)) {
+        setVisible(false);
+        onDiscover_(searchQuery_.starts_with('#') ? searchQuery_.substr(1)
+                                                  : searchQuery_);
+      }
     } else if (selectedResultIndex_ < currentResults_.size() && onSummon_) {
       onSummon_(currentResults_[selectedResultIndex_].entry);
       setVisible(false);

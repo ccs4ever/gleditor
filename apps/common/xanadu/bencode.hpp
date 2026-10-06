@@ -93,6 +93,7 @@ public:
 
 private:
   friend Value decode(std::string_view /*input*/, std::size_t & /*pos*/);
+  friend Value decode(std::string_view, std::size_t &, std::size_t);
 
   Kind valueKind{Kind::Integer};
   std::int64_t number{};

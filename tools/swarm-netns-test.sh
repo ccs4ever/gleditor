@@ -97,6 +97,10 @@ ip link add xudu-s type veth peer name xudu-l
 ip link set xudu-s netns "$PEER_NS"
 ip link set xudu-l netns "$TEST_NS"
 ip netns exec "$PEER_NS" sh -c "ip addr add $PEER_IP/24 dev xudu-s; ip link set xudu-s up; ip link set lo up"
+# Reader sessions have distinct addresses from the bootstrap DHT node.
+for reader_address in 10.77.0.3 10.77.0.4; do
+  ip netns exec "$PEER_NS" ip addr add "$reader_address/24" dev xudu-s
+done
 ip netns exec "$TEST_NS" sh -c "ip addr add $TEST_IP/24 dev xudu-l; ip link set xudu-l up; ip link set lo up"
 echo "  seeder $PEER_IP, leecher $TEST_IP"
 
@@ -144,6 +148,8 @@ set +e
 ip netns exec "$TEST_NS" env \
   XUDU_PEER_HOST="$PEER_IP" \
   XUDU_TEST_HOST="$TEST_IP" \
+  XUDU_READER_HOST=10.77.0.3 \
+  XUDU_DISCOVERY_HOST=10.77.0.4 \
   XUDU_PEER_NAMESPACE="$PEER_NS" \
   XUDU_PEER_PORT="$PEER_PORT" \
   XUDU_PEER_TORRENT="$WORK/sample.torrent" \

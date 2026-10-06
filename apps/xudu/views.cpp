@@ -1115,6 +1115,135 @@ void Views::summonPublication(const PublicationEntry &entry) {
   openDocumentFromPath(entry.bep46Uri);
 }
 
+void Views::discoverPublications(const std::string &query) {
+  renderer->runWithState([this, query](RenderState &) {
+    using Field      = gleditor::Form::Field;
+    const auto start = [this](const std::string &value, bool author) {
+      try {
+        const auto id = session.publicationDiscovery().submit(value, author);
+        publicationDiscoveryStatus(id);
+      } catch (const std::exception &error) {
+        Field back;
+        back.label         = "Action";
+        back.kind          = gleditor::Form::Kind::Choice;
+        back.options       = {"Back to discovery"};
+        back.submitOnEnter = true;
+        form.open("Discovery unavailable", error.what(), {std::move(back)},
+                  [this](const auto &) { discoverPublications(); });
+      }
+    };
+    if (!query.empty()) {
+      const auto author = query.starts_with("author:");
+      start(author ? query.substr(7) : query, author);
+      return;
+    }
+    Field mode;
+    mode.label        = "Find by";
+    mode.kind         = gleditor::Form::Kind::Choice;
+    mode.options      = {"Topic keyword", "Follow publishing key"};
+    mode.optionValues = {"topic", "author"};
+    Field input;
+    input.label = "Topic or publishing key";
+    input.hint  = "Ideas, or the author's 64-hex public key";
+    Field action;
+    action.label         = "Action";
+    action.kind          = gleditor::Form::Kind::Choice;
+    action.options       = {"Start discovery", "Close"};
+    action.optionValues  = {"start", "close"};
+    action.submitOnEnter = true;
+    form.open("Discover publications",
+              "Signed metadata; author enrollment is not verified.",
+              {std::move(mode), std::move(input), std::move(action)},
+              [start](const auto &answers) {
+                if (answers[2].answer() == "start")
+                  start(answers[1].answer(), answers[0].answer() == "author");
+              });
+  });
+}
+
+void Views::publicationDiscoveryStatus(const std::string &id) {
+  renderer->runWithState([this, id](RenderState &) {
+    using Field = gleditor::Form::Field;
+    try {
+      const auto status = session.publicationDiscovery().status(id);
+      Field action;
+      action.label         = "Action";
+      action.kind          = gleditor::Form::Kind::Choice;
+      action.options       = {"Refresh progress", "Open selected publication",
+                              "Retry discovery", "Close"};
+      action.optionValues  = {"refresh", "open", "retry", "close"};
+      action.submitOnEnter = true;
+      Field result;
+      result.label = "Publication";
+      result.kind  = gleditor::Form::Kind::Choice;
+      std::string note;
+      if (publicationCatalog_)
+        for (const auto &key : session.publicationDiscovery().followedAuthors())
+          publicationCatalog_->followAuthor(key);
+      for (const auto &catalog : status.catalogs) {
+        if (publicationCatalog_)
+          publicationCatalog_->ingestAuthorCatalog(catalog);
+        for (const auto &entry : catalog.entries) {
+          if (!status.author && std::ranges::find(entry.topics, status.query) ==
+                                    entry.topics.end())
+            continue;
+          const auto publication = catalogPublicationEntry(catalog, entry);
+          result.options.push_back(
+              entry.title + " — " + catalog.publisher.hex().substr(0, 12) +
+              " #" + std::to_string(entry.sequence) + " (catalog #" +
+              std::to_string(catalog.sequence) + ")");
+          result.optionValues.push_back(publication.bep46Uri);
+        }
+      }
+      switch (status.phase) {
+      case DiscoveryPhase::Queued:
+        note = "queued";
+        break;
+      case DiscoveryPhase::Searching:
+        note = "searching peers";
+        break;
+      case DiscoveryPhase::Ready:
+        note = "signed metadata received; enrollment unchecked";
+        break;
+      case DiscoveryPhase::Failed:
+        note = status.error;
+        break;
+      }
+      note += status.author ? " — author " + status.query.substr(0, 12)
+                            : " — topic " + status.query;
+      if (result.options.empty()) {
+        result.options      = {"No accepted publication metadata"};
+        result.optionValues = {""};
+      }
+      form.open("Publication discovery", std::move(note),
+                {std::move(action), std::move(result)},
+                [this, id](const auto &answers) {
+                  const auto action = answers[0].answer();
+                  if (action == "close") return;
+                  if (action == "open" && !answers[1].answer().empty()) {
+                    openDocumentFromPath(answers[1].answer());
+                    return;
+                  }
+                  if (action == "retry") {
+                    const auto status =
+                        session.publicationDiscovery().status(id);
+                    (void)session.publicationDiscovery().submit(status.query,
+                                                                status.author);
+                  }
+                  publicationDiscoveryStatus(id);
+                });
+    } catch (const std::exception &error) {
+      Field back;
+      back.label         = "Action";
+      back.kind          = gleditor::Form::Kind::Choice;
+      back.options       = {"Back to discovery"};
+      back.submitOnEnter = true;
+      form.open("Discovery unavailable", error.what(), {std::move(back)},
+                [this](const auto &) { discoverPublications(); });
+    }
+  });
+}
+
 void Views::publicationDownloadStatus(const std::string &id) {
   renderer->runWithState([this, id](RenderState &) {
     try {
