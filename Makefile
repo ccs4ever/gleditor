@@ -497,7 +497,7 @@ override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
 # Only src/a11y/platform_accesskit.cpp includes the header, but the flags are
 # not per-file here and a stray include path costs nothing.
 override CXXFLAGS += $(A11Y_CFLAGS)
-override CXXFLAGS += $(patsubst -I%,-isystem%,$(shell pkg-config --cflags libtorrent-rasterbar))
+override CXXFLAGS += $(if $(XUDU_PKGS),$(patsubst -I%,-isystem%,$(shell pkg-config --cflags $(XUDU_PKGS))))
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif
@@ -605,7 +605,7 @@ ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
 # about pkg-config's own -I ordering). lib/common holds the private
 # xxhash.h/mem.h headers these two files need that installed zstd.h never
 # exposes.
-ZSTD_SEEKABLE_CFLAGS := -isystem thirdparty/zstd/lib -isystem thirdparty/zstd/lib/common \
+ZSTD_SEEKABLE_CFLAGS := -fPIC -isystem thirdparty/zstd/lib -isystem thirdparty/zstd/lib/common \
                        -I$(ZSTD_SEEKABLE_DIR)
 LIB_SRCS_C :=
 ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
@@ -798,6 +798,13 @@ FORCE:
 $(FLAGSTAMP): FORCE | $(OBJDIR)/
 	@sig='$(CXXFLAGS) $(LDFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
 $(ALL_OBJS): $(FLAGSTAMP)
+
+# Distribution hardening flags also apply to the C objects linked into the
+# shared library. Their stamp avoids rebuilding unrelated C++ when CFLAGS vary.
+CFLAGSTAMP := $(OBJDIR)/.c-buildflags
+$(CFLAGSTAMP): FORCE | $(OBJDIR)/
+	@sig='$(CC) $(CFLAGS) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
+$(call objc,$(LIB_SRCS_C)): $(CFLAGSTAMP)
 
 $(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
 $(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
@@ -1553,19 +1560,19 @@ $(OBJDIR)/%.j: %.cpp Makefile
 # compiles (thirdparty/zstd/contrib/seekable_format, see LIB_SRCS_C). Uses
 # $(CC) and $(ZSTD_SEEKABLE_CFLAGS) rather than $(CXX)/$(CXXFLAGS): almost
 # none of the C++-specific half of CXXFLAGS applies to this vendored C code,
-# and the parts that do (debug/optimisation level) are pulled in via
-# $(DEBUG_OPTS) directly instead.
+# CFLAGS carries distribution hardening flags, with DEBUG_OPTS supplying the
+# selected debug/optimisation level.
 $(OBJDIR)/%.o: %.c
-	$(CC) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -c -o $@ $<
 
 $(OBJDIR)/%.dep: %.c Makefile
 	set -e; $(RM) -f $@; \
-	$(CC) -MM -MP $(ZSTD_SEEKABLE_CFLAGS) $< > $@.$$$$; \
+	$(CC) -MM -MP $(CFLAGS) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) $< > $@.$$$$; \
 	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j $@ : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
 $(OBJDIR)/%.j: %.c Makefile
-	$(CC) -MJ $@.tmp $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
+	$(CC) -MJ $@.tmp $(CFLAGS) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
 	$(SED) 's/, "-E"//' $@.tmp > $@
 	$(RM) -f $@.tmp
 

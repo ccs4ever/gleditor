@@ -42,24 +42,24 @@ dangling reference in session initialization.
 
 ## Evidence and limits
 
-| Target          | Evidence                                                                                                                                                        | Remaining validation                                                               |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Linux native    | Source-built static AccessKit; AT-SPI document text readback in gleditor and Xuzz; Xuzz New Document delivered through AT-SPI                                   | Native Walks and endpoint actions, complete journey execution with a screen reader |
-| Debian package  | Local Actions package build and install; installed gleditor/Xuzz render with GL/Vulkan and pass native AT-SPI text/action checks                                | Clean end-to-end local Actions invocation after the recipe repairs                 |
-| Arch / Fedora   | Package recipes require the pinned static binding and installed native client checks                                                                            | Package builds and installed client execution                                      |
-| Nix             | Actual AccessKit derivation builds and installs its static binding                                                                                              | Full application derivation and installed client readback                          |
-| Android         | gleditor ARM64/x86_64 APKs build; adapter, matching delegate and all shaders verified; API 28/30 native text/focus/click/edit round trips pass                  | ARM64 device execution and screen-reader journeys; native Xuzz remains separate    |
-| Browser adapter | Emscripten-compiled C++ tree read through Chromium accessibility; actions return to C++; Unicode, modal focus, secret fields, options and stale actions checked | Full applications blocked on media and networking ports                            |
-| macOS           | Official VLC SDK headers, real Mach-O dependency closure and relocation checked; native AX client added                                                         | Native execution, signing and trusted AX client execution                          |
-| Windows         | Pinned RNP recipe builds with its selected backend on Linux; native UIA client added and PowerShell syntax checked                                              | MinGW package build, relocation and native UIA execution                           |
+| Target          | Evidence                                                                                                                                                 | Remaining validation                                                         |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Linux native    | AT-SPI document text, New Document, Walks notes, many-to-many navigation, branches, references, exact Restore and restart/refusal checks                 | Complete screen-reader journeys and reopening a closed target through the UI |
+| Debian package  | Actual package build/install; installed GL/Vulkan rendering and native client checks                                                                     | Clean complete local Actions invocation after recipe repairs                 |
+| Arch / Fedora   | Actual packages build/install; installed GL/Vulkan rendering, text/action readback and Walks notes                                                       | Clean complete local Actions invocation; full screen-reader journeys         |
+| Nix             | Full application and AccessKit derivations build; installed GL/Vulkan, native text/action and Walks notes with matching runtime closure                  | Clean complete local Actions invocation; full screen-reader journeys         |
+| Android         | ARM64/x86_64 APKs; matching delegate and shaders verified; API 28/30 native text/focus/click/edit round trips; API 28 Save Document and saved-path label | ARM64 device and screen-reader journeys; native Xuzz remains separate        |
+| Browser adapter | Compiled C++ tree through Chromium accessibility; native actions, Unicode, modal focus, secrets, options and stale actions                               | Full applications blocked on media and networking ports                      |
+| macOS           | Official VLC SDK headers, real Mach-O dependency closure and relocation; native AX client added                                                          | Native runner access, application execution, signing and trusted AX checks   |
+| Windows         | Pinned RNP helper builds with selected backend; UIA client and PowerShell syntax checked                                                                 | Native runner access, MinGW package build, relocation and UIA execution      |
 
-Repository format/lint gates and focused Clang analyzer checks pass. The clean regression runs pass
-546 library tests, 1,218 engine tests, 59 Xuzz tests and 120 ZigZag tests. One video interaction
-test skips under the headless driver and one existing engine test is disabled. Network namespace
-suites were excluded from these runs. All 33 binary journey cases pass on GL, GLES and software
-Vulkan. The complete fresh-frame image comparison passes using the existing backend tolerances.
-Per-backend scratch configuration was isolated after reused settings produced inconsistent footer
-layout.
+Repository format/lint gates and focused Clang analyzer checks pass. The preceding full regression
+runs passed 546 library tests, 1,218 engine tests, 59 Xuzz tests and 120 ZigZag tests. One video
+interaction test skips under the headless driver and one existing engine test is disabled. Network
+namespace suites were excluded from these runs. All 33 binary journey cases pass on GL, GLES and
+software Vulkan. The complete fresh-frame image comparison passes using the existing backend
+tolerances. Per-backend scratch configuration was isolated after reused settings produced
+inconsistent footer layout.
 
 Android API 30 initially timed out before provider attachment, then failed document readback while a
 System UI ANR dialog held the active window. The native provider had attached and the editor
@@ -78,7 +78,105 @@ runner mappings. Downloaded Linux images and an Android SDK are usable; a Linux 
 evidence of native Windows UIA or macOS AX delivery. The remote packaging workflows are manually
 disabled and were not enabled as part of this work.
 
-The earlier native accessibility gap is narrowed to the exact controls exercised above. Walks,
-many-to-many link endpoints and their full journey semantics still need native assistive technology
-validation. Remote authority discovery and unopened ZigZag formatting inheritance remain separate UX
-findings.
+The earlier native accessibility gap is narrowed to the exact controls exercised above. Complete
+screen-reader journeys and reopening a closed target through the UI remain unverified. Remote
+authority discovery and unopened ZigZag formatting inheritance remain separate UX findings.
+
+## Installed-package follow-up
+
+Native Walks testing found that AccessKit static text derives its accessible name from the value, so
+application labels published only as labels were unreadable. The converter now preserves the label
+and any displayed value in static text. Virtual focusable choices also advertise the native
+Component interface required by AT-SPI Focus. The note field now publishes a real text run, caret
+selection and its painted bounds.
+
+`packaging/check-accessibility-linux.py <xuzz> opengl --walks` authors its link fixture through UI
+input and default key bindings, then uses native AT-SPI controls to edit and save a note. It checks
+readable preview/availability labels, native Focus, empty text readback, actual keyboard input and
+the saved-note label. It captures three private-Xvfb frames and native trees. The client refreshes
+its GI interface cache after the note changes from static text to a text input; this focused client
+result does not establish that a screen reader handles that transition correctly. The pinned Linux
+backend exposes no EditableText interface, so note replacement through native SetValue is not
+claimed. Keyboard editing is verified.
+
+The final installed Debian package passes that check, document text readback in both programs, New
+Document activation and empty-document readback. Installed Xuzz renders with OpenGL and Vulkan from
+outside the source tree. Evidence is retained under `/tmp/ux-native-walks-final3-evidence/`;
+screenshots were inspected. Logs use `/tmp/ux-installed-native-walks-final3.log` and
+`/tmp/ux-followup-debian-*.log`. The schema fallback and Walks persistence regressions pass (four
+focused tests); the native converter and Walks overlay pass Clang static analysis.
+
+Arch and Fedora repositories lack the required RNP package. Their recipes now build checksum-pinned
+RNP 0.18.1 into a private library directory and retain its licenses. The shared helper also
+preserves the Windows recipe's existing generator and OpenSSL selection. The Makefile now consumes
+the full Xanadu pkg-config include flags, allowing private-prefix RNP headers to compile. Nix wraps
+the canonical Xuzz executable so its aliases enter the runtime wrapper, and its installed-check
+closure supplies matching Mesa, fonts, GI typelibs and a private accessibility bus on non-NixOS
+hosts. A named owning schema fallback avoids a GCC 16 dangling-pointer diagnostic without changing
+schema defaults.
+
+The installed Debian `--navigation` check passes a two-document, two-left/three-right link fixture
+authored through UI input. Both documents are preserved through the Save UI before link marking; the
+temporary-document preservation dialog is accepted through its default keyboard action. Native
+member actions and occurrence Focus preserve the source caret; native occurrence Click enters the
+exact target range 8–13. Back and a different right occurrence create sibling visits. Native Walks
+Focus previews Visit 2 while Visit 3 remains current; Reference and Restore return to Visit 2's
+exact range. After a graceful Quit and restart with only the source document open, the three visits
+and reference persist. Restore of the closed target displays a refusal and leaves the current visit
+and visit count unchanged. Both documents retain identical operation/table hashes throughout,
+including after restart.
+
+The real Alt+Shift+W shortcut exposed another product defect: SDL delivered `W` as text after the
+command consumed the key, replacing the target selection before the queued Walks overlay opened. The
+input handler now discards the text associated with an executed Ctrl/Alt shortcut. A blocked
+document binding leaves the modal's text input intact; the note check caught a preliminary filter
+that dropped `r` from `native branch note` because its document binding was blocked. Android
+keyboard input also caught loss of ordinary characters bound to bare camera commands; those commands
+retain their existing text entry behavior. The native check verifies that opening Walks leaves the
+target text unchanged. Earlier fixture attempts that left a Save dialog open or modified the target
+version are failed attempts, not evidence of passing navigation. The client waits for Walks before
+operating Close and retries transient native-tree removals while refreshing cached interfaces. Six
+inspected frames, native trees and document hashes are retained under
+`/tmp/ux-native-modified-debian-final/fixture/`; the final run log is
+`/tmp/ux-shortcut-modified-debian-navigation.log`.
+
+Fedora's Poppler stream constructor also disproved the version-based API gate. Constructor feature
+detection preserves ownership with both raw-pointer and unique-pointer APIs; thirteen PDF and
+text-source tests pass. Fedora's hardening/link step exposed missing position-independent code and
+ignored CFLAGS on bundled seekable-Zstd C objects. The C build now applies both and tracks its own
+flags so previously cached objects rebuild. This leaves unrelated C++ objects untouched when only C
+flags change. Linux CI retains the native test frames, trees and application log as artifacts.
+
+The Fedora package passes RPM hardening, rpath, debug-file, desktop and AppStream checks. Its
+private RNP library is excluded from global Provides and the application's RNP Requires; RNP's
+actual system-library dependencies remain in the generated metadata. Android's enhanced API 28
+client also verifies the native Save Document action and exact saved-path label. A guest System UI
+ANR required dismissing the observed dialog before that client could access the editor; the failed
+attempt and passing result remain in `/tmp/ux-a11y-android-label-*`.
+
+After the keyboard fix, all 546 library tests pass again and the input handler passes Clang static
+analysis. Focused schema/Walks persistence, PDF/text-source and seekable-Zstd checks passed earlier
+in this follow-up. Native platform-client checks cover the controls described here; they do not
+establish completion of J1–J6 with a screen reader.
+
+The final Debian, Arch, Fedora and Nix packages pass installed GL/Vulkan rendering, native document
+text/actions, empty-document readback, Walks note editing and the two-by-three native navigation
+check, including restart/refusal and unchanged document hashes. Their inspected private frames and
+native trees are retained under `/tmp/ux-{native,walks}-modified-{debian,arch,fedora,nix}-final/`.
+Logs use `/tmp/ux-shortcut-modified-*`. The Nix check runs with libraries from the same package
+closure, rather than host Mesa/GI libraries. Both Android ABIs build again with the final input
+handler and pass adapter/delegate/shader content checks.
+
+Nix's formatter and CI's source-built `nix-linter` pass on the new validation closure and
+application recipe. The Nix CI gate now includes that validation expression. The final input handler
+again passes all 546 library tests and Clang static analysis. Earlier broader regression results
+above remain separate from these focused follow-up checks.
+
+The final API 28 Android run passes native text/focus/click, complete keyboard text input, Save, the
+exact saved-path static notification and persisted edited bytes. The notification probe now observes
+the native content-change event and reads its source while the transient toast is present; polling a
+previously cached window root missed it. An attempted root-refresh probe also failed and was
+removed. These are retained failed attempts, not passing evidence. The final result is in
+`/tmp/ux-shortcut-modified-android-event-native.log`; both ABI builds and APK content checks use the
+same prefix. The emulator was hidden and used disposable fixture content. Live announcement delivery
+with TalkBack and ARM64 device execution remain unverified.

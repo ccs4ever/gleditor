@@ -1,12 +1,18 @@
+# RNP is private to this application; it must not satisfy another package's
+# system-library dependency. Continue scanning its own system dependencies.
+%global __provides_exclude_from ^%{_libdir}/gleditor/.*$
+%global __requires_exclude ^librnp[.]so[.]0[(][)]([(]64bit[)])?$
+
 Name:           gleditor
 Version:        0.1.0
 Release:        1%{?dist}
 Summary:        GPU-rendered text editor with three graphics backends
 
-License:        GPL-3.0-or-later
+License:        GPL-3.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND MIT
 URL:            https://github.com/ccs4ever/gleditor
 Source0:        %{name}-%{version}.tar.gz
 Source1:        https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip
+Source2:        https://github.com/rnpgp/rnp/releases/download/v0.18.1/rnp-v0.18.1.tar.gz
 
 BuildRequires:  gcc-c++ >= 13
 BuildRequires:  make
@@ -31,7 +37,10 @@ BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel
 BuildRequires:  openssl-devel
 BuildRequires:  lmdb-devel
-BuildRequires:  rnp-devel
+BuildRequires:  cmake
+BuildRequires:  json-c-devel
+BuildRequires:  bzip2-devel
+BuildRequires:  zlib-devel
 BuildRequires:  pkgconfig(libtorrent-rasterbar)
 # libtorrent-rasterbar's own headers use boost/predef at compile time, and its
 # -devel package's dependency on it is weak rather than hard -- so it is named
@@ -75,6 +84,9 @@ document format; xudu, shipped in the main package, is one program built on it.
 %prep
 %autosetup
 echo 'b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177  %{SOURCE1}' | sha256sum -c -
+echo '423c8e32e1e591462f759adf8441b1c44bca96d9f5daff13b82e81a79f18ecfd  %{SOURCE2}' | sha256sum -c -
+mkdir -p build/rnp-source
+tar -xf %{SOURCE2} -C build/rnp-source
 mkdir -p build/accesskit-source
 unzip -q %{SOURCE1} -d build/accesskit-source
 
@@ -83,8 +95,16 @@ unzip -q %{SOURCE1} -d build/accesskit-source
 # Debian package this one does not fall back to SDL2. GLEDITOR_VERSION is
 # passed because the tarball has no git history to describe.
 %set_build_flags
+# RNP is absent from Fedora's repositories; bundle its pinned release privately.
+packaging/rnp/build.sh build/rnp-source/rnp-v0.18.1 build/rnp "$PWD/build/rnp-prefix" \
+    -DCMAKE_INSTALL_LIBDIR=lib
+export PKG_CONFIG_PATH="$PWD/build/rnp-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export LDFLAGS="$LDFLAGS -Wl,-rpath,%{_libdir}/gleditor"
 packaging/accesskit/build-linux.sh build/accesskit-source/accesskit-c-0.22.3 "$PWD/build/accesskit"
+# Installed programs use the private RNP directory and normal system-library
+# lookup; the in-tree $ORIGIN fallback is not an installed RPM search path.
 %make_build \
+    RPATH_FLAGS= \
     libdir=%{_libdir} \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
@@ -93,7 +113,11 @@ packaging/accesskit/build-linux.sh build/accesskit-source/accesskit-c-0.22.3 "$P
     lib gleditor xudu shaders
 
 %install
+%set_build_flags
+export PKG_CONFIG_PATH="$PWD/build/rnp-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export LDFLAGS="$LDFLAGS -Wl,-rpath,%{_libdir}/gleditor"
 %make_install \
+    RPATH_FLAGS= \
     prefix=%{_prefix} \
     bindir=%{_bindir} \
     libdir=%{_libdir} \
@@ -105,6 +129,9 @@ packaging/accesskit/build-linux.sh build/accesskit-source/accesskit-c-0.22.3 "$P
     GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION=%{version}
 
+install -d %{buildroot}%{_libdir}/gleditor
+cp -a build/rnp-prefix/lib/librnp.so* %{buildroot}%{_libdir}/gleditor/
+
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
 appstream-util validate-relax --nonet \
@@ -112,6 +139,7 @@ appstream-util validate-relax --nonet \
 
 %files
 %license LICENSE
+%license build/rnp-prefix/share/licenses/rnp/*
 %license build/accesskit/LICENSE-MIT build/accesskit/LICENSE-APACHE
 %doc README.md
 %{_bindir}/gleditor
@@ -119,6 +147,7 @@ appstream-util validate-relax --nonet \
 %{_bindir}/xuzz
 %{_bindir}/zigzag
 %{_libdir}/libgleditor.so.0
+%{_libdir}/gleditor/
 %{_datadir}/gleditor/
 %{_datadir}/applications/gleditor.desktop
 %{_datadir}/metainfo/gleditor.metainfo.xml

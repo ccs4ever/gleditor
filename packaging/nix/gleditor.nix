@@ -141,7 +141,7 @@ stdenv.mkDerivation {
   postInstall = ''
     mkdir -p $out/share/licenses/accesskit
     cp ${accesskit}/share/licenses/accesskit/* $out/share/licenses/accesskit/
-    for program in gleditor xudu; do
+    for program in gleditor xuzz; do
       wrapProgram $out/bin/$program \
         --prefix LD_LIBRARY_PATH : ${
           lib.makeLibraryPath [

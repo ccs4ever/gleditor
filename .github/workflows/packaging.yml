@@ -71,11 +71,15 @@ jobs:
       run: |
         sudo apt-get install -y --no-install-recommends \
           xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core \
-          dbus at-spi2-core python3-gi gir1.2-atspi-2.0
+          dbus at-spi2-core python3-gi gir1.2-atspi-2.0 python3-pil xdotool xauth
         xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
         xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         python3 packaging/check-accessibility-linux.py /usr/bin/gleditor
         python3 packaging/check-accessibility-linux.py /usr/bin/xuzz
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-walks" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz opengl --walks
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -84,6 +88,19 @@ jobs:
     # moved inside the workspace first.
     - name: collect the package
       run: mkdir -p dist && mv ../gleditor_*.deb dist/
+
+    - name: retain native accessibility evidence
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: native-accessibility-debian
+        path: |
+          ${{ runner.temp }}/native-walks/fixture/*.png
+          ${{ runner.temp }}/native-walks/fixture/*.json
+          ${{ runner.temp }}/native-walks/fixture/application.log
+          ${{ runner.temp }}/native-navigation/fixture/*.png
+          ${{ runner.temp }}/native-navigation/fixture/*.json
+          ${{ runner.temp }}/native-navigation/fixture/application.log
 
     - uses: actions/upload-artifact@v7
       with:
@@ -104,7 +121,8 @@ jobs:
           libunibreak-devel fontconfig-devel \
           SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
           vulkan-loader-devel glslang openssl-devel lmdb-devel \
-          desktop-file-utils libappstream-glib python3 rnp-devel poppler-cpp-devel \
+          desktop-file-utils libappstream-glib python3 cmake \
+          json-c-devel bzip2-devel zlib-devel poppler-cpp-devel \
           file-devel vlc-devel sqlite-devel
         # rb_libtorrent is the Fedora package name; the upstream project and
         # everything else in this file call it libtorrent-rasterbar, so this
@@ -142,6 +160,8 @@ jobs:
         cp build/dist/gleditor-0.1.0.tar.gz ~/rpmbuild/SOURCES/
         packaging/accesskit/fetch.sh "$RUNNER_TEMP/accesskit"
         cp "$RUNNER_TEMP/accesskit/accesskit-c-0.22.3.zip" ~/rpmbuild/SOURCES/
+        packaging/rnp/fetch.sh "$RUNNER_TEMP/rnp"
+        cp "$RUNNER_TEMP/rnp/rnp-v0.18.1.tar.gz" ~/rpmbuild/SOURCES/
         rpmbuild -ba packaging/fedora/gleditor.spec
 
     - name: install it
@@ -158,13 +178,31 @@ jobs:
       run: |
         dnf install -y --setopt=install_weak_deps=False \
           xorg-x11-server-Xvfb mesa-dri-drivers mesa-vulkan-drivers \
-          dejavu-sans-fonts dbus-daemon at-spi2-core python3-gobject
+          dejavu-sans-fonts dbus-daemon at-spi2-core python3-gobject \
+          gobject-introspection xdotool python3-pillow xorg-x11-xauth
         xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
         xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         python3 packaging/check-accessibility-linux.py /usr/bin/gleditor
         python3 packaging/check-accessibility-linux.py /usr/bin/xuzz
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-walks" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --walks
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
+
+    - name: retain native accessibility evidence
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: native-accessibility-fedora
+        path: |
+          ${{ runner.temp }}/native-walks/fixture/*.png
+          ${{ runner.temp }}/native-walks/fixture/*.json
+          ${{ runner.temp }}/native-walks/fixture/application.log
+          ${{ runner.temp }}/native-navigation/fixture/*.png
+          ${{ runner.temp }}/native-navigation/fixture/*.json
+          ${{ runner.temp }}/native-navigation/fixture/application.log
 
     - uses: actions/upload-artifact@v7
       with:
@@ -183,7 +221,7 @@ jobs:
           git pkgconf make gcc freetype2 harfbuzz fribidi libunibreak fontconfig \
           sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
           openssl lmdb libtorrent-rasterbar boost spdlog glslang python rust \
-          curl unzip rnp poppler file libvlc sqlite
+          curl unzip cmake json-c bzip2 zlib poppler file libvlc sqlite
 
     - uses: actions/checkout@v7
       with:
@@ -226,13 +264,30 @@ jobs:
     - name: run the installed binary
       run: |
         pacman -S --noconfirm --needed xorg-server-xvfb mesa vulkan-swrast \
-          ttf-dejavu dbus at-spi2-core python-gobject
+          ttf-dejavu dbus at-spi2-core python-gobject xdotool python-pillow xorg-xauth
         xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
         xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         python packaging/check-accessibility-linux.py /usr/bin/gleditor
         python packaging/check-accessibility-linux.py /usr/bin/xuzz
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-walks" \
+          python packaging/check-accessibility-linux.py /usr/bin/xuzz --walks
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
+          python packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
+
+    - name: retain native accessibility evidence
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: native-accessibility-arch
+        path: |
+          ${{ runner.temp }}/native-walks/fixture/*.png
+          ${{ runner.temp }}/native-walks/fixture/*.json
+          ${{ runner.temp }}/native-walks/fixture/application.log
+          ${{ runner.temp }}/native-navigation/fixture/*.png
+          ${{ runner.temp }}/native-navigation/fixture/*.json
+          ${{ runner.temp }}/native-navigation/fixture/application.log
 
     - uses: actions/upload-artifact@v7
       with:
@@ -263,23 +318,37 @@ jobs:
     - name: build
       run: nix build '.?submodules=1#gleditor' --print-build-logs
 
-    # The store path is the installed layout -- result/bin/gleditor beside
-    # result/share/gleditor -- so this exercises the same executable-relative
-    # search a distribution package does, without a prefix anywhere in it.
-    #
-    # No backend is named, so the frame is not drawn: a store binary links
-    # nixpkgs' libglvnd, which cannot load the Mesa drivers a non-NixOS
-    # runner has, and no amount of LIBGL_ALWAYS_SOFTWARE changes that. What
-    # is checked is that it starts, that its libraries resolve, and that it
-    # finds its shaders -- which is the part packaging gets wrong. The frame
-    # itself is drawn on the three distributions that can.
-    - name: run what was built
+    # The matching Nix Mesa and AT-SPI closure also works on non-NixOS runners.
+    # Use a private virtual display, session bus and configuration directories.
+    - name: render and read the installed package through native accessibility
       run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          xvfb fonts-dejavu-core
-        xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor"
-        xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/xudu"
+        package=$(readlink -f result)
+        nix build --impure --out-link validation-check --expr "
+          let
+            flake = builtins.getFlake (toString ./.);
+            pkgs = flake.inputs.nixpkgs.legacyPackages.\${builtins.currentSystem};
+          in pkgs.callPackage ./packaging/nix/validation.nix {
+            gleditor = builtins.storePath \"$package\";
+          }
+        "
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-walks" \
+          validation-check/bin/check-gleditor-installed
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
+          validation-check/bin/check-gleditor-installed --navigation
+
+    - name: retain native accessibility evidence
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: native-accessibility-nix
+        path: |
+          ${{ runner.temp }}/native-walks/fixture/*.png
+          ${{ runner.temp }}/native-walks/fixture/*.json
+          ${{ runner.temp }}/native-walks/fixture/application.log
+          ${{ runner.temp }}/native-navigation/fixture/*.png
+          ${{ runner.temp }}/native-navigation/fixture/*.json
+          ${{ runner.temp }}/native-navigation/fixture/application.log
+
 
   # --------------------------------------------------------------- Windows ---
   # MSYS2 rather than MSVC: the dependencies are the GTK stack -- pangomm,

@@ -366,11 +366,31 @@ void WalksOverlay::describe(gleditor::a11y::Builder &builder) {
     node.label = preview_[i];
     children.push_back(builder.id(30 + i));
   }
+  std::size_t noteCharacters{};
+  if (editing_) {
+    auto &run            = builder.add(kNoteRun, Role::TextRun);
+    run.value            = note_;
+    run.characterLengths = characterLengths(note_);
+    run.wordStarts       = wordStarts(note_);
+    noteCharacters       = run.characterLengths.size();
+  }
   auto &note     = builder.add(kNote, editing_ ? Role::TextInput : Role::Label);
   note.label     = editing_ ? "Edit visit note" : "Visit note";
   note.value     = note_;
   note.focusable = editing_;
-  if (editing_) note.actions = bit(Action::Focus) | bit(Action::SetValue);
+  if (editing_) {
+    note.actions  = bit(Action::Focus) | bit(Action::SetValue);
+    note.children = {builder.id(kNoteRun)};
+    const TextPoint caret{builder.id(kNoteRun), noteCharacters};
+    note.selection = TextSelection{caret, caret};
+    if (const auto found = areas_.find(kNote); found != areas_.end()) {
+      const auto &area = found->second;
+      note.bounds =
+          Rect{static_cast<double>(area.x), static_cast<double>(area.y),
+               static_cast<double>(area.x + area.width),
+               static_cast<double>(area.y + area.height)};
+    }
+  }
   children.push_back(builder.id(kNote));
   auto &status = builder.add(40, Role::Label);
   status.label = status_;

@@ -10,9 +10,9 @@ pkgrel=1
 pkgdesc="GPU-rendered document library, a text editor and a xanadoc editor, with OpenGL, OpenGL ES and Vulkan backends"
 arch=('x86_64' 'aarch64')
 url="https://github.com/ccs4ever/gleditor"
-license=('GPL-3.0-or-later')
+license=('GPL-3.0-or-later' 'Apache-2.0' 'BSD-2-Clause' 'BSD-3-Clause' 'MIT')
 depends=('freetype2' 'harfbuzz' 'fribidi' 'libunibreak' 'fontconfig' 'poppler' 'file' 'sdl3' 'sdl3_image' 'libglvnd'
-  'openssl' 'lmdb' 'libtorrent-rasterbar' 'rnp' 'spdlog' 'libvlc' 'sqlite' 'hicolor-icon-theme')
+  'openssl' 'lmdb' 'libtorrent-rasterbar' 'json-c' 'bzip2' 'zlib' 'spdlog' 'libvlc' 'sqlite' 'hicolor-icon-theme')
 # The Vulkan backend loads a loader at run time; the other two backends work
 # without one, so this is optional rather than a hard dependency.
 optdepends=('vulkan-icd-loader: Vulkan backend'
@@ -21,13 +21,20 @@ optdepends=('vulkan-icd-loader: Vulkan backend'
 # boost/predef at compile time, and on Arch the headers live in the full
 # 'boost' package -- 'boost-libs', which libtorrent-rasterbar depends on,
 # ships only the shared objects.
-makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers' 'boost' 'rust')
+makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers' 'boost' 'rust' 'cmake')
 source=("$pkgname-$pkgver.tar.gz"
-  'https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip')
-sha256sums=('SKIP' 'b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177')
+  'https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip'
+  'https://github.com/rnpgp/rnp/releases/download/v0.18.1/rnp-v0.18.1.tar.gz')
+sha256sums=('SKIP' 'b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177'
+  '423c8e32e1e591462f759adf8441b1c44bca96d9f5daff13b82e81a79f18ecfd')
 
 build() {
   cd "$pkgname-$pkgver" || exit
+  # Arch's official repositories do not provide RNP. Keep its release library
+  # private so this package does not conflict with separately installed RNP.
+  packaging/rnp/build.sh "$srcdir/rnp-v0.18.1" "$PWD/build/rnp" "$PWD/build/rnp-prefix" \
+    -DCMAKE_INSTALL_LIBDIR=lib
+  export PKG_CONFIG_PATH="$PWD/build/rnp-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   packaging/accesskit/build-linux.sh "$srcdir/accesskit-c-0.22.3" "$PWD/build/accesskit"
   # GLEDITOR_VERSION is passed because the tarball carries no git history, and
   # SDL3 is stated rather than probed so the package cannot silently change
@@ -37,11 +44,13 @@ build() {
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
     GLEDITOR_VERSION="$pkgver" \
+    LDFLAGS="${LDFLAGS:-} -Wl,-rpath,/usr/lib/gleditor" \
     lib gleditor xudu shaders
 }
 
 package() {
   cd "$pkgname-$pkgver" || exit
+  export PKG_CONFIG_PATH="$PWD/build/rnp-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   make install \
     DESTDIR="$pkgdir" \
     prefix=/usr \
@@ -50,7 +59,12 @@ package() {
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_LINK=static ACCESSKIT_DIR="$PWD/build/accesskit" \
-    GLEDITOR_VERSION="$pkgver"
+    GLEDITOR_VERSION="$pkgver" \
+    LDFLAGS="${LDFLAGS:-} -Wl,-rpath,/usr/lib/gleditor"
+  install -d "$pkgdir/usr/lib/gleditor"
+  cp -a build/rnp-prefix/lib/librnp.so* "$pkgdir/usr/lib/gleditor/"
+  install -d "$pkgdir/usr/share/licenses/$pkgname/rnp"
+  cp build/rnp-prefix/share/licenses/rnp/* "$pkgdir/usr/share/licenses/$pkgname/rnp/"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 build/accesskit/LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/accesskit/LICENSE-MIT"
   install -Dm644 build/accesskit/LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/accesskit/LICENSE-APACHE"

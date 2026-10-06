@@ -11,7 +11,7 @@ complete.
 | Reference a visit using the pointer                               | Click Reference in Walks                                                                                                                                    | Pass; reference persists; underlying caret and document operations stay unchanged | `annotated.args.json`, `hashes.json`; binary regression                             |
 | Restore saved branches after restart                              | Alt+Shift+W; preview with arrows; Enter restores                                                                                                            | Pass; saved side and endpoint return without creating another visit               | `preview.png`, `restored.png`, `reference-other.png`, `restored-other.png` and logs |
 | Annotate an unavailable target and attempt restoration            | Ctrl+W closes the document; Walks previews its visit; N edits; Enter saves; Enter attempts restoration                                                      | Pass; note remains editable, refusal is visible, current visit is unchanged       | `unavailable.png`, `closed.log`; binary regression                                  |
-| Deliver native accessibility actions                              | Not exercised with native assistive technology                                                                                                              | Remaining validation gap                                                          | Headless accessibility tree describes controls, focus and modal state only          |
+| Deliver native accessibility actions at the initial audit         | Not exercised with native assistive technology                                                                                                              | Remaining validation gap                                                          | Headless accessibility tree describes controls, focus and modal state only          |
 
 The captures above were inspected. Each run uses independent XDG data and configuration directories;
 all authored text and links are created through default keyboard bindings. The replay driver and
@@ -56,4 +56,11 @@ The [coincident-link follow-up](audit-2026-10-05-ux-coincident-links.md) adds po
 reach covered link identities. A direct overlap comparison list remains proposed.
 
 The [distribution accessibility follow-up](audit-2026-10-05-distribution-accessibility.md) verifies
-native Linux document text and New Document delivery. Native Walks actions remain untested.
+native Linux document text and New Document delivery. Native Walks preview labels, note focus,
+keyboard input, text readback and Save note now pass on installed Debian, Arch, Fedora and Nix
+packages. Native many-to-many endpoint actions, branching, references, exact-range restoration,
+restart and closed-target refusal now pass on installed Debian, Arch, Fedora and Nix packages.
+Actual keyboard input exposed an Alt+Shift+W text-insertion defect, which is fixed and checked by
+the native client. Document hashes remain unchanged across navigation and restart. Full
+screen-reader journeys and reopening closed targets through the UI remain validation gaps; see the
+distribution audit for platform evidence.

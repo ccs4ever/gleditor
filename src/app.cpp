@@ -1353,7 +1353,7 @@ int Application::run() {
   // What each input event does, shared by the platform's events and a
   // script's (AppState::SyntheticInput), so that automation exercises the
   // path a person's input takes rather than a side door.
-  const auto onKeyDown = [&](const int scancode, const Mod mods) {
+  const auto onKeyDown = [&](const int scancode, const Mod mods) -> bool {
     // A modal has the keyboard while it is up, and gets first refusal on
     // every key: a question on screen is not answered by editing the
     // document behind it. A key it does not use falls through, so that
@@ -1361,15 +1361,19 @@ int Application::run() {
     if (nullptr != state->modal && state->modal->grabbing()) {
       const auto key = modalKey(scancode);
       if (key && state->modal->keyPressed(*key, modalMods(mods))) {
-        return;
+        return true;
       }
     }
-    std::ignore =
-        commandTable.dispatch(scancode, mods, [this](const auto name) {
-          return !state->modal || !state->modal->grabbing() ||
-                 state->modal->permitsCommand(name);
+    bool permitted{};
+    const bool bound = commandTable.dispatch(
+        scancode, mods, [this, &permitted](const auto name) {
+          permitted = !state->modal || !state->modal->grabbing() ||
+                      state->modal->permitsCommand(name);
+          return permitted;
         });
+    return bound && permitted;
   };
+  bool shortcutTakesText{};
   const auto onMotion = [&](const int x, const int y,
                             const std::uint32_t held) {
     // Kept in window coordinates, top-down, which is what
@@ -1530,8 +1534,10 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_KEY_DOWN: {
-        onKeyDown(static_cast<int>(sdl::keyScancode(evt)),
-                  modsFromSdl(sdl::keyModifiers(evt)));
+        const auto mods = modsFromSdl(sdl::keyModifiers(evt));
+        shortcutTakesText =
+            onKeyDown(static_cast<int>(sdl::keyScancode(evt)), mods) &&
+            mods != Mod::None && mods != Mod::Shift;
         break;
       }
       case SDL_EVENT_MOUSE_MOTION: {
@@ -1649,6 +1655,10 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_TEXT_INPUT: {
+        // SDL can deliver text for an Alt shortcut before its queued modal
+        // opens, editing the document behind the command (Alt+Shift+W).
+        // Bare view bindings still permit text entry in the plain editor.
+        if (std::exchange(shortcutTakesText, false)) break;
         if (nullptr != state->modal && state->modal->grabbing()) {
           state->modal->textTyped(evt.text.text);
           break;
@@ -1664,6 +1674,7 @@ int Application::run() {
         // SDL2 reports every window change as one event type with a sub-type,
         // SDL3 as distinct types, so these are asked rather than matched on.
         if (bool focused = false; sdl::windowFocusChanged(evt, focused)) {
+          if (!focused) shortcutTakesText = false;
           // Which window has the keyboard is the desktop's business and only
           // the platform knows it. Without this an assistive technology would
           // believe the caret was in this window while somebody typed into

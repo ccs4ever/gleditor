@@ -1805,12 +1805,13 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   }
 
   // Schemas and defaults
-  const auto schemasToBuild =
-      spec.schemas.empty()
-          ? std::vector<SettingSchemaShape>{{.expectedTypes = {"string"},
-                                             .defaultValues = {std::string{
-                                                 ""}}}}
-          : spec.schemas;
+  auto schemasToBuild = spec.schemas;
+  if (schemasToBuild.empty()) {
+    SettingSchemaShape fallback;
+    fallback.expectedTypes.emplace_back("string");
+    fallback.defaultValues.emplace_back(std::string{});
+    schemasToBuild.push_back(std::move(fallback));
+  }
 
   zigzag::CellRef prevBlank = zigzag::noCell;
   for (std::size_t s = 0; s < schemasToBuild.size(); ++s) {

@@ -14,6 +14,7 @@ import org.libsdl.app.SDLActivity;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 
 /** Exercises the platform client, including actions returning to native state. */
 public final class AccessibilitySmoke extends Instrumentation {
@@ -38,6 +39,24 @@ public final class AccessibilitySmoke extends Instrumentation {
         }
         for (int child = 0; child < node.getChildCount(); ++child) {
             AccessibilityNodeInfo found = findEditor(node.getChild(child));
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private AccessibilityNodeInfo findNamedNode(AccessibilityNodeInfo node, String name) {
+        if (node == null) {
+            return null;
+        }
+        if (name.contentEquals(node.getText() == null ? "" : node.getText())
+                || name.contentEquals(node.getContentDescription() == null
+                        ? "" : node.getContentDescription())) {
+            return node;
+        }
+        for (int child = 0; child < node.getChildCount(); ++child) {
+            AccessibilityNodeInfo found = findNamedNode(node.getChild(child), name);
             if (found != null) {
                 return found;
             }
@@ -133,8 +152,34 @@ public final class AccessibilitySmoke extends Instrumentation {
             if (!textVisible) {
                 throw new AssertionError("Edited text is absent from the platform accessibility tree");
             }
+            AccessibilityNodeInfo save = findNamedNode(getUiAutomation().getRootInActiveWindow(),
+                    "Save Document (Ctrl+S)");
+            if (save == null) {
+                throw new AssertionError("Native Save Document accessibility action is absent");
+            }
+            AccessibilityNodeInfo[] notification = {null};
+            // Observe the native content-change event while the toast is live;
+            // a window root retained before Save can have an old child list.
+            getUiAutomation().executeAndWaitForEvent(() -> {
+                if (!save.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    throw new AssertionError("Native Save Document action was refused");
+                }
+            }, event -> {
+                notification[0] = findNamedNode(event.getSource(),
+                        "saved " + document.getAbsolutePath());
+                return notification[0] != null;
+            }, 15000);
+            if (!"android.widget.TextView".contentEquals(notification[0].getClassName())) {
+                throw new AssertionError("Saved notification is not native static text");
+            }
+            String savedText = new String(Files.readAllBytes(document.toPath()),
+                    StandardCharsets.UTF_8);
+            if (!savedText.contains("android-a11y-probe")) {
+                throw new AssertionError("Save action did not persist edited document text");
+            }
+            checkpoint("save action and static notification read through platform client");
             results.putString("accessibility",
-                    "PASS: editable text, focus and click via platform client");
+                    "PASS: editable text, focus, click, save and static notification via platform client");
             finish(Activity.RESULT_OK, results);
         } catch (Throwable error) {
             results.putString("accessibility", "FAIL: " + error);

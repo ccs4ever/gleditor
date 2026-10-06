@@ -44,8 +44,9 @@ private:
     Save,
     Close
   };
-  static constexpr std::uint64_t kNote = 20;
-  static constexpr std::uint64_t kRow  = 100;
+  static constexpr std::uint64_t kNote    = 20;
+  static constexpr std::uint64_t kNoteRun = 21;
+  static constexpr std::uint64_t kRow     = 100;
   void activate(std::uint64_t control);
   void move(int delta);
   LinkContext &context_;

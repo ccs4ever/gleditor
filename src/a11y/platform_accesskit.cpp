@@ -200,7 +200,13 @@ accesskit_node *nodeOf(const Node &node) {
   }
   // AccessKit traverses every text run through its value, including the
   // empty run that provides a caret position in a new document.
-  if (node.role == Role::TextRun || !node.value.empty()) {
+  if (node.role == Role::Label) {
+    // Native static-text names come from the value, unlike control names.
+    const auto text = node.label.empty()   ? node.value
+                      : node.value.empty() ? node.label
+                                           : node.label + ": " + node.value;
+    accesskit_node_set_value_with_length(built, text.data(), text.size());
+  } else if (node.role == Role::TextRun || !node.value.empty()) {
     accesskit_node_set_value_with_length(built, node.value.data(),
                                          node.value.size());
   }
@@ -215,6 +221,13 @@ accesskit_node *nodeOf(const Node &node) {
   if (node.bounds) {
     accesskit_node_set_bounds(built, rectOf(*node.bounds));
   }
+#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__ANDROID__)
+  else if (node.focusable || (node.actions & bit(Action::Focus))) {
+    // AT-SPI exposes focus through Component, which AccessKit requires
+    // bounds to publish. Virtual endpoint choices have no painted rectangle.
+    accesskit_node_set_bounds(built, accesskit_rect{});
+  }
+#endif
   for (const auto child : node.children) {
     accesskit_node_push_child(built, child);
   }

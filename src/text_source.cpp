@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -70,16 +71,18 @@ Object nullObject() {
 #endif
 }
 
-/// 25.02 moved PDFDoc's stream parameter to `unique_ptr`; before that it took
-/// a raw `BaseStream *` and took ownership of it all the same, so releasing
-/// into it hands over the same stream with the same lifetime.
-std::unique_ptr<PDFDoc> openDoc(std::unique_ptr<BaseStream> stream) {
-#if POPPLER_VERSION_MAJOR > 25 ||                                              \
-    (POPPLER_VERSION_MAJOR == 25 && POPPLER_VERSION_MINOR >= 2)
-  return std::make_unique<PDFDoc>(std::move(stream));
-#else
-  return std::make_unique<PDFDoc>(stream.release());
-#endif
+/// Distribution releases differ in when they change stream ownership in this
+/// private API. Detect the constructor rather than inferring it from a version.
+/// Both forms take ownership, so releasing into the raw form preserves
+/// lifetime.
+template <typename PdfDocument = PDFDoc>
+std::unique_ptr<PdfDocument> openDoc(std::unique_ptr<BaseStream> stream) {
+  if constexpr (std::is_constructible_v<PdfDocument,
+                                        std::unique_ptr<BaseStream>>) {
+    return std::make_unique<PdfDocument>(std::move(stream));
+  } else {
+    return std::make_unique<PdfDocument>(stream.release());
+  }
 }
 
 } // namespace poppler_compat
