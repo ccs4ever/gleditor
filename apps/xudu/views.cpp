@@ -1258,6 +1258,7 @@ void Views::publicationDiscoveryStatus(const std::string &id) {
         if (publicationCatalog_)
           publicationCatalog_->ingestAuthorCatalog(catalog);
         for (const auto &entry : catalog.entries) {
+          if (entry.kind != CatalogEntryKind::Document) continue;
           if (!status.author && std::ranges::find(entry.topics, status.query) ==
                                     entry.topics.end())
             continue;

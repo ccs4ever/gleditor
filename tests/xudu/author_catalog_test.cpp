@@ -65,14 +65,18 @@ TEST_F(AuthorCatalogTest,
       (void)xanadu::decodeAuthorCatalog(xanadu::encodeAuthorCatalog(forged)),
       xanadu::AuthorCatalogUnreadable);
   auto fields      = xanadu::bencode::decode(wire).asDict();
-  fields["format"] = xanadu::bencode::Value::integer(2);
+  fields["format"] = xanadu::bencode::Value::integer(3);
   try {
     (void)xanadu::decodeAuthorCatalog(
         xanadu::bencode::Value::dict(fields).encode());
-    FAIL() << "version 2 accepted";
+    FAIL() << "version 3 accepted";
   } catch (const xanadu::AuthorCatalogUnreadable &error) {
-    EXPECT_THAT(error.what(), testing::HasSubstr("version 1 expected, got 2"));
+    EXPECT_THAT(error.what(), testing::HasSubstr("version 2 expected, got 3"));
   }
+  fields["format"] = xanadu::bencode::Value::integer(1);
+  EXPECT_THROW((void)xanadu::decodeAuthorCatalog(
+                   xanadu::bencode::Value::dict(fields).encode()),
+               xanadu::AuthorCatalogUnreadable);
   EXPECT_THROW((void)xanadu::decodeAuthorCatalog(wire + "junk"),
                xanadu::AuthorCatalogUnreadable);
   EXPECT_THROW((void)xanadu::decodeAuthorCatalog(
@@ -118,6 +122,38 @@ TEST_F(AuthorCatalogTest,
   EXPECT_THROW(
       (void)xanadu::updateAuthorCatalog(root / "publisher", next, hash, keys),
       xanadu::AuthorCatalogUnreadable);
+}
+
+TEST_F(AuthorCatalogTest,
+       PackageAnnouncementPreservesTheAuthorsDocumentEntries) {
+  const auto before =
+      xanadu::updateAuthorCatalog(root / "mixed", pub, hash, keys);
+  xanadu::GlobalLink link;
+  link.owner         = "Response";
+  link.left          = pub.pieces;
+  link.right         = pub.pieces;
+  const auto package = xanadu::publishLinkPackage(
+      keys, "curations:ideas", "Story Ideas links", 1, 1, {link}, pub.scrolls);
+  const std::vector<xanadu::TorrentContent> files{
+      {.path = "links.xanalinks", .data = xanadu::encodeLinkPackage(package)}};
+  const auto packageHash = xanadu::makeTorrent(files, "link-package").hash;
+  const auto after =
+      xanadu::updateAuthorCatalog(root / "mixed", package, packageHash, keys);
+  ASSERT_EQ(after.entries.size(), 2U);
+  const auto document = std::ranges::find(after.entries, pub.salt,
+                                          &xanadu::AuthorCatalogEntry::salt);
+  ASSERT_NE(document, after.entries.end());
+  EXPECT_EQ(*document, before.entries.front());
+  EXPECT_EQ(after.sequence, 2);
+  xanadu::SwarmCatalog index;
+  index.followAuthor(keys.publicKey);
+  index.ingestAuthorCatalog(after);
+  EXPECT_EQ(index.search("Ideas").size(), 1U);
+  EXPECT_EQ(index.followedAuthors().front().publicationCount, 1U);
+  xanadu::SwarmCatalog followedLater;
+  followedLater.ingestAuthorCatalog(after);
+  followedLater.followAuthor(keys.publicKey);
+  EXPECT_EQ(followedLater.followedAuthors().front().publicationCount, 1U);
 }
 
 TEST_F(AuthorCatalogTest,
@@ -213,6 +249,11 @@ public:
     wait(stop);
     return state_->response.at(0);
   }
+  std::vector<std::string> backlinks(const std::vector<std::string> &,
+                                     std::stop_token stop) override {
+    wait(stop);
+    return state_->response;
+  }
   std::vector<std::string> topic(std::string_view,
                                  std::stop_token stop) override {
     wait(stop);
@@ -295,6 +336,28 @@ TEST_F(PublicationDiscoveryTest,
   }
   EXPECT_TRUE(fs::is_empty(root / "discovery" / "followed"));
 }
+TEST_F(PublicationDiscoveryTest,
+       BacklinksRequireTypedEntriesAndMatchedScrolls) {
+  auto configured                 = options();
+  auto advertised                 = catalog();
+  advertised.entries.front().kind = xanadu::CatalogEntryKind::LinkPackage;
+  const auto key = xanadu::scrollKey(pub.scrolls.begin()->second);
+  advertised.entries.front().scrollKeys = {key};
+  advertised      = xanadu::signAuthorCatalog(advertised, keys);
+  state->response = {xanadu::encodeAuthorCatalog(advertised)};
+  xanadu::PublicationDiscovery discovery(configured);
+  const auto id = discovery.submitLinks({key, key});
+  ASSERT_TRUE(discovery.waitFor(id, xanadu::DiscoveryPhase::Ready, 3s));
+  EXPECT_EQ(discovery.status(id).scrollKeys.size(), 1U);
+  EXPECT_TRUE(discovery.followedAuthors().empty());
+  const auto missing = discovery.submitLinks({"btpk:unknown:permascroll"});
+  ASSERT_TRUE(discovery.waitFor(missing, xanadu::DiscoveryPhase::Failed, 3s));
+  xanadu::SwarmCatalog index;
+  index.ingestAuthorCatalog(advertised);
+  EXPECT_TRUE(index.search("Ideas").empty());
+  EXPECT_THROW((void)discovery.submitLinks({}), std::invalid_argument);
+}
+
 TEST_F(PublicationDiscoveryTest, IdleShutdownDoesNotLoseStopWakeups) {
   const auto started = std::chrono::steady_clock::now();
   for (int attempt = 0; attempt < 100; ++attempt) {

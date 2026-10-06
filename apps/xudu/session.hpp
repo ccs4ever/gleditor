@@ -44,6 +44,7 @@
 #include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/focus_target.hpp"
+#include "common/xanadu/link_package_exchange.hpp"
 #include "common/xanadu/media_manager.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/mutable_link.hpp"
@@ -459,6 +460,12 @@ public:
   }
   PublicationOutbox &publicationOutbox();
   PublicationInbox &publicationInbox();
+  LinkPackageExchange &linkPackageExchange();
+  std::vector<Publication> packagePublicationSources();
+  PublicationPin pinPublication(const Publication &publication) const;
+  std::string prepareLinkPackage(const Publication &source,
+                                 const std::string &salt,
+                                 const std::string &title, bool announce);
   PublicationDiscovery &publicationDiscovery();
   PublicationSubscriptions &publicationSubscriptions();
   PublicationSubscriptions *activePublicationSubscriptions() const {
@@ -843,6 +850,7 @@ private:
   std::unique_ptr<SwarmContentSource> swarmSource;
   std::unique_ptr<PublicationOutbox> publicationOutbox_;
   std::unique_ptr<PublicationInbox> publicationInbox_;
+  std::unique_ptr<LinkPackageExchange> linkPackageExchange_;
   std::unique_ptr<PublicationDiscovery> publicationDiscovery_;
   std::unique_ptr<PublicationSubscriptions> publicationSubscriptions_;
   bool testPublicationSwarm_{};

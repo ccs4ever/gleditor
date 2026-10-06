@@ -231,9 +231,27 @@ public:
     lastRefresh_ = next->first;
     nextRefresh_ = now + std::chrono::seconds{5};
   }
+  void announcePackage(const LinkPackage &pkg, const InfoHash &hash) override {
+    Publication name;
+    name.publisher = pkg.curator;
+    name.salt      = pkg.salt;
+    name.sequence  = pkg.sequence;
+    announce(name, hash);
+  }
+  bool packageAcknowledged(const LinkPackage &pkg,
+                           const InfoHash &hash) override {
+    return source_.publicationAcknowledged(pkg.curator, pkg.salt, hash,
+                                           pkg.sequence);
+  }
+  bool advertisePackage(const LinkPackage &pkg, const InfoHash &hash) override {
+    return advertiseCatalog(
+        updateAuthorCatalog(catalogDirectory_ / "state", pkg, hash, keys_));
+  }
   bool advertise(const Publication &pub, const InfoHash &hash) override {
-    const auto catalog =
-        updateAuthorCatalog(catalogDirectory_ / "state", pub, hash, keys_);
+    return advertiseCatalog(
+        updateAuthorCatalog(catalogDirectory_ / "state", pub, hash, keys_));
+  }
+  bool advertiseCatalog(const SignedAuthorCatalog &catalog) {
     if (!catalog_ || catalog.sequence > catalog_->sequence) {
       catalog_ = catalog;
       const std::vector<TorrentContent> files{
@@ -249,10 +267,14 @@ public:
     if (source_.publicationAcknowledged(keys_.publicKey, "catalog",
                                         catalogHash_, catalog_->sequence)) {
       const auto encoded = encodeAuthorCatalog(*catalog_);
-      for (const auto &entry : catalog_->entries)
+      for (const auto &entry : catalog_->entries) {
         for (const auto &topic : entry.topics)
           source_.joinPublicationTopic(
               topic, (catalogDirectory_ / "topics").string(), encoded);
+        for (const auto &key : entry.scrollKeys)
+          source_.joinLinkPackageScroll(
+              key, (catalogDirectory_ / "links").string(), encoded);
+      }
       return true;
     }
     const auto now = std::chrono::steady_clock::now();

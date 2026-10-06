@@ -21,6 +21,11 @@
 namespace xanadu {
 
 class Store;
+inline constexpr std::size_t maximumLinkPackageBytes = 512 * 1024;
+class LinkPackageUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 /**
  * @struct LinkPackage
@@ -29,8 +34,9 @@ class Store;
  *
  * In Xanadu's pluralistic link architecture, anyone can curate and publish a
  * link package that connects spans across documents. Link packages can be
- * adopted into a viewing session in any order without modifying the original
- * documents.
+ * retained by LinkPackageExchange for private review without modifying
+ * documents. The legacy adoptLinkPackage importer below authors Structure
+ * operations and is not a display toggle.
  */
 struct LinkPackage {
   PublicKey curator;
@@ -42,6 +48,7 @@ struct LinkPackage {
   std::vector<GlobalLink> links;
   std::map<std::string, Scroll> scrolls;
 
+  std::vector<PublicationPin> publications;
   Signature signature;
 
   [[nodiscard]] DhtTarget name() const;
@@ -60,7 +67,14 @@ decodeLinkPackage(std::string_view encoded);
 publishLinkPackage(const MutableKeys &keys, std::string salt, std::string title,
                    std::int64_t sequence, std::uint64_t published,
                    std::vector<GlobalLink> links,
-                   std::map<std::string, Scroll> scrolls);
+                   std::map<std::string, Scroll> scrolls,
+                   std::vector<PublicationPin> publications = {});
+
+/// Complete endpoint metadata is required for network publication. This
+/// verifies declarations/ranges, not payload availability or Oracle enrollment.
+void reviewLinkPackage(const LinkPackage &package);
+[[nodiscard]] std::vector<std::string>
+linkPackageScrollKeys(const LinkPackage &package);
 
 /// Result of adopting a standalone link package into a store.
 struct AdoptedLinksResult {

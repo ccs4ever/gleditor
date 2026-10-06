@@ -213,7 +213,14 @@ sequences and catches missed updates after reconnect. It preserves earlier snaps
 author's edition choices. `publicationPollSeconds` in `system://settings` defaults to 30 and is read
 at startup; the isolated mock swarm uses a shorter interval. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
-repaired prerequisites and remaining network/UI work.
+repaired prerequisites and remaining network/UI work. `Ctrl+Alt+Shift+P` prepares an independent
+signed package from a selected publication's authored links; review it before publishing to the
+explicit test swarm. `Ctrl+Alt+Shift+L` discovers packages referencing that publication's registered
+global scrolls, fetches and reviews both endsets, and opens cited immutable snapshots through the
+download panel. Retained packages reopen offline. These controls do not yet enable package display
+layers. Catalog format 2 distinguishes documents and packages; old development catalogs must be
+regenerated. See
+[the package validation report](design/ux_publication_links_validation_2026-10-06.md).
 
 ### Configuration and computation
 

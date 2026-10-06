@@ -11,6 +11,7 @@
 #include <thread>
 
 #include "common/xanadu/bencode.hpp"
+#include "common/xanadu/link_package_exchange.hpp"
 #include "common/xanadu/publication_discovery.hpp"
 #include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
@@ -437,6 +438,33 @@ TEST_F(PublicationInboxTest,
     EXPECT_NE(thread, std::this_thread::get_id());
     EXPECT_EQ(thread, downloads->threads.front());
   }
+}
+
+TEST_F(PublicationInboxTest, PinnedSnapshotDoesNotResolveNewerMutableHead) {
+  xanadu::PublicationPin pin{.publisher = keys.publicKey,
+                             .salt      = publication.salt,
+                             .hash      = downloads->pointer.hash,
+                             .sequence  = publication.sequence,
+                             .version   = publication.version,
+                             .title     = publication.title};
+  downloads->fail             = true;
+  downloads->pointer.sequence = 99;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submitPinned(pin);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << inbox.status(id).error;
+  EXPECT_EQ(inbox.status(id).version, pin.version);
+  EXPECT_EQ(inbox.status(id).sequence, 1);
+  pin.version      = {};
+  const auto wrong = inbox.submitPinned(pin);
+  ASSERT_TRUE(
+      inbox.waitFor(wrong, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_FALSE(fs::exists(inbox.status(wrong).storePath / "ops.nodes"));
+  pin.version      = publication.version;
+  pin.sequence     = 2;
+  const auto stale = inbox.submitPinned(pin);
+  ASSERT_TRUE(
+      inbox.waitFor(stale, xanadu::PublicationDownloadPhase::Failed, 3s));
 }
 
 TEST_F(PublicationInboxTest, RejectsDifferentKeySaltAndPointerSequence) {
@@ -964,6 +992,192 @@ TEST_F(PublicationOutboxNetworkTest,
     EXPECT_EQ(reader.textOf(publication.version), "Story Ideas");
     EXPECT_EQ(reader.userPermascroll().spool().size(), 0U);
   }
+}
+
+TEST_F(PublicationOutboxNetworkTest,
+       IndependentPackagesAreFoundReviewedAndOpenPinnedSnapshotsThroughUi) {
+  const auto host            = std::getenv("XUDU_PEER_HOST");
+  const auto port            = std::getenv("XUDU_PEER_PORT");
+  const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
+  const auto readerHost      = std::getenv("XUDU_READER_HOST");
+  const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
+  if (!host || !port || !publisherHost || !readerHost || !readerNamespace)
+    GTEST_SKIP() << "run make test/publication-swarm";
+  xanadu::Link link;
+  link.owner         = "Response link";
+  link.type          = xanadu::LinkType::Comment;
+  link.left          = {{0, 0, 5}, {0, 6, 5}};
+  link.right         = {{1, 0, 8}};
+  const auto version = authored->addLink(authored->latest(), link);
+  roots[0]           = root / "linked-seeds";
+  const auto seal    = xanadu::sealLocalSpool(
+      *authored, keys, "permascroll", roots[0].string(),
+      {.tsv = "temporary test provenance", .signature = "mock"});
+  publication = xanadu::publish(*authored, version, keys, publication.salt,
+                                publication.title, 1, 1, &seal.scroll,
+                                {*seal.opsSegment}, {}, {"ideas"});
+  ASSERT_EQ(publication.links.size(), 1U);
+  const auto originalOps = authored->opCount();
+  xanadu::SwarmContentSource::Options network;
+  network.listenInterfaces               = std::string(publisherHost) + ":0";
+  network.enableLocalDiscovery           = false;
+  network.enableTrackers                 = false;
+  network.restrictDhtToDistinctNetworks  = false;
+  network.allowManyConnectionsPerAddress = true;
+  network.dhtPacketsPerSecond            = 100;
+  const std::vector<std::pair<std::string, std::uint16_t>> nodes{
+      {host, static_cast<std::uint16_t>(std::stoul(port))}};
+  auto configured          = options();
+  configured.makeTransport = xanadu::publicationSwarmTransport(
+      keys, network, nodes, root / "source-catalog");
+  xanadu::PublicationOutbox publisher(configured);
+  const auto documentId = publisher.submit(publication, roots, true);
+  ASSERT_TRUE(
+      publisher.waitFor(documentId, xanadu::PublicationPhase::Published, 60s));
+  const xanadu::PublicationPin pin{
+      .publisher = keys.publicKey,
+      .salt      = publication.salt,
+      .hash      = status(publisher, documentId).manifestHash,
+      .sequence  = publication.sequence,
+      .version   = publication.version,
+      .title     = publication.title};
+  std::vector<std::unique_ptr<xanadu::LinkPackageExchange>> curators;
+  for (const std::string name : {"Bob's Commentary", "Carl's Commentary"}) {
+    const auto curator = xanadu::createMutableKeys();
+    xanadu::LinkPackageExchange::Options opts;
+    opts.directory      = root / curator.publicKey.hex();
+    opts.verifyIdentity = [](const auto &) {
+      return xanadu::PublicationIdentity::MockVerified;
+    };
+    opts.makePublisher = xanadu::publicationSwarmTransport(
+        curator, network, nodes, root / "catalogs" / curator.publicKey.hex());
+    auto service =
+        std::make_unique<xanadu::LinkPackageExchange>(std::move(opts));
+    const auto package = xanadu::publishLinkPackage(
+        curator, "curations:story-ideas", name, 1, 1, publication.links,
+        publication.scrolls, {pin});
+    const auto id = service->submit(package, true);
+    ASSERT_TRUE(service->waitFor(id, xanadu::LinkPackagePhase::Published, 60s))
+        << service->status(id).error;
+    curators.push_back(std::move(service));
+  }
+  const auto quote = [](const std::string &value) {
+    std::string result{"'"};
+    for (char ch : value) result += ch == '\'' ? "'\\''" : std::string(1, ch);
+    return result + "'";
+  };
+  const auto evidence =
+      fs::current_path() / "build/publication-links/network-ui";
+  fs::create_directories(evidence);
+  const auto profile = root / "alice-reader";
+  fs::create_directories(profile / "workspace/published");
+  std::ofstream(profile / "workspace/identity") << keys.publicKey.hex() << "\n"
+                                                << keys.secretKey.hex() << "\n";
+  std::ofstream(profile / "workspace/published/source.xanadoc",
+                std::ios::binary)
+      << xanadu::encodePublication(publication);
+  const auto uiBase = [&](const fs::path &uiProfile, bool reader) {
+    return (reader ? "ip netns exec " + quote(readerNamespace) + " " : "") +
+           std::string("env") +
+           " SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+           "LIBGL_ALWAYS_SOFTWARE=1 XDG_DATA_HOME=" +
+           quote((uiProfile / "data").string()) +
+           " XDG_CONFIG_HOME=" + quote((uiProfile / "config").string()) +
+           " XDG_CACHE_HOME=" + quote((uiProfile / "cache").string()) +
+           " ./build/xuzz " + quote((uiProfile / "workspace").string()) +
+           " --permascroll " + quote((uiProfile / "permascroll").string()) +
+           " --backend opengl --profile --test-publication-swarm " +
+           quote(std::string(reader ? readerHost : publisherHost) + ":0") +
+           " --dht-node " + quote(std::string(host) + ":" + port);
+  };
+  const auto base = uiBase(profile, true);
+  for (int selected = 0; selected < 2; ++selected) {
+    const auto stem    = "response-" + std::to_string(selected);
+    const auto logPath = evidence / (stem + ".log");
+    const auto select =
+        selected ? " --chord Tab --chord Right --chord Shift+Tab" : "";
+    const auto command =
+        base +
+        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 --chord "
+        "Return "
+        "--dump-a11y --capture " +
+        quote((evidence / (stem + "-catalog.ppm")).string()) + select +
+        " --chord Right --chord Return --wait-ms 35000 --chord Return "
+        "--dump-a11y --capture " +
+        quote((evidence / (stem + "-ready.ppm")).string()) +
+        " --chord Right --chord Return --dump-a11y --capture " +
+        quote((evidence / (stem + "-review.ppm")).string()) +
+        " --chord Right --chord Right --chord Right --chord Right --chord "
+        "Return --dump-a11y --capture " +
+        quote((evidence / (stem + "-keys.ppm")).string()) +
+        " --chord Tab --chord Tab --chord Tab --chord Space --dump-a11y "
+        "--capture " +
+        quote((evidence / (stem + "-key-parts.ppm")).string()) +
+        " --chord Return --chord Shift+Tab --chord Shift+Tab --chord Shift+Tab "
+        "--chord Return --chord Right --chord Return --wait-ms 30000 --chord "
+        "Return "
+        "--dump-a11y --capture " +
+        quote((evidence / (stem + "-download.ppm")).string()) +
+        " --chord Right --chord Return --dump-a11y --capture " +
+        quote((evidence / (stem + "-opened.ppm")).string()) + " > " +
+        quote(logPath.string()) + " 2>&1";
+    ASSERT_EQ(std::system(command.c_str()), 0)
+        << std::ifstream(logPath).rdbuf();
+    std::ifstream input(logPath);
+    const std::string log{std::istreambuf_iterator<char>(input),
+                          std::istreambuf_iterator<char>()};
+    EXPECT_THAT(log, testing::HasSubstr("Signed catalog metadata received"));
+    EXPECT_THAT(log, testing::HasSubstr("Review independent links"));
+    EXPECT_THAT(
+        log, testing::HasSubstr("opened downloaded publication Story Ideas"));
+  }
+  xanadu::LinkPackageExchange offline(
+      {.directory = profile / "data/xudu/link-packages"});
+  ASSERT_EQ(offline.statuses().size(), 2U);
+  for (const auto &pkg : offline.statuses()) {
+    ASSERT_EQ(pkg.phase, xanadu::LinkPackagePhase::Ready);
+    ASSERT_FALSE(pkg.package.publications.empty());
+    EXPECT_EQ(pkg.package.publications.front(), pin);
+    EXPECT_EQ(pkg.package.links.front().left.size(), 2U);
+  }
+  xanadu::PublicationDiscovery discovered(
+      {.directory = profile / "data/xudu/publication-discovery"});
+  EXPECT_TRUE(discovered.followedAuthors().empty());
+  EXPECT_EQ(authored->opCount(), originalOps);
+  // This source snapshot is fixture setup. The controls below prove package
+  // preparation/review, without claiming commentary authorship was driven here.
+  const auto devinProfile = root / "devin-publisher";
+  const auto devinKeys    = xanadu::createMutableKeys();
+  fs::create_directories(devinProfile / "workspace/published");
+  std::ofstream(devinProfile / "workspace/identity")
+      << devinKeys.publicKey.hex() << "\n"
+      << devinKeys.secretKey.hex() << "\n";
+  std::ofstream(devinProfile / "workspace/published/source.xanadoc",
+                std::ios::binary)
+      << xanadu::encodePublication(publication);
+  const auto prepared =
+      uiBase(devinProfile, false) +
+      " --chord Ctrl+Alt+Shift+P --chord Tab --chord Tab --type " +
+      quote("Devin's links") +
+      " --chord Shift+Tab --chord Shift+Tab --chord Return --wait-ms 2000 "
+      "--chord Return --dump-a11y --capture " +
+      quote((evidence / "prepared.ppm").string()) +
+      " --chord Right --chord Return --dump-a11y --capture " +
+      quote((evidence / "prepared-review.ppm").string()) +
+      " --chord Right --chord Right --chord Return --chord Right --chord Right "
+      "--chord Right --chord Right --chord Right --chord Return --wait-ms "
+      "35000 --chord Return --wait-ms 20000 --chord Return --dump-a11y "
+      "--capture " +
+      quote((evidence / "prepared-published.ppm").string()) + " > " +
+      quote((evidence / "prepared.log").string()) + " 2>&1";
+  ASSERT_EQ(std::system(prepared.c_str()), 0)
+      << std::ifstream(evidence / "prepared.log").rdbuf();
+  std::ifstream preparedInput(evidence / "prepared.log");
+  const std::string preparedLog{std::istreambuf_iterator<char>(preparedInput),
+                                std::istreambuf_iterator<char>()};
+  EXPECT_THAT(preparedLog, testing::HasSubstr("Review independent links"));
+  EXPECT_THAT(preparedLog, testing::HasSubstr("Published to rendezvous"));
+  EXPECT_THAT(preparedLog, testing::HasSubstr("mock verification"));
 }
 
 TEST_F(PublicationOutboxNetworkTest,

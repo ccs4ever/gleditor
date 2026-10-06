@@ -1879,6 +1879,18 @@ int XuzzApp::run(const int argc, char **argv) {
         views.discoverPublications();
       });
   app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLinkPackagePublish),
+      "publish independent links", [&views, &swarmTelescope] {
+        swarmTelescope.setVisible(false);
+        views.publishIndependentLinks();
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapLinksResponses),
+      "discover links and responses", [&views, &swarmTelescope] {
+        swarmTelescope.setVisible(false);
+        views.linksAndResponses();
+      });
+  app.commands().registerAction(
       std::string(xanadu::settings::kKeymapPublicationUpdates),
       "review verified publication updates", [&views, &swarmTelescope] {
         swarmTelescope.setVisible(false);

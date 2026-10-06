@@ -14,28 +14,33 @@ using V = bencode::Value;
 bencode::Dict body(const SignedAuthorCatalog &catalog) {
   bencode::List entries;
   for (const auto &entry : catalog.entries) {
+    bencode::List scrolls;
+    for (const auto &key : entry.scrollKeys) scrolls.push_back(V::string(key));
     bencode::List topics;
     for (const auto &topic : entry.topics) topics.push_back(V::string(topic));
-    entries.push_back(V::dict({{"hash", V::string(entry.hash.hex())},
-                               {"salt", V::string(entry.salt)},
-                               {"sequence", V::integer(entry.sequence)},
-                               {"title", V::string(entry.title)},
-                               {"topics", V::list(std::move(topics))},
-                               {"version", V::string(entry.version.str())}}));
+    entries.push_back(
+        V::dict({{"kind", V::integer(static_cast<std::int64_t>(entry.kind))},
+                 {"scrolls", V::list(std::move(scrolls))},
+                 {"hash", V::string(entry.hash.hex())},
+                 {"salt", V::string(entry.salt)},
+                 {"sequence", V::integer(entry.sequence)},
+                 {"title", V::string(entry.title)},
+                 {"topics", V::list(std::move(topics))},
+                 {"version", V::string(entry.version.str())}}));
   }
   return {{"entries", V::list(std::move(entries))},
-          {"format", V::integer(1)},
+          {"format", V::integer(2)},
           {"publisher", V::string(catalog.publisher.hex())},
           {"sequence", V::integer(catalog.sequence)}};
 }
 std::string signingBytes(const SignedAuthorCatalog &catalog) {
-  return "xudu-author-catalog:1:" + V::dict(body(catalog)).encode();
+  return "xudu-author-catalog:2:" + V::dict(body(catalog)).encode();
 }
 void validate(const SignedAuthorCatalog &catalog) {
   if (catalog.publisher.isZero() || catalog.sequence < 1 ||
       catalog.entries.size() > maximumAuthorCatalogEntries)
     throw AuthorCatalogUnreadable(
-        "author catalog format 1: invalid identity, sequence or count");
+        "author catalog format 2: invalid identity, sequence or count");
   std::string previous;
   for (const auto &entry : catalog.entries) {
     if (entry.hash.isZero() || entry.sequence < 0 || entry.salt.empty() ||
@@ -43,12 +48,31 @@ void validate(const SignedAuthorCatalog &catalog) {
         (!previous.empty() && entry.salt <= previous) || entry.title.empty() ||
         entry.title.size() > 1024 || entry.topics.size() > 32)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: invalid or duplicate entry");
+          "author catalog format 2: invalid or duplicate entry");
+    if (entry.kind != CatalogEntryKind::Document &&
+        entry.kind != CatalogEntryKind::LinkPackage)
+      throw AuthorCatalogUnreadable(
+          "author catalog format 2: unknown entry kind");
+    if ((entry.kind == CatalogEntryKind::Document &&
+         !entry.scrollKeys.empty()) ||
+        (entry.kind == CatalogEntryKind::LinkPackage &&
+         entry.scrollKeys.empty()) ||
+        entry.scrollKeys.size() > 256 ||
+        !std::ranges::is_sorted(entry.scrollKeys) ||
+        std::adjacent_find(entry.scrollKeys.begin(), entry.scrollKeys.end()) !=
+            entry.scrollKeys.end())
+      throw AuthorCatalogUnreadable(
+          "author catalog format 2: invalid referenced scroll keys");
+    for (const auto &key : entry.scrollKeys)
+      if (key.empty() || key.size() > 256 ||
+          key.find_first_of("\r\n\0", 0, 3) != std::string::npos)
+        throw AuthorCatalogUnreadable(
+            "author catalog format 2: invalid scroll key");
     std::set<std::string> topics;
     for (const auto &topic : entry.topics)
       if (topic != canonicalPublicationTopic(topic) ||
           !topics.insert(topic).second)
-        throw AuthorCatalogUnreadable("author catalog format 1: invalid topic");
+        throw AuthorCatalogUnreadable("author catalog format 2: invalid topic");
     previous = entry.salt;
   }
 }
@@ -88,7 +112,7 @@ const V &field(const V &value, std::string_view name) {
   const auto &fields = value.asDict();
   const auto found   = fields.find(std::string(name));
   if (found == fields.end())
-    throw AuthorCatalogUnreadable("author catalog format 1: missing field " +
+    throw AuthorCatalogUnreadable("author catalog format 2: missing field " +
                                   std::string(name));
   return found->second;
 }
@@ -122,7 +146,7 @@ std::string encodeAuthorCatalog(const SignedAuthorCatalog &catalog) {
   auto encoded = V::dict(std::move(fields)).encode();
   if (encoded.size() > maximumAuthorCatalogBytes)
     throw AuthorCatalogUnreadable(
-        "author catalog format 1: byte limit exceeded");
+        "author catalog format 2: byte limit exceeded");
   return encoded;
 }
 SignedAuthorCatalog signAuthorCatalog(SignedAuthorCatalog catalog,
@@ -136,46 +160,53 @@ SignedAuthorCatalog signAuthorCatalog(SignedAuthorCatalog catalog,
 SignedAuthorCatalog decodeAuthorCatalog(std::string_view bytes) {
   if (bytes.size() > maximumAuthorCatalogBytes)
     throw AuthorCatalogUnreadable(
-        "author catalog format 1: byte limit exceeded");
+        "author catalog format 2: byte limit exceeded");
   try {
     const auto root   = bencode::decode(bytes);
     const auto format = field(root, "format").asInteger();
-    if (format != 1)
-      throw AuthorCatalogUnreadable("author catalog version 1 expected, got " +
+    if (format != 2)
+      throw AuthorCatalogUnreadable("author catalog version 2 expected, got " +
                                     std::to_string(format));
     if (root.asDict().size() != 5)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: unexpected fields");
+          "author catalog format 2: unexpected fields");
     SignedAuthorCatalog catalog;
     const auto key = PublicKey::parseHex(field(root, "publisher").asString());
     if (!key)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: invalid publisher");
+          "author catalog format 2: invalid publisher");
     catalog.publisher     = *key;
     catalog.sequence      = field(root, "sequence").asInteger();
     const auto &signature = field(root, "signature").asString();
     if (signature.size() != catalog.signature.bytes.size())
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: invalid signature size");
+          "author catalog format 2: invalid signature size");
     std::copy(signature.begin(), signature.end(),
               catalog.signature.bytes.begin());
     const auto &entries = field(root, "entries").asList();
     if (entries.size() > maximumAuthorCatalogEntries)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: entry limit exceeded");
+          "author catalog format 2: entry limit exceeded");
     for (const auto &entry : entries) {
-      if (entry.asDict().size() != 6)
+      if (entry.asDict().size() != 8)
         throw AuthorCatalogUnreadable(
-            "author catalog format 1: unexpected entry fields");
+            "author catalog format 2: unexpected entry fields");
       AuthorCatalogEntry item;
       const auto hash = InfoHash::parseHex(field(entry, "hash").asString());
       if (!hash)
-        throw AuthorCatalogUnreadable("author catalog format 1: invalid hash");
+        throw AuthorCatalogUnreadable("author catalog format 2: invalid hash");
       item.hash     = *hash;
       item.salt     = field(entry, "salt").asString();
       item.title    = field(entry, "title").asString();
       item.version  = MicroversionId::parse(field(entry, "version").asString());
       item.sequence = field(entry, "sequence").asInteger();
+      const auto kind = field(entry, "kind").asInteger();
+      if (kind < 0 || kind > 1)
+        throw AuthorCatalogUnreadable(
+            "author catalog format 2: unknown entry kind");
+      item.kind = static_cast<CatalogEntryKind>(kind);
+      for (const auto &key : field(entry, "scrolls").asList())
+        item.scrollKeys.push_back(key.asString());
       for (const auto &topic : field(entry, "topics").asList())
         item.topics.push_back(topic.asString());
       catalog.entries.push_back(std::move(item));
@@ -185,28 +216,22 @@ SignedAuthorCatalog decodeAuthorCatalog(std::string_view bytes) {
         !verifyMutableItem(signingBytes(catalog), catalog.signature,
                            catalog.publisher))
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: signature or canonical encoding failed");
+          "author catalog format 2: signature or canonical encoding failed");
     return catalog;
   } catch (const AuthorCatalogUnreadable &) {
     throw;
   } catch (const std::exception &error) {
-    throw AuthorCatalogUnreadable("author catalog format 1: " +
+    throw AuthorCatalogUnreadable("author catalog format 2: " +
                                   std::string(error.what()));
   }
 }
 
-SignedAuthorCatalog updateAuthorCatalog(const std::filesystem::path &directory,
-                                        const Publication &pub,
-                                        const InfoHash &hash,
-                                        const MutableKeys &keys) {
-  // LMDB serializes processes; one environment at a time also avoids opening
-  // the same LMDB directory twice within this process.
-  if (directory.empty() || keys.publicKey != pub.publisher ||
-      !verifyPublication(pub))
-    throw std::invalid_argument(
-        "Author catalog requires the signed author's publication");
+namespace {
+SignedAuthorCatalog updateEntry(const std::filesystem::path &directory,
+                                const AuthorCatalogEntry &incoming,
+                                const MutableKeys &keys) {
   CatalogDb storage(directory);
-  auto name = pub.publisher.hex();
+  auto name = keys.publicKey.hex();
   MDB_val key{name.size(), name.data()}, value{};
   SignedAuthorCatalog catalog;
   const auto rc = mdb_get(storage.txn.get(), storage.db, &key, &value);
@@ -215,13 +240,11 @@ SignedAuthorCatalog updateAuthorCatalog(const std::filesystem::path &directory,
         {static_cast<const char *>(value.mv_data), value.mv_size});
     if (catalog.publisher != keys.publicKey)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: stored publisher mismatch");
+          "author catalog format 2: stored publisher mismatch");
   } else if (rc != MDB_NOTFOUND)
     checkDb(rc);
-  const AuthorCatalogEntry incoming{hash,       pub.salt,    pub.title,
-                                    pub.topics, pub.version, pub.sequence};
-  auto found =
-      std::ranges::find(catalog.entries, pub.salt, &AuthorCatalogEntry::salt);
+  auto found = std::ranges::find(catalog.entries, incoming.salt,
+                                 &AuthorCatalogEntry::salt);
   if (found != catalog.entries.end()) {
     if (incoming == *found || incoming.sequence < found->sequence)
       return catalog;
@@ -241,6 +264,36 @@ SignedAuthorCatalog updateAuthorCatalog(const std::filesystem::path &directory,
   checkDb(mdb_put(storage.txn.get(), storage.db, &key, &value, 0));
   storage.commit();
   return catalog;
+}
+} // namespace
+SignedAuthorCatalog updateAuthorCatalog(const std::filesystem::path &directory,
+                                        const Publication &pub,
+                                        const InfoHash &hash,
+                                        const MutableKeys &keys) {
+  if (directory.empty() || keys.publicKey != pub.publisher ||
+      !verifyPublication(pub))
+    throw std::invalid_argument(
+        "Author catalog requires the signed author's publication");
+  return updateEntry(
+      directory,
+      {hash, pub.salt, pub.title, pub.topics, pub.version, pub.sequence}, keys);
+}
+SignedAuthorCatalog updateAuthorCatalog(const std::filesystem::path &directory,
+                                        const LinkPackage &pkg,
+                                        const InfoHash &hash,
+                                        const MutableKeys &keys) {
+  reviewLinkPackage(pkg);
+  if (keys.publicKey != pkg.curator)
+    throw std::invalid_argument(
+        "Catalog signing key differs from package curator");
+  AuthorCatalogEntry entry;
+  entry.hash       = hash;
+  entry.salt       = pkg.salt;
+  entry.title      = pkg.title;
+  entry.sequence   = pkg.sequence;
+  entry.kind       = CatalogEntryKind::LinkPackage;
+  entry.scrollKeys = linkPackageScrollKeys(pkg);
+  return updateEntry(directory, entry, keys);
 }
 PublicationEntry catalogPublicationEntry(const SignedAuthorCatalog &catalog,
                                          const AuthorCatalogEntry &entry) {
@@ -276,7 +329,7 @@ bool retainAuthorCatalog(const std::filesystem::path &directory,
         {static_cast<const char *>(value.mv_data), value.mv_size});
     if (previous.publisher != catalog.publisher)
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: retained publisher mismatch");
+          "author catalog format 2: retained publisher mismatch");
     if (previous.sequence > catalog.sequence) return false;
     if (previous.sequence == catalog.sequence) {
       if (encodeAuthorCatalog(previous) != encoded)
@@ -317,7 +370,7 @@ retainedAuthorCatalogs(const std::filesystem::path &directory) {
     if (std::string_view(static_cast<const char *>(key.mv_data), key.mv_size) !=
         catalog.publisher.hex())
       throw AuthorCatalogUnreadable(
-          "author catalog format 1: retained key mismatch");
+          "author catalog format 2: retained key mismatch");
     result.push_back(std::move(catalog));
   }
   if (rc != MDB_NOTFOUND) checkDb(rc);

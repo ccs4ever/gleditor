@@ -58,13 +58,20 @@ public:
   }
   std::vector<std::string> topic(std::string_view requested,
                                  std::stop_token stop) override {
-    auto options                 = options_;
-    options.enableLocalDiscovery = false;
-    options.enableTrackers       = false;
-    SwarmContentSource source(options);
-    const auto topic  = canonicalPublicationTopic(requested);
-    const auto target = publicationTopicTarget(topic);
-    source.joinPublicationTopic(topic, scratch_.string());
+    return collect({canonicalPublicationTopic(requested)}, {}, stop);
+  }
+  std::vector<std::string> backlinks(const std::vector<std::string> &scrollKeys,
+                                     std::stop_token stop) override {
+    return collect({}, scrollKeys, stop);
+  }
+  std::vector<std::string> collect(const std::vector<std::string> &topics,
+                                   const std::vector<std::string> &scrollKeys,
+                                   std::stop_token stop) {
+    SwarmContentSource source(options_);
+    for (const auto &topic : topics)
+      source.joinPublicationTopic(topic, scratch_.string());
+    for (const auto &key : scrollKeys)
+      source.joinLinkPackageScroll(key, scratch_.string());
     const auto deadline = std::chrono::steady_clock::now() + timeout_;
     std::chrono::steady_clock::time_point collectedUntil{};
     std::set<std::string> seen;
@@ -74,19 +81,37 @@ public:
       for (const auto &[host, port] : nodes_) source.addDhtNode(host, port);
       source.poll();
       for (auto &[hash, bytes] : source.takePublicationCatalogs()) {
-        if (hash != target || result.size() >= 64) continue;
+        const bool wanted =
+            std::ranges::any_of(topics,
+                                [&](const auto &topic) {
+                                  return hash == publicationTopicTarget(topic);
+                                }) ||
+            std::ranges::any_of(scrollKeys, [&](const auto &key) {
+              return hash.bytes == linkPackageRendezvousTarget(key).bytes;
+            });
+        if (!wanted || result.size() >= 64) continue;
         try {
           const auto catalog = decodeAuthorCatalog(bytes);
           if (!std::ranges::any_of(catalog.entries, [&](const auto &entry) {
-                return std::ranges::find(entry.topics, topic) !=
-                       entry.topics.end();
+                return std::ranges::any_of(topics,
+                                           [&](const auto &topic) {
+                                             return std::ranges::find(
+                                                        entry.topics, topic) !=
+                                                    entry.topics.end();
+                                           }) ||
+                       (entry.kind == CatalogEntryKind::LinkPackage &&
+                        std::ranges::any_of(scrollKeys, [&](const auto &key) {
+                          return std::ranges::find(entry.scrollKeys, key) !=
+                                 entry.scrollKeys.end();
+                        }));
               }))
             continue;
           const auto identity = catalog.publisher.hex() + ":" +
                                 std::to_string(catalog.sequence) + ":" + bytes;
           if (seen.insert(identity).second) result.push_back(std::move(bytes));
           if (collectedUntil == std::chrono::steady_clock::time_point{})
-            collectedUntil = std::chrono::steady_clock::now() + 2s;
+            collectedUntil = std::chrono::steady_clock::now() +
+                             (scrollKeys.empty() ? 2s : 10s);
         } catch (const AuthorCatalogUnreadable &) {
           GLEDITOR_LOG_DEBUG("xudu.discovery", "Refused invalid topic catalog");
         }
@@ -96,8 +121,8 @@ public:
       std::this_thread::sleep_for(50ms);
     } while (std::chrono::steady_clock::now() < deadline);
     if (result.empty())
-      throw std::runtime_error(
-          "No signed topic metadata received; retry when peers are reachable");
+      throw std::runtime_error("No signed rendezvous metadata received; retry "
+                               "when peers are reachable");
     return result;
   }
 
@@ -174,7 +199,9 @@ struct PublicationDiscovery::Impl {
         if (!transport)
           throw std::runtime_error("Discovery transport unavailable");
         std::vector<std::string> encoded;
-        if (status.author)
+        if (!status.scrollKeys.empty())
+          encoded = transport->backlinks(status.scrollKeys, stop);
+        else if (status.author)
           encoded.push_back(
               transport->author(*PublicKey::parseHex(status.query), stop));
         else
@@ -191,8 +218,16 @@ struct PublicationDiscovery::Impl {
                 "Author catalog publisher differs from the pinned key");
           if (!status.author &&
               !std::ranges::any_of(catalog.entries, [&](const auto &entry) {
-                return std::ranges::find(entry.topics, status.query) !=
-                       entry.topics.end();
+                return status.scrollKeys.empty()
+                           ? std::ranges::find(entry.topics, status.query) !=
+                                 entry.topics.end()
+                           : entry.kind == CatalogEntryKind::LinkPackage &&
+                                 std::ranges::any_of(
+                                     status.scrollKeys, [&](const auto &key) {
+                                       return std::ranges::find(
+                                                  entry.scrollKeys, key) !=
+                                              entry.scrollKeys.end();
+                                     });
               }))
             continue;
           if (retainAuthorCatalog(options.directory, catalog)) {
@@ -266,6 +301,37 @@ std::string PublicationDiscovery::submit(std::string_view query, bool author) {
   status.query  = canonical;
   status.author = author;
   status.phase  = DiscoveryPhase::Queued;
+  status.error.clear();
+  impl_->changed.notify_all();
+  return id;
+}
+std::string PublicationDiscovery::submitLinks(std::vector<std::string> keys) {
+  std::ranges::sort(keys);
+  keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+  if (keys.empty() || keys.size() > 64 ||
+      std::ranges::any_of(keys, [](const auto &key) {
+        return key.empty() || key.size() > 256 ||
+               key.find_first_of("\r\n") != std::string::npos;
+      }))
+    throw std::invalid_argument(
+        "Links and responses needs 1 to 64 global scroll keys");
+  std::string joined;
+  for (const auto &key : keys) joined += key + '\n';
+  const auto id = "links:" + linkPackageRendezvousTarget(joined).hex();
+  const std::scoped_lock lock(impl_->guard);
+  auto found = impl_->jobs.find(id);
+  if (found != impl_->jobs.end() &&
+      (found->second.phase == DiscoveryPhase::Queued ||
+       found->second.phase == DiscoveryPhase::Searching))
+    return id;
+  if (found == impl_->jobs.end() &&
+      impl_->jobs.size() >= impl_->options.maximumRequests)
+    throw std::runtime_error("Discovery request limit reached");
+  auto &status      = impl_->jobs[id];
+  status.query      = "Links and responses";
+  status.author     = false;
+  status.scrollKeys = std::move(keys);
+  status.phase      = DiscoveryPhase::Queued;
   status.error.clear();
   impl_->changed.notify_all();
   return id;

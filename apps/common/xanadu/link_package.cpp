@@ -5,7 +5,10 @@
 #include "link_package.hpp"
 
 #include <algorithm>
+#include <filesystem>
 #include <format>
+#include <limits>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -197,7 +200,18 @@ bencode::Dict manifestOf(const LinkPackage &pkg, const bool includeSignature) {
     scrollsDict.emplace(key, encodeScroll(scroll));
   }
 
+  bencode::List publications;
+  for (const auto &pin : pkg.publications)
+    publications.push_back(bencode::Value::dict(
+        {{"publisher", bencode::Value::string(pin.publisher.hex())},
+         {"salt", bencode::Value::string(pin.salt)},
+         {"hash", bencode::Value::string(pin.hash.hex())},
+         {"sequence", bencode::Value::integer(pin.sequence)},
+         {"version", bencode::Value::string(pin.version.str())},
+         {"title", bencode::Value::string(pin.title)}}));
   bencode::Dict dict = {
+      {"format", bencode::Value::integer(1)},
+      {"publications", bencode::Value::list(std::move(publications))},
       {keyCurator, bencode::Value::string(rawBytes(pkg.curator))},
       {keyLinks, bencode::Value::list(std::move(linksList))},
       {keySalt, bencode::Value::string(pkg.salt)},
@@ -244,7 +258,10 @@ std::string linkPackageSigningBuffer(const LinkPackage &pkg) {
 }
 
 std::string encodeLinkPackage(const LinkPackage &pkg) {
-  return bencode::Value::dict(manifestOf(pkg, true)).encode();
+  auto bytes = bencode::Value::dict(manifestOf(pkg, true)).encode();
+  if (bytes.size() > maximumLinkPackageBytes)
+    throw LinkPackageUnreadable("Link package format 1: byte limit exceeded");
+  return bytes;
 }
 
 bool verifyLinkPackage(const LinkPackage &pkg) {
@@ -253,6 +270,7 @@ bool verifyLinkPackage(const LinkPackage &pkg) {
 }
 
 std::optional<LinkPackage> decodeLinkPackage(const std::string_view encoded) {
+  if (encoded.size() > maximumLinkPackageBytes) return std::nullopt;
   bencode::Value root;
   try {
     root = bencode::decode(encoded);
@@ -263,6 +281,16 @@ std::optional<LinkPackage> decodeLinkPackage(const std::string_view encoded) {
     return std::nullopt;
   }
 
+  const auto format = root.find("format");
+  if (!format || !format->isInteger() || format->asInteger() != 1)
+    throw LinkPackageUnreadable("Link package version 1 expected, got " +
+                                (format && format->isInteger()
+                                     ? std::to_string(format->asInteger())
+                                     : "missing"));
+  if (root.asDict().size() != 10) return std::nullopt;
+  const auto pins = root.find("publications");
+  if (!pins || !pins->isList() || pins->asList().size() > 128)
+    return std::nullopt;
   const auto curator   = root.find(keyCurator);
   const auto salt      = root.find(keySalt);
   const auto title     = root.find(keyTitle);
@@ -305,6 +333,24 @@ std::optional<LinkPackage> decodeLinkPackage(const std::string_view encoded) {
     pkg.scrolls.emplace(key, std::move(*scroll));
   }
 
+  try {
+    for (const auto &value : pins->asList()) {
+      if (!value.isDict() || value.asDict().size() != 6) return std::nullopt;
+      const auto field = [&](std::string_view name) -> const bencode::Value & {
+        return value.asDict().at(std::string(name));
+      };
+      const auto key  = PublicKey::parseHex(field("publisher").asString());
+      const auto hash = InfoHash::parseHex(field("hash").asString());
+      if (!key || !hash) return std::nullopt;
+      pkg.publications.push_back(
+          {*key, field("salt").asString(), *hash, field("sequence").asInteger(),
+           MicroversionId::parse(field("version").asString()),
+           field("title").asString()});
+    }
+    if (encodeLinkPackage(pkg) != encoded) return std::nullopt;
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
   return pkg;
 }
 
@@ -312,18 +358,106 @@ LinkPackage publishLinkPackage(const MutableKeys &keys, std::string salt,
                                std::string title, const std::int64_t sequence,
                                const std::uint64_t published,
                                std::vector<GlobalLink> links,
-                               std::map<std::string, Scroll> scrolls) {
+                               std::map<std::string, Scroll> scrolls,
+                               std::vector<PublicationPin> publications) {
   LinkPackage pkg;
-  pkg.curator   = keys.publicKey;
-  pkg.salt      = std::move(salt);
-  pkg.title     = std::move(title);
-  pkg.sequence  = sequence;
-  pkg.published = published;
-  pkg.links     = std::move(links);
-  pkg.scrolls   = std::move(scrolls);
+  pkg.curator      = keys.publicKey;
+  pkg.salt         = std::move(salt);
+  pkg.title        = std::move(title);
+  pkg.sequence     = sequence;
+  pkg.published    = published;
+  pkg.links        = std::move(links);
+  pkg.scrolls      = std::move(scrolls);
+  pkg.publications = std::move(publications);
 
   pkg.signature = signMutableItem(linkPackageSigningBuffer(pkg), keys);
   return pkg;
+}
+
+std::vector<std::string> linkPackageScrollKeys(const LinkPackage &pkg) {
+  std::set<std::string> keys;
+  for (const auto &link : pkg.links) {
+    for (const auto &span : link.left) keys.insert(span.scroll);
+    for (const auto &span : link.right) keys.insert(span.scroll);
+  }
+  return {keys.begin(), keys.end()};
+}
+void reviewLinkPackage(const LinkPackage &pkg) {
+  if (pkg.curator.isZero() || pkg.salt.empty() || pkg.salt.size() > 64 ||
+      pkg.salt == "catalog" || pkg.title.empty() || pkg.title.size() > 1024 ||
+      pkg.sequence < 0 ||
+      pkg.published > static_cast<std::uint64_t>(
+                          std::numeric_limits<std::int64_t>::max()) ||
+      pkg.links.empty() || pkg.links.size() > 4096 ||
+      pkg.scrolls.size() > 256 || pkg.publications.size() > 128 ||
+      !verifyLinkPackage(pkg))
+    throw LinkPackageUnreadable(
+        "Link package format 1: invalid signed package or limits");
+  for (const auto &[key, scroll] : pkg.scrolls) {
+    if (key != scrollKey(scroll) || scroll.segments.empty() ||
+        scroll.segments.size() > 4096)
+      throw LinkPackageUnreadable(
+          "Link package format 1: scroll identity/deployment mismatch");
+    std::uint64_t end = 0;
+    for (const auto &segment : scroll.segments) {
+      const std::filesystem::path path(segment.path);
+      if (segment.torrent.isZero() || segment.path.empty() ||
+          path.has_root_path() ||
+          segment.path.find_first_of("\\\0", 0, 2) != std::string::npos ||
+          std::ranges::any_of(
+              path,
+              [](const auto &part) { return part == "." || part == ".."; }) ||
+          segment.streamOffset >
+              std::numeric_limits<std::uint64_t>::max() - segment.length ||
+          !segment.length || segment.at < end ||
+          segment.at >
+              std::numeric_limits<std::uint64_t>::max() - segment.length)
+        throw LinkPackageUnreadable("Link package format 1: invalid or "
+                                    "overlapping immutable scroll segments");
+      end = segment.at + segment.length;
+    }
+  }
+  for (const auto &link : pkg.links) {
+    if (link.left.empty() || link.right.empty() || link.left.size() > 4096 ||
+        link.right.size() > 4096)
+      throw LinkPackageUnreadable(
+          "Link package format 1: empty or oversized endset");
+    for (const auto *ends : {&link.left, &link.right})
+      for (const auto &span : *ends) {
+        const auto found = pkg.scrolls.find(span.scroll);
+        if (span.empty() ||
+            span.start >
+                std::numeric_limits<std::uint64_t>::max() - span.length ||
+            found == pkg.scrolls.end())
+          throw LinkPackageUnreadable(
+              "Link package format 1: undeclared or invalid endpoint");
+        auto covered = span.start;
+        for (const auto &segment : found->second.segments) {
+          if (segment.torrent.isZero() || segment.path.empty() ||
+              segment.at >
+                  std::numeric_limits<std::uint64_t>::max() - segment.length)
+            throw LinkPackageUnreadable(
+                "Link package format 1: invalid immutable scroll segment");
+          if (segment.at > covered) break;
+          if (segment.at + segment.length > covered)
+            covered = segment.at + segment.length;
+          if (covered >= span.end()) break;
+        }
+        if (covered < span.end())
+          throw LinkPackageUnreadable(
+              "Link package format 1: endpoint exceeds declared scroll ranges");
+      }
+  }
+  std::set<std::string> pins;
+  for (const auto &pin : pkg.publications) {
+    if (pin.publisher.isZero() || pin.salt.empty() || pin.salt.size() > 64 ||
+        pin.hash.isZero() || pin.sequence < 0 || pin.title.empty() ||
+        pin.title.size() > 1024 ||
+        !pins.insert(scrollKeyFor(pin.publisher, pin.salt)).second)
+      throw LinkPackageUnreadable(
+          "Link package format 1: invalid or duplicate publication citation");
+  }
+  (void)encodeLinkPackage(pkg);
 }
 
 AdoptedLinksResult adoptLinkPackage(Store &store, const LinkPackage &pkg,

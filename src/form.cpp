@@ -216,6 +216,10 @@ void Form::describe(a11y::Builder &into) {
           reveal ? "shown on screen" : "hidden; there is a button to show it";
       break;
     case Kind::Choice:
+      if (!one.options.empty() &&
+          one.optionDescriptions.size() == one.options.size())
+        node.description = one.optionDescriptions[std::min(
+            one.chosen, one.options.size() - 1)];
       node.value =
           one.options.empty()
               ? std::string{}
@@ -239,6 +243,8 @@ void Form::describe(a11y::Builder &into) {
       for (std::size_t option = 0; option < one.options.size(); option++) {
         auto &entry = into.add(optionId(which, option), a11y::Role::ListItem);
         entry.label = one.options[option];
+        if (one.optionDescriptions.size() == one.options.size())
+          entry.description = one.optionDescriptions[option];
         entry.actions =
             a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
         entry.focusable = true;

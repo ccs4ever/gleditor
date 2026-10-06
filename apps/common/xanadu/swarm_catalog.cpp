@@ -10,6 +10,12 @@
 #include <map>
 
 namespace xanadu {
+namespace {
+std::size_t documentCount(const SignedAuthorCatalog &catalog) {
+  return static_cast<std::size_t>(std::ranges::count(
+      catalog.entries, CatalogEntryKind::Document, &AuthorCatalogEntry::kind));
+}
+} // namespace
 
 struct SwarmCatalog::Impl {
   PublicationLedger ledger;
@@ -52,7 +58,7 @@ void SwarmCatalog::followAuthor(const PublicKey &key) {
   if (const auto found = impl_->signedCatalogs.find(name);
       found != impl_->signedCatalogs.end())
     std::ranges::find(impl_->authors, name, &AuthorNode::pubKeyHex)
-        ->publicationCount = decodeAuthorCatalog(found->second).entries.size();
+        ->publicationCount = documentCount(decodeAuthorCatalog(found->second));
 }
 void SwarmCatalog::ingestAuthorCatalog(const SignedAuthorCatalog &catalog) {
   const auto bytes = encodeAuthorCatalog(catalog);
@@ -78,12 +84,13 @@ void SwarmCatalog::ingestAuthorCatalog(const SignedAuthorCatalog &catalog) {
   }
   for (const auto &entry : catalog.entries)
     // Key ownership is checked; Oracle/ledger enrollment is still unverified.
-    addPublication(catalogPublicationEntry(catalog, entry), 0, 0, false);
+    if (entry.kind == CatalogEntryKind::Document)
+      addPublication(catalogPublicationEntry(catalog, entry), 0, 0, false);
   impl_->signedCatalogs[key] = bytes;
   const auto author =
       std::ranges::find(impl_->authors, key, &AuthorNode::pubKeyHex);
   if (author != impl_->authors.end())
-    author->publicationCount = catalog.entries.size();
+    author->publicationCount = documentCount(catalog);
   impl_->topics.clear();
   for (const auto &[topic, count] : impl_->index.topTopics())
     impl_->topics.push_back({.topic    = topic,

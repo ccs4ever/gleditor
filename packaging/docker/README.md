@@ -70,3 +70,8 @@ availability and kernel support are separate from a passing publication test.
 The publication smoke tests also cover complete reader installation, author edition preservation,
 reader-only edits, offline reopening and refusal of missing/corrupt cache files. Store-table format
 4 and its deployment bindings are covered by `StoreTablesTest`.
+
+Package smoke tests cover typed catalog entries, signed endpoint declarations, exact publication
+citations, independent package/cache recovery and cancellation. Catalog format 2 and package format
+1 replace their earlier development shapes. `Ctrl+Alt+Shift+P` prepares/reviews packages;
+`Ctrl+Alt+Shift+L` discovers scroll responses. Reader visibility layers remain pending.

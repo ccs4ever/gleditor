@@ -195,6 +195,9 @@ public:
   /// torrent or auxiliary listener. Catalog signatures are checked by the host.
   void joinPublicationTopic(std::string_view topic, const std::string &dataRoot,
                             const std::string &catalog = {});
+  void joinLinkPackageScroll(const std::string &scrollKey,
+                             const std::string &dataRoot,
+                             const std::string &catalog = {});
   [[nodiscard]] std::vector<std::pair<InfoHash, std::string>>
   takePublicationCatalogs();
 
@@ -406,6 +409,8 @@ public:
 private:
   friend class XuduTorrentPlugin;
   friend class XuduPeerPlugin;
+  void joinCatalogRendezvous(const InfoHash &hash, const std::string &dataRoot,
+                             const std::string &catalog);
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

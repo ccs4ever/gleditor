@@ -75,6 +75,7 @@ public:
   /// are admitted, while rollback and equal-sequence conflicts are refused.
   std::string submit(const MutableLink &link,
                      std::optional<MutablePointer> minimum = std::nullopt);
+  std::string submitPinned(const PublicationPin &pin);
   void cancel(std::string_view id);
   void retry(std::string_view id);
   [[nodiscard]] std::vector<PublicationDownloadStatus> statuses() const;

@@ -12,6 +12,7 @@ enum class DiscoveryPhase : std::uint8_t { Queued, Searching, Ready, Failed };
 struct PublicationDiscoveryStatus {
   std::string query;
   bool author{};
+  std::vector<std::string> scrollKeys;
   DiscoveryPhase phase{DiscoveryPhase::Queued};
   std::string error;
   std::vector<SignedAuthorCatalog> catalogs;
@@ -20,8 +21,12 @@ class PublicationDiscoveryTransport {
 public:
   virtual ~PublicationDiscoveryTransport() = default;
   virtual std::string author(const PublicKey &key, std::stop_token stop) = 0;
+  virtual std::vector<std::string> backlinks(const std::vector<std::string> &,
+                                             std::stop_token) {
+    throw std::runtime_error("Backlink discovery is unavailable");
+  }
   virtual std::vector<std::string> topic(std::string_view topic,
-                                         std::stop_token stop)           = 0;
+                                         std::stop_token stop) = 0;
 };
 /// Explicit discovery runs on one worker. Stored signatures/high-water marks
 /// survive restart; cached metadata is never presented as a fresh DHT lookup.
@@ -38,6 +43,7 @@ public:
   PublicationDiscovery(const PublicationDiscovery &)            = delete;
   PublicationDiscovery &operator=(const PublicationDiscovery &) = delete;
   std::string submit(std::string_view query, bool author);
+  std::string submitLinks(std::vector<std::string> scrollKeys);
   [[nodiscard]] PublicationDiscoveryStatus status(std::string_view id) const;
   [[nodiscard]] std::vector<SignedAuthorCatalog> cachedCatalogs() const;
   [[nodiscard]] std::vector<PublicKey> followedAuthors() const;

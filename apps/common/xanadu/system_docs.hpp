@@ -318,6 +318,10 @@ inline constexpr std::string_view kKeymapPublicationStatus =
     "std:xudu/publication_status";
 inline constexpr std::string_view kKeymapPublicationDiscovery =
     "std:xudu/publication_discovery";
+inline constexpr std::string_view kKeymapLinkPackagePublish =
+    "std:xudu/link_package_publish";
+inline constexpr std::string_view kKeymapLinksResponses =
+    "std:xudu/links_responses";
 inline constexpr std::string_view kKeymapPublicationUpdates =
     "std:xudu/publication_updates";
 inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";

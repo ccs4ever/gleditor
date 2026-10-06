@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "author_catalog.hpp"
+#include "link_package.hpp"
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/bdecode.hpp>
 #include <libtorrent/bencode.hpp>
@@ -979,9 +980,21 @@ bool SwarmContentSource::flushDownload(const InfoHash &hash,
 void SwarmContentSource::joinPublicationTopic(std::string_view topic,
                                               const std::string &dataRoot,
                                               const std::string &catalog) {
+  joinCatalogRendezvous(publicationTopicTarget(topic), dataRoot, catalog);
+}
+void SwarmContentSource::joinLinkPackageScroll(const std::string &key,
+                                               const std::string &dataRoot,
+                                               const std::string &catalog) {
+  if (key.empty() || key.size() > 256)
+    throw std::invalid_argument("Invalid scroll rendezvous key");
+  joinCatalogRendezvous(InfoHash{linkPackageRendezvousTarget(key).bytes},
+                        dataRoot, catalog);
+}
+void SwarmContentSource::joinCatalogRendezvous(const InfoHash &hash,
+                                               const std::string &dataRoot,
+                                               const std::string &catalog) {
   if (catalog.size() > maximumAuthorCatalogBytes)
     throw std::invalid_argument("Publication catalog exceeds wire byte limit");
-  const auto hash = publicationTopicTarget(topic);
   if (!impl->publicationTopics.contains(hash) &&
       impl->publicationTopics.size() >= impl->options.maximumPublicationTopics)
     throw std::runtime_error("Publication topic connection limit reached");

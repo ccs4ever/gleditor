@@ -304,6 +304,7 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
   publicationSubscriptions_.reset();
+  linkPackageExchange_.reset();
   publicationDiscovery_.reset();
   publicationInbox_.reset();
   try {
@@ -588,7 +589,7 @@ void Session::configureTestPublicationSwarm(
     const std::string &listen,
     std::vector<std::pair<std::string, std::uint16_t>> nodes) {
   if (publicationOutbox_ || publicationInbox_ || publicationDiscovery_ ||
-      publicationSubscriptions_)
+      publicationSubscriptions_ || linkPackageExchange_)
     throw std::logic_error("publication outbox is already running");
   testPublicationSwarm_ = true;
   publicationListen_    = listen;
@@ -639,6 +640,103 @@ PublicationInbox &Session::publicationInbox() {
     publicationInbox_ = std::make_unique<PublicationInbox>(std::move(options));
   }
   return *publicationInbox_;
+}
+
+LinkPackageExchange &Session::linkPackageExchange() {
+  if (!linkPackageExchange_) {
+    LinkPackageExchange::Options options;
+    options.directory = xanadocsDirectory().parent_path() / "link-packages";
+    if (testPublicationSwarm_) {
+      const auto mine        = identity();
+      options.verifyIdentity = [key = mine.publicKey](const LinkPackage &pkg) {
+        return pkg.curator == key ? PublicationIdentity::MockVerified
+                                  : PublicationIdentity::Unknown;
+      };
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makePublisher                = publicationSwarmTransport(
+          mine, swarm, publicationNodes_,
+          xanadocsDirectory().parent_path() / "author-catalog" /
+              mine.publicKey.hex());
+      options.makeDownloader =
+          publicationDownloadSwarmTransport(swarm, publicationNodes_);
+    }
+    linkPackageExchange_ =
+        std::make_unique<LinkPackageExchange>(std::move(options));
+  }
+  return *linkPackageExchange_;
+}
+PublicationPin Session::pinPublication(const Publication &pub) const {
+  const std::vector<TorrentContent> files{
+      {.path = "publication.xanadoc", .data = encodePublication(pub)}};
+  return {.publisher = pub.publisher,
+          .salt      = pub.salt,
+          .hash      = makeTorrent(files, "publication").hash,
+          .sequence  = pub.sequence,
+          .version   = pub.version,
+          .title     = pub.title};
+}
+std::vector<Publication> Session::packagePublicationSources() {
+  std::vector<std::filesystem::path> files;
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    const auto root = publishedDir(i);
+    if (!std::filesystem::is_directory(root)) continue;
+    for (const auto &entry : std::filesystem::directory_iterator(root))
+      if (entry.is_regular_file() && entry.path().extension() == ".xanadoc")
+        files.push_back(entry.path());
+  }
+  for (const auto &status : publicationInbox().statuses())
+    if (status.phase == PublicationDownloadPhase::Ready)
+      files.push_back(status.storePath.parent_path() / "publication.xanadoc");
+  std::vector<Publication> result;
+  std::set<std::string> hashes;
+  for (const auto &file : files) {
+    if (result.size() >= 128) break;
+    if (!std::filesystem::is_regular_file(file) ||
+        std::filesystem::file_size(file) > 16 * 1024 * 1024)
+      continue;
+    std::ifstream input(file, std::ios::binary);
+    const std::string bytes{std::istreambuf_iterator<char>(input),
+                            std::istreambuf_iterator<char>()};
+    const auto pub = decodePublication(bytes);
+    if (pub && verifyPublication(*pub) &&
+        hashes.insert(pinPublication(*pub).hash.hex()).second)
+      result.push_back(*pub);
+  }
+  std::ranges::sort(result, {}, [](const auto &pub) {
+    return pub.title + pub.publisher.hex() + std::to_string(pub.sequence);
+  });
+  return result;
+}
+std::string Session::prepareLinkPackage(const Publication &source,
+                                        const std::string &salt,
+                                        const std::string &title,
+                                        bool announce) {
+  if (!verifyPublication(source))
+    throw std::invalid_argument("Source publication signature failed");
+  const auto mine    = identity();
+  std::int64_t floor = 0;
+  for (const auto &status : linkPackageExchange().statuses())
+    if (status.package.curator == mine.publicKey && status.package.salt == salt)
+      floor = std::max(floor, status.package.sequence);
+  const auto sequence = reservePublicationSequence(
+      std::filesystem::path(path(0)) / "publication-sequences", mine.publicKey,
+      salt, floor);
+  std::map<std::string, Scroll> scrolls;
+  for (const auto &link : source.links)
+    for (const auto *ends : {&link.left, &link.right})
+      for (const auto &span : *ends)
+        scrolls.emplace(span.scroll, source.scrolls.at(span.scroll));
+  const auto now = static_cast<std::uint64_t>(
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+  const auto pkg =
+      publishLinkPackage(mine, salt, title, sequence, now, source.links,
+                         std::move(scrolls), {pinPublication(source)});
+  return linkPackageExchange().submit(pkg, announce);
 }
 
 PublicationDiscovery &Session::publicationDiscovery() {

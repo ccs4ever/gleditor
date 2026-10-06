@@ -362,13 +362,43 @@ evidence in `build/publication-local/run-2gytb_n4/`. Docker image `gleditor-swar
 sources match the host and no private identity directories were found in its source or work tree.
 Format-check and lint passed; the separate clang-format 19 comparison found no new deviations.
 
+## Independent packages and scroll response discovery (2026-10-06)
+
+`Ctrl+Alt+Shift+P` prepares an independent package from a deliberately chosen signed publication's
+links. The curator reviews both endsets before publishing the retained signed bytes to the explicit
+mock swarm. `Ctrl+Alt+Shift+L` queries the registered global scroll rendezvous, fetches packages
+from signed catalog advertisements, and opens exact cited snapshots through the download controls.
+No curator key is needed for discovery. Fetch/review does not adopt links or append source
+operations.
+
+`LinkPackageExchange` retains bounded immutable requests and verified package caches. Workers own
+publishing/download sessions. Publishing requires package and catalog acknowledgements; reader
+acceptance requires piece, signature, identity, sequence and endpoint-declaration checks. Explicit
+cancellation survives restart. Retry preserves signed bytes and sequence. Later packages supersede
+older own announcement jobs while retaining their metadata. Exact citations fetch their signed
+publication root directly, preserving the author's chosen version even if the mutable head changes.
+
+Catalog format 2 carries typed package entries and their referenced scroll keys. Package format 1
+carries exact publication citations. The retired catalog/package shapes are refused without a shim;
+regenerate development catalogs. Store format 4, publication format 2 and native fixtures remain
+unchanged. The package cache's atomic rename checks cover process restart, not power loss.
+
+See [the package report](ux_publication_links_validation_2026-10-06.md) for fixture boundaries,
+interface evidence and limitations. This is a publication/discovery/review prerequisite batch;
+visibility layers and full commentary authorship are not yet certified. The final native suites
+passed 540 library, 1,284 engine, 57 Xuzz and 119 ZigZag cases, plus 12 namespace transport cases
+and four publication integrations across the recorded runs. Docker image `485bcd8f427d` passed 129
+network-disabled smoke tests; all 32 changed/new C++ hashes match the host. The review now shows
+compact identities and readable ranges, with full key inspection and accessibility descriptions.
+
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
-   explicit mock verification boundary are now implemented in the outbox.
-1. Add commentary/backlink and independent link-package creation, review, announcement and
-   discovery. Package visibility must be a private reader preference that filters contributions
-   without appending operations to visited stores.
-1. Rerun P1–P7 and their rejection/offline/retry cases through the UI. The first batch's unit, form
-   and transport passes do not substitute for that acceptance run.
+   explicit mock verification boundary are implemented in the outbox.
+1. Add private package visibility preferences and reader contribution rendering/navigation without
+   appending operations to visited stores. Filter discovered packages by the publication's exact
+   spans, and support individual link selection/editing during package preparation.
+1. Validate commentary document creation, publication and Alice's reply citing both commentaries.
+   Rerun P1–P7 and rejection/offline/retry cases through the UI. Fixture, unit and transport passes
+   do not substitute for that acceptance run.

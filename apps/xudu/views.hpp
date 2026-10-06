@@ -176,6 +176,12 @@ public:
                                 float screenX = 0.0F, float screenY = 0.0F);
   void summonPublication(const PublicationEntry &entry);
   void publicationDownloadStatus(const std::string &id);
+  void publishIndependentLinks();
+  void linksAndResponses(const std::string &query = {});
+  void linkPackageStatus(const std::string &id);
+  void inspectIndependentLinkKeys(const std::string &id, std::size_t link,
+                                  std::size_t left, std::size_t right);
+  void reviewIndependentLinks(const std::string &id, std::size_t selected = 0);
   void publicationUpdates(const std::string &subscription = {},
                           std::int64_t sequence           = -1);
   void discoverPublications(const std::string &query = {});

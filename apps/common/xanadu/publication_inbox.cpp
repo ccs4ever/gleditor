@@ -48,6 +48,9 @@ public:
     const auto deadline = std::chrono::steady_clock::now() + timeout_;
     do {
       checkCancelled(stop);
+      // Pinned snapshots and packages reach fetch without resolving a name.
+      // Introduce bootstrap nodes after asynchronous DHT startup here too.
+      for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
       for (const auto &[host, port] : peers_)
         source_.connectPeer(hash, host, port);
       if (source_.waitForMetadata(hash, 250ms)) break;
@@ -152,6 +155,7 @@ struct PublicationInbox::Impl {
   struct Job {
     MutableLink link;
     std::optional<MutablePointer> minimum;
+    std::optional<PublicationPin> pin;
     PublicationDownloadStatus status;
     std::stop_source cancel;
   };
@@ -232,7 +236,9 @@ struct PublicationInbox::Impl {
       auto transport = options.makeTransport();
       if (!transport)
         throw std::runtime_error("Publication transport unavailable");
-      const auto pointer = transport->resolve(job.link, stop);
+      const auto pointer =
+          job.pin ? MutablePointer{job.pin->hash, job.pin->sequence}
+                  : transport->resolve(job.link, stop);
       if (job.minimum && (pointer.sequence < job.minimum->sequence ||
                           (pointer.sequence == job.minimum->sequence &&
                            pointer.hash != job.minimum->hash)))
@@ -254,6 +260,10 @@ struct PublicationInbox::Impl {
           pub->salt != job.link.salt || pub->sequence != pointer.sequence)
         throw std::runtime_error("Publication signature, name or sequence does "
                                  "not match the signed DHT pointer");
+      if (job.pin &&
+          (pub->version != job.pin->version || pub->title != job.pin->title))
+        throw std::runtime_error(
+            "Publication version or title differs from the pinned citation");
       std::set<InfoHash> dependencies;
       for (const auto &[name, scroll] : pub->scrolls) {
         (void)name;
@@ -362,6 +372,27 @@ std::string PublicationInbox::submit(const MutableLink &link,
   job.minimum    = minimum;
   job.status.id  = id;
   job.status.uri = link.uri();
+  impl_->jobs.emplace(id, std::move(job));
+  impl_->changed.notify_all();
+  return id;
+}
+std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
+  if (pin.publisher.isZero() || pin.salt.empty() || pin.salt.size() > 64 ||
+      pin.hash.isZero() || pin.sequence < 0)
+    throw std::invalid_argument("Invalid pinned publication");
+  const std::scoped_lock lock(impl_->guard);
+  std::string id;
+  do {
+    id = createMutableKeys().publicKey.hex();
+  } while (impl_->jobs.contains(id) ||
+           std::filesystem::exists(impl_->options.directory / id));
+  Impl::Job job;
+  job.link.key                = pin.publisher;
+  job.link.salt               = pin.salt;
+  job.link.currentWhenWritten = pin.hash;
+  job.pin                     = pin;
+  job.status.id               = id;
+  job.status.uri              = job.link.uri();
   impl_->jobs.emplace(id, std::move(job));
   impl_->changed.notify_all();
   return id;

@@ -101,6 +101,9 @@ public:
      * cannot be given a reveal button that reveals nothing.
      */
     bool revealsSecrets{};
+    /// Full accessible details when a compact visible option cannot carry
+    /// its identity. Empty or the same length as options.
+    std::vector<std::string> optionDescriptions;
 
     /// What this field is worth as an answer: the chosen option's value for a
     /// Choice, "on" or nothing for a Toggle, the text for anything else.

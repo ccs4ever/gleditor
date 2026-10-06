@@ -1,6 +1,7 @@
 #ifndef XUDU_AUTHOR_CATALOG_HPP
 #define XUDU_AUTHOR_CATALOG_HPP
 
+#include "link_package.hpp"
 #include "publication.hpp"
 #include "publication_ledger.hpp"
 #include <filesystem>
@@ -10,6 +11,7 @@ namespace xanadu {
 inline constexpr std::size_t maximumAuthorCatalogBytes   = 512 * 1024;
 inline constexpr std::size_t maximumAuthorCatalogEntries = 1024;
 
+enum class CatalogEntryKind : std::uint8_t { Document, LinkPackage };
 struct AuthorCatalogEntry {
   InfoHash hash;
   std::string salt;
@@ -17,6 +19,8 @@ struct AuthorCatalogEntry {
   std::vector<std::string> topics;
   MicroversionId version;
   std::int64_t sequence{};
+  CatalogEntryKind kind{CatalogEntryKind::Document};
+  std::vector<std::string> scrollKeys;
   bool operator==(const AuthorCatalogEntry &) const = default;
 };
 struct SignedAuthorCatalog {
@@ -41,6 +45,10 @@ encodeAuthorCatalog(const SignedAuthorCatalog &catalog);
 [[nodiscard]] SignedAuthorCatalog
 updateAuthorCatalog(const std::filesystem::path &directory,
                     const Publication &publication, const InfoHash &hash,
+                    const MutableKeys &keys);
+[[nodiscard]] SignedAuthorCatalog
+updateAuthorCatalog(const std::filesystem::path &directory,
+                    const LinkPackage &package, const InfoHash &hash,
                     const MutableKeys &keys);
 [[nodiscard]] PublicationEntry
 catalogPublicationEntry(const SignedAuthorCatalog &catalog,
