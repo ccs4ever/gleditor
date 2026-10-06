@@ -946,9 +946,12 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       const float prefixWidth = std::max(0.0F, width - marker.widthPx);
       FittedText prefix;
       if (prefixWidth > 0.0F) {
-        prefix =
-            fit(text.substr(last.byteStart, sourceEnd - last.byteStart), font,
+        const auto source =
+            text.substr(last.byteStart, sourceEnd - last.byteStart);
+        const auto clipped =
+            fit(source, font,
                 {.maxWidthPx = prefixWidth, .overflow = Overflow::Clip});
+        prefix = fit(source.substr(0, clipped.visibleBytes), font, {});
       }
       std::erase_if(shaping.glyphs, [lineIndex](const auto &glyph) {
         return glyph.lineIndex >= lineIndex;

@@ -164,10 +164,11 @@ render::PipelineDesc glyphPipeline() {
   return descriptor;
 }
 
-OverflowCounts buildScene(gleditor::Canvas &canvas, RenderState &state,
-                          const std::vector<std::string> &labels,
-                          const float lineHeight, const bool widthLimited,
-                          const bool withText = true) {
+OverflowCounts
+buildScene(gleditor::Canvas &canvas, RenderState &state,
+           const std::vector<std::string> &labels, const float lineHeight,
+           const bool widthLimited, const bool withText = true,
+           const std::optional<gleditor::text::Overflow> boxed = std::nullopt) {
   canvas.clear();
   constexpr float columnWidth =
       (static_cast<float>(screenWidth) - 2.0F * margin -
@@ -195,8 +196,18 @@ OverflowCounts buildScene(gleditor::Canvas &canvas, RenderState &state,
                                  .width  = textWidth,
                                  .height = lineHeight});
     const auto &label = labels[static_cast<std::size_t>(index) % labels.size()];
-    const auto metrics = canvas.addText(state, left + padding, top - padding,
-                                        label, textColour, rowColour);
+    gleditor::TextMetrics metrics;
+    if (boxed) {
+      const auto result = canvas.addText(
+          state,
+          gleditor::ui::Rect{left + padding, top - padding - lineHeight,
+                             textWidth, lineHeight},
+          label, textColour, rowColour, {.overflow = *boxed});
+      metrics = {result.fitted.widthPx, result.fitted.heightPx};
+    } else {
+      metrics = canvas.addText(state, left + padding, top - padding, label,
+                               textColour, rowColour);
+    }
     overflows.width += metrics.width > textWidth ? 1 : 0;
     overflows.height += metrics.height > lineHeight ? 1 : 0;
   }
@@ -239,8 +250,10 @@ void writeScreenshot(const render::FrameImage &image, const std::string &path) {
   }
 }
 
-std::size_t changedPixels(const render::FrameImage &text,
-                          const render::FrameImage &rectangles) {
+std::size_t
+changedPixels(const render::FrameImage &text,
+              const render::FrameImage &rectangles,
+              const std::optional<float> boxedLineHeight = std::nullopt) {
   if (text.width != screenWidth || text.height != screenHeight ||
       rectangles.width != text.width || rectangles.height != text.height ||
       text.rgba.size() != static_cast<std::size_t>(screenWidth) *
@@ -254,6 +267,32 @@ std::size_t changedPixels(const render::FrameImage &text,
         text.rgba[offset + 1] != rectangles.rgba[offset + 1] ||
         text.rgba[offset + 2] != rectangles.rgba[offset + 2]) {
       ++changed;
+      if (boxedLineHeight) {
+        constexpr float columnWidth =
+            (static_cast<float>(screenWidth) - 2.0F * margin -
+             static_cast<float>(columns - 1) * gap) /
+            static_cast<float>(columns);
+        const float x = static_cast<float>((offset / 4) % screenWidth) + 0.5F;
+        const float y = static_cast<float>(screenHeight) -
+                        static_cast<float>((offset / 4) / screenWidth) - 0.5F;
+        bool inside = false;
+        for (int index = 0; index < labelCount; ++index) {
+          const float left =
+              margin + static_cast<float>(index / rows) * (columnWidth + gap) +
+              padding;
+          const float top = static_cast<float>(screenHeight) - margin -
+                            static_cast<float>(index % rows) *
+                                (*boxedLineHeight + 2.0F * padding + gap) -
+                            padding;
+          inside = inside ||
+                   (x >= left && x <= left + columnWidth - 2.0F * padding &&
+                    y <= top && y >= top - *boxedLineHeight);
+        }
+        if (!inside) {
+          throw std::runtime_error(
+              "boxed text changed a pixel outside its clip");
+        }
+      }
     }
   }
   if (changed == 0) {
@@ -262,13 +301,15 @@ std::size_t changedPixels(const render::FrameImage &text,
   return changed;
 }
 
-void runScenario(const Options &options, const std::string_view mode,
-                 const bool widthLimited, const bool retained,
-                 const std::vector<std::string> &labels,
-                 render::RenderDevice &device, RenderState &state,
-                 gleditor::Canvas &canvas, const glm::mat4 &projection,
-                 const float lineHeight) {
-  auto overflows = buildScene(canvas, state, labels, lineHeight, widthLimited);
+void runScenario(
+    const Options &options, const std::string_view mode,
+    const bool widthLimited, const bool retained,
+    const std::vector<std::string> &labels, render::RenderDevice &device,
+    RenderState &state, gleditor::Canvas &canvas, const glm::mat4 &projection,
+    const float lineHeight,
+    const std::optional<gleditor::text::Overflow> boxed = std::nullopt) {
+  auto overflows =
+      buildScene(canvas, state, labels, lineHeight, widthLimited, true, boxed);
   Samples samples;
   samples.frameMs.reserve(static_cast<std::size_t>(options.frames));
   samples.layouts.reserve(static_cast<std::size_t>(options.frames));
@@ -281,7 +322,8 @@ void runScenario(const Options &options, const std::string_view mode,
     gleditor::text::ShapingStatsScope capture;
     const auto start = Clock::now();
     if (!retained) {
-      overflows = buildScene(canvas, state, labels, lineHeight, widthLimited);
+      overflows = buildScene(canvas, state, labels, lineHeight, widthLimited,
+                             true, boxed);
     }
     drawFrame(device, state, canvas, projection);
     const auto elapsed =
@@ -302,9 +344,11 @@ void runScenario(const Options &options, const std::string_view mode,
     writeScreenshot(textImage, options.screenshotPrefix + "." +
                                    std::string(mode) + ".ppm");
   }
-  buildScene(canvas, state, labels, lineHeight, widthLimited, false);
+  buildScene(canvas, state, labels, lineHeight, widthLimited, false, boxed);
   drawFrame(device, state, canvas, projection);
-  const auto inkPixels = changedPixels(textImage, device.captureColorTarget());
+  const auto inkPixels =
+      changedPixels(textImage, device.captureColorTarget(),
+                    boxed ? std::optional<float>{lineHeight} : std::nullopt);
 
   std::cout << render::backendName(options.backend) << '\t' << mode << '\t'
             << options.font << '\t' << labels.size() << '\t' << labelCount
@@ -365,6 +409,15 @@ int run(const Options &options) {
                 state, canvas, projection, lineHeight);
     runScenario(options, "width-limit-retained", true, true, labels, *device,
                 state, canvas, projection, lineHeight);
+    runScenario(options, "boxed-rebuild", true, false, labels, *device, state,
+                canvas, projection, lineHeight,
+                gleditor::text::Overflow::Ellipsis);
+    runScenario(options, "boxed-retained", true, true, labels, *device, state,
+                canvas, projection, lineHeight,
+                gleditor::text::Overflow::Ellipsis);
+    runScenario(options, "boxed-clip-rebuild", true, false, labels, *device,
+                state, canvas, projection, lineHeight,
+                gleditor::text::Overflow::Clip);
     device->waitIdle();
   }
   device->shutdown();

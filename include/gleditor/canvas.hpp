@@ -35,6 +35,8 @@
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/text/fit.hpp>
+#include <gleditor/ui/rect.hpp>
 #include <gleditor/ui/text_diagnostics.hpp>
 
 struct RenderState;
@@ -51,6 +53,11 @@ struct ImageResource;
 struct TextMetrics {
   float width{};
   float height{};
+};
+
+struct BoxedText {
+  text::FittedText fitted;
+  ui::Rect box;
 };
 
 /**
@@ -70,7 +77,7 @@ public:
   /**
    * @param aDevice   Device the vertex storage lives on. Not owned; must
    *        outlive the canvas.
-   * @param aFontName Pango font description text is laid out with.
+   * @param aFontName Font description text is laid out with, such as Sans 12.
    * @param initialRows Quads the storage starts out with. It grows on demand.
    */
   Canvas(render::RenderDevice *aDevice, std::string aFontName,
@@ -96,6 +103,12 @@ public:
   /// Throw away the geometry built so far, keeping the storage. The start of
   /// rebuilding a canvas whose contents changed.
   void clear();
+
+  /// Nested clips intersect in Canvas space and affect all subsequent quads.
+  /// Invalid rectangles throw invalid_argument; an empty clip draws nothing.
+  /// clear() resets the stack. Popping an empty stack throws logic_error.
+  void pushClip(ui::Rect box);
+  void popClip();
 
   /**
    * @brief Identity written into every primitive added from here on.
@@ -169,10 +182,24 @@ public:
                       std::uint32_t background,
                       std::span<const DecoratedRange> decoratedRanges = {});
 
+  /// Fit and draw inside the box, intersecting any enclosing clip. Positive
+  /// fit dimensions may narrow the returned box; zero uses the box dimension.
+  BoxedText addText(RenderState &state, ui::Rect box, std::string_view utf8,
+                    std::uint32_t colour, std::uint32_t background,
+                    const text::TextFit &constraints                = {},
+                    text::ShapingCache *cache                       = nullptr,
+                    std::span<const DecoratedRange> decoratedRanges = {});
+
+  /// Draw retained fitting without layout. The result must use this Canvas's
+  /// font. Atlas insertion can still rasterize a previously unseen cluster.
+  void addText(RenderState &state, ui::Rect box, const text::FittedText &fitted,
+               std::uint32_t colour, std::uint32_t background);
+
   /// Size @p utf8 would take, without drawing it or touching the glyph cache.
   [[nodiscard]] TextMetrics measureText(std::string_view utf8) const;
 
-  /// Longest a line of text may get before it is ellipsised. Zero, the
+  /// @deprecated Prefer boxed addText for new code. Longest a single
+  /// line may get before it is ellipsised. Zero, the
   /// default, does not wrap or ellipsise at all.
   void setTextWidthLimit(int pixels) { textWidthLimit = pixels; }
 
@@ -222,6 +249,7 @@ private:
   std::uint32_t committedInstances{};
   int textWidthLimit{};
   std::optional<ui::TextBounds> textBounds;
+  std::vector<ui::Rect> clips;
   std::uint32_t tagKind{render::tagKindOverlay};
   std::uint32_t tagIndex{};
   /// Document and page, with no kind: the base every primitive's identity is
@@ -231,6 +259,10 @@ private:
   /// document model and is not worth dragging into this header.
   std::vector<std::byte> rows;
   std::uint32_t pendingInstances{};
+
+  void drawText(RenderState &state, float left, float top,
+                const PageShaping &shaping, std::uint32_t colour,
+                std::uint32_t background);
 
   /**
    * @brief Second pipeline and instance stream, for addImage() alone.

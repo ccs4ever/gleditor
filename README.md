@@ -100,6 +100,13 @@ to continue normally. Caller-owned `text::ShapingCache` retains page layouts and
 one bounded LRU, keyed by the font and every layout constraint. References last until their entry is
 evicted or the cache clears; use each cache on one thread.
 
+Canvas can fit text directly into a Y-up `ui::Rect`, returning a `BoxedText` with the fitted label
+and its effective draw box. Drawing the returned `FittedText` again uses no layout. `pushClip()` and
+`popClip()` intersect nested boxes on the CPU for rectangles, lines, glyphs and images; `clear()`
+resets the clip stack. Glyph crops preserve integer atlas texels, rounding fractional clip edges
+inward. Image crops interpolate their UV rectangle. The compatibility width-limit API keeps
+single-line ellipsis and clips ink to that width; new callers should use boxed text.
+
 Pages outside the view are culled conservatively in clip space. Distant pages switch to per-line
 coarse bars according to projected size. `--no-cull` and `--coarse-below` expose both paths for
 comparison. `Doc::collect()` submits page draws across open documents as one list. Vulkan can record

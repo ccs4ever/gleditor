@@ -414,6 +414,10 @@ std::vector<Piece> selectLine(const std::vector<Atom> &atoms,
     while (prefixEnd < end && used + atoms[prefixEnd].width <= budget) {
       used += atoms[prefixEnd++].width;
     }
+    if (!ellipsize && prefixEnd < end) {
+      // Canvas needs the intersecting cluster to crop its edge quad.
+      ++prefixEnd;
+    }
   } else if (position == EllipsisAt::Start) {
     while (suffixBegin > begin &&
            used + atoms[suffixBegin - 1].width <= budget) {
@@ -647,14 +651,22 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
     float width = 0.0F;
     for (const auto &piece : pieces) {
       width += piece.width;
-      if (piece.atom != nullptr) {
+      if (piece.atom != nullptr &&
+          (constraints.overflow != Overflow::Clip || width <= maxWidth)) {
         retained.push_back(piece.atom);
       }
     }
-    const float left     = alignedLeft(width, maxWidth, constraints.align);
-    const float top      = static_cast<float>(lineIndex) * lineHeight;
+    const float visibleWidth = constraints.overflow == Overflow::Clip
+                                   ? std::min(width, maxWidth)
+                                   : width;
+    const float left = alignedLeft(visibleWidth, maxWidth, constraints.align);
+    const float top  = static_cast<float>(lineIndex) * lineHeight;
     const auto paragraph = atoms[line.begin].paragraph;
     float pen            = left;
+    if (constraints.overflow == Overflow::Clip && width > maxWidth &&
+        FRIBIDI_IS_RTL(paragraph)) {
+      pen -= width - maxWidth;
+    }
     for (const auto index : visualOrder(pieces, text, marker, paragraph)) {
       const auto &piece = pieces[index];
       const auto content =
@@ -695,7 +707,7 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
       endByte = atoms[line.end].end;
     }
     result.shaping.lines.push_back(PageShaping::LineEntry{
-        .barWidth   = width,
+        .barWidth   = visibleWidth,
         .barHeight  = lineHeight,
         .left       = left,
         .top        = top,
@@ -703,8 +715,8 @@ FittedText fit(const std::string_view source, const FontFacePtr &font,
         .byteStart  = static_cast<std::uint32_t>(startByte),
         .byteLength = static_cast<std::uint32_t>(endByte - startByte),
     });
-    result.widthPx = std::max(result.widthPx, width);
-    rightmost      = std::max(rightmost, left + width);
+    result.widthPx = std::max(result.widthPx, visibleWidth);
+    rightmost      = std::max(rightmost, left + visibleWidth);
     // A consumed newline belongs to the visible prefix, despite having no ink.
     if (line.consumed > line.end && !hidden && !ellipsize) {
       retained.push_back(&atoms[line.end]);

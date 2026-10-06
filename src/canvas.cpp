@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,6 +27,39 @@
 #include <glm/gtc/type_ptr.hpp>
 
 namespace {
+
+void validateRect(const gleditor::ui::Rect &box) {
+  if (!std::isfinite(box.left) || !std::isfinite(box.bottom) ||
+      !std::isfinite(box.width) || !std::isfinite(box.height) ||
+      !std::isfinite(box.left + box.width) ||
+      !std::isfinite(box.bottom + box.height) || box.width < 0.0F ||
+      box.height < 0.0F) {
+    throw std::invalid_argument(
+        "Canvas rectangle must have finite nonnegative extents");
+  }
+}
+
+gleditor::ui::Rect intersect(const gleditor::ui::Rect &a,
+                             const gleditor::ui::Rect &b) {
+  const float left   = std::max(a.left, b.left);
+  const float bottom = std::max(a.bottom, b.bottom);
+  return {
+      .left   = left,
+      .bottom = bottom,
+      .width =
+          std::max(0.0F, std::min(a.left + a.width, b.left + b.width) - left),
+      .height = std::max(
+          0.0F, std::min(a.bottom + a.height, b.bottom + b.height) - bottom)};
+}
+
+struct ScopedClip {
+  gleditor::Canvas &canvas;
+  ScopedClip(gleditor::Canvas &canvas, const gleditor::ui::Rect &box)
+      : canvas(canvas) {
+    canvas.pushClip(box);
+  }
+  ~ScopedClip() { canvas.popClip(); }
+};
 
 /// Copy a matrix into the flat array the device uniform structs carry.
 std::array<float, 16> toArray(const glm::mat4 &mat) {
@@ -135,10 +169,23 @@ void Canvas::createPipeline(const render::PipelineDesc &documentDesc,
 
 void Canvas::clear() {
   textBounds.reset();
+  clips.clear();
   rows.clear();
   pendingInstances = 0;
   imageRows.clear();
   pendingImageInstances = 0;
+}
+
+void Canvas::pushClip(const ui::Rect box) {
+  validateRect(box);
+  clips.push_back(clips.empty() ? box : intersect(clips.back(), box));
+}
+
+void Canvas::popClip() {
+  if (clips.empty()) {
+    throw std::logic_error("Canvas clip stack is empty");
+  }
+  clips.pop_back();
 }
 
 void Canvas::setTag(const std::uint32_t kind, const std::uint32_t index) {
@@ -151,11 +198,10 @@ void Canvas::setIdentity(const std::uint32_t docIndex,
   identity = render::packTagIdentity(0, docIndex, pageIndex);
 }
 
-void Canvas::pushQuad(const float centreX, const float centreY,
-                      const float width, const float height,
+void Canvas::pushQuad(float centreX, float centreY, float width, float height,
                       const std::uint32_t foreground,
                       const std::uint32_t background, const std::uint32_t layer,
-                      const float texX, const float texY, const bool solid) {
+                      float texX, float texY, const bool solid) {
   // The width and height fields the vertex stage unpacks are 12 bits each, so
   // a quad larger than this cannot be described. Clamping rather than asserting
   // because the sizes come from whatever a caller is drawing, and a panel too
@@ -164,6 +210,46 @@ void Canvas::pushQuad(const float centreX, const float centreY,
     return static_cast<unsigned int>(std::clamp(
         value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
   };
+
+  if (!std::isfinite(centreX) || !std::isfinite(centreY) ||
+      !std::isfinite(width) || !std::isfinite(height)) {
+    return;
+  }
+  if (!clips.empty()) {
+    const float packedWidth  = static_cast<float>(clamp(width));
+    const float packedHeight = static_cast<float>(clamp(height));
+    const ui::Rect original{centreX - packedWidth * 0.5F,
+                            centreY - packedHeight * 0.5F, packedWidth,
+                            packedHeight};
+    const auto cropped = intersect(original, clips.back());
+    if (cropped.width <= 0.0F || cropped.height <= 0.0F) {
+      return;
+    }
+    float left   = cropped.left;
+    float bottom = cropped.bottom;
+    width        = cropped.width;
+    height       = cropped.height;
+    if (!solid) {
+      // The glyph format names integer atlas origins and extents. Crop whole
+      // texels inward so fractional clip edges cannot shift glyph sampling.
+      const float dx = std::ceil(left - original.left);
+      const float dy = std::ceil(bottom - original.bottom);
+      width = std::floor(cropped.left + cropped.width - original.left) - dx;
+      height =
+          std::floor(cropped.bottom + cropped.height - original.bottom) - dy;
+      left   = original.left + dx;
+      bottom = original.bottom + dy;
+      texX += dx;
+      texY += dy;
+    }
+    width  = static_cast<float>(clamp(width));
+    height = static_cast<float>(clamp(height));
+    if (width <= 0.0F || height <= 0.0F) {
+      return;
+    }
+    centreX = left + width * 0.5F;
+    centreY = bottom + height * 0.5F;
+  }
 
   const Doc::VBORow row{
       .pos        = {centreX, centreY},
@@ -235,11 +321,27 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
           std::max(spanX, thickness), std::max(spanY, thickness), colour);
 }
 
-void Canvas::pushImageRow(const float left, const float bottom,
-                          const float width, const float height,
-                          const int layer, const float u0, const float v0,
-                          const float u1, const float v1,
-                          const std::uint32_t tint) {
+void Canvas::pushImageRow(float left, float bottom, float width, float height,
+                          const int layer, float u0, float v0, float u1,
+                          float v1, const std::uint32_t tint) {
+  if (!clips.empty()) {
+    const auto cropped = intersect({left, bottom, width, height}, clips.back());
+    if (cropped.width <= 0.0F || cropped.height <= 0.0F) {
+      return;
+    }
+    const float du     = (u1 - u0) / width;
+    const float dv     = (v1 - v0) / height;
+    const float startU = u0 + (cropped.left - left) * du;
+    const float startV = v0 + (cropped.bottom - bottom) * dv;
+    u0                 = startU;
+    v0                 = startV;
+    u1                 = startU + cropped.width * du;
+    v1                 = startV + cropped.height * dv;
+    left               = cropped.left;
+    bottom             = cropped.bottom;
+    width              = cropped.width;
+    height             = cropped.height;
+  }
   const ImageRow row{.pos   = {left + (width / 2.0F), bottom + (height / 2.0F)},
                      .size  = {width, height},
                      .uv    = {u0, v0, u1, v1},
@@ -311,6 +413,22 @@ Canvas::addText(RenderState &state, const float left, const float top,
         *textBounds, tagKind, tagIndex);
   }
 
+  std::optional<ScopedClip> clip;
+  if (textWidthLimit > 0) {
+    clip.emplace(*this, ui::Rect{left, top - shaping.textHeightPx,
+                                 static_cast<float>(textWidthLimit),
+                                 static_cast<float>(shaping.textHeightPx)});
+  }
+  drawText(state, left, top, shaping, colour, background);
+
+  return {.width  = static_cast<float>(shaping.textWidthPx),
+          .height = static_cast<float>(shaping.textHeightPx)};
+}
+
+void Canvas::drawText(RenderState &state, const float left, const float top,
+                      const PageShaping &shaping, const std::uint32_t colour,
+                      const std::uint32_t background) {
+  const auto font = text::FontManager::instance().getFont(fontName);
   for (const auto &g : shaping.glyphs) {
     const auto glyphPlaced = state.glyphCache.put(
         g.chr, font, gleditor::decorationSetFor(g.decorations));
@@ -336,9 +454,60 @@ Canvas::addText(RenderState &state, const float left, const float top,
              static_cast<std::uint32_t>(glyph.layer), glyph.texCoords.topLeft.x,
              glyph.texCoords.topLeft.y, false);
   }
+}
 
-  return {.width  = static_cast<float>(shaping.textWidthPx),
-          .height = static_cast<float>(shaping.textHeightPx)};
+BoxedText
+Canvas::addText(RenderState &state, const ui::Rect box,
+                const std::string_view utf8, const std::uint32_t colour,
+                const std::uint32_t background,
+                const text::TextFit &constraints, text::ShapingCache *cache,
+                const std::span<const DecoratedRange> decoratedRanges) {
+  validateRect(box);
+  BoxedText result{.box = box};
+  if (box.width == 0.0F || box.height == 0.0F) {
+    result.fitted.truncated = !utf8.empty();
+    return result;
+  }
+  auto fitConstraints       = constraints;
+  fitConstraints.maxWidthPx = constraints.maxWidthPx > 0.0F
+                                  ? std::min(box.width, constraints.maxWidthPx)
+                                  : box.width;
+  fitConstraints.maxHeightPx =
+      constraints.maxHeightPx > 0.0F
+          ? std::min(box.height, constraints.maxHeightPx)
+          : box.height;
+  result.fitted =
+      text::fit(utf8, text::FontManager::instance().getFont(fontName),
+                fitConstraints, cache);
+  const auto font = text::FontManager::instance().getFont(fontName);
+  for (auto &glyph : result.fitted.shaping.glyphs) {
+    const auto byte =
+        result.fitted.shaping.clusters[glyph.clusterIndex].byteStart;
+    for (const auto &range : decoratedRanges) {
+      if (byte >= range.start && byte < range.end) {
+        glyph.decorations |= range.decorations;
+      }
+    }
+    if (hasDecoration(glyph.decorations, Decoration::Superscript)) {
+      glyph.clusterTop -= font->metrics().ascent * 0.35F;
+    } else if (hasDecoration(glyph.decorations, Decoration::Subscript)) {
+      glyph.clusterTop += font->metrics().lineHeight * 0.2F;
+    }
+  }
+  result.box = {box.left, box.bottom + box.height - fitConstraints.maxHeightPx,
+                fitConstraints.maxWidthPx, fitConstraints.maxHeightPx};
+  addText(state, result.box, result.fitted, colour, background);
+  return result;
+}
+
+void Canvas::addText(RenderState &state, const ui::Rect box,
+                     const text::FittedText &fitted, const std::uint32_t colour,
+                     const std::uint32_t background) {
+  const ScopedClip clip(*this, box);
+  if (box.width > 0.0F && box.height > 0.0F) {
+    drawText(state, box.left, box.bottom + box.height, fitted.shaping, colour,
+             background);
+  }
 }
 
 void Canvas::commit() {

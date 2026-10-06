@@ -38,8 +38,9 @@ struct FittedText {
 
 /// Fits complete graphemes and HarfBuzz clusters, keeping original source
 /// offsets in the result. Synthetic ellipsis clusters have byteLength zero.
-/// Width measures typographic advances. Clip retains complete source clusters;
-/// a renderer also clips physical ink, including italic overhang, to its box.
+/// Width measures typographic advances. Clip retains the intersecting edge
+/// cluster for Canvas to crop; visibleBytes counts only fully retained source.
+/// Renderers also clip physical ink, including italic overhang, to the box.
 [[nodiscard]] FittedText fit(std::string_view text, const FontFacePtr &font,
                              const TextFit &constraints,
                              ShapingCache *cache = nullptr);
