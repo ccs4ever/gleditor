@@ -1,0 +1,10 @@
+# Reusable UTF-8 UI labels. First field is a fixture identity, second is full text.
+ascii-description	Follow every endpoint in this many-to-many link, keep the complete description visible, and return to the original document after exploring a distant related cell with a very long title.
+ascii-identifier	/shared/documents/research/long-running-projects/publications/immutable-editions/author-local-scrolls/2026/complete-neighbourhood-index-and-cross-document-endpoint-summary.xanadoc
+fingerprint	OpenPGP:0123456789ABCDEF0123456789ABCDEF01234567/BEP46:89ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCD
+combining	Café Ångström naïve résumé — Café Ångström naïve résumé — Café Ångström naïve résumé — Café Ångström naïve résumé
+emoji-zwj	Families 👨‍👩‍👧‍👦 and collaborators 👩🏽‍💻 👨🏿‍🚀 — Families 👨‍👩‍👧‍👦 and collaborators 👩🏽‍💻 👨🏿‍🚀 — Families 👨‍👩‍👧‍👦 and collaborators 👩🏽‍💻 👨🏿‍🚀
+devanagari	संबंधित दस्तावेज़ और दूरस्थ कोशिकाएँ — संबंधित दस्तावेज़ और दूरस्थ कोशिकाएँ — संबंधित दस्तावेज़ और दूरस्थ कोशिकाएँ — संबंधित दस्तावेज़ और दूरस्थ कोशिकाएँ
+arabic-rtl	استكشف جميع أطراف الرابط ثم عد إلى المستند الأصلي — استكشف جميع أطراف الرابط ثم عد إلى المستند الأصلي — استكشف جميع أطراف الرابط ثم عد إلى المستند الأصلي
+mixed-bidi	Edition 2026 / نسخة منشورة / related document 0123456789ABCDEF / מסמך מקושר / Edition 2026 / نسخة منشورة / related document 0123456789ABCDEF
+cjk	文書のすべてのリンク先と関連するセルを表示して元の文書に戻る — 显示所有相关文档和远程单元格并返回原始文档 — 文書のすべてのリンク先と関連するセルを表示して元の文書に戻る

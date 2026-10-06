@@ -144,12 +144,19 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     // Tab label text
     canvas->setTextWidthLimit(
         static_cast<int>(tabW - closeButtonW - (2.0F * tabPaddingX)));
+    canvas->setTextBounds(
+        ui::TextBounds{.left   = curX + tabPaddingX,
+                       .bottom = tabY,
+                       .width  = tabW - closeButtonW - (2.0F * tabPaddingX),
+                       .height = tabH});
     canvas->addText(ctx.state, curX + tabPaddingX, top - 8.0F, title,
                     isActive ? tabTextActive : tabTextInactive, tabBg);
 
     // Close button [×]: cluster tag has bit 0 = 1 (close)
     const float closeX = curX + tabW - closeButtonW;
     canvas->setTag(render::tagKindOverlay, (i << 1U) | 1U);
+    canvas->setTextBounds(ui::TextBounds{
+        .left = closeX, .bottom = tabY, .width = closeButtonW, .height = tabH});
     canvas->addText(ctx.state, closeX, top - 7.0F, "×", closeTextColour, tabBg);
 
     curX += tabW + 2.0F;
@@ -162,6 +169,8 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     const float tabY = barY + 2.0F;
     canvas->setTag(render::tagKindOverlay, kManagerTag);
     canvas->addRect(curX, tabY, mgrButtonW, tabH, tabInactiveBg);
+    canvas->setTextBounds(ui::TextBounds{
+        .left = curX, .bottom = tabY, .width = mgrButtonW, .height = tabH});
     canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "=", tabTextInactive,
                     tabInactiveBg);
     curX += mgrButtonW + 2.0F;
@@ -174,10 +183,13 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     const float tabY = barY + 2.0F;
     canvas->setTag(render::tagKindOverlay, kNewDocTag);
     canvas->addRect(curX, tabY, newButtonW, tabH, tabInactiveBg);
+    canvas->setTextBounds(ui::TextBounds{
+        .left = curX, .bottom = tabY, .width = newButtonW, .height = tabH});
     canvas->addText(ctx.state, curX + 9.0F, top - 7.0F, "+", tabTextInactive,
                     tabInactiveBg);
   }
 
+  canvas->setTextBounds(std::nullopt);
   canvas->commit();
   canvas->draw(ctx.state, ortho);
 }

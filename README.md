@@ -93,6 +93,13 @@ from page building to the render thread. Editing rebuilds the affected page and 
 pagination resynchronizes. Caret and selection offsets are document byte positions, while picking
 and highlighting account for character boundaries inside shaped clusters such as ligatures.
 
+UI labels use `text::fit()` with explicit width, height, line count and overflow policies. End,
+middle and start ellipsis retain complete graphemes and shaping clusters, with source byte offsets
+preserved. `LayoutOptions::ellipsize` now truncates the last visible line; document pages disable it
+to continue normally. Caller-owned `text::ShapingCache` retains page layouts and fitted labels in
+one bounded LRU, keyed by the font and every layout constraint. References last until their entry is
+evicted or the cache clears; use each cache on one thread.
+
 Pages outside the view are culled conservatively in clip space. Distant pages switch to per-line
 coarse bars according to projected size. `--no-cull` and `--coarse-below` expose both paths for
 comparison. `Doc::collect()` submits page draws across open documents as one list. Vulkan can record
@@ -111,6 +118,12 @@ Programs extend the library through `TextSource`, `DocumentObserver`, `SpanDecor
 `runWithState()` moves commands onto the render thread. Xudu uses these hooks for its versioned
 text, shared-span shading, and links; ZigZag contributes cells and picking without putting its model
 in `libgleditor`.
+
+For UI text overflow, `SPDLOG_LEVEL=ui.layout=debug` reports declared Canvas parent bounds;
+`ui.layout=trace` also reports render-thread shaping per frame. `--benchmark` includes p95 frame
+time and shaping counts. The optional `make -j$(nproc) ui-text-baseline` tool measures long-label
+rebuilds and retained geometry across backends. See the
+[text-fitting baseline](design/ui-text-fit-baseline.md) for headless commands and coverage.
 
 The public C++26 compatibility facades select native library facilities or pinned fallbacks for
 `function_ref`, optional references and ranges, and `inplace_vector`. Scoped adapters provide

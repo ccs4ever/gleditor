@@ -23,7 +23,8 @@ struct LayoutOptions {
   bool singleParagraph{false}; ///< True to treat newlines as spaces (for
                                ///< single-line titles/toasts)
   bool ellipsize{
-      false}; ///< True to truncate with "..." if exceeding maxWidthPx
+      false}; ///< Ellipsize overflow on the last visible line; pagination
+              ///< callers leave this false to continue on the next page.
   /// Which decorations apply where in this text slice, checked per glyph
   /// cluster by its byte offset. Empty -- the default, and every caller
   /// before this existed -- means no glyph in the page carries any.

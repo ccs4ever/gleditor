@@ -667,13 +667,13 @@ void Form::drawFrame(FrameContext &ctx) {
     // An open drop-down grows the panel rather than covering the rows under
     // it: a list that obscures the fields it is part of is a list somebody has
     // to close before they can see what they were filling in.
-    const auto listRows = listDown && where < shown.size()
-                              ? static_cast<float>(shown[where].options.size())
-                              : 0.0F;
+    const auto listRows    = listDown && where < shown.size()
+                                 ? static_cast<float>(shown[where].options.size())
+                                 : 0.0F;
     const auto panelHeight = (2 * padding) + (rowHeight * 2) +
                              ((rows + listRows) * rowHeight) + rowHeight;
-    const auto left        = std::max(0.0F, (width - panelWidth) / 2.0F);
-    const auto bottom      = std::max(0.0F, (height - panelHeight) / 2.0F);
+    const auto left   = std::max(0.0F, (width - panelWidth) / 2.0F);
+    const auto bottom = std::max(0.0F, (height - panelHeight) / 2.0F);
     canvas->addRect(left, bottom, panelWidth, panelHeight, ink(panelBack));
 
     auto top = bottom + panelHeight - padding;
@@ -681,9 +681,17 @@ void Form::drawFrame(FrameContext &ctx) {
     // a document will be written is often a long path, and text spilling past
     // the edge of a modal reads as a drawing mistake rather than as a value.
     canvas->setTextWidthLimit(static_cast<int>(panelWidth - (2 * padding)));
+    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
+                                         .bottom = top - rowHeight,
+                                         .width  = panelWidth - (2 * padding),
+                                         .height = rowHeight});
     canvas->addText(ctx.state, left + padding, top, heading, ink(titleInk),
                     ink(panelBack));
     top -= rowHeight;
+    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
+                                         .bottom = top - rowHeight,
+                                         .width  = panelWidth - (2 * padding),
+                                         .height = rowHeight});
     canvas->addText(ctx.state, left + padding, top, subheading,
                     ink(complaining ? troubleInk : hintInk), ink(panelBack));
     top -= rowHeight * 0.6F;
@@ -695,6 +703,10 @@ void Form::drawFrame(FrameContext &ctx) {
 
       // A required field says so where it is asked, rather than only when it
       // is refused.
+      canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
+                                           .bottom = top - rowHeight,
+                                           .width  = labelWidth,
+                                           .height = rowHeight});
       canvas->addText(ctx.state, left + padding, top,
                       one.required ? one.label + " *" : one.label,
                       ink(one.required ? requiredInk : panelInk),
@@ -727,6 +739,10 @@ void Form::drawFrame(FrameContext &ctx) {
 
       const auto textLeft = boxLeft + 6.0F;
       canvas->setTextWidthLimit(static_cast<int>(boxWidth - 12.0F));
+      canvas->setTextBounds(ui::TextBounds{.left   = boxLeft,
+                                           .bottom = top - boxHeight + lineGap,
+                                           .width  = boxWidth,
+                                           .height = boxHeight});
       canvas->addText(ctx.state, textLeft, top, shownValue, ink(valueInk),
                       ink(focused ? boxFocused : boxBack));
 
@@ -770,6 +786,11 @@ void Form::drawFrame(FrameContext &ctx) {
           const bool under = option == lit;
           canvas->addRect(boxLeft, top - boxHeight + lineGap, boxWidth,
                           boxHeight, ink(under ? boxFocused : boxBack));
+          canvas->setTextBounds(
+              ui::TextBounds{.left   = boxLeft,
+                             .bottom = top - boxHeight + lineGap,
+                             .width  = boxWidth,
+                             .height = boxHeight});
           canvas->addText(ctx.state, textLeft, top, one.options[option],
                           ink(under ? titleInk : panelInk),
                           ink(under ? boxFocused : boxBack));
@@ -779,6 +800,10 @@ void Form::drawFrame(FrameContext &ctx) {
 
     top -= rowHeight;
     canvas->setTextWidthLimit(static_cast<int>(panelWidth - (2 * padding)));
+    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
+                                         .bottom = top - rowHeight,
+                                         .width  = panelWidth - (2 * padding),
+                                         .height = rowHeight});
     canvas->addText(ctx.state, left + padding, top,
                     listDown
                         ? "up/down: choose   enter: take it   esc: close it"
@@ -786,6 +811,7 @@ void Form::drawFrame(FrameContext &ctx) {
                           "esc: leave it",
                     ink(hintInk), ink(panelBack));
 
+    canvas->setTextBounds(std::nullopt);
     canvas->commit();
   }
 

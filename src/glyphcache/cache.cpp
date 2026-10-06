@@ -16,7 +16,8 @@
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
-#include <gleditor/text/font.hpp>          // for FontManager
+#include <gleditor/text/diagnostics.hpp>
+#include <gleditor/text/font.hpp> // for FontManager
 #include <hb.h>
 #include <iostream>      // for basic_ostream, operator<<
 #include <numeric>       // for format
@@ -118,8 +119,8 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                 std::byte{0});
   std::uint64_t totalInk = 0;
   for (int row = 0; row < height; row++) {
-    const auto *src   = surface.data() + static_cast<std::size_t>(row) *
-                                             static_cast<std::size_t>(stride);
+    const auto *src = surface.data() + static_cast<std::size_t>(row) *
+                                           static_cast<std::size_t>(stride);
     const auto dstRow = height - 1 - row;
     auto *dst =
         padded.data() +
@@ -393,6 +394,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   hb_buffer_add_utf8(buf, chr.data(), static_cast<int>(chr.size()), 0,
                      static_cast<int>(chr.size()));
   hb_buffer_guess_segment_properties(buf);
+  text::detail::recordHarfBuzz(false);
   hb_shape(useFont->hbFont(), buf, nullptr, 0);
 
   unsigned int glyphCount  = 0;

@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -34,6 +35,7 @@
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/ui/text_diagnostics.hpp>
 
 struct RenderState;
 
@@ -174,6 +176,13 @@ public:
   /// default, does not wrap or ellipsise at all.
   void setTextWidthLimit(int pixels) { textWidthLimit = pixels; }
 
+  /// Opt into debug-level ui.layout overflow reports for subsequent text.
+  /// This is the caller's allocated row or container, in Y-up canvas pixels.
+  /// clear() resets it; nullopt ends the diagnostic scope without a rebuild.
+  void setTextBounds(std::optional<ui::TextBounds> bounds) {
+    textBounds = bounds;
+  }
+
   /// Upload the geometry built since the last clear(). Nothing is drawn until
   /// this has been called.
   void commit();
@@ -212,6 +221,7 @@ private:
   BufferPool::Allocation backing{};
   std::uint32_t committedInstances{};
   int textWidthLimit{};
+  std::optional<ui::TextBounds> textBounds;
   std::uint32_t tagKind{render::tagKindOverlay};
   std::uint32_t tagIndex{};
   /// Document and page, with no kind: the base every primitive's identity is

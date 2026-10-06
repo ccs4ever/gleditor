@@ -192,6 +192,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   // the page behind; the buttons are tagged after it, one each.
   canvas->setTag(render::tagKindOverlay, kTagPanelBase);
   canvas->addRect(left, top - panelH, panelW, panelH, config.backgroundColour);
+  canvas->setTextBounds(gleditor::ui::TextBounds{
+      .left = left, .bottom = top - panelH, .width = panelW, .height = panelH});
 
   // The canvas is y-up and a block of text hangs down from its top.
   auto y = top - config.paddingPx;
@@ -219,10 +221,15 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
     canvas->setTag(render::tagKindOverlay,
                    kTagPanelBase + 1U + static_cast<std::uint32_t>(i));
     canvas->addRect(bLeft, bTop - height, width, height, config.buttonColour);
+    canvas->setTextBounds(gleditor::ui::TextBounds{.left   = bLeft,
+                                                   .bottom = bTop - height,
+                                                   .width  = width,
+                                                   .height = height});
     std::ignore =
         canvas->addText(ctx.state, bLeft + gap, bTop - gap, buttons[i].label,
                         colour, config.buttonColour);
   }
+  canvas->setTextBounds(std::nullopt);
   canvas->setTag(render::tagKindOverlay, 0);
   canvas->commit();
 }

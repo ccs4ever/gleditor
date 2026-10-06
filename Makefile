@@ -628,6 +628,7 @@ XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
 XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
+UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
 VQUERY_SRCS     := $(shell find apps/vquery -name '*.cpp' 2>/dev/null)
@@ -701,7 +702,8 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS))
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) \
+	$(UI_TEXT_BASELINE_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -1025,6 +1027,16 @@ $(OBJDIR)/xudu-dump: $(XUDU_DUMP_OBJS)
 layout-latency-probe: $(OBJDIR)/layout-latency-probe
 $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# Headless UI label workload for tracking overflow and steady-frame shaping
+# before promoting shared text fitting. Optional like the latency probe above.
+.PHONY: ui-text-baseline
+ui-text-baseline: $(OBJDIR)/ui-text-baseline
+ifdef GLEDITOR_ENABLE_VULKAN
+ui-text-baseline: shaders
+endif
+$(OBJDIR)/ui-text-baseline: $(UI_TEXT_BASELINE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(UI_TEXT_BASELINE_OBJS) $(APP_LDFLAGS) $(LIBS)
 
 # Proves the decode-index prototype (design/decode-index-spike.md) on real
 # files rather than leaving it a paper design: a PNG scanline checkpoint

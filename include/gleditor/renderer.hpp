@@ -32,6 +32,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/span_decorator.hpp>
 #include <gleditor/state.hpp>
+#include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text_source.hpp>
 #include <gleditor/toast.hpp>
 
@@ -435,6 +436,7 @@ private:
   std::vector<std::chrono::nanoseconds> benchFrame;
   std::vector<std::chrono::nanoseconds> benchCollect;
   std::vector<std::chrono::nanoseconds> benchRecord;
+  std::vector<gleditor::text::ShapingStats> benchShaping;
   /// Page draws the last measured frame submitted, reported alongside the
   /// timings: a recording cost means nothing without the number of draws.
   std::size_t benchBatches{};

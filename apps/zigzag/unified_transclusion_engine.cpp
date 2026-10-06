@@ -520,83 +520,10 @@ std::string_view UnifiedTransclusionEngine::resolveLocalCellView(
   return store_.primedia().readView(run.front());
 }
 
-std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(
-    const ShapingKey &k) const noexcept {
-  // The text dominates; the rest are folded in so that the same words shaped
-  // at a different width, or with different decorations, land elsewhere.
-  std::size_t h  = std::hash<std::string>{}(k.text);
-  const auto mix = [&h](const std::size_t v) {
-    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
-  };
-  mix(std::hash<const void *>{}(k.font));
-  mix(std::hash<float>{}(k.maxWidthPx));
-  mix(std::hash<float>{}(k.maxHeightPx));
-  mix(static_cast<std::size_t>(k.singleParagraph) |
-      (static_cast<std::size_t>(k.ellipsize) << 1U));
-  for (const auto &range : k.decoratedRanges) {
-    mix(static_cast<std::size_t>(range.start));
-    mix(static_cast<std::size_t>(range.end));
-    mix(static_cast<std::size_t>(range.decorations));
-  }
-  for (const auto &box : k.boxes) {
-    mix(static_cast<std::size_t>(box.anchor));
-    mix(std::hash<float>{}(box.widthPx));
-    mix(std::hash<float>{}(box.heightPx));
-    mix(static_cast<std::size_t>(box.placement));
-  }
-  for (const auto &range : k.blockStyles) {
-    mix(static_cast<std::size_t>(range.start));
-    mix(static_cast<std::size_t>(range.end));
-    mix(static_cast<std::size_t>(range.align));
-  }
-  mix(static_cast<std::size_t>(k.page.mode));
-  mix(std::hash<float>{}(k.page.widthPx));
-  mix(std::hash<float>{}(k.page.heightPx));
-  return h;
-}
-
 const PageShaping &UnifiedTransclusionEngine::shapedPage(
     const std::string_view text, const gleditor::text::FontFacePtr &font,
     const gleditor::text::LayoutOptions &opts) {
-  ShapingKey key{.text            = std::string(text),
-                 .font            = font.get(),
-                 .maxWidthPx      = opts.maxWidthPx,
-                 .maxHeightPx     = opts.maxHeightPx,
-                 .singleParagraph = opts.singleParagraph,
-                 .ellipsize       = opts.ellipsize,
-                 .decoratedRanges = opts.decoratedRanges,
-                 .boxes           = opts.boxes,
-                 .blockStyles     = opts.blockStyles,
-                 .page            = opts.page};
-
-  shapingTick_++;
-  if (const auto found = shapingCache_.find(key);
-      found != shapingCache_.end()) {
-    found->second.lastUsedTick = shapingTick_;
-    shapingHits_++;
-    return found->second.shaping;
-  }
-  shapingMisses_++;
-
-  // Evict before inserting, so the cache never exceeds capacity even briefly.
-  // Oldest-used first: a staging pass sweeps a neighbourhood, so the entry
-  // asked for least recently is the one the camera has moved away from.
-  if (shapingCache_.size() >= kShapingCacheCapacity) {
-    auto oldest = shapingCache_.begin();
-    for (auto it = shapingCache_.begin(); it != shapingCache_.end(); ++it) {
-      if (it->second.lastUsedTick < oldest->second.lastUsedTick) {
-        oldest = it;
-      }
-    }
-    shapingCache_.erase(oldest);
-    shapingEvictions_++;
-  }
-
-  auto shaping = gleditor::text::TextLayout::layoutPage(text, font, opts);
-  const auto [it, inserted] = shapingCache_.emplace(
-      std::move(key), ShapingEntry{.shaping      = std::move(shaping),
-                                   .lastUsedTick = shapingTick_});
-  return it->second.shaping;
+  return shapingCache_.page(text, font, opts);
 }
 
 UnifiedTransclusionEngine::RenderInstanceBatch
@@ -773,10 +700,7 @@ std::size_t UnifiedTransclusionEngine::stageIntoStreamBuffer(
 
 UnifiedTransclusionEngine::ShapingCacheStats
 UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
-  return ShapingCacheStats{.entries   = shapingCache_.size(),
-                           .hits      = shapingHits_,
-                           .misses    = shapingMisses_,
-                           .evictions = shapingEvictions_};
+  return shapingCache_.stats();
 }
 
 void UnifiedTransclusionEngine::clearShapingCache() noexcept {

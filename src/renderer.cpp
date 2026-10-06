@@ -331,7 +331,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
     return false;
   }
 
-  const auto start = std::chrono::steady_clock::now();
+  const auto start               = std::chrono::steady_clock::now();
+  static const auto layoutLogger = gleditor::logging::category("ui.layout");
+  const bool traceShaping = layoutLogger->should_log(spdlog::level::trace);
+  const gleditor::text::ShapingStatsScope shapingCapture(
+      this->state->benchmarkFrames > 0 || traceShaping);
 
   // Advance every animation before anything reads a position or an opacity, so
   // that one frame draws one instant rather than a mixture of two.
@@ -613,6 +617,15 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   const auto end              = std::chrono::steady_clock::now();
   this->state->frameTimeDelta = end - start;
+  const auto shapingStats     = shapingCapture.stats();
+  if (traceShaping) {
+    GLEDITOR_LOG_TRACE(
+        "ui.layout",
+        "frame shaping (render thread): layouts={} harfbuzz={} fallback={} "
+        "input_bytes={}",
+        shapingStats.layoutCalls, shapingStats.harfbuzzCalls,
+        shapingStats.fallbackCalls, shapingStats.inputBytes);
+  }
 
   // Only settled frames are measured, and only once every requested click has
   // been answered, so the sample covers the frame the editor actually steadies
@@ -621,6 +634,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
     benchFrame.push_back(end - start);
     benchCollect.push_back(recordStart - collectStart);
     benchRecord.push_back(recordEnd - recordStart);
+    benchShaping.push_back(shapingStats);
     benchBatches = state.pageBatches.size();
   }
 
@@ -649,6 +663,37 @@ void Renderer::reportBenchmark() const {
   std::cout << std::format(
       "pages: {} considered, {} culled, {} coarse, {} detailed\n",
       lastDraw.pages, lastDraw.culled, lastDraw.coarse, lastDraw.detailed);
+
+  // Nearest-rank p95, alongside the existing upper-middle median. Counts
+  // cover this render thread only, not asynchronous document pagination.
+  auto sortedFrames = benchFrame;
+  std::ranges::sort(sortedFrames);
+  const auto p95Index       = (sortedFrames.size() * 95U + 99U) / 100U - 1U;
+  const auto countQuantiles = [this](auto field) {
+    std::vector<std::uint64_t> values;
+    values.reserve(benchShaping.size());
+    for (const auto &sample : benchShaping) {
+      values.push_back(sample.*field);
+    }
+    std::ranges::sort(values);
+    const auto p95 = (values.size() * 95U + 99U) / 100U - 1U;
+    return std::pair{values[values.size() / 2U], values[p95]};
+  };
+  const auto layouts =
+      countQuantiles(&gleditor::text::ShapingStats::layoutCalls);
+  const auto harfbuzz =
+      countQuantiles(&gleditor::text::ShapingStats::harfbuzzCalls);
+  const auto fallback =
+      countQuantiles(&gleditor::text::ShapingStats::fallbackCalls);
+  const auto inputBytes =
+      countQuantiles(&gleditor::text::ShapingStats::inputBytes);
+  std::cout << std::format(
+      "ui baseline: p95 frame {:.3f} ms, render-thread layouts p50={} p95={}, "
+      "harfbuzz p50={} p95={}, fallback p50={} p95={}, input_bytes p50={} "
+      "p95={}\n",
+      std::chrono::duration<double, std::milli>(sortedFrames[p95Index]).count(),
+      layouts.first, layouts.second, harfbuzz.first, harfbuzz.second,
+      fallback.first, fallback.second, inputBytes.first, inputBytes.second);
 }
 
 void Renderer::placeCaretFromPick(RenderState &state,

@@ -1,4 +1,8 @@
+#include <gleditor/text/diagnostics.hpp>
+#include <gleditor/text/fit.hpp>
 #include <gleditor/text/layout.hpp>
+
+#include "unicode_breaks.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -40,6 +44,7 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
                      static_cast<int>(text.size()));
   hb_buffer_guess_segment_properties(buf);
 
+  detail::recordHarfBuzz(false);
   hb_shape(font->hbFont(), buf, nullptr, 0);
 
   unsigned int glyphCount    = 0;
@@ -79,10 +84,13 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
       if (cp > 32) {
         auto fallback = FontManager::instance().getFallbackFont(font, cp);
         if (fallback && (*fallback)->hbFont()) {
-          hb_buffer_t *fbuf = hb_buffer_create();
-          hb_buffer_add_utf8(fbuf, text.data() + glyphInfo[i].cluster, -1, 0,
-                             -1);
+          hb_buffer_t *fbuf    = hb_buffer_create();
+          const auto remaining = text.size() - glyphInfo[i].cluster;
+          hb_buffer_add_utf8(fbuf, text.data() + glyphInfo[i].cluster,
+                             static_cast<int>(remaining), 0,
+                             static_cast<int>(remaining));
           hb_buffer_guess_segment_properties(fbuf);
+          detail::recordHarfBuzz(true);
           hb_shape((*fallback)->hbFont(), fbuf, nullptr, 0);
           unsigned int fCount    = 0;
           hb_glyph_info_t *fInfo = hb_buffer_get_glyph_infos(fbuf, &fCount);
@@ -412,6 +420,30 @@ FilledLine fillLine(const ShapedRun &shaped, const std::string_view text,
 PageShaping TextLayout::layoutPage(std::string_view text,
                                    const FontFacePtr &font,
                                    const LayoutOptions &options) {
+  if (options.ellipsize && options.boxes.empty() &&
+      options.blockStyles.empty()) {
+    auto fitted         = fit(text, font,
+                              {.maxWidthPx  = options.maxWidthPx,
+                               .maxHeightPx = options.maxHeightPx,
+                               .maxLines    = static_cast<std::uint16_t>(
+                           options.singleParagraph ? 1 : 0),
+                               .overflow = options.singleParagraph ? Overflow::Ellipsis
+                                                                   : Overflow::Wrap});
+    fitted.shaping.page = options.page;
+    for (auto &glyph : fitted.shaping.glyphs) {
+      const auto &cluster = fitted.shaping.clusters[glyph.clusterIndex];
+      glyph.decorations =
+          decorationsAt(cluster.byteStart, options.decoratedRanges);
+      if (font && hasDecoration(glyph.decorations, Decoration::Superscript)) {
+        glyph.clusterTop -= font->metrics().ascent * 0.35F;
+      } else if (font &&
+                 hasDecoration(glyph.decorations, Decoration::Subscript)) {
+        glyph.clusterTop += font->metrics().lineHeight * 0.2F;
+      }
+    }
+    return std::move(fitted.shaping);
+  }
+  detail::recordLayout(text.size());
   PageShaping shaping;
   shaping.page = options.page;
   if (text.empty() || !font) {
@@ -438,11 +470,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     }
   }
 
-  static bool lbInited = false;
-  if (!lbInited) {
-    init_linebreak();
-    lbInited = true;
-  }
+  detail::initializeUnicodeBreaks();
 
   // 1. Calculate Unicode line breaking opportunities
   std::vector<char> breakAttrs(text.size(), 0);
@@ -885,6 +913,120 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       [](const float a, const float b) { return std::max(a, b); });
 
   shaping.textWidthPx = static_cast<int>(std::ceil(maxSeenWidth));
+  if (options.ellipsize && !shaping.lines.empty()) {
+    // Keep the existing media/paragraph flow; only its last text line is
+    // shortened. A media anchor is atomic and must never become label text.
+    if (options.singleParagraph && shaping.lines.size() > 1) {
+      shaping.lines.resize(1);
+      shaping.lineCount = 1;
+    }
+    auto &last     = shaping.lines.back();
+    const auto end = static_cast<std::size_t>(last.byteStart) + last.byteLength;
+    if (end < text.size() || last.left + last.barWidth > maxWidth) {
+      const auto lineIndex = shaping.lines.size() - 1;
+      auto sourceEnd       = std::min(end, text.size());
+      for (const auto &box : options.boxes) {
+        if (box.anchor >= last.byteStart && box.anchor < sourceEnd) {
+          sourceEnd = box.anchor;
+        }
+      }
+      while (sourceEnd > last.byteStart &&
+             (text[sourceEnd - 1] == '\n' || text[sourceEnd - 1] == '\r')) {
+        --sourceEnd;
+      }
+      const auto marker = fit("…", font, {});
+      const auto band = availableAt(last.top, last.barHeight, maxWidth, floats);
+      const auto style = blockStyleAt(last.byteStart, options.blockStyles);
+      const bool paragraphStart =
+          last.byteStart == 0 || text[last.byteStart - 1] == '\n';
+      float left = band.left + style.indentLeftPx +
+                   (paragraphStart ? style.indentFirstPx : 0.0F);
+      const float width =
+          std::max(0.0F, band.right - style.indentRightPx - left);
+      const float prefixWidth = std::max(0.0F, width - marker.widthPx);
+      FittedText prefix;
+      if (prefixWidth > 0.0F) {
+        prefix =
+            fit(text.substr(last.byteStart, sourceEnd - last.byteStart), font,
+                {.maxWidthPx = prefixWidth, .overflow = Overflow::Clip});
+      }
+      std::erase_if(shaping.glyphs, [lineIndex](const auto &glyph) {
+        return glyph.lineIndex >= lineIndex;
+      });
+      const auto visibleEnd = last.byteStart + prefix.visibleBytes;
+      std::erase_if(shaping.boxes, [visibleEnd](const auto &box) {
+        return box.anchorByteOffset >= visibleEnd;
+      });
+      const bool showMarker = marker.widthPx <= width;
+      left += alignedLeft(width,
+                          prefix.widthPx + (showMarker ? marker.widthPx : 0.0F),
+                          style.align);
+      const auto append = [&](const FittedText &part, const float offset,
+                              const bool synthetic) {
+        for (const auto &glyph : part.shaping.glyphs) {
+          auto cluster = part.shaping.clusters[glyph.clusterIndex];
+          cluster.byteStart += last.byteStart;
+          if (synthetic) {
+            cluster.byteStart  = visibleEnd;
+            cluster.byteLength = 0;
+            cluster.charCount  = 0;
+          }
+          auto placed         = glyph;
+          placed.clusterIndex = shaping.clusters.size();
+          placed.clusterLeft += left + offset;
+          placed.clusterTop += last.top;
+          placed.lineIndex = lineIndex;
+          placed.decorations =
+              decorationsAt(cluster.byteStart, options.decoratedRanges);
+          if (hasDecoration(placed.decorations, Decoration::Superscript)) {
+            placed.clusterTop -= ascent * 0.35F;
+          } else if (hasDecoration(placed.decorations, Decoration::Subscript)) {
+            placed.clusterTop += lineHeight * 0.2F;
+          }
+          shaping.clusters.push_back(cluster);
+          shaping.glyphs.push_back(std::move(placed));
+        }
+      };
+      hb_buffer_t *direction = hb_buffer_create();
+      hb_buffer_add_utf8(direction, text.data(), static_cast<int>(text.size()),
+                         last.byteStart,
+                         static_cast<int>(sourceEnd - last.byteStart));
+      hb_buffer_guess_segment_properties(direction);
+      const bool rtl = hb_buffer_get_direction(direction) == HB_DIRECTION_RTL;
+      hb_buffer_destroy(direction);
+      if (showMarker && rtl) {
+        append(marker, 0.0F, true);
+      }
+      append(prefix, showMarker && rtl ? marker.widthPx : 0.0F, false);
+      if (showMarker && !rtl) {
+        append(marker, prefix.widthPx, true);
+      }
+      std::vector<ClusterBox> visibleClusters;
+      visibleClusters.reserve(shaping.glyphs.size());
+      for (auto &glyph : shaping.glyphs) {
+        visibleClusters.push_back(shaping.clusters[glyph.clusterIndex]);
+        glyph.clusterIndex = visibleClusters.size() - 1;
+      }
+      shaping.clusters = std::move(visibleClusters);
+      last.left        = left;
+      last.barWidth    = prefix.widthPx + (showMarker ? marker.widthPx : 0.0F);
+      last.byteLength  = static_cast<std::uint32_t>(prefix.visibleBytes);
+      shaping.limit    = visibleEnd;
+      shaping.textHeightPx =
+          static_cast<int>(std::ceil(last.top + last.barHeight));
+      shaping.textWidthPx = 0;
+      for (const auto &line : shaping.lines) {
+        shaping.textWidthPx =
+            std::max(shaping.textWidthPx,
+                     static_cast<int>(std::ceil(line.left + line.barWidth)));
+      }
+      for (const auto &box : shaping.boxes) {
+        shaping.textWidthPx =
+            std::max(shaping.textWidthPx,
+                     static_cast<int>(std::ceil(box.left + box.width)));
+      }
+    }
+  }
   return shaping;
 }
 

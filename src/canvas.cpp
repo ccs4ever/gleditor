@@ -134,6 +134,7 @@ void Canvas::createPipeline(const render::PipelineDesc &documentDesc,
 }
 
 void Canvas::clear() {
+  textBounds.reset();
   rows.clear();
   pendingInstances = 0;
   imageRows.clear();
@@ -298,6 +299,16 @@ Canvas::addText(RenderState &state, const float left, const float top,
   auto shaping = text::TextLayout::layoutSingleLine(utf8, font, opts);
   if (shaping.textWidthPx <= 0 || shaping.textHeightPx <= 0) {
     return {};
+  }
+
+  static const auto layoutLogger = logging::category("ui.layout");
+  if (textBounds && layoutLogger->should_log(spdlog::level::debug)) {
+    ui::reportTextOverflow(
+        {.left   = left,
+         .bottom = top - static_cast<float>(shaping.textHeightPx),
+         .width  = static_cast<float>(shaping.textWidthPx),
+         .height = static_cast<float>(shaping.textHeightPx)},
+        *textBounds, tagKind, tagIndex);
   }
 
   for (const auto &g : shaping.glyphs) {

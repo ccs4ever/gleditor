@@ -30,6 +30,7 @@
 #include "gleditor/render/stream_buffer.hpp"
 #include "gleditor/text/font.hpp"
 #include "gleditor/text/layout.hpp"
+#include "gleditor/text/shaping_cache.hpp"
 #include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace zigzag {
@@ -280,19 +281,13 @@ public:
   /// the per-glyph vector, so this ceiling is roughly 2.5 MiB and scales with
   /// how much text a cell holds. Bounded rather than generous on purpose: an
   /// unbounded cache is not a cache.
-  static constexpr std::size_t kShapingCacheCapacity = 512;
+  static constexpr std::size_t kShapingCacheCapacity =
+      gleditor::text::ShapingCache::defaultCapacity;
 
-  struct ShapingCacheStats {
-    std::size_t entries{};
-    std::uint64_t hits{};
-    std::uint64_t misses{};
-    std::uint64_t evictions{};
-  };
+  using ShapingCacheStats = gleditor::text::ShapingCache::Stats;
   [[nodiscard]] ShapingCacheStats shapingCacheStats() const noexcept;
 
-  /// Drop every shaped page. The cache keys on the FontFace address, and an
-  /// address can be reused after a font is released and another loaded, so
-  /// anything swapping fonts under the engine has to say so.
+  /// Drop every retained shaped page while preserving cumulative counters.
   void clearShapingCache() noexcept;
 
   /// Synchronize cached formatFlags across manifold cells from store links.
@@ -325,31 +320,6 @@ private:
   shapedPage(std::string_view text, const gleditor::text::FontFacePtr &font,
              const gleditor::text::LayoutOptions &opts);
 
-  /// Everything layoutPage's output depends on. If a field is added to
-  /// LayoutOptions that changes the result, it belongs here too -- otherwise
-  /// the cache starts answering a question it was not asked.
-  struct ShapingKey {
-    std::string text;
-    const gleditor::text::FontFace *font{nullptr};
-    float maxWidthPx{};
-    float maxHeightPx{};
-    bool singleParagraph{};
-    bool ellipsize{};
-    std::vector<gleditor::DecoratedRange> decoratedRanges;
-    std::vector<gleditor::LayoutBox> boxes;
-    std::vector<gleditor::BlockStyleRange> blockStyles;
-    gleditor::PageSize page;
-
-    [[nodiscard]] bool operator==(const ShapingKey &) const = default;
-  };
-  struct ShapingKeyHash {
-    [[nodiscard]] std::size_t operator()(const ShapingKey &k) const noexcept;
-  };
-  struct ShapingEntry {
-    PageShaping shaping;
-    std::uint64_t lastUsedTick{};
-  };
-
   xanadu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
   xanadu::MicroversionId head_;
@@ -372,11 +342,7 @@ private:
   /// Per-cell facts the manifold does not hold, keyed by CellRef.
   std::unordered_map<CellRef, ColdCell> cold_;
 
-  std::unordered_map<ShapingKey, ShapingEntry, ShapingKeyHash> shapingCache_;
-  std::uint64_t shapingTick_{0};
-  std::uint64_t shapingHits_{0};
-  std::uint64_t shapingMisses_{0};
-  std::uint64_t shapingEvictions_{0};
+  gleditor::text::ShapingCache shapingCache_;
 
   struct EphemeralMetaDimSlot {
     CellRef parentCell{noCell};
