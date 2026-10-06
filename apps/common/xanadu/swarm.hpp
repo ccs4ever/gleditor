@@ -175,7 +175,15 @@ public:
    * Returns as soon as the swarm has been joined; use waitForMetadata() to
    * block until the content can actually be described.
    */
-  InfoHash addMagnet(const std::string &uri, const std::string &dataRoot);
+  InfoHash addMagnet(const std::string &uri, const std::string &dataRoot,
+                     bool metadataOnly = false);
+
+  /// Release a metadata-only magnet for payload download after validating its
+  /// file list and resource budget. All handle calls stay on the owner thread.
+  void startDownload(const InfoHash &hash);
+  /// Streaming downloads can discard copied piece bytes after verification.
+  /// Later reads still obtain the piece from libtorrent's retained disk cache.
+  void discardCachedPieces(const InfoHash &hash);
 
   /**
    * @brief Tell a swarm about a peer directly.

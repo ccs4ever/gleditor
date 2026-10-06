@@ -834,6 +834,15 @@ void Renderer::advanceScript(RenderState &state) {
   using Kind       = AppState::AutomationStep::Kind;
 
   switch (step.kind) {
+  case Kind::Wait: {
+    const auto now = std::chrono::steady_clock::now();
+    if (!scriptWaitUntil) scriptWaitUntil = now + step.delay;
+    if (now >= *scriptWaitUntil) {
+      scriptWaitUntil.reset();
+      ++nextStep;
+    }
+    return;
+  }
   case Kind::Capture:
     pendingScriptCapture = step.text;
     return;

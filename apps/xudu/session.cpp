@@ -303,6 +303,7 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
 // the same unavoidable risk any other noexcept-adjacent code accepts.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
+  publicationInbox_.reset();
   try {
     flushUncommitted();
   } catch (const std::exception &err) {
@@ -584,7 +585,7 @@ const MutableKeys &Session::identity() {
 void Session::configureTestPublicationSwarm(
     const std::string &listen,
     std::vector<std::pair<std::string, std::uint16_t>> nodes) {
-  if (publicationOutbox_)
+  if (publicationOutbox_ || publicationInbox_)
     throw std::logic_error("publication outbox is already running");
   testPublicationSwarm_ = true;
   publicationListen_    = listen;
@@ -613,6 +614,46 @@ PublicationOutbox &Session::publicationOutbox() {
         std::make_unique<PublicationOutbox>(std::move(options));
   }
   return *publicationOutbox_;
+}
+
+PublicationInbox &Session::publicationInbox() {
+  if (!publicationInbox_) {
+    PublicationInbox::Options options;
+    options.directory = xanadocsDirectory().parent_path() / "publication-inbox";
+    if (testPublicationSwarm_) {
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      options.makeTransport =
+          publicationDownloadSwarmTransport(swarm, publicationNodes_);
+    }
+    publicationInbox_ = std::make_unique<PublicationInbox>(std::move(options));
+  }
+  return *publicationInbox_;
+}
+
+std::pair<std::size_t, MicroversionId>
+Session::openDownloadedPublication(std::string_view id) {
+  const auto downloaded = publicationInbox().status(id);
+  if (downloaded.phase != PublicationDownloadPhase::Ready)
+    throw std::runtime_error("Publication is not ready to open");
+  const auto target = std::filesystem::weakly_canonical(downloaded.storePath);
+  auto index        = stores.size();
+  for (std::size_t candidate = 0; candidate < stores.size(); ++candidate) {
+    if (!stores[candidate].path.empty() &&
+        std::filesystem::weakly_canonical(stores[candidate].path) == target) {
+      index = candidate;
+      break;
+    }
+  }
+  if (index == stores.size())
+    index = loadAuxiliaryStore(downloaded.storePath.string());
+  invalidate();
+  std::cout << "xudu: opened downloaded publication " << downloaded.title
+            << " (complete store " << index << ")\n";
+  return {index, downloaded.version};
 }
 
 std::string Session::publishDocument(const MicroversionId &version,

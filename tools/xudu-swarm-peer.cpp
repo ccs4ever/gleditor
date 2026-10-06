@@ -25,6 +25,7 @@
 #include <tuple>
 
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
@@ -106,9 +107,63 @@ int restoreRemote(const int argc, char **argv) {
   return 0;
 }
 
+int downloadRemote(const int argc, char **argv) {
+  if (argc != 6)
+    throw std::invalid_argument(
+        "usage: xudu-swarm-peer --download-publication URI HOST PORT CACHE");
+  const auto port = std::stoul(argv[4]);
+  if (!port || port > UINT16_MAX)
+    throw std::invalid_argument("invalid peer port");
+  xanadu::SwarmContentSource::Options network;
+  network.enableLocalDiscovery           = false;
+  network.enableTrackers                 = false;
+  network.restrictDhtToDistinctNetworks  = false;
+  network.allowManyConnectionsPerAddress = true;
+  const std::vector<std::pair<std::string, std::uint16_t>> peers{
+      {argv[3], static_cast<std::uint16_t>(port)}};
+  xanadu::PublicationInbox inbox(
+      {.directory = std::filesystem::path(argv[5]) / "inbox",
+       .makeTransport =
+           xanadu::publicationDownloadSwarmTransport(network, peers)});
+  const auto link = xanadu::MutableLink::parse(argv[2]);
+  const auto id   = inbox.submit(link);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds{120};
+  xanadu::PublicationDownloadStatus status;
+  do {
+    status = inbox.status(id);
+    if (status.phase == xanadu::PublicationDownloadPhase::Failed)
+      throw std::runtime_error(status.error);
+    if (status.phase == xanadu::PublicationDownloadPhase::Ready) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds{50});
+  } while (std::chrono::steady_clock::now() < deadline);
+  if (status.phase != xanadu::PublicationDownloadPhase::Ready)
+    throw std::runtime_error("publication download timed out");
+  const auto reader = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store restored(reader);
+  restored.load(status.storePath.string());
+  const auto manifest = xanadu::decodePublication(readWholeFile(
+      (status.storePath.parent_path() / "publication.xanadoc").string()));
+  if (!manifest)
+    throw std::runtime_error("retained publication signature failed");
+  std::cout << "restored " << manifest->publisher.hex() << " "
+            << manifest->sequence << " " << restored.opCount() << " "
+            << manifest->inventory.size() << " " << reader->bytes().size()
+            << "\n";
+  return 0;
+}
+
 } // namespace
 
 int main(const int argc, char **argv) {
+  if (argc > 1 && std::string_view(argv[1]) == "--download-publication") {
+    try {
+      return downloadRemote(argc, argv);
+    } catch (const std::exception &error) {
+      std::cerr << error.what() << "\n";
+      return 1;
+    }
+  }
   if (argc > 1 && std::string_view(argv[1]) == "--restore-publication") {
     try {
       return restoreRemote(argc, argv);

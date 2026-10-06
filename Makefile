@@ -1067,12 +1067,12 @@ sample-xanadocs: $(OBJDIR)/xudu
 # The swarm tests proper, with the two peers on separate network stacks via
 # unprivileged user namespaces (unshare -Urnm).
 .PHONY: test/swarm
-test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
+test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
 	tools/swarm-netns-test.sh
 	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-swarm
-test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
+test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/xuzz
 	XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh
 
 .PHONY: test/publication-local

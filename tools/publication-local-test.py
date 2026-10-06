@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -252,8 +253,63 @@ def validate_reader(binary, root, author_env):
         assert len(list(copy.parent.glob("publication-*"))) == 1
     finally:
         hidden.rename(seeds)
+    # The cached reader supplies an already verified snapshot for checking the
+    # completed-download picker across restart. Live transfer is checked in
+    # the separate namespace runner, not claimed by this seeded UI fixture.
+    pub = decode(manifest.read_bytes())
+    incoming = root / "reader-data/xudu/publication-inbox" / pub[b"publisher"].hex()
+    shutil.copytree(copy, incoming / "store")
+    shutil.copy2(manifest, incoming / "publication.xanadoc")
+    with (root / "download-reopen.log").open("w") as log:
+        subprocess.run(base + [
+            "--chord", "Ctrl+O", "--chord", "Right", "--chord", "Right",
+            "--chord", "Right", "--chord", "Right", "--chord", "Right",
+            "--chord", "Tab", "--chord", "Return", "--dump-a11y",
+            "--capture", str(root / "download-ready.ppm"), "--chord", "Right", "--chord", "Return",
+            "--dump-a11y", "--capture", str(root / "download-reopen.ppm"),
+            "--chord", "Ctrl+O", "--chord", "Right", "--chord", "Right",
+            "--chord", "Right", "--chord", "Right", "--chord", "Right",
+            "--chord", "Tab", "--chord", "Return", "--chord", "Right",
+            "--chord", "Return", "--dump-a11y", "--capture",
+            str(root / "download-reopen-again.ppm")],
+            env=env, stdout=log, stderr=log, timeout=120, check=True)
+    reopened = (root / "download-reopen.log").read_text()
+    assert "Ready to open" in reopened and "opened downloaded publication" in reopened
+    opened_stores = re.findall(r"opened downloaded publication .* \(complete store (\d+)\)", reopened)
+    assert len(opened_stores) == 2 and opened_stores[0] == opened_stores[1],         "Opening one snapshot twice created competing stores"
+    assert (incoming / "store/ops.nodes").read_bytes() == initial_ops
+    bad = incoming.parent / ("e" * 64)
+    bad.mkdir()
+    (bad / "publication.xanadoc").write_text("invalid publication")
+    try:
+        with (root / "download-invalid-cache.log").open("w") as log:
+            subprocess.run(base + [
+                "--chord", "Ctrl+O", "--dump-a11y", "--capture",
+                str(root / "download-invalid-cache.ppm"), "--chord", "Tab",
+                "--type", str(copy), "--chord", "Return", "--dump-a11y",
+                "--capture", str(root / "download-invalid-cache-local.ppm")],
+                env=env, stdout=log, stderr=log, timeout=120, check=True)
+        contained = (root / "download-invalid-cache.log").read_text()
+        assert "Downloads unavailable" in contained and "opened store" in contained
+    finally:
+        shutil.rmtree(bad)
+    uri = "magnet:?xs=urn:btpk:" + pub[b"publisher"].hex() + "&s=" + pub[b"salt"].hex()
+    refresh = ["--chord", "Return"] * 5
+    with (root / "download-failure.log").open("w") as log:
+        subprocess.run(base + [
+            "--chord", "Ctrl+O", "--chord", "Tab", "--type", uri,
+            "--chord", "Return", "--wait-ms", "200"] + refresh + ["--dump-a11y", "--capture",
+            str(root / "download-failure.ppm"), "--chord", "Right", "--chord",
+            "Right", "--chord", "Return", "--wait-ms", "200"] + refresh + ["--dump-a11y",
+            "--capture", str(root / "download-retry.ppm")], env=env,
+            stdout=log, stderr=log, timeout=120, check=True)
+    refused = (root / "download-failure.log").read_text()
+    assert "Download failed" in refused and "No publication swarm configured" in refused
+    assert "opened downloaded publication" not in refused
     report = json.loads((root / "results.json").read_text())
-    report.update({"reader_open_keyboard": True, "reader_offline_reopen_keyboard": True,
+    report.update({"download_reopen_keyboard": True, "download_failure_retry_keyboard": True,
+                   "invalid_download_cache_keeps_local_open": True,
+                   "reader_open_keyboard": True, "reader_offline_reopen_keyboard": True,
                    "reader_keeps_authored_ops": True, "reader_refuses_missing_cache": True})
     (root / "results.json").write_text(json.dumps(report, indent=2) + "\n")
 
@@ -274,7 +330,7 @@ def main():
     root = Path(tempfile.mkdtemp(prefix="run-", dir=args.output)).resolve()
     print(f"Publication local journey evidence: {root}", flush=True)
     run(binary, root)
-    print("PASS: three UI publications, signatures, edition choices, cached reader opening and offline reopening")
+    print("PASS: three UI publications, signatures, edition choices, cached reader opening, offline reopening and download controls")
 
 
 if __name__ == "__main__":

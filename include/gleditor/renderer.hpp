@@ -406,6 +406,7 @@ private:
   render::PickingTag reportedPick{};
   /// Index of the next AppState::script step to carry out.
   std::size_t nextStep{};
+  std::optional<std::chrono::steady_clock::time_point> scriptWaitUntil;
   /// Whether the step being carried out is waiting for a picking answer. One
   /// at a time: the device holds only a couple of reads, and a step that
   /// issued its own before the last was answered would lose one of them.

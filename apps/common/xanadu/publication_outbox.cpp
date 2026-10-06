@@ -223,6 +223,11 @@ private:
 };
 } // namespace
 
+PublicationSeed reviewPublicationSeed(const InfoHash &hash,
+                                      const std::filesystem::path &directory) {
+  return checkedSeed(hash, directory);
+}
+
 std::vector<PublicationSeed>
 reviewPublicationDependencies(const Publication &pub,
                               const std::vector<std::filesystem::path> &roots) {

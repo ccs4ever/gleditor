@@ -98,6 +98,7 @@ struct AppState {
       Capture, ///< Write the frame drawn for this point in the script.
       DumpAccessibility, ///< Print the accessibility tree at this point.
       Input,             ///< Make one input event; see SyntheticInput.
+      Wait,              ///< Let asynchronous work progress without input.
     };
     Kind kind{};
     int x{}; ///< Pick and click: the pixel.
@@ -113,6 +114,8 @@ struct AppState {
     /// every --type before this existed -- means plain text.
     gleditor::DecorationMask decorations{};
     SyntheticInput input{}; ///< Input: the event.
+    std::chrono::milliseconds
+        delay{}; ///< Wait: elapsed time before proceeding.
   };
   /// The script, in command line order. Written before the render thread
   /// starts and only read after.

@@ -79,6 +79,19 @@ TEST(AutomationScript, takesAValueJoinedByAnEqualsSign) {
   EXPECT_EQ(script[2].to, 9U);
 }
 
+TEST(AutomationScript, waitsInOrderAndRejectsUnboundedOrMalformedDurations) {
+  const auto script = scriptOf(
+      {"--chord", "Ctrl+O", "--wait-ms=250", "--capture", "ready.ppm"});
+  ASSERT_EQ(script.size(), 3U);
+  EXPECT_EQ(script[0].kind, Kind::Input);
+  EXPECT_EQ(script[1].kind, Kind::Wait);
+  EXPECT_EQ(script[1].delay, std::chrono::milliseconds{250});
+  EXPECT_EQ(script[2].kind, Kind::Capture);
+  EXPECT_THROW(scriptOf({"--wait-ms", "-1"}), std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--wait-ms", "60001"}), std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--wait-ms", "12x"}), std::invalid_argument);
+}
+
 TEST(AutomationScript, capturesAtThePointItWasWritten) {
   const auto script = scriptOf(
       {"--capture", "before.ppm", "--click", "7,8", "--capture=after.ppm"});
@@ -281,7 +294,7 @@ TEST(AutomationScript, everyScriptedStepWantsFrames) {
       {"--key", "enter"},       {"--chord", "Ctrl+N"}, {"--mouse-down", "1,2"},
       {"--mouse-move", "1,2"},  {"--mouse-up", "1,2"}, {"--drag", "1,2:3,4"},
       {"--right-click", "1,2"}, {"--wheel", "0,1"},    {"--ctrl-wheel", "0,1"},
-      {"--shift-wheel", "0,1"}, {"--chord=Alt+Home"},
+      {"--shift-wheel", "0,1"}, {"--chord=Alt+Home"},  {"--wait-ms", "1"},
   };
   for (const auto &line : lines) {
     ASSERT_FALSE(scriptOf(line).empty()) << line.front();

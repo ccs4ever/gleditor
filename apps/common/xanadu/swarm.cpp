@@ -166,7 +166,6 @@ class XuduTorrentPlugin;
 
 struct SwarmContentSource::Impl {
   SwarmContentSource::Options options;
-  lt::session session;
   /// Mutable because reading is logically const -- it answers a question about
   /// content -- while unavoidably driving a session and filling a cache.
   mutable std::map<InfoHash, Swarm> swarms;
@@ -199,6 +198,9 @@ struct SwarmContentSource::Impl {
   std::map<InfoHash, std::shared_ptr<XuduTorrentPlugin>> torrentPlugins;
   /// Mutex protecting torrentPlugins.
   std::mutex pluginsMutex;
+  // The session owns callback threads capturing this Impl. Join it before
+  // destroying their queues, plugin registry and mutexes.
+  lt::session session;
 
   explicit Impl(SwarmContentSource::Options aOptions);
 
@@ -404,7 +406,9 @@ struct SwarmContentSource::Impl {
           continue;
         }
         const auto hash = fromLt(got->handle.info_hashes().v1);
-        if (const auto found = swarms.find(hash); found != swarms.end()) {
+        if (const auto found = swarms.find(hash);
+            found != swarms.end() && found->second.pendingPieces.contains(
+                                         static_cast<int>(got->piece))) {
           found->second.pieces.emplace(
               static_cast<int>(got->piece),
               std::string(got->buffer.get(),
@@ -782,7 +786,8 @@ InfoHash SwarmContentSource::addTorrent(const std::string_view torrentFile,
 }
 
 InfoHash SwarmContentSource::addMagnet(const std::string &uri,
-                                       const std::string &dataRoot) {
+                                       const std::string &dataRoot,
+                                       const bool metadataOnly) {
   // Parsed by this codebase first, so that an unusable link is refused with
   // this program's own complaint rather than libtorrent's.
   const auto link = MagnetLink::parse(uri);
@@ -797,6 +802,13 @@ InfoHash SwarmContentSource::addMagnet(const std::string &uri,
     params.trackers.clear();
   }
 
+  if (metadataOnly) {
+    params.flags |= lt::torrent_flags::upload_mode;
+    // Automatic management may leave upload mode and download immediately;
+    // metadata review must be the only road to requesting payload pieces.
+    params.flags &=
+        ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+  }
   auto handle = impl->session.add_torrent(params);
   // No metadata yet: that is what a magnet lacks, and it arrives from a peer.
   impl->swarms.insert_or_assign(link.hash, Swarm{.handle        = handle,
@@ -805,6 +817,20 @@ InfoHash SwarmContentSource::addMagnet(const std::string &uri,
                                                  .wantedPeers   = {},
                                                  .pendingPieces = {}});
   return link.hash;
+}
+
+void SwarmContentSource::startDownload(const InfoHash &hash) {
+  const auto found = impl->swarms.find(hash);
+  if (found == impl->swarms.end() || !found->second.meta)
+    throw std::runtime_error("Cannot download a torrent without metadata");
+  found->second.handle.unset_flags(lt::torrent_flags::upload_mode);
+}
+
+void SwarmContentSource::discardCachedPieces(const InfoHash &hash) {
+  if (const auto found = impl->swarms.find(hash); found != impl->swarms.end()) {
+    found->second.pieces.clear();
+    found->second.pendingPieces.clear();
+  }
 }
 
 void SwarmContentSource::connectPeer(const InfoHash &hash,

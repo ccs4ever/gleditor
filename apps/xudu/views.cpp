@@ -1112,11 +1112,71 @@ void Views::spawnTranscludedDocument(const TetherPayload &payload,
 }
 
 void Views::summonPublication(const PublicationEntry &entry) {
-  state->showDialog(
-      render::DiagnosticSeverity::Warning, "Publication is not cached",
-      "Open its signed .xanadoc and downloaded dependencies with Ctrl+O. "
-      "Fetching discovery results is not available yet: " +
-          entry.title);
+  openDocumentFromPath(entry.bep46Uri);
+}
+
+void Views::publicationDownloadStatus(const std::string &id) {
+  renderer->runWithState([this, id](RenderState &) {
+    try {
+      const auto downloaded = session.publicationInbox().status(id);
+      using Field           = gleditor::Form::Field;
+      Field action;
+      action.label         = "Action";
+      action.kind          = gleditor::Form::Kind::Choice;
+      action.submitOnEnter = true;
+      action.options       = {"Refresh progress", "Open completed publication",
+                              "Retry download", "Cancel download", "Close"};
+      action.optionValues  = {"refresh", "open", "retry", "cancel", "close"};
+      auto note = std::string(publicationDownloadPhaseName(downloaded.phase));
+      if (downloaded.dependencyCount)
+        note += " (" + std::to_string(downloaded.completedDependencies) + "/" +
+                std::to_string(downloaded.dependencyCount) + " dependencies)";
+      if (!downloaded.error.empty()) note += ": " + downloaded.error;
+      form.open("Download publication", std::move(note), {std::move(action)},
+                [this, id](const std::vector<Field> &answers) {
+                  const auto action = answers[0].answer();
+                  if (action == "close") return;
+                  renderer->runWithState([this, id, action](RenderState &) {
+                    try {
+                      if (action == "open") {
+                        const auto [index, version] =
+                            session.openDownloadedPublication(id);
+                        showAlongside(version, 0.0F, index);
+                        activateNewest();
+                        return;
+                      }
+                      if (action == "retry")
+                        session.publicationInbox().retry(id);
+                      if (action == "cancel")
+                        session.publicationInbox().cancel(id);
+                      publicationDownloadStatus(id);
+                    } catch (const std::exception &error) {
+                      // Keep failures in the drawn, accessible form; native
+                      // message boxes are suppressed during headless runs and
+                      // hide retry controls.
+                      Field back;
+                      back.label         = "Action";
+                      back.kind          = gleditor::Form::Kind::Choice;
+                      back.options       = {"Back to download"};
+                      back.submitOnEnter = true;
+                      form.open("Could not open publication", error.what(),
+                                {std::move(back)}, [this, id](const auto &) {
+                                  publicationDownloadStatus(id);
+                                });
+                    }
+                  });
+                });
+    } catch (const std::exception &error) {
+      using Field = gleditor::Form::Field;
+      Field back;
+      back.label         = "Action";
+      back.kind          = gleditor::Form::Kind::Choice;
+      back.options       = {"Back to Open"};
+      back.submitOnEnter = true;
+      form.open("Downloads unavailable", error.what(), {std::move(back)},
+                [this](const auto &) { openDocumentPalette(); });
+    }
+  });
 }
 
 void Views::insertSpanAtCaret(const PrimediaSpan &span) {
@@ -1335,6 +1395,20 @@ void Views::openDocumentPalette() {
     choiceField.optionValues.push_back(uri);
   }
 
+  std::string downloadError;
+  try {
+    for (const auto &download : session.publicationInbox().statuses()) {
+      const auto title =
+          download.title.empty() ? "Publication download" : download.title;
+      choiceField.options.push_back(
+          "[Download] " + title + " — " +
+          std::string(publicationDownloadPhaseName(download.phase)));
+      choiceField.optionValues.push_back("__download__" + download.id);
+    }
+  } catch (const std::exception &error) {
+    downloadError = "Downloads unavailable: " + std::string(error.what());
+  }
+
   namespace fs = std::filesystem;
   std::error_code ec;
   const auto curPath = fs::current_path(ec);
@@ -1363,29 +1437,54 @@ void Views::openDocumentPalette() {
 
   Field customPathField;
   customPathField.label = "Custom path";
-  customPathField.hint =
-      "store, file, or signed .xanadoc with cached dependencies";
+  customPathField.hint  = "store, signed .xanadoc, or author publication link";
 
   std::vector<Field> fields;
   fields.push_back(std::move(choiceField));
   fields.push_back(std::move(customPathField));
 
-  form.open("Open Document or System Xanadoc",
-            "Select a system xanadoc, local store, or file to open alongside",
-            std::move(fields), [this](const std::vector<Field> &answers) {
-              std::string chosen           = answers[0].answer();
-              const std::string customPath = answers[1].answer();
-              if (chosen == "__custom__" || !customPath.empty()) {
-                chosen = customPath;
-              }
-              if (chosen.empty()) {
-                return;
-              }
-              openDocumentFromPath(chosen);
-            });
+  form.open(
+      "Open Document or System Xanadoc",
+      downloadError.empty()
+          ? "Select a system xanadoc, local store, or file to open alongside"
+          : downloadError,
+      std::move(fields), [this](const std::vector<Field> &answers) {
+        std::string chosen           = answers[0].answer();
+        const std::string customPath = answers[1].answer();
+        if (chosen == "__custom__" || !customPath.empty()) {
+          chosen = customPath;
+        }
+        if (chosen.empty()) {
+          return;
+        }
+        openDocumentFromPath(chosen);
+      });
 }
 
 void Views::openDocumentFromPath(const std::string &chosen) {
+  if (chosen.starts_with("__download__")) {
+    publicationDownloadStatus(
+        chosen.substr(std::string_view("__download__").size()));
+    return;
+  }
+  if (MutableLink::looksLikeMutableLink(chosen)) {
+    try {
+      const auto id =
+          session.publicationInbox().submit(MutableLink::parse(chosen));
+      publicationDownloadStatus(id);
+    } catch (const std::exception &error) {
+      using Field = gleditor::Form::Field;
+      Field back;
+      back.label         = "Action";
+      back.kind          = gleditor::Form::Kind::Choice;
+      back.options       = {"Choose another publication"};
+      back.submitOnEnter = true;
+      form.open("Could not download publication", error.what(),
+                {std::move(back)},
+                [this](const auto &) { openDocumentPalette(); });
+    }
+    return;
+  }
   if (const auto kind = xudu::systemDocKindFromUri(chosen)) {
     const auto sIdx = session.systemStoreIndex(*kind);
     auto &sysStore  = session.store(sIdx);

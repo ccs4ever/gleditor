@@ -171,6 +171,7 @@ public:
   void spawnTranscludedDocument(const TetherPayload &payload,
                                 float screenX = 0.0F, float screenY = 0.0F);
   void summonPublication(const PublicationEntry &entry);
+  void publicationDownloadStatus(const std::string &id);
 
   void insertPageBreak(std::uint32_t docIndex, std::uint32_t charOffset);
   void insertPageBreakAtCaret();

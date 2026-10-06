@@ -283,7 +283,8 @@ constexpr std::array scriptedOptions = {
     "--pick",        "--click",      "--capture",    "--type",
     "--select",      "--do",         "--key",        "--chord",
     "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
-    "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel"};
+    "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel",
+    "--wait-ms"};
 
 } // namespace
 
@@ -333,6 +334,16 @@ readAutomationScript(const int argc, const char *const *const argv) {
   const auto add = [&script, &held, &input,
                     &point](const std::string_view option,
                             const std::string &value) {
+    if ("--wait-ms" == option) {
+      std::size_t consumed{};
+      const auto duration = std::stoll(value, &consumed);
+      if (consumed != value.size() || duration < 0 || duration > 60000)
+        throw std::invalid_argument(
+            "--wait-ms requires 0 through 60000 milliseconds");
+      script.push_back(Step{.kind  = Step::Kind::Wait,
+                            .delay = std::chrono::milliseconds{duration}});
+      return;
+    }
     if ("--chord" == option) {
       if (const auto combo = parseKeyCombo(value)) {
         input(Input{.kind     = Input::Kind::KeyDown,
@@ -967,6 +978,12 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "end, and any of them prefixed shift-. Carried out in order with "
              "the other automation options, and reported as a mistake when "
              "nothing is up to receive it.");
+  automation(
+      parser.add_argument("--wait-ms").append(),
+      "wait 0 through 60000 milliseconds between script inputs; repeatable",
+      "Pause the automation script while rendering and input handling "
+      "continue. Allows background downloads and other asynchronous "
+      "work to complete before the next scripted input or capture.");
   automation(parser.add_argument("--chord").append(),
              "press a key combination, as the keymap writes it; repeatable",
              "Press a key combination written as the keymap writes it, for "

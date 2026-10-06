@@ -198,8 +198,11 @@ are persisted per publishing key and salt. The Publish form accepts topics and d
 preparation; `Ctrl+Shift+P` shows background verification, DHT acknowledgement and retry status. For
 an isolated test swarm, `--test-publication-swarm HOST:PORT --dht-node HOST:PORT` enables the
 explicit mock verification destination. `Ctrl+O` opens signed `.xanadoc` publications with
-dependencies cached beside the manifest, and reopens their separate reader stores offline. Topic and
-author-catalog discovery remain pending. See
+dependencies cached beside the manifest, and accepts a BEP 46 publication magnet to resolve and
+fetch on a worker. The Download publication panel offers progress refresh, open, cancel and retry;
+completed snapshots remain in the Open picker across restart and open offline. Downloads check the
+manifest's author key, salt and sequence against the signed DHT pointer, then verify every
+dependency before installation. Topic and author-catalog discovery remain pending. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
 repaired prerequisites and remaining network/UI work.
 
@@ -244,7 +247,8 @@ defines platform-independent nodes; `src/a11y/` sends them through AccessKit to 
 Automation on Windows, and NSAccessibility on macOS. A build without AccessKit still builds the
 internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requires the binding;
 `ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
-for headless inspection, at its place among the other automation options.
+for headless inspection, at its place among the other automation options. `--wait-ms` pauses the
+automation script for up to 60 seconds while rendering, input and background work continue.
 
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2

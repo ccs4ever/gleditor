@@ -245,15 +245,58 @@ Validation evidence is under `build/publication-reader-fixes/`. The local public
 also drives cached opening, offline reopening and missing-cache rejection with `Ctrl+O`, capturing
 the form, documents and diagnostics. Final counts and limitations appear in the validation report.
 
+## Signed-name download and reader controls (2026-10-05)
+
+`PublicationInbox` resolves a BEP 46 publication magnet, downloads its manifest and signed
+content/history dependencies, then installs a separate native reader snapshot. All libtorrent
+construction, calls and destruction, piece review and complete-store installation happen on one
+worker. Submission does no networking. Each attempt owns a fresh transport and cache; failures and
+cancellation remove its output, and an explicit retry resolves the same author/document name again.
+
+A downloaded manifest must have a valid signature and match the requested key, salt and the DHT
+pointer's sequence. A remembered immutable hash in the link is not a substitute for DHT resolution.
+Default engine budgets cap manifests at 16 MiB, dependencies at 1 GiB and the dependency count at
+4,096; the options allow a host to change these limits. Network metadata is obtained in upload mode
+before payload is enabled; paths and budget are checked first. Pieces larger than 16 MiB are
+refused, and copied read buffers are discarded after verification. The existing complete-store
+installer checks all piece hashes, path/length constraints, history and inventory before the reader
+becomes ready. No changes to native store format 4 or publication format 2 are needed.
+
+Ctrl+O accepts the publication magnet in Custom path. Discovery-result activation uses the same path
+once signed catalog entries exist. The drawn Download publication form exposes refresh, open, retry,
+cancel and close. Errors stay in that accessible form. Closing the form leaves the job running; the
+Open picker lists requests and completed snapshots. Snapshots live in the user data directory
+separately from temporary primary workspaces; repeated opens reuse one mutable store instance.
+Completion atomically retains the signed manifest beside the native store, drops the temporary
+transfer cache, and exposes an offline snapshot in the picker on subsequent runs. Interrupted/failed
+requests are not silently restarted. Opening preserves the publication's selected version and
+authored edition choices; it creates no subscription or edition update. Signature checks establish
+control of the key; Oracle enrollment and author-key/catalog discovery remain later work.
+
+Validation evidence and remaining interface findings are recorded in
+[the download validation report](ux_publication_download_validation_2026-10-05.md). This batch adds
+the network/opening prerequisite for P2. It does not mark the original seven user journeys complete.
+
+The full headless test target passed 539 library, 1,249 engine, 57 Xuzz and 119 ZigZag tests, plus
+12 namespace transport/mutable-name cases and the publication namespace integration. One optional
+video test was skipped and one benchmark remains disabled. After the final cancellation commit-order
+fix, the focused inbox/outbox/inventory run passed all 38 cases. The local publication runner
+passed, retaining its final evidence in `build/publication-local/run-wtmyh7k4/`. The live
+publication namespace/UI integration also passed after that fix. The final Docker image
+`gleditor-swarm-test:local` (`8b0375f74c72`) rebuilt the corrected inbox object and passed all 95
+smoke tests with networking disabled. Repository formatting and lint gates passed. Final build, test
+and image identity logs are retained under `build/publication-download/`.
+
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
-1. Add asynchronous download and opening of remote discovery results. Verified cached opening and
-   native offline reopening with durable reader deployment bindings are now implemented.
-1. Add signed author catalog publication/ingestion and topic rendezvous exchange, author-key
-   following and remote opening. An empty catalog now honestly stays empty until data is learned.
+1. Add signed author catalog publication/ingestion and topic rendezvous exchange for author-key
+   following and keyword search. Feed verified results into the asynchronous download/opening path.
+   Known publication magnets now resolve/download on a worker, and completed snapshots reopen
+   offline; the complete P2 catalog/follow and P3 search journeys remain pending. An empty catalog
+   stays empty until data is learned.
 1. Add persisted update subscriptions, sequence polling, dependency verification, retry and
    acknowledgement, including missed updates after reconnect.
 1. Add commentary/backlink and independent link-package creation, review, announcement and

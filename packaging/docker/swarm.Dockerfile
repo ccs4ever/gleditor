@@ -36,8 +36,8 @@ RUN make -j$(nproc) GLEDITOR_VERSION="${GLEDITOR_VERSION}" \
       CXXFLAGS="-isystem /usr/include/poppler -isystem /usr/include/poppler/cpp" \
       xuzz xudu-dump xudu-swarm-peer xudu_test xuzz_test zigzag_test \
     && ./build/xudu_test \
-      --gtest_filter='PublicationTest.*:PublicationInventoryTest.*:StoreTablesTest.*:PublicationOutboxTest.*:BinaryOpsTest.*:MutableLinkTest.*:LinkPackageTest.*:LinkPackageInteractionTest.*:SpanfiladeBenchmarkTest.ScaledOccurrencesOfSpeedup:HolefiladeBenchmarkTest.ScaledSpanDecompositionSpeedup'
+      --gtest_filter='PublicationTest.*:PublicationInventoryTest.*:StoreTablesTest.*:PublicationOutboxTest.*:PublicationInboxTest.*:BinaryOpsTest.*:MutableLinkTest.*:LinkPackageTest.*:LinkPackageInteractionTest.*:SpanfiladeBenchmarkTest.ScaledOccurrencesOfSpeedup:HolefiladeBenchmarkTest.ScaledSpanDecompositionSpeedup'
 
 # The network suites need peers supplied by the runner; the default command
 # exercises the publication primitives without pretending those peers exist.
-CMD ["./build/xudu_test", "--gtest_filter=PublicationTest.*:PublicationInventoryTest.*:StoreTablesTest.*:PublicationOutboxTest.*:BinaryOpsTest.*:MutableLinkTest.*:LinkPackageTest.*:LinkPackageInteractionTest.*:SpanfiladeBenchmarkTest.ScaledOccurrencesOfSpeedup:HolefiladeBenchmarkTest.ScaledSpanDecompositionSpeedup"]
+CMD ["./build/xudu_test", "--gtest_filter=PublicationTest.*:PublicationInventoryTest.*:StoreTablesTest.*:PublicationOutboxTest.*:PublicationInboxTest.*:BinaryOpsTest.*:MutableLinkTest.*:LinkPackageTest.*:LinkPackageInteractionTest.*:SpanfiladeBenchmarkTest.ScaledOccurrencesOfSpeedup:HolefiladeBenchmarkTest.ScaledSpanDecompositionSpeedup"]

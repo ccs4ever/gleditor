@@ -10,6 +10,7 @@
 #include <thread>
 
 #include "common/xanadu/bencode.hpp"
+#include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/store.hpp"
 
@@ -323,6 +324,216 @@ TEST_F(PublicationOutboxTest, TheSeedDataDirectoryCannotEscapeThroughASymlink) {
                std::runtime_error);
 }
 
+struct DownloadState {
+  std::mutex guard;
+  std::map<xanadu::InfoHash, fs::path> seeds;
+  xanadu::MutablePointer pointer;
+  std::vector<std::thread::id> threads;
+  std::atomic<bool> hold{false};
+  std::atomic<bool> fail{false};
+};
+
+class TestDownloadTransport final
+    : public xanadu::PublicationDownloadTransport {
+public:
+  explicit TestDownloadTransport(std::shared_ptr<DownloadState> state)
+      : state_(std::move(state)) {
+    record();
+  }
+  ~TestDownloadTransport() override { record(); }
+  xanadu::MutablePointer resolve(const xanadu::MutableLink &,
+                                 std::stop_token stop) override {
+    record();
+    while (state_->hold && !stop.stop_requested())
+      std::this_thread::sleep_for(5ms);
+    if (stop.stop_requested()) throw std::runtime_error("cancelled");
+    if (state_->fail) throw std::runtime_error("injected network failure");
+    return state_->pointer;
+  }
+  void fetch(const xanadu::InfoHash &hash, const fs::path &directory,
+             std::uint64_t, std::stop_token) override {
+    record();
+    fs::create_directories(directory.parent_path());
+    fs::copy(state_->seeds.at(hash), directory, fs::copy_options::recursive);
+  }
+
+private:
+  void record() {
+    const std::scoped_lock lock(state_->guard);
+    state_->threads.push_back(std::this_thread::get_id());
+  }
+  std::shared_ptr<DownloadState> state_;
+};
+
+class PublicationInboxTest : public PublicationOutboxTest {
+protected:
+  std::shared_ptr<DownloadState> downloads = std::make_shared<DownloadState>();
+  xanadu::MutableLink link;
+  void SetUp() override {
+    PublicationOutboxTest::SetUp();
+    const std::vector<xanadu::TorrentContent> files{
+        {.path = "publication.xanadoc",
+         .data = xanadu::encodePublication(publication)}};
+    const auto manifest = xanadu::makeTorrent(files, "publication");
+    const auto directory =
+        xanadu::writeTorrentSeed(root / "manifest", manifest, files);
+    downloads->pointer              = {.hash     = manifest.hash,
+                                       .sequence = publication.sequence};
+    downloads->seeds[manifest.hash] = directory;
+    for (const auto &seed :
+         xanadu::reviewPublicationDependencies(publication, roots))
+      downloads->seeds[seed.hash] = seed.savePath;
+    link.key  = keys.publicKey;
+    link.salt = publication.salt;
+  }
+  xanadu::PublicationInbox::Options incomingOptions() {
+    xanadu::PublicationInbox::Options result;
+    result.directory     = root / "inbox";
+    result.makeTransport = [state = downloads] {
+      return std::make_unique<TestDownloadTransport>(state);
+    };
+    return result;
+  }
+};
+
+TEST_F(PublicationInboxTest,
+       CompleteStoreRetainsSignedSnapshotAndReopensOffline) {
+  std::string id;
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    id = inbox.submit(link);
+    ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+        << inbox.status(id).error;
+    const auto status = inbox.status(id);
+    EXPECT_EQ(status.completedDependencies, 2U);
+    EXPECT_EQ(status.title, "Story Ideas");
+    xanadu::Store restored;
+    restored.load(status.storePath.string());
+    EXPECT_EQ(restored.documentId(), publication.storeId);
+    EXPECT_EQ(restored.textOf(status.version), "Story Ideas");
+    EXPECT_TRUE(restored.userPermascrollPtr()->bytes().empty());
+  }
+  xanadu::PublicationInbox offline({.directory = root / "inbox"});
+  ASSERT_EQ(offline.statuses().size(), 1U);
+  EXPECT_EQ(offline.status(id).phase, xanadu::PublicationDownloadPhase::Ready);
+  EXPECT_EQ(offline.status(id).version, publication.version);
+  const std::scoped_lock lock(downloads->guard);
+  ASSERT_FALSE(downloads->threads.empty());
+  for (const auto thread : downloads->threads) {
+    EXPECT_NE(thread, std::this_thread::get_id());
+    EXPECT_EQ(thread, downloads->threads.front());
+  }
+}
+
+TEST_F(PublicationInboxTest, RejectsDifferentKeySaltAndPointerSequence) {
+  xanadu::PublicationInbox inbox(incomingOptions());
+  auto wrong = link;
+  wrong.key  = xanadu::createMutableKeys().publicKey;
+  auto id    = inbox.submit(wrong);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_FALSE(fs::exists(root / "inbox" / id));
+  wrong      = link;
+  wrong.salt = "doc:another";
+  id         = inbox.submit(wrong);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  ++downloads->pointer.sequence;
+  id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(inbox.status(id).error, testing::HasSubstr("signed DHT pointer"));
+}
+
+TEST_F(PublicationInboxTest, CancelsActiveWaitAndRetriesTheSameRequest) {
+  downloads->hold = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(
+      inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 2s));
+  inbox.cancel(id);
+  ASSERT_TRUE(
+      inbox.waitFor(id, xanadu::PublicationDownloadPhase::Cancelled, 2s));
+  EXPECT_FALSE(fs::exists(root / "inbox" / id));
+  downloads->hold = false;
+  inbox.retry(id);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s))
+      << inbox.status(id).error;
+  EXPECT_THROW(inbox.retry(id), std::logic_error);
+}
+
+TEST_F(PublicationInboxTest, NetworkFailureLeavesNoStoreAndAllowsRetry) {
+  downloads->fail = true;
+  xanadu::PublicationInbox inbox(incomingOptions());
+  const auto id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 2s));
+  EXPECT_FALSE(fs::exists(root / "inbox" / id));
+  downloads->fail = false;
+  inbox.retry(id);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Ready, 3s));
+}
+
+TEST_F(PublicationInboxTest,
+       RejectsCorruptedDependencyAndConfiguredResourceLimits) {
+  const auto dependency =
+      xanadu::reviewPublicationDependencies(publication, roots).front();
+  const auto meta = xanadu::Metainfo::parse(dependency.metainfo);
+  const auto payload =
+      dependency.savePath / meta.name() / meta.files().front().path;
+  std::fstream damaged(payload,
+                       std::ios::in | std::ios::out | std::ios::binary);
+  damaged.put('!');
+  damaged.close();
+  xanadu::PublicationInbox inbox(incomingOptions());
+  auto id = inbox.submit(link);
+  ASSERT_TRUE(inbox.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(inbox.status(id).error, testing::HasSubstr("verification"));
+  auto limited                = incomingOptions();
+  limited.directory           = root / "limited";
+  limited.maximumDependencies = 1;
+  xanadu::PublicationInbox tooMany(limited);
+  id = tooMany.submit(link);
+  ASSERT_TRUE(
+      tooMany.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(tooMany.status(id).error,
+              testing::HasSubstr("too many dependencies"));
+  limited.directory            = root / "small";
+  limited.maximumManifestBytes = 1;
+  xanadu::PublicationInbox tooLarge(limited);
+  id = tooLarge.submit(link);
+  ASSERT_TRUE(
+      tooLarge.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(tooLarge.status(id).error, testing::HasSubstr("byte limit"));
+}
+
+TEST_F(PublicationInboxTest,
+       RejectsDependencyBudgetAndInvalidRetainedSnapshots) {
+  auto configured                   = incomingOptions();
+  configured.maximumDependencyBytes = 1;
+  xanadu::PublicationInbox limited(configured);
+  const auto id = limited.submit(link);
+  ASSERT_TRUE(
+      limited.waitFor(id, xanadu::PublicationDownloadPhase::Failed, 3s));
+  EXPECT_THAT(limited.status(id).error, testing::HasSubstr("byte limit"));
+  EXPECT_FALSE(fs::exists(root / "inbox" / id));
+  fs::create_directories(root / "broken" / keys.publicKey.hex());
+  std::ofstream(root / "broken" / keys.publicKey.hex() / "publication.xanadoc")
+      << "bad";
+  EXPECT_THROW((xanadu::PublicationInbox{{.directory = root / "broken"}}),
+               std::runtime_error);
+}
+
+TEST_F(PublicationInboxTest, ShutdownCancelsWorkerAndQueuedRequests) {
+  downloads->hold  = true;
+  const auto start = std::chrono::steady_clock::now();
+  {
+    xanadu::PublicationInbox inbox(incomingOptions());
+    const auto id = inbox.submit(link);
+    ASSERT_TRUE(
+        inbox.waitFor(id, xanadu::PublicationDownloadPhase::Resolving, 2s));
+    (void)inbox.submit(link);
+  }
+  EXPECT_LT(std::chrono::steady_clock::now() - start, 2s);
+  EXPECT_TRUE(fs::is_empty(root / "inbox"));
+}
+
 class PublicationOutboxNetworkTest : public PublicationOutboxTest {};
 
 TEST_F(PublicationOutboxNetworkTest,
@@ -383,7 +594,7 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_EQ(xanadu::encodePublication(*received),
             xanadu::encodePublication(publication));
   // A fresh process in the other namespace starts with an empty cache. Its
-  // only inputs are the immutable manifest hash and an explicit peer address.
+  // only inputs are the author publication link and a named DHT bootstrap node.
   const auto readerNamespace = std::getenv("XUDU_PEER_NAMESPACE");
   const auto publisherHost   = std::getenv("XUDU_TEST_HOST");
   ASSERT_NE(readerNamespace, nullptr);
@@ -398,9 +609,9 @@ TEST_F(PublicationOutboxNetworkTest,
   };
   const auto command =
       std::string("ip netns exec ") + quote(readerNamespace) +
-      " ./build/xudu-swarm-peer --restore-publication " + expected.hex() + " " +
-      quote(publisherHost) + " " + std::to_string(reopened.listenPort()) + " " +
-      quote(cache.string()) + " > " + quote(report.string()) + " 2>&1";
+      " ./build/xudu-swarm-peer --download-publication " + quote(link.uri()) +
+      " " + quote(publisherHost) + " " + std::to_string(reopened.listenPort()) +
+      " " + quote(cache.string()) + " > " + quote(report.string()) + " 2>&1";
   ASSERT_EQ(std::system(command.c_str()), 0) << std::ifstream(report).rdbuf();
   std::ifstream restoredReport(report);
   std::string line;
@@ -412,10 +623,56 @@ TEST_F(PublicationOutboxNetworkTest,
   // The child and its BitTorrent session have exited. Reopening consults only
   // the reader's retained cache and deployment metadata, across no sockets.
   xanadu::Store offline(std::make_shared<xanadu::UserPermascroll>());
-  offline.load((cache / "reader").string());
+  const auto copies = fs::directory_iterator(cache / "inbox");
+  ASSERT_NE(copies, fs::directory_iterator{});
+  offline.load((copies->path() / "store").string());
   EXPECT_EQ(offline.documentId(), publication.storeId);
   EXPECT_EQ(offline.textOf(publication.version), "Story Ideas");
   EXPECT_EQ(offline.opCount(), publication.opsSegments.front().length);
+  // The keyboard path uses no incoming cache fixture: the running publisher
+  // is reached by DHT peer discovery, while --wait-ms stands in for waiting.
+  const auto evidence =
+      fs::current_path() / "build/publication-download/network-ui";
+  fs::create_directories(evidence);
+  const auto uiLog  = evidence / "download.log";
+  const auto uiRoot = root / "keyboard-reader";
+  const auto uiCommand =
+      std::string("ip netns exec ") + quote(readerNamespace) +
+      " env SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy "
+      "LIBGL_ALWAYS_SOFTWARE=1" +
+      " XDG_DATA_HOME=" + quote((uiRoot / "data").string()) +
+      " XDG_CONFIG_HOME=" + quote((uiRoot / "config").string()) +
+      " XDG_CACHE_HOME=" + quote((uiRoot / "cache").string()) +
+      " ./build/xuzz " + quote((uiRoot / "workspace").string()) +
+      " --permascroll " + quote((uiRoot / "permascroll").string()) +
+      " --backend opengl --profile --test-publication-swarm " +
+      quote(std::string(host) + ":0") + " --dht-node " +
+      quote(std::string(publisherHost) + ":" +
+            std::to_string(reopened.listenPort())) +
+      " --chord Ctrl+O --chord Tab --type " + quote(link.uri()) +
+      " --chord Return" + " --dump-a11y --capture " +
+      quote((evidence / "queued.ppm").string()) +
+      " --wait-ms 30000 --chord Return --dump-a11y --capture " +
+      quote((evidence / "ready.ppm").string()) +
+      " --chord Right --chord Return --dump-a11y --capture " +
+      quote((evidence / "opened.ppm").string()) + " > " +
+      quote(uiLog.string()) + " 2>&1";
+  ASSERT_EQ(std::system(uiCommand.c_str()), 0) << std::ifstream(uiLog).rdbuf();
+  std::ifstream uiOutput(uiLog);
+  const std::string log{std::istreambuf_iterator<char>(uiOutput),
+                        std::istreambuf_iterator<char>()};
+  EXPECT_THAT(log, testing::HasSubstr("Ready to open"));
+  EXPECT_THAT(log,
+              testing::HasSubstr("opened downloaded publication Story Ideas"));
+  const auto inbox = uiRoot / "data/xudu/publication-inbox";
+  ASSERT_TRUE(fs::exists(inbox));
+  const auto uiCopies = fs::directory_iterator(inbox);
+  ASSERT_NE(uiCopies, fs::directory_iterator{});
+  xanadu::Store keyboardReader;
+  keyboardReader.load((uiCopies->path() / "store").string());
+  EXPECT_EQ(keyboardReader.documentId(), publication.storeId);
+  EXPECT_EQ(keyboardReader.opCount(), publication.opsSegments.front().length);
+  EXPECT_EQ(keyboardReader.textOf(publication.version), "Story Ideas");
 }
 
 } // namespace

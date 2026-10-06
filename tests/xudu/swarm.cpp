@@ -187,6 +187,28 @@ TEST_F(SwarmTest, aMagnetGetsItsMetadataFromAPeer) {
   EXPECT_EQ(fetched->totalLength(), meta.totalLength());
 }
 
+TEST_F(SwarmTest,
+       MetadataOnlyMagnetWaitsForExplicitDownloadAndCanDiscardPieces) {
+  const auto meta = xanadu::Metainfo::parse(readWholeFile(peer.torrentPath));
+  auto configured = options();
+  configured.readTimeout = 250ms;
+  SwarmContentSource swarm(configured);
+  const auto hash = swarm.addMagnet(meta.magnet(), downloads.string(), true);
+  swarm.connectPeer(hash, peer.host, peer.port);
+  ASSERT_TRUE(swarm.waitForMetadata(hash, 30s));
+  EXPECT_TRUE(swarm.readStream(hash, 0, meta.totalLength()).empty());
+  swarm.startDownload(hash);
+  const auto deadline = std::chrono::steady_clock::now() + 30s;
+  std::string received;
+  do {
+    received = swarm.readStream(hash, 0, meta.totalLength());
+  } while (received.empty() && std::chrono::steady_clock::now() < deadline);
+  ASSERT_EQ(received, peer.text);
+  swarm.discardCachedPieces(hash);
+  // Discarding the copied read buffers leaves retained disk pieces available.
+  EXPECT_EQ(swarm.readStream(hash, 0, meta.totalLength()), peer.text);
+}
+
 TEST_F(SwarmTest, aDocumentQuotesContentThisMachineNeverHad) {
   // The whole argument, end to end: a document holding no content of its own,
   // whose text comes from a machine it has never met, verified on arrival.
