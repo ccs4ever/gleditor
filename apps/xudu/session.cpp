@@ -929,8 +929,8 @@ void Session::loadRetainedScrolls(const Store &store,
                                   const std::string &storePath) {
   for (const auto &scroll : store.scrolls()) {
     for (const auto &segment : scroll.segments) {
-      const auto root     = std::filesystem::path(storePath) / "published" /
-                            segment.torrent.hex();
+      const auto root = std::filesystem::path(storePath) / "published" /
+                        segment.torrent.hex();
       const auto metainfo = root / "metainfo.torrent";
       if (!std::filesystem::exists(metainfo)) continue;
       std::ifstream in(metainfo, std::ios::binary);

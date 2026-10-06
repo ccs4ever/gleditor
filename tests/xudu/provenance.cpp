@@ -649,7 +649,7 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   ASSERT_TRUE(keyring.usable()) << "cannot create temporary GPG signing key";
   const auto mine = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                    ("xudu-publication-" + mine.publicKey.hex());
+                   ("xudu-publication-" + mine.publicKey.hex());
   Store store;
   const auto text   = store.insert({}, 0, "Story Ideas");
   const auto branch = store.insert(text, 11, " alternate");
@@ -698,7 +698,7 @@ TEST(ProvenanceTest, documentHelperEmitsSeedableHistoryAndKeepsEarlierSeals) {
   ASSERT_EQ(first.opsSegments.size(), 1U);
   const auto historyPath = dir / first.opsSegments.front().torrent.hex() /
                            "history" / xanadu::sealedOpsName;
-  const auto read        = [](const std::filesystem::path &path) {
+  const auto read = [](const std::filesystem::path &path) {
     std::ifstream in(path, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>());

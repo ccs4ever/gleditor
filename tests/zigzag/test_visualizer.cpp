@@ -245,7 +245,7 @@ TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
   doc.meta.name = "Clone Sync Test";
   doc.focus     = 2;
   doc.view      = {
-      .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
+           .x_dimension = "d.1", .y_dimension = "d.clone", .z_dimension = "d.3"};
   doc.cells[1] = Cell{.id         = 1,
                       .data       = std::string("Original Text"),
                       .dimensions = {{"d.clone", LinkPairs{.pos = 2}}}};
@@ -1363,8 +1363,8 @@ TEST(ZigzagVisualizerTest, aSliceOpensAlongTheDimensionItsHomeUses) {
   auto seq       = sequence.sliceGenesis(xanadu::MicroversionId{});
   const auto two = sequence.makeDimension(seq, "d.2");
   seq            = sequence.makeCell(two.version, "below");
-  seq = sequence.setLink(seq, sequence.homeCell(), two.dim,
-                         zigzag::DimVector::POS, sequence.cellRefOf(seq));
+  seq            = sequence.setLink(seq, sequence.homeCell(), two.dim,
+                                    zigzag::DimVector::POS, sequence.cellRefOf(seq));
   viz.bindXuduStore(sequence, seq);
   EXPECT_EQ(viz.currentView().x_dimension, "d.result")
       << "home links along d.2, which the view still shows";
