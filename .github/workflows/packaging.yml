@@ -80,6 +80,8 @@ jobs:
           python3 packaging/check-accessibility-linux.py /usr/bin/xuzz opengl --walks
         GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
           python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-documents" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --documents
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -101,6 +103,9 @@ jobs:
           ${{ runner.temp }}/native-navigation/fixture/*.png
           ${{ runner.temp }}/native-navigation/fixture/*.json
           ${{ runner.temp }}/native-navigation/fixture/application.log
+          ${{ runner.temp }}/native-documents/fixture/**
+          ${{ runner.temp }}/native-documents/data/xudu/permascroll/**
+          ${{ runner.temp }}/native-documents/config/**
 
     - uses: actions/upload-artifact@v7
       with:
@@ -188,6 +193,8 @@ jobs:
           python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --walks
         GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
           python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-documents" \
+          python3 packaging/check-accessibility-linux.py /usr/bin/xuzz --documents
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -203,6 +210,9 @@ jobs:
           ${{ runner.temp }}/native-navigation/fixture/*.png
           ${{ runner.temp }}/native-navigation/fixture/*.json
           ${{ runner.temp }}/native-navigation/fixture/application.log
+          ${{ runner.temp }}/native-documents/fixture/**
+          ${{ runner.temp }}/native-documents/data/xudu/permascroll/**
+          ${{ runner.temp }}/native-documents/config/**
 
     - uses: actions/upload-artifact@v7
       with:
@@ -273,6 +283,8 @@ jobs:
           python packaging/check-accessibility-linux.py /usr/bin/xuzz --walks
         GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
           python packaging/check-accessibility-linux.py /usr/bin/xuzz --navigation
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-documents" \
+          python packaging/check-accessibility-linux.py /usr/bin/xuzz --documents
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -288,6 +300,9 @@ jobs:
           ${{ runner.temp }}/native-navigation/fixture/*.png
           ${{ runner.temp }}/native-navigation/fixture/*.json
           ${{ runner.temp }}/native-navigation/fixture/application.log
+          ${{ runner.temp }}/native-documents/fixture/**
+          ${{ runner.temp }}/native-documents/data/xudu/permascroll/**
+          ${{ runner.temp }}/native-documents/config/**
 
     - uses: actions/upload-artifact@v7
       with:
@@ -335,6 +350,8 @@ jobs:
           validation-check/bin/check-gleditor-installed
         GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-navigation" \
           validation-check/bin/check-gleditor-installed --navigation
+        GLEDITOR_A11Y_EVIDENCE="$RUNNER_TEMP/native-documents" \
+          validation-check/bin/check-gleditor-installed --documents
 
     - name: retain native accessibility evidence
       if: always()
@@ -348,6 +365,9 @@ jobs:
           ${{ runner.temp }}/native-navigation/fixture/*.png
           ${{ runner.temp }}/native-navigation/fixture/*.json
           ${{ runner.temp }}/native-navigation/fixture/application.log
+          ${{ runner.temp }}/native-documents/fixture/**
+          ${{ runner.temp }}/native-documents/data/xudu/permascroll/**
+          ${{ runner.temp }}/native-documents/config/**
 
 
   # --------------------------------------------------------------- Windows ---

@@ -16,10 +16,11 @@ import time
 def main():
     if len(sys.argv) < 2:
         raise SystemExit(
-            "usage: check-accessibility-linux.py <binary> [backend] [--walks|--navigation]"
+            "usage: check-accessibility-linux.py <binary> [backend] [--walks|--navigation|--documents]"
         )
+    documents = "--documents" in sys.argv
     navigation = "--navigation" in sys.argv
-    keyboard = navigation or "--walks" in sys.argv
+    keyboard = documents or navigation or "--walks" in sys.argv
     if sys.argv[1] != "--session":
         binary = str(Path(sys.argv[1]).resolve())
         with tempfile.TemporaryDirectory(prefix="gleditor-atspi-") as directory:
@@ -127,7 +128,10 @@ def main():
             if not walks:
                 args += ["--no-present"]
             if Path(binary).name in ("xuzz", "xudu", "zigzag"):
-                if navigation:
+                if documents:
+                    text = ""
+                    args = [binary]
+                elif navigation:
                     text = "alpha bravo charlie"
                     # Preserve both documents before marking immutable endpoint versions.
                     args += [
@@ -286,6 +290,12 @@ def main():
                                     "role": node.get_role_name(),
                                     "name": node.get_name(),
                                     "interfaces": list(node.get_interfaces()),
+                                    "focused": node.get_state_set().contains(
+                                        Atspi.StateType.FOCUSED
+                                    ),
+                                    "editable": node.get_state_set().contains(
+                                        Atspi.StateType.EDITABLE
+                                    ),
                                 }
                                 for node in native_nodes
                             ]
@@ -322,6 +332,197 @@ def main():
                             return frame if painted >= 2 else None
 
                         wait_for(painted_frame).save(directory / (step + ".png"))
+
+                    if documents:
+
+                        def entries():
+                            return [
+                                n
+                                for n in nodes(root)
+                                if n.get_role() == Atspi.Role.ENTRY
+                                and n.get_state_set().contains(Atspi.StateType.EDITABLE)
+                            ]
+
+                        def active_entry():
+                            return next(
+                                (
+                                    n
+                                    for n in entries()
+                                    if n.get_state_set().contains(
+                                        Atspi.StateType.FOCUSED
+                                    )
+                                ),
+                                None,
+                            )
+
+                        windows = wait_for(
+                            lambda: subprocess.check_output(
+                                [
+                                    "xdotool",
+                                    "search",
+                                    "--onlyvisible",
+                                    "--pid",
+                                    str(application.pid),
+                                ],
+                                text=True,
+                            ).splitlines()
+                        )
+                        subprocess.run(
+                            ["xdotool", "windowfocus", "--sync", windows[0]], check=True
+                        )
+                        wait_for(active_entry)
+                        snapshot("j1-launch")
+                        initial = len(entries())
+                        click("New Document")
+                        wait_for(lambda: len(entries()) == initial + 1)
+                        snapshot("j1-create-control")
+                        subprocess.run(["xdotool", "key", "ctrl+n"], check=True)
+                        wait_for(lambda: len(entries()) == initial + 2)
+                        wait_for(active_entry)
+                        snapshot("j1-create-keyboard")
+                        lines = [
+                            "Native screen reader first line.",
+                            "Second line resumes here.",
+                        ]
+                        for i, line in enumerate(lines):
+                            if i:
+                                subprocess.run(["xdotool", "key", "Return"], check=True)
+                            subprocess.run(
+                                [
+                                    "xdotool",
+                                    "type",
+                                    "--clearmodifiers",
+                                    "--delay",
+                                    "30",
+                                    line,
+                                ],
+                                check=True,
+                            )
+                        content = "\n".join(lines)
+
+                        def typed_document():
+                            n = active_entry()
+                            return (
+                                n
+                                if n
+                                and "Text" in n.get_interfaces()
+                                and Atspi.Text.get_text(n, 0, -1) == content
+                                else None
+                            )
+
+                        edited = wait_for(typed_document)
+                        snapshot("j1-typed")
+                        subprocess.run(["xdotool", "key", "ctrl+Home"], check=True)
+                        wait_for(lambda: Atspi.Text.get_caret_offset(edited) == 0)
+                        first_line = Atspi.Text.get_string_at_offset(
+                            edited, 0, Atspi.TextGranularity.LINE
+                        )
+                        if first_line.content.rstrip("\n") != lines[0]:
+                            raise RuntimeError("Native first-line readback is wrong")
+                        snapshot("j1-read-first-line")
+                        subprocess.run(
+                            [
+                                "xdotool",
+                                "key",
+                                "ctrl+End",
+                                "Left",
+                                "Left",
+                                "Left",
+                                "Left",
+                                "Left",
+                                "Left",
+                            ],
+                            check=True,
+                        )
+                        before = len(content) - 6
+                        wait_for(lambda: Atspi.Text.get_caret_offset(edited) == before)
+                        subprocess.run(["xdotool", "key", "ctrl+s"], check=True)
+                        wait_for(lambda: named("Preserve Temporary Xanadoc"))
+                        snapshot("j1-preserve-dialog")
+                        folder = wait_for(lambda: named("Folder"))
+                        name = wait_for(lambda: named("Name"))
+                        if (
+                            "Text" not in folder.get_interfaces()
+                            or "Text" not in name.get_interfaces()
+                        ):
+                            raise RuntimeError("Preservation fields lack native Text")
+                        saved_name = Atspi.Text.get_text(name, 0, -1)
+                        if Atspi.Text.get_text(folder, 0, -1) != str(directory):
+                            raise RuntimeError(
+                                "Preservation folder has unreadable or wrong value"
+                            )
+                        subprocess.run(["xdotool", "key", "Tab"], check=True)
+                        wait_for(
+                            lambda: named("Name")
+                            .get_state_set()
+                            .contains(Atspi.StateType.FOCUSED)
+                        )
+                        snapshot("j1-preserve-name")
+                        subprocess.run(["xdotool", "key", "Return"], check=True)
+                        wait_for(lambda: not named("Preserve Temporary Xanadoc"))
+                        stores = list(directory.glob("doc_*.xanadoc"))
+                        if len(stores) != 1:
+                            raise RuntimeError(
+                                "J1 did not preserve exactly one authored store"
+                            )
+                        target = stores[0]
+                        snapshot("j1-preserved")
+                        subprocess.run(["xdotool", "key", "ctrl+w"], check=True)
+                        wait_for(lambda: len(entries()) == initial + 1)
+                        shutil.copytree(target, directory / "j5-closed-store")
+                        snapshot("j5-closed")
+                        subprocess.run(["xdotool", "key", "ctrl+o"], check=True)
+                        wait_for(lambda: named("Open Document or System Xanadoc"))
+                        subprocess.run(["xdotool", "key", "Tab"], check=True)
+                        path_field = wait_for(lambda: named("Custom path"))
+                        if "Text" not in path_field.get_interfaces():
+                            raise RuntimeError("Open path field lacks native Text")
+                        subprocess.run(
+                            [
+                                "xdotool",
+                                "type",
+                                "--clearmodifiers",
+                                "--delay",
+                                "40",
+                                saved_name,
+                            ],
+                            check=True,
+                        )
+                        wait_for(
+                            lambda: Atspi.Text.get_text(path_field, 0, -1) == saved_name
+                        )
+                        snapshot("j5-open-dialog")
+                        subprocess.run(["xdotool", "key", "Return"], check=True)
+                        reopened = wait_for(typed_document)
+                        if Atspi.Text.get_caret_offset(reopened) != before:
+                            raise RuntimeError("Reopening reset the saved caret")
+                        snapshot("j5-reopened")
+                        subprocess.run(
+                            [
+                                "xdotool",
+                                "type",
+                                "--clearmodifiers",
+                                "--delay",
+                                "30",
+                                " resumed",
+                            ],
+                            check=True,
+                        )
+                        resumed = content[:before] + " resumed" + content[before:]
+                        wait_for(
+                            lambda: Atspi.Text.get_text(active_entry(), 0, -1)
+                            == resumed
+                        )
+                        snapshot("j5-resumed")
+                        subprocess.run(
+                            ["xdotool", "key", "ctrl+s", "ctrl+q"], check=True
+                        )
+                        application.wait(timeout=20)
+                        print(
+                            "PASS: native J1 creation/type/preserve and focused J5 close/reopen/caret/resumed input",
+                            flush=True,
+                        )
+                        return 0
 
                     if navigation:
                         # Close can also name a setup dialog; wait for the final
@@ -631,6 +832,7 @@ def main():
                             flush=True,
                         )
                         click("Close")
+                        wait_for(lambda: not named("Walks"))
                         subprocess.run(["xdotool", "key", "ctrl+o"], check=True)
                         wait_for(lambda: named("Open Document or System Xanadoc"))
                         click("Document")

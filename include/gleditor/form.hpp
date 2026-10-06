@@ -26,6 +26,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gleditor/a11y/tree.hpp>
@@ -186,6 +187,7 @@ private:
   [[nodiscard]] std::optional<std::string> firstMissing() const;
   /// Move the highlight within an open drop-down, or the focus between fields.
   void step(int by);
+  std::uint64_t accessibilityId(std::uint64_t local);
 
   mutable std::mutex guard;
   std::string fontName;
@@ -205,6 +207,11 @@ private:
   std::size_t highlight{};
   /// Bumped whenever anything visible changes, so drawing knows to rebuild.
   std::uint64_t revision{1};
+  // Stable within one form, distinct across openings so native clients cannot
+  // retain the previous dialog's fields or send actions to their replacements.
+  std::uint64_t nextAccessibilityId{1};
+  std::unordered_map<std::uint64_t, std::uint64_t> accessibilityIds;
+  std::unordered_map<std::uint64_t, std::uint64_t> accessibilityLocals;
 
   /// Where the focused field was drawn, in the pixels SDL counts in. Worked
   /// out while drawing, because that is where the panel's geometry is decided,

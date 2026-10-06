@@ -25,11 +25,11 @@ export XDG_CONFIG_HOME="$work/config"
 export XDG_CACHE_HOME="$work/cache"
 export XDG_RUNTIME_DIR="$work/runtime"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
-if [ "$mode" = --navigation ]; then
+if [ "$mode" = --navigation ] || [ "$mode" = --documents ]; then
   if [ -n "$evidence" ]; then
     export GLEDITOR_A11Y_EVIDENCE="$evidence"
   fi
-  python3 "$native" "$package/bin/xuzz" --navigation
+  python3 "$native" "$package/bin/xuzz" "$mode"
   exit 0
 elif [ -n "$mode" ]; then
   echo "Unknown validation mode: $mode" >&2

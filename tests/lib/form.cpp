@@ -10,6 +10,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,6 +50,95 @@ TEST(FormAccessibility,
     }
     EXPECT_EQ(node.value.find("new secret"), std::string::npos);
   }
+}
+
+TEST(FormAccessibility, longUnicodeValuesHaveCompleteRunsAndCharacterCaret) {
+  namespace a11y = gleditor::a11y;
+  gleditor::Form form{"Sans 11"};
+  const auto value = std::string(a11y::runLimit + 10, 'x') + " é界";
+  form.open("Path", "", {gleditor::Form::Field{"Name", value}},
+            [](const auto &) {});
+  form.keyPressed(gleditor::Key::Left, gleditor::KeyMods::None);
+  a11y::Tree tree;
+  a11y::Builder builder(tree, 17);
+  form.describe(builder);
+  const auto field = std::ranges::find_if(tree.nodes, [](const auto &node) {
+    return node.role == a11y::Role::TextInput;
+  });
+  ASSERT_NE(field, tree.nodes.end());
+  ASSERT_TRUE(field->selection);
+  std::string readback;
+  std::size_t characters{};
+  std::optional<std::size_t> caret;
+  for (const auto id : field->children) {
+    const auto run = tree.find(id);
+    ASSERT_TRUE(run);
+    ASSERT_EQ(run->role, a11y::Role::TextRun);
+    EXPECT_LE(run->characterLengths.size(), a11y::runLimit);
+    if (id == field->selection->focus.node) {
+      caret = characters + field->selection->focus.character;
+    }
+    readback += run->value;
+    characters += run->characterLengths.size();
+  }
+  EXPECT_EQ(readback, value);
+  ASSERT_TRUE(caret);
+  EXPECT_EQ(*caret, characters - 1);
+  EXPECT_EQ(field->selection->anchor, field->selection->focus);
+}
+
+TEST(FormAccessibility, emptyFieldsRetainAnEmptyRunAndCaret) {
+  namespace a11y = gleditor::a11y;
+  gleditor::Form form{"Sans 11"};
+  form.open("Path", "", {gleditor::Form::Field{"Name"}}, [](const auto &) {});
+  a11y::Tree tree;
+  a11y::Builder builder(tree, 17);
+  form.describe(builder);
+  const auto field = std::ranges::find_if(tree.nodes, [](const auto &node) {
+    return node.role == a11y::Role::TextInput;
+  });
+  ASSERT_NE(field, tree.nodes.end());
+  ASSERT_EQ(field->children.size(), 1U);
+  const auto run = tree.find(field->children.front());
+  ASSERT_TRUE(run);
+  EXPECT_TRUE(run->value.empty());
+  ASSERT_TRUE(field->selection);
+  EXPECT_EQ(field->selection->focus.character, 0U);
+}
+
+TEST(FormAccessibility, editsKeepIdentityButNewFormsRejectStaleFieldActions) {
+  namespace a11y = gleditor::a11y;
+  gleditor::Form form{"Sans 11"};
+  const auto describe = [&] {
+    a11y::Tree tree;
+    a11y::Builder builder(tree, 17);
+    form.describe(builder);
+    return tree;
+  };
+  const auto fieldId = [](const auto &tree) {
+    return std::ranges::find_if(tree.nodes,
+                                [](const auto &node) {
+                                  return node.role == a11y::Role::TextInput;
+                                })
+        ->id;
+  };
+  form.open("Save", "", {gleditor::Form::Field{"Name", "first"}},
+            [](const auto &) {});
+  const auto first = describe();
+  const auto oldId = fieldId(first);
+  form.textTyped("X");
+  EXPECT_EQ(fieldId(describe()), oldId);
+  form.close();
+  form.open("Open", "", {gleditor::Form::Field{"Custom path", "second"}},
+            [](const auto &) {});
+  const auto second = describe();
+  EXPECT_NE(first.nodes.front().id, second.nodes.front().id);
+  EXPECT_NE(fieldId(second), oldId);
+  EXPECT_FALSE(form.performAction(oldId, a11y::Action::SetValue, "stale"));
+  EXPECT_EQ(form.current().front().value, "second");
+  EXPECT_TRUE(
+      form.performAction(fieldId(second), a11y::Action::SetValue, "current"));
+  EXPECT_EQ(form.current().front().value, "current");
 }
 
 namespace {

@@ -139,6 +139,8 @@ constexpr std::uint64_t noteId     = 2;
 constexpr std::uint64_t firstField = 16;
 /// Room for a Choice's options under each field.
 constexpr std::uint64_t perField = 64;
+// Text runs use a separate range so long fields cannot overlap choice options.
+constexpr std::uint64_t perTextField = 1ULL << 32U;
 
 constexpr std::uint64_t fieldId(const std::size_t which) {
   return firstField + (which * perField);
@@ -148,7 +150,21 @@ constexpr std::uint64_t optionId(const std::size_t which,
   return fieldId(which) + 1 + option;
 }
 
+constexpr std::uint64_t firstTextRunId(const std::size_t which) {
+  return (which + 1) * perTextField;
+}
+
 } // namespace
+
+std::uint64_t Form::accessibilityId(const std::uint64_t local) {
+  const auto [found, inserted] =
+      accessibilityIds.try_emplace(local, nextAccessibilityId);
+  if (inserted) {
+    accessibilityLocals.emplace(nextAccessibilityId, local);
+    ++nextAccessibilityId;
+  }
+  return found->second;
+}
 
 void Form::describe(a11y::Builder &into) {
   const std::scoped_lock locker(guard);
@@ -160,25 +176,25 @@ void Form::describe(a11y::Builder &into) {
     // Modal, which is the whole point of it: an assistive technology that
     // knows a dialog is modal stops offering the document behind it, which is
     // the same thing the keyboard grab does for somebody typing.
-    auto &panel = into.add(panelId, a11y::Role::Dialog);
+    auto &panel = into.add(accessibilityId(panelId), a11y::Role::Dialog);
     panel.label = title;
     panel.modal = true;
-    panel.children.push_back(into.id(titleId));
+    panel.children.push_back(into.id(accessibilityId(titleId)));
     if (!note.empty() || !trouble.empty()) {
-      panel.children.push_back(into.id(noteId));
+      panel.children.push_back(into.id(accessibilityId(noteId)));
     }
     for (std::size_t which = 0; which < fields.size(); which++) {
-      panel.children.push_back(into.id(fieldId(which)));
+      panel.children.push_back(into.id(accessibilityId(fieldId(which))));
     }
-    into.contribute(into.id(panelId));
+    into.contribute(into.id(accessibilityId(panelId)));
   }
 
   {
-    auto &heading = into.add(titleId, a11y::Role::Label);
+    auto &heading = into.add(accessibilityId(titleId), a11y::Role::Label);
     heading.value = title;
   }
   if (!note.empty() || !trouble.empty()) {
-    auto &line = into.add(noteId, a11y::Role::Label);
+    auto &line = into.add(accessibilityId(noteId), a11y::Role::Label);
     // The complaint replaces the note on screen, and does the same here --
     // said at once rather than at the next pause, because it is the answer to
     // something the person just tried to do.
@@ -192,7 +208,34 @@ void Form::describe(a11y::Builder &into) {
 
   for (std::size_t which = 0; which < fields.size(); which++) {
     const auto &one = fields[which];
-    auto &node      = into.add(fieldId(which), roleOf(one.kind));
+    const auto held = Kind::Secret == one.kind
+                          ? std::string(charactersIn(one.value), '*')
+                          : one.value;
+    std::vector<std::uint64_t> runs;
+    std::optional<a11y::TextPoint> textCaret;
+    if (Kind::Text == one.kind || Kind::Secret == one.kind) {
+      const auto breaks       = a11y::runBreaks(held);
+      const auto originalByte = which == focus ? caret : one.value.size();
+      const auto byte         = Kind::Secret == one.kind
+                                    ? a11y::characterIndexOf(one.value, originalByte)
+                                    : std::min(originalByte, held.size());
+      for (std::size_t run = 0; run + 1 < breaks.size(); ++run) {
+        const auto start = breaks[run], end = breaks[run + 1];
+        const auto text  = std::string_view{held}.substr(start, end - start);
+        const auto local = firstTextRunId(which) + run;
+        auto &node = into.add(accessibilityId(local), a11y::Role::TextRun);
+        node.value = text;
+        node.characterLengths = a11y::characterLengths(text);
+        node.wordStarts       = a11y::wordStarts(text);
+        runs.push_back(into.id(accessibilityId(local)));
+        if (!textCaret && (byte < end || run + 2 == breaks.size())) {
+          textCaret = a11y::TextPoint{
+              into.id(accessibilityId(local)),
+              a11y::characterIndexOf(text, std::min(byte, end) - start)};
+        }
+      }
+    }
+    auto &node = into.add(accessibilityId(fieldId(which)), roleOf(one.kind));
     // A toggle beside a passphrase has no label of its own on screen -- the
     // button says what it does -- so it is named by what it does.
     node.label       = one.label.empty() && Kind::Toggle == one.kind
@@ -204,7 +247,7 @@ void Form::describe(a11y::Builder &into) {
 
     switch (one.kind) {
     case Kind::Text:
-      node.value = one.value;
+      node.value = held;
       node.actions |= a11y::bit(a11y::Action::SetValue);
       break;
     case Kind::Secret:
@@ -213,7 +256,7 @@ void Form::describe(a11y::Builder &into) {
       // person's choice about their own screen; what goes on the accessibility
       // bus is readable by anything on the session, and a screen reader will
       // say it out loud.
-      node.value = std::string(charactersIn(one.value), '*');
+      node.value = held;
       node.description =
           reveal ? "shown on screen" : "hidden; there is a button to show it";
       break;
@@ -224,7 +267,8 @@ void Form::describe(a11y::Builder &into) {
               : one.options[std::min(one.chosen, one.options.size() - 1)];
       node.actions |= a11y::bit(a11y::Action::Click);
       for (std::size_t option = 0; option < one.options.size(); option++) {
-        node.children.push_back(into.id(optionId(which, option)));
+        node.children.push_back(
+            into.id(accessibilityId(optionId(which, option))));
       }
       break;
     case Kind::Toggle:
@@ -233,13 +277,25 @@ void Form::describe(a11y::Builder &into) {
       break;
     }
 
+    if (textCaret) {
+      node.children  = std::move(runs);
+      node.selection = a11y::TextSelection{*textCaret, *textCaret};
+    }
+
     if (which == focus) {
-      into.takeFocus(into.id(fieldId(which)));
+      if (typingAt) {
+        node.bounds = a11y::Rect{
+            static_cast<double>(typingAt->x), static_cast<double>(typingAt->y),
+            static_cast<double>(typingAt->x + typingAt->width),
+            static_cast<double>(typingAt->y + typingAt->height)};
+      }
+      into.takeFocus(into.id(accessibilityId(fieldId(which))));
     }
 
     if (Kind::Choice == one.kind) {
       for (std::size_t option = 0; option < one.options.size(); option++) {
-        auto &entry = into.add(optionId(which, option), a11y::Role::ListItem);
+        auto &entry = into.add(accessibilityId(optionId(which, option)),
+                               a11y::Role::ListItem);
         entry.label = one.options[option];
         entry.actions =
             a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
@@ -258,14 +314,15 @@ std::uint64_t Form::accessibilityRevision() const {
 
 bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
                          const std::string_view value) {
-  const auto local = a11y::Ids::localOf(nodeId);
+  const std::scoped_lock locker(guard);
+  const auto found = accessibilityLocals.find(a11y::Ids::localOf(nodeId));
+  if (found == accessibilityLocals.end()) return false;
+  const auto local = found->second;
   if (local < firstField) {
     return false;
   }
   const auto which  = (local - firstField) / perField;
   const auto within = (local - firstField) % perField;
-
-  const std::scoped_lock locker(guard);
   if (!open_ || which >= fields.size()) {
     return false;
   }
@@ -330,8 +387,10 @@ void Form::open(std::string aTitle, std::string aNote,
                 std::vector<Field> aFields, Accepted onAccept,
                 Cancelled onCancel) {
   const std::scoped_lock locker(guard);
-  title     = std::move(aTitle);
-  note      = std::move(aNote);
+  title = std::move(aTitle);
+  note  = std::move(aNote);
+  accessibilityIds.clear();
+  accessibilityLocals.clear();
   fields    = std::move(aFields);
   accepted  = std::move(onAccept);
   cancelled = std::move(onCancel);

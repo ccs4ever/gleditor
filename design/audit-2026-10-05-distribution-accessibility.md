@@ -237,3 +237,9 @@ operation/table hashes remain unchanged. The Nix wrapper also passes installed G
 and both programs' native text/action checks with its matching runtime closure. The application
 build and Walks Clang analysis pass; repository formatting and lint gates pass. These focused checks
 do not replace the earlier full unit regression or complete local Actions invocations.
+
+## Document form follow-up
+
+The [document accessibility audit](audit-2026-10-05-ux-document-accessibility.md) records the next
+focused J1/J5 run, native form text and identity fixes, and a remaining Orca flat-review reading
+gap. Its findings and package reruns are separate from the results above.
