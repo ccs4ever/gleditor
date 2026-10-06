@@ -54,6 +54,8 @@ bool SwarmTelescopeOverlay::busy() const { return false; }
 
 void SwarmTelescopeOverlay::setVisible(const bool visible) {
   const std::scoped_lock lock(guard_);
+  if (visible && !visible_) activate();
+  if (!visible) deactivate();
   visible_       = visible;
   searchFocused_ = true;
   ++revision_;

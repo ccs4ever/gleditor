@@ -113,6 +113,11 @@ class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::ModalInput,
                          public xanadu::ZigzagPresentationSurface {
 public:
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   explicit ZigzagVisualizer(
       std::string aFontName,
       std::shared_ptr<xanadu::UserPermascroll> userPermascroll = {});

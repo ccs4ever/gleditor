@@ -888,13 +888,14 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.
 # The xanalogical engine's tests link the engine and not the library, so they
 # run without a graphics device. That is the boundary being checked rather than
 # merely asserted: if a rule about versions, links or content addresses ever
-# needed a renderer, this would stop linking.
+# needed a renderer, this would stop linking. Focus arbitration is also
+# device-independent and is shared with the modal adapter contract tests.
 xudu_test: $(OBJDIR)/xudu_test
-$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 xuzz_test: $(OBJDIR)/xuzz_test
-$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
@@ -948,7 +949,7 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 # namespace of its own.
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
-$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # All compilation happens inside the image, so the host needs only git and
@@ -965,27 +966,27 @@ swarm-image:
 
 .PHONY: vqueryc
 vqueryc: $(OBJDIR)/vqueryc
-$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/vqueryc: $(VQUERYC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vquery
 vquery: $(OBJDIR)/vquery
-$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/vquery: $(VQUERY_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vprolog
 vprolog: $(OBJDIR)/vprolog
-$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vplc
 vplc: $(OBJDIR)/vplc
-$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 .PHONY: vpl
 vpl: $(OBJDIR)/vpl
-$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # Reads a store as text without going through the loader, which is what lets

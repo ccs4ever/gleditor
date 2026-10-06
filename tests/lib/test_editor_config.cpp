@@ -92,4 +92,15 @@ TEST(EditorConfigTest, LoadAssetsConfig) {
   EXPECT_FALSE(cfg.userNotes.empty());
 }
 
+TEST(EditorConfigTest, ModalCommandsDefaultToQuitAndCanBeDisabled) {
+  EXPECT_EQ(gleditor::parseEditorConfig("").modalGlobalCommands,
+            std::vector<std::string>{"quit"});
+  const auto configured =
+      gleditor::parseEditorConfig("input.modalGlobalCommands\tquit help\n");
+  EXPECT_EQ(configured.modalGlobalCommands,
+            (std::vector<std::string>{"quit", "help"}));
+  EXPECT_TRUE(gleditor::parseEditorConfig("input.modalGlobalCommands\t\n")
+                  .modalGlobalCommands.empty());
+}
+
 } // namespace

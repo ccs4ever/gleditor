@@ -65,6 +65,8 @@ bool QuotationBuilderOverlay::busy() const { return false; }
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::setVisible(const bool visible) {
+  if (visible && !visible_) activate();
+  if (!visible) deactivate();
   visible_ = visible;
   if (visible_) {
     if (activeVersion_.isZero() &&
@@ -804,23 +806,23 @@ void QuotationBuilderOverlay::describe(gleditor::a11y::Builder &into) {
     return;
   }
   constexpr std::uint64_t kDialogNodeId = 0x80000000ULL;
-  auto &dialogNode = into.add(kDialogNodeId, gleditor::a11y::Role::Group);
-  dialogNode.label = "Quotation Builder Dialog";
-  into.contribute(kDialogNodeId);
-
   const std::string storeKey =
       foreignStores_.empty() ? "none" : foreignStores_[selectedStoreIndex_];
   constexpr std::uint64_t kStoreNodeId = 0x80000001ULL;
   auto &storeNode = into.add(kStoreNodeId, gleditor::a11y::Role::Label);
   storeNode.label = "Source Store: " + storeKey;
-  dialogNode.children.push_back(kStoreNodeId);
 
   constexpr std::uint64_t kPreviewNodeId = 0x80000002ULL;
   auto &previewNode = into.add(kPreviewNodeId, gleditor::a11y::Role::Group);
   previewNode.label = "Quotation Preview (" +
                       std::to_string(builder_.preview().cells.size()) +
                       " cells)";
-  dialogNode.children.push_back(kPreviewNodeId);
+
+  // Builder references survive only until the next add.
+  auto &dialogNode    = into.add(kDialogNodeId, gleditor::a11y::Role::Group);
+  dialogNode.label    = "Quotation Builder Dialog";
+  dialogNode.children = {into.id(kStoreNodeId), into.id(kPreviewNodeId)};
+  into.contribute(into.id(kDialogNodeId));
 }
 
 } // namespace xanadu

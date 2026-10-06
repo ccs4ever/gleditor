@@ -1203,7 +1203,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                             changedCell != zigzag::noCell;
+                            changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -1331,9 +1331,11 @@ int XuzzApp::run(const int argc, char **argv) {
         });
   });
 
-  gleditor::CompositeModalInput compositeModal({zigzagPresentation.get(),
-                                                &swarmTelescope, &publishForm,
-                                                &quotationOverlay});
+  gleditor::CompositeModalInput compositeModal(
+      {zigzagPresentation.get(), &swarmTelescope, &publishForm,
+       &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
+       radialMenu.get()});
+  compositeModal.syncFocus(state->focusManager);
   state->modal = &compositeModal;
 
   renderer->addPickObserver(docSwitcher.get());
@@ -1972,7 +1974,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-    };
+        };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,
@@ -2684,8 +2686,8 @@ int XuzzApp::run(const int argc, char **argv) {
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
        &views, &overview, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints](const xudu::SystemDocKind kind,
-                                          const xudu::Store &store) {
+       &bridgeCoordinator, &showKeyHints,
+       state](const xudu::SystemDocKind kind, const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
                   << ")\n";
         const auto model = xudu::SystemStoreModel::fromStore(store);
@@ -2699,6 +2701,8 @@ int XuzzApp::run(const int argc, char **argv) {
         case xudu::SystemDocKind::Keymap: {
           const auto vHost =
               zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
+          state->focusManager.setGlobalCommandAllowList(
+              xudu::KeymapConfig::fromStore(store).modalGlobalCommands);
           applyKeymap(app.commands(), store, zigzagPresentation, vHost);
           showKeyHints();
           break;
@@ -2748,6 +2752,8 @@ int XuzzApp::run(const int argc, char **argv) {
             .autoSaveSeconds));
     const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
     const auto &kmStore = session->store(kmIdx);
+    state->focusManager.setGlobalCommandAllowList(
+        xudu::KeymapConfig::fromStore(kmStore).modalGlobalCommands);
     if (kmStore.opCount() > 0) {
       const auto vHost =
           zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;

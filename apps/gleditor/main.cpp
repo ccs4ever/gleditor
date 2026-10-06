@@ -113,6 +113,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const std::shared_ptr<gleditor::DocumentSwitcher> &switcher,
                   const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar,
                   const gleditor::EditorConfig &config) {
+  state->focusManager.setGlobalCommandAllowList(config.modalGlobalCommands);
   app.bindDefaultViewCommands();
   app.commands().bind(SDL_SCANCODE_Q, "quit", "close the editor",
                       [state] { state->alive = false; });

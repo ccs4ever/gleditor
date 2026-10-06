@@ -34,9 +34,11 @@ void PouchDrawer::deviceReady(render::RenderDevice &device,
 }
 
 void PouchDrawer::setOpen(const bool open, const bool animated) noexcept {
+  if (open && !isOpen_) activate();
   if (open != isOpen_) {
     ++a11yRevision_;
   }
+  if (!open) deactivate();
   isOpen_           = open;
   targetSlideWidth_ = open ? kDrawerWidth : 0.0F;
   if (!animated) {

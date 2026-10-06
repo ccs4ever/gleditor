@@ -42,6 +42,11 @@ class QuotationBuilderOverlay : public gleditor::FrameContributor,
                                 public gleditor::PickObserver,
                                 public gleditor::a11y::Source {
 public:
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   using VersionCommitCallback = std::function<void(
       MicroversionId newVersion, zigzag::CellRef quotationCell)>;
   using OpenStoresProvider    = std::function<std::vector<Store *>()>;

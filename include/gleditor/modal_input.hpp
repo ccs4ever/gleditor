@@ -19,60 +19,21 @@
 #ifndef GLEDITOR_MODAL_INPUT_H
 #define GLEDITOR_MODAL_INPUT_H
 
+#include <gleditor/render/types.hpp>
+#include <gleditor/ui/focus_manager.hpp>
+
 #include <algorithm>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
 
+struct RenderState;
+
 namespace gleditor {
-
-/**
- * @brief Keys a modal reacts to that are not text.
- *
- * A small list on purpose: this is what a form needs to be usable, not a
- * general keyboard abstraction. Everything else arrives as text or not at all,
- * which is what keeps the platform's key codes out of application code.
- */
-enum class Key : std::uint8_t {
-  Escape,
-  Return,
-  Tab,
-  Backspace,
-  Delete,
-  Left,
-  Right,
-  Up,
-  Down,
-  Home,
-  End,
-};
-
-/// Modifier keys held with it. Matches gleditor::Mod, and is repeated here so
-/// that a modal does not have to include the application header.
-enum class KeyMods : std::uint16_t {
-  None  = 0,
-  Shift = 1U << 0U,
-  Ctrl  = 1U << 1U,
-  Alt   = 1U << 2U,
-};
-
-[[nodiscard]] inline bool held(const KeyMods mods, const KeyMods which) {
-  return 0 !=
-         (static_cast<std::uint16_t>(mods) & static_cast<std::uint16_t>(which));
-}
-
-/// A rectangle in window pixels, top left origin: SDL's convention.
-struct InputArea {
-  int x{};
-  int y{};
-  int width{};
-  int height{};
-
-  bool operator==(const InputArea &) const = default;
-};
 
 /**
  * @brief Something that takes the keyboard while it is up.
@@ -81,7 +42,7 @@ struct InputArea {
  * read from the render thread at the same time, and is responsible for its own
  * locking -- see Form, which holds one mutex over the whole of its state.
  */
-class ModalInput {
+class ModalInput : public ui::FocusScope {
 public:
   ModalInput()          = default;
   virtual ~ModalInput() = default;
@@ -99,8 +60,53 @@ public:
    */
   [[nodiscard]] virtual bool grabbing() const = 0;
 
-  /// A key that is not text. Ignored keys should return false, so that a modal
-  /// which does not use a key does not silently swallow it.
+  [[nodiscard]] bool active() const override { return grabbing(); }
+  [[nodiscard]] bool acceptsCommand(std::string_view command) const override {
+    return command == "quit" || command == "std:xudu/quit";
+  }
+  bool keyPressed(const ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+  void textTyped(std::string_view utf8) override {
+    textTyped(std::string(utf8));
+  }
+  void cancel() override { keyPressed(Key::Escape, KeyMods::None); }
+  virtual bool pointerPick(const render::PickingResult &, RenderState &) {
+    return false;
+  }
+  void releaseFocus() {
+    ui::FocusManager::ScopeHandle old;
+    {
+      const std::scoped_lock lock(registrationGuard_);
+      old                = std::move(registration_);
+      registeredManager_ = nullptr;
+      ++registrationGeneration_;
+    }
+    old.reset();
+  }
+  virtual void syncFocus(ui::FocusManager &manager) {
+    ui::FocusManager::ScopeHandle old;
+    std::uint64_t generation;
+    {
+      const std::scoped_lock lock(registrationGuard_);
+      if (registeredManager_ == &manager) return;
+      old                = std::move(registration_);
+      registeredManager_ = &manager;
+      generation         = ++registrationGeneration_;
+    }
+    // Registration may notify scopes and re-enter this adapter.
+    old.reset();
+    auto next = manager.registerScope(*this);
+    {
+      const std::scoped_lock lock(registrationGuard_);
+      if (registrationGeneration_ == generation) {
+        registration_ = std::move(next);
+      }
+    }
+  }
+
+  /// A key that is not text. False means this scope has no action for the key;
+  /// a modal still blocks delivery to the document behind it.
   virtual bool keyPressed(Key key, KeyMods mods) = 0;
 
   /// Composed text -- what an input method produced, not a scancode.
@@ -119,19 +125,25 @@ public:
    * closed list -- so that a keyboard is not raised for a field nobody can
    * type into.
    */
-  [[nodiscard]] virtual std::optional<InputArea> textArea() const {
+  [[nodiscard]] std::optional<InputArea> textArea() const override {
     return std::nullopt;
   }
+
+private:
+  std::mutex registrationGuard_;
+  std::uint64_t registrationGeneration_{};
+  ui::FocusManager *registeredManager_{};
+  ui::FocusManager::ScopeHandle registration_;
 };
 
 /**
  * @brief Composite modal input dispatcher that checks registered modals in
- * reverse order.
+ * activation order.
  *
  * Allows multiple distinct modals (e.g. publication form and presentation
  * overlay) to coexist within the application state without conflict. The
- * topmost active modal that returns grabbing() == true receives keyboard and
- * text events.
+ * most recently opened modal that returns grabbing() == true receives keyboard
+ * and text events.
  */
 class CompositeModalInput : public ModalInput {
 public:
@@ -145,42 +157,39 @@ public:
     }
   }
 
-  void remove(ModalInput *modal) { std::erase(modals_, modal); }
-
-  [[nodiscard]] bool grabbing() const override {
-    return std::ranges::any_of(std::views::reverse(modals_), [](auto *modal) {
-      return modal != nullptr && modal->grabbing();
-    });
+  void remove(ModalInput *modal) {
+    if (modal) modal->releaseFocus();
+    std::erase(modals_, modal);
   }
 
-  bool keyPressed(const Key key, const KeyMods mods) override {
-    for (auto &modal : std::views::reverse(modals_)) {
-      if (modal != nullptr && modal->grabbing()) {
-        return modal->keyPressed(key, mods);
-      }
+  void syncFocus(ui::FocusManager &manager) override {
+    for (auto *modal : modals_) {
+      if (modal) modal->syncFocus(manager);
     }
-    return false;
   }
-
+  [[nodiscard]] bool grabbing() const override { return top() != nullptr; }
+  bool keyPressed(Key key, KeyMods mods) override {
+    auto *modal = top();
+    return modal && modal->keyPressed(key, mods);
+  }
   void textTyped(const std::string &utf8) override {
-    for (auto &modal : std::views::reverse(modals_)) {
-      if (modal != nullptr && modal->grabbing()) {
-        modal->textTyped(utf8);
-        return;
-      }
-    }
+    if (auto *modal = top()) modal->textTyped(utf8);
   }
-
   [[nodiscard]] std::optional<InputArea> textArea() const override {
-    for (auto *modal : std::views::reverse(modals_)) {
-      if (modal != nullptr && modal->grabbing()) {
-        return modal->textArea();
-      }
-    }
-    return std::nullopt;
+    auto *modal = top();
+    return modal ? modal->textArea() : std::nullopt;
   }
 
 private:
+  [[nodiscard]] ModalInput *top() const {
+    ModalInput *result = nullptr;
+    for (auto *modal : modals_) {
+      if (modal && modal->grabbing() &&
+          (!result || modal->openedSequence() >= result->openedSequence()))
+        result = modal;
+    }
+    return result;
+  }
   std::vector<ModalInput *> modals_;
 };
 

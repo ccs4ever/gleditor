@@ -832,7 +832,13 @@ inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
 [[nodiscard]] std::string_view canonicalKeymapAction(std::string_view action);
 [[nodiscard]] std::string_view legacyKeymapAction(std::string_view action);
 
+namespace settings {
+inline constexpr std::string_view kModalGlobalCommands =
+    "input.modalGlobalCommands";
+}
+
 struct KeymapConfig {
+  std::vector<std::string> modalGlobalCommands{"std:xudu/quit"};
   std::vector<std::pair<std::string, std::string>> bindings;
   [[nodiscard]] std::optional<std::string>
   bindingFor(std::string_view action) const;

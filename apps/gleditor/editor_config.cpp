@@ -24,6 +24,7 @@ std::string defaultEditorConfigTsv() {
          "spatial.depthZ\t-45.0\n"
          "spatial.docArrivalSeconds\t0.22\n"
          "spatial.backgroundOpacity\t0.35\n"
+         "input.modalGlobalCommands\tquit\n"
          "keymap.new\tCtrl+N\n"
          "keymap.close\tCtrl+W\n"
          "keymap.save\tCtrl+S\n"
@@ -70,6 +71,12 @@ EditorConfig parseEditorConfig(const std::string_view tsv) {
     } else if ("spatial.backgroundOpacity" == key) {
       config.spatial.backgroundOpacity =
           common::tsv::parseFloat(value, config.spatial.backgroundOpacity);
+    } else if ("input.modalGlobalCommands" == key) {
+      config.modalGlobalCommands.clear();
+      std::istringstream commands(value);
+      for (std::string command; commands >> command;) {
+        config.modalGlobalCommands.push_back(std::move(command));
+      }
     } else if (key.starts_with(keymapPrefix)) {
       config.keymap.emplace_back(key.substr(keymapPrefix.size()), value);
     } else if ("user_notes.notes" == key) {

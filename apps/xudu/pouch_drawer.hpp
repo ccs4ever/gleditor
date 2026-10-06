@@ -16,6 +16,7 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -33,8 +34,21 @@ using namespace ::xanadu;
  */
 class PouchDrawer : public gleditor::FrameContributor,
                     public gleditor::PickObserver,
+                    public gleditor::ModalInput,
                     public gleditor::a11y::Source {
 public:
+  [[nodiscard]] bool grabbing() const override { return isOpen_; }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
+    if (key != gleditor::Key::Escape || !grabbing()) return false;
+    setOpen(false);
+    return true;
+  }
+  void textTyped(const std::string &) override {}
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   enum class DockSide : std::uint8_t { Left, Right };
 
   static constexpr std::uint32_t kTagDrawerClose     = 7001U;

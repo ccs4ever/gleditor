@@ -74,7 +74,9 @@ struct AppState {
       Motion,
       ButtonDown,
       ButtonUp,
-      Wheel
+      Wheel,
+      Text,
+      FocusLost
     };
     Kind kind{};
     int x{}; ///< Pointer events: window pixels, top-down.
@@ -85,6 +87,8 @@ struct AppState {
     std::uint32_t held{};  ///< Motion: the buttons held, as SDL's mask.
     float wheelX{};        ///< Wheel: horizontal delta.
     float wheelY{};        ///< Wheel: vertical delta.
+    std::string text;
+    std::optional<char32_t> codepoint;
   };
 
   struct AutomationStep {
@@ -215,6 +219,13 @@ struct AppState {
    * and is asked before every key. See gleditor/modal_input.hpp.
    */
   gleditor::ModalInput *modal{};
+  gleditor::ui::FocusManager focusManager;
+  std::atomic<std::uint64_t> focusLossEpoch{0};
+  void syncFocus() {
+    if (modal) {
+      modal->syncFocus(focusManager);
+    }
+  }
 
   /**
    * @brief What reports this program's user interface to the platform.

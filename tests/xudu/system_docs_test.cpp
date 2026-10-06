@@ -95,6 +95,21 @@ normalisedChord(const std::string &chord) {
 // Two actions on one chord in one scope means one of them can never run from
 // the keyboard; the UX audit found eight. Different scopes are the point of
 // scopes: ZigZag's arrows step cells only while it has the keyboard.
+TEST(SystemDocsTest, ModalCommandsAreKeymapDataAndNotBindings) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Keymap);
+  auto config = KeymapConfig::fromStore(store);
+  EXPECT_EQ(config.modalGlobalCommands,
+            std::vector<std::string>{"std:xudu/quit"});
+  EXPECT_FALSE(config.bindingFor(xanadu::settings::kModalGlobalCommands));
+  const auto head =
+      xanadu::setSetting(store, store.primaryCurrentVersion(),
+                         xanadu::settings::kModalGlobalCommands, std::string{});
+  store.repointCurrentVersion(head);
+  EXPECT_TRUE(KeymapConfig::fromStore(store).modalGlobalCommands.empty());
+}
+
 TEST(SystemDocsTest, DefaultKeymapGivesEachChordOneActionPerScope) {
   std::map<
       std::pair<std::string, std::pair<std::vector<std::string>, std::string>>,

@@ -176,7 +176,8 @@ void RadialMenu::open(const float screenX, const float screenY,
   targetCharOffset_ = aCharOffset;
   targetCharLength_ = aCharLength;
   open_             = true;
-  inSubWheel_       = false;
+  activate();
+  inSubWheel_ = false;
   rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
                 lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
   revision_++;
@@ -198,7 +199,8 @@ void RadialMenu::openAtWindowCoords(const float windowX, const float windowY,
 
 void RadialMenu::close() {
   if (open_) {
-    open_       = false;
+    open_ = false;
+    deactivate();
     inSubWheel_ = false;
     revision_++;
   }

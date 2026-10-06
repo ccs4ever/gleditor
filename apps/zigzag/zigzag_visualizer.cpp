@@ -146,7 +146,7 @@ void ZigzagVisualizer::populateFallbackStructure() {
   doc.meta.name = "Xanadu ZigZag Sample Structure";
   doc.focus     = 1;
   doc.view      = ViewAxisBinding{
-      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+           .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
 
   Cell c1;
   c1.id         = 1;
@@ -1127,7 +1127,7 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
   metrics.titleTop         = metrics.height - verticalPadding;
   const float titleBottom  = metrics.titleTop - titleMetrics.height;
   const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
-                                            presentation_config_.cellBandGapPx
+                                           presentation_config_.cellBandGapPx
                                       : verticalPadding;
   const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
   metrics.labelTop =
@@ -1957,7 +1957,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   const float structureTop = hudTop - presentation_config_.hudVerticalPaddingPx;
   const float focusTop     = structureTop - structureMetrics.height -
-                             presentation_config_.hudVerticalPaddingPx;
+                         presentation_config_.hudVerticalPaddingPx;
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
                       structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
@@ -1985,7 +1985,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
                           structureMetrics.width +
                           presentation_config_.hudColumnGapPx;
-  float rightEdge       = width - presentation_config_.hudHorizontalPaddingPx;
+  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
   for (const auto &[label, colour] :
        {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
         std::pair{std::cref(modeLabel), 0xF59E0BFFU},
@@ -2956,6 +2956,7 @@ ZigzagVisualizer *ZigzagVisualizer::togglePalette() {
 }
 
 ZigzagVisualizer *ZigzagVisualizer::setPaletteVisible(const bool visible) {
+  if (visible && !paletteVisible_) activate();
   paletteVisible_ = visible;
   if (visible) {
     paletteSelectedIndex_ = 0;
@@ -3176,6 +3177,7 @@ ZigzagVisualizer *ZigzagVisualizer::toggleCommandBar() {
 }
 
 ZigzagVisualizer *ZigzagVisualizer::setCommandBarVisible(const bool visible) {
+  if (visible && !commandBarVisible_) activate();
   commandBarVisible_ = visible;
   if (commandBarVisible_) {
     commandBarFeedback_.clear();
@@ -3207,8 +3209,9 @@ ZigzagVisualizer *ZigzagVisualizer::beginCellEdit() {
       !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
     return this;
   }
-  cellEditText_  = inspectCell(static_cast<CellRef>(accursed_cell_focus_)).text;
-  cellEditing_   = true;
+  cellEditText_ = inspectCell(static_cast<CellRef>(accursed_cell_focus_)).text;
+  cellEditing_  = true;
+  activate();
   cellEditWhole_ = !cellEditText_.empty();
   return this;
 }

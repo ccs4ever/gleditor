@@ -14,6 +14,7 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
 
@@ -61,8 +62,21 @@ struct RadialConfig {
  */
 class RadialMenu : public FrameContributor,
                    public PickObserver,
+                   public ModalInput,
                    public a11y::Source {
 public:
+  [[nodiscard]] bool grabbing() const override { return open_; }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
+    if (key != gleditor::Key::Escape || !grabbing()) return false;
+    close();
+    return true;
+  }
+  void textTyped(const std::string &) override {}
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   static constexpr std::uint32_t kRadialTagBase = 0x8000U;
   static constexpr std::uint32_t kRadialTagHub  = 0x8050U;
   static constexpr std::uint32_t kRadialTagBack = 0x8051U;

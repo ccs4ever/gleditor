@@ -279,7 +279,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  std::ignore    = std::system(py.c_str());
+  std::ignore = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -523,10 +523,10 @@ TEST(E2EBinaryOrchestrationTest,
       storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
   const auto sealB = xanadu::sealLocalSpool(storeB, authorB, "permascroll",
                                             testRoot.string(), provenance);
-  auto pubB = publish(storeB, vB1, authorB, "xanadoc_b",
-                      "Bob Observations on Multi-Source Data", 1, 1700000050,
-                      &sealB.scroll, {*sealB.opsSegment});
-  pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
+  auto pubB        = publish(storeB, vB1, authorB, "xanadoc_b",
+                             "Bob Observations on Multi-Source Data", 1, 1700000050,
+                             &sealB.scroll, {*sealB.opsSegment});
+  pubB.signature   = signMutableItem(publicationSigningBuffer(pubB), authorB);
 
   const auto pubBPath = testRoot / "xanadoc_b.manifest";
   {
@@ -629,10 +629,10 @@ TEST(E2EBinaryOrchestrationTest,
       storeC.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
   const auto sealC = xanadu::sealLocalSpool(storeC, authorC, "permascroll",
                                             testRoot.string(), provenance);
-  auto pubC      = publish(storeC, vC1, authorC, "xanadoc_c",
-                           "Epilogue on Universal Xanadu Wisdom", 1, 1700000250,
-                           &sealC.scroll, {*sealC.opsSegment});
-  pubC.signature = signMutableItem(publicationSigningBuffer(pubC), authorC);
+  auto pubC        = publish(storeC, vC1, authorC, "xanadoc_c",
+                             "Epilogue on Universal Xanadu Wisdom", 1, 1700000250,
+                             &sealC.scroll, {*sealC.opsSegment});
+  pubC.signature   = signMutableItem(publicationSigningBuffer(pubC), authorC);
 
   const auto pubCPath = testRoot / "xanadoc_c.manifest";
   {
@@ -833,9 +833,9 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
-                          " timeout 120 " + xuduBin.string() + " --backend " +
-                          activeBackend() + " --profile " + script);
+                               " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                               " timeout 120 " + xuduBin.string() + " --backend " +
+                               activeBackend() + " --profile " + script);
   };
   const auto untitled = [&] {
     std::vector<fs::path> found;
@@ -933,6 +933,120 @@ TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
               ::testing::ContainsRegex("kind=delete [^\n]* at=6 len=2"));
   EXPECT_THAT(dump.output, ::testing::ContainsRegex(
                                "kind=insert [^\n]* at=6 [^\n]*text=\"Z\""));
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     everyModalBlocksBackgroundEditsAndRestoresTheDocumentCaret) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
+  struct ModalCase {
+    std::string command;
+    std::string label;
+  };
+  // The clasp forge is the pouch drawer's bench, not a separately opened
+  // dialog. It goes through the same scope and isolation contract.
+  const std::vector<ModalCase> cases{
+      {"open-doc", "Open Document or System Xanadoc"},
+      {"telescope-toggle", "Swarm Telescope"},
+      {"store-manager-toggle", "Store Object Manager"},
+      {"pouch-toggle", "Pouch drawer"},
+      {"map", "Hypertime Branching DAG"},
+      {"radial-menu", "3D Radial Marking Menu"},
+      {"quotation-toggle", "Quotation Builder Dialog"},
+  };
+  for (const auto &modal : cases) {
+    SCOPED_TRACE(modal.command);
+    const auto root = fs::current_path() / "build" /
+                      ("integration_workspace_focus_" + modal.command);
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto scroll = root / "permascroll";
+    const auto path   = root / "store";
+    Store original(permascrollAt(scroll));
+    const std::string text    = "original document remains untouched";
+    const auto initial        = original.insert(MicroversionId{}, 0, text);
+    const auto operationCount = original.segmentedOps().size();
+    original.save(path.string());
+
+    const auto result = executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(scroll) + " --backend " +
+        activeBackend() + " --profile --version-id " + initial.str() +
+        " --select 4,4 --dump-a11y --do " + modal.command +
+        " --dump-a11y --type MODAL_LETTERS --chord Alt+Shift+N"
+        " --chord Ctrl+N --key tab --wheel 0,3 --chord Left --dump-a11y"
+        " --key escape --key escape --type RESTORED --do save-document " +
+        path.string());
+    ASSERT_EQ(result.exitCode, 0) << result.output;
+    ASSERT_THAT(result.output, testing::HasSubstr(modal.label))
+        << "the modal must actually open before isolation is tested";
+    std::size_t caretReports = 0;
+    for (std::size_t at = 0;
+         (at = result.output.find("[caret 4]", at)) != std::string::npos;
+         ++at) {
+      ++caretReports;
+    }
+    EXPECT_GE(caretReports, 2U)
+        << "the document caret must remain at byte four while the modal is up";
+    Store reloaded(permascrollAt(scroll));
+    reloaded.load(path.string());
+    EXPECT_EQ(reloaded.segmentedOps().size(), operationCount + 1)
+        << "only the marker typed after closing may create an operation";
+    EXPECT_EQ(reloaded.textOf(reloaded.latest()),
+              text.substr(0, 4) + "RESTORED" + text.substr(4))
+        << "typing after close must resume at the unchanged document caret";
+  }
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     cellEditingBlocksBackgroundCommandsAndRestoresTheZigzagPane) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_focus_cell_edit";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  const auto launch = [&](const std::string &script) {
+    return executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() +
+        " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(scroll) + " --backend " +
+        activeBackend() + " --profile " + script + " " + path.string());
+  };
+  const auto seed =
+      launch("--type ORIGINAL --chord Ctrl+Alt+Shift+N --chord N");
+  ASSERT_EQ(seed.exitCode, 0) << seed.output;
+  Store before(permascrollAt(scroll));
+  before.load(path.string());
+  const auto operationCount = before.segmentedOps().size();
+  const auto session =
+      launch("--do std:xuzz/focus_toggle"
+             " --do std:ui/open_command_bar_slash --type CANCELLED_COMMAND"
+             " --chord Alt+Shift+N --chord Ctrl+N --key tab --wheel 0,3"
+             " --key escape --do std:ui/toggle_palette --type CANCELLED_PALETTE"
+             " --chord Alt+Shift+N --chord Ctrl+N --key tab --wheel 0,3"
+             " --key escape --chord E --type CANCELLED"
+             " --chord Alt+Shift+N --chord Ctrl+N"
+             " --key tab --wheel 0,3 --key escape --chord E --type COMMITTED"
+             " --chord Return --dump-a11y");
+  ASSERT_EQ(session.exitCode, 0) << session.output;
+  Store after(permascrollAt(scroll));
+  after.load(path.string());
+  EXPECT_EQ(after.segmentedOps().size(), operationCount + 1)
+      << "only committing the second cell edit may author an operation";
+  const auto dump = executeProcess(
+      (binary.parent_path() / "xudu-dump").string() +
+      " --section=ops --permascroll=" + scroll.string() + " " + path.string());
+  ASSERT_EQ(dump.exitCode, 0) << dump.output;
+  EXPECT_THAT(dump.output,
+              testing::ContainsRegex("setValue.*text=\"COMMITTED\""));
+  EXPECT_THAT(dump.output, testing::Not(testing::HasSubstr("CANCELLED")));
+  EXPECT_THAT(dump.output, testing::HasSubstr("ORIGINAL"));
+  EXPECT_THAT(session.output, testing::Not(testing::HasSubstr(
+                                  "created new sovereign document")));
 }
 
 // Pressing inside a selection picks it up: dropped on a page it is
@@ -1419,8 +1533,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pages) +
                                  "x" + std::to_string(pages) + "_pages";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1495,8 +1609,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
                                  "x" + std::to_string(pagesB) + "_asymmetric";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1927,10 +2041,10 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
            "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
   }
   const auto storePath = testRoot / "store";
-  const auto res = executeProcess(xuduBin.string() +
-                                  permascrollFlag(testRoot / "permascroll") +
-                                  " --headless --structure-script " +
-                                  script.string() + " " + storePath.string());
+  const auto res       = executeProcess(xuduBin.string() +
+                                        permascrollFlag(testRoot / "permascroll") +
+                                        " --headless --structure-script " +
+                                        script.string() + " " + storePath.string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   Store store(permascrollAt(testRoot / "permascroll"));
@@ -2142,8 +2256,8 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer = store.transclude(textVer, at, pngVersion, 0,
-                             static_cast<std::uint32_t>(pngBytes.size()));
+  textVer          = store.transclude(textVer, at, pngVersion, 0,
+                                      static_cast<std::uint32_t>(pngBytes.size()));
   at += static_cast<std::uint32_t>(pngBytes.size());
   textVer = store.insert(textVer, at, between);
   at += static_cast<std::uint32_t>(between.size());

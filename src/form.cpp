@@ -340,6 +340,7 @@ void Form::open(std::string aTitle, std::string aNote,
   // filled-in value wants to be.
   caret = fields.empty() ? 0 : fields.front().value.size();
   open_ = true;
+  activate();
   // Where the last form's focused field was is not where this one's is, and
   // until this one has been drawn nobody knows where that will be. Saying
   // nothing is right: the platform keeps whatever it was told last, which is
@@ -352,7 +353,8 @@ void Form::close() {
   Cancelled onCancel;
   {
     const std::scoped_lock locker(guard);
-    open_     = false;
+    open_ = false;
+    deactivate();
     accepted  = nullptr;
     onCancel  = std::move(cancelled);
     cancelled = nullptr;
@@ -452,7 +454,8 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         expanded = false;
         return true;
       }
-      open_     = false;
+      open_ = false;
+      deactivate();
       toCancel  = std::move(cancelled);
       accepted  = nullptr;
       cancelled = nullptr;
@@ -492,7 +495,8 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       // The form comes down first, and the callback runs outside the lock, so
       // that what it does -- which may be to open another form -- does not
       // deadlock against this one.
-      open_   = false;
+      open_ = false;
+      deactivate();
       toCall  = std::exchange(accepted, nullptr);
       answers = fields;
       typingAt.reset();
@@ -569,6 +573,8 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       trouble.clear();
       return true;
     }
+    default:
+      return false;
     }
   }
 

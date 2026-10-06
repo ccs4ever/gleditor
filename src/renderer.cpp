@@ -465,7 +465,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
     // arrived on the event thread and waited for this one, because moving a
     // caret is this thread's business.
     for (const auto &want : documents.takeWanted()) {
-      if (want.document < state.docs.size()) {
+      if (!this->state->focusManager.modalActive() &&
+          want.document < state.docs.size()) {
         caret->placeAt(want.document, want.byteOffset);
       }
     }
@@ -698,6 +699,19 @@ void Renderer::reportBenchmark() const {
 
 void Renderer::placeCaretFromPick(RenderState &state,
                                   const render::PickingResult &pick) {
+  if (this->state->modal) {
+    this->state->modal->syncFocus(this->state->focusManager);
+  }
+  if (this->state->focusManager.modalActive()) {
+    draggingSelection = false;
+    if (!awaitingDrag) {
+      if (auto *scope = dynamic_cast<gleditor::ModalInput *>(
+              this->state->focusManager.focusedScope())) {
+        std::ignore = scope->pointerPick(pick, state);
+      }
+    }
+    return;
+  }
   // Every outcome is reported, including the ones that place no caret. The
   // read is asynchronous, so a line that named only the offset could not be
   // lined up with the click that caused it -- and a silent outcome would drop
@@ -923,18 +937,17 @@ void Renderer::advanceScript(RenderState &state) {
     finishStepWhenSettled();
     return;
   case Kind::Press:
-    if (nullptr == this->state->modal || !this->state->modal->grabbing()) {
-      std::cerr << "--key with nothing to press it in; use --do first\n";
-    } else {
-      std::ignore = this->state->modal->keyPressed(step.key, step.mods);
+    if (this->state->modal) {
+      this->state->modal->syncFocus(this->state->focusManager);
     }
+    std::ignore = this->state->focusManager.dispatchKey({step.key, step.mods});
     finishStepWhenSettled();
     return;
   case Kind::Type:
-    // Into whatever has the keyboard. A form is on screen because something
-    // asked a question, and answering it is what typing means while it is up.
-    if (nullptr != this->state->modal && this->state->modal->grabbing()) {
-      this->state->modal->textTyped(step.text);
+    if (this->state->modal) {
+      this->state->modal->syncFocus(this->state->focusManager);
+    }
+    if (this->state->focusManager.dispatchText(step.text)) {
       finishStepWhenSettled();
       return;
     }
@@ -961,6 +974,10 @@ void Renderer::advanceScript(RenderState &state) {
     finishStepWhenSettled();
     return;
   case Kind::Select:
+    if (this->state->focusManager.modalActive()) {
+      finishStepWhenSettled();
+      return;
+    }
     if (state.docs.empty()) {
       std::cerr << "--select with no document to select in\n";
     } else {
@@ -1217,7 +1234,20 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   double timeToFirstPage = 0.0;
   bool firstPageRecorded = false;
 
+  auto seenFocusLoss = this->state->focusLossEpoch.load();
   while (this->state->alive) {
+    if (const auto epoch = this->state->focusLossEpoch.load();
+        epoch != seenFocusLoss) {
+      seenFocusLoss     = epoch;
+      draggingSelection = false;
+      awaitingDrag      = false;
+      if (awaitingClick) {
+        awaitingClick.reset();
+        if (awaitingStep && !awaitingInput) {
+          finishStepWhenSettled();
+        }
+      }
+    }
 
     // Drain queued commands before drawing, so that work requested before this
     // thread started -- files named on the command line, for instance -- is

@@ -26,6 +26,7 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
 
@@ -43,8 +44,21 @@ namespace xanadu::ui {
  */
 class HypertimeGraph : public gleditor::FrameContributor,
                        public gleditor::PickObserver,
+                       public gleditor::ModalInput,
                        public gleditor::a11y::Source {
 public:
+  [[nodiscard]] bool grabbing() const override { return visible_; }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
+    if (key != gleditor::Key::Escape || !grabbing()) return false;
+    setVisible(false);
+    return true;
+  }
+  void textTyped(const std::string &) override {}
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   static constexpr std::uint32_t kTagScrubberThumb    = 900U;
   static constexpr std::uint32_t kTagScrubberTrack    = 901U;
   static constexpr std::uint32_t kTagQuoteButton      = 910U;
@@ -85,14 +99,14 @@ public:
   HypertimeGraph *setVisible(bool show) noexcept {
     if (visible_ == show) return this;
     visible_ = show;
+    if (visible_)
+      activate();
+    else
+      deactivate();
     revision_++;
     return this;
   }
-  HypertimeGraph *toggle() noexcept {
-    visible_ = !visible_;
-    revision_++;
-    return this;
-  }
+  HypertimeGraph *toggle() noexcept { return setVisible(!visible_); }
   [[nodiscard]] bool isVisible() const noexcept { return visible_; }
   void scroll(float horizontal, float vertical, bool zoom, bool shift,
               float pointerX, float pointerY);

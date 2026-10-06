@@ -36,6 +36,11 @@ class SwarmTelescopeOverlay : public gleditor::FrameContributor,
                               public gleditor::ModalInput,
                               public gleditor::a11y::Source {
 public:
+  bool pointerPick(const render::PickingResult &pick,
+                   RenderState &state) override {
+    return picked(pick, state);
+  }
+
   static constexpr std::uint32_t kTagTelescopeClose  = 14001U;
   static constexpr std::uint32_t kTagTabRecent       = 14002U;
   static constexpr std::uint32_t kTagTabAuthors      = 14003U;

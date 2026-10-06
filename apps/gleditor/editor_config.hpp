@@ -31,6 +31,7 @@ struct EditorSettings {
 struct EditorConfig {
   EditorSettings settings;
   SpatialConfig spatial;
+  std::vector<std::string> modalGlobalCommands{"quit"};
   std::vector<std::pair<std::string, std::string>> keymap;
   std::string userNotes;
 };

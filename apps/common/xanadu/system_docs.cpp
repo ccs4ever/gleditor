@@ -808,6 +808,12 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
 
   case SystemDocKind::Keymap:
     specs = {
+        {.name = std::string(settings::kModalGlobalCommands),
+         .notes =
+             "Space-separated global commands allowed by modal scopes. "
+             "An empty string disables global commands while a modal is open.",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"std:xudu/quit"}}}}},
         // Xudu Core Actions
         {.name    = std::string(settings::kKeymapQuit),
          .notes   = "Shortcut to save and close the application",
@@ -1574,9 +1580,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     const std::string storeNoteText = "Sovereign system store managing " +
                                       std::string(systemDocName(kind)) +
                                       " configuration.";
-    cur                             = store.makeCell(cur, storeNoteText);
-    const auto noteRef              = store.cellRefOf(cur);
-    manifold                        = store.rebuildManifold(cur);
+    cur                = store.makeCell(cur, storeNoteText);
+    const auto noteRef = store.cellRefOf(cur);
+    manifold           = store.rebuildManifold(cur);
     cur = store.setLink(cur, store.homeCell(), notesDim, zigzag::DimVector::POS,
                         noteRef);
     manifold = store.rebuildManifold(cur);
@@ -1589,9 +1595,9 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
     cur                      = store.makeCell(cur, "");
     const auto emptyGroupRef = store.cellRefOf(cur);
     manifold                 = store.rebuildManifold(cur);
-    cur      = store.setLink(cur, store.homeCell(), groupsDim,
-                             zigzag::DimVector::POS, emptyGroupRef);
-    manifold = store.rebuildManifold(cur);
+    cur                      = store.setLink(cur, store.homeCell(), groupsDim,
+                                             zigzag::DimVector::POS, emptyGroupRef);
+    manifold                 = store.rebuildManifold(cur);
   }
 
   // Mint prototype type cells along d.schemas off d.schemas dimension cell
@@ -2093,9 +2099,9 @@ SystemStoreModel SystemStoreModel::fromManifold(const ManifoldT &manifold,
     // Active values along d.values
     entry.value.valueCells = zigzag::rankAfter(manifold, setCell, valuesDim) |
                              std::ranges::to<std::vector>();
-    entry.value.elements   = entry.value.valueCells |
-                             std::views::transform(valueOf) |
-                             std::ranges::to<std::vector>();
+    entry.value.elements = entry.value.valueCells |
+                           std::views::transform(valueOf) |
+                           std::ranges::to<std::vector>();
 
     // Validate
     std::string err;
@@ -2680,7 +2686,15 @@ KeymapConfig KeymapConfig::fromStore(const Store &store) {
   }
   const auto model = SystemStoreModel::fromStore(store);
   for (const auto &s : model.settings()) {
-    cfg.bindings.emplace_back(s.name, s.value.asString(0));
+    if (s.name == settings::kModalGlobalCommands) {
+      cfg.modalGlobalCommands.clear();
+      std::istringstream commands(s.value.asString(0));
+      for (std::string command; commands >> command;) {
+        cfg.modalGlobalCommands.push_back(std::move(command));
+      }
+    } else {
+      cfg.bindings.emplace_back(s.name, s.value.asString(0));
+    }
   }
   return cfg;
 }
@@ -2755,7 +2769,7 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
       settings::kPhysicsMaxForce, static_cast<double>(cfg.physics.maxForce)));
   cfg.physics.maxVelocity             = static_cast<float>(
       model.getDouble(settings::kPhysicsMaxVelocity,
-                      static_cast<double>(cfg.physics.maxVelocity)));
+                                  static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 

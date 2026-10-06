@@ -39,6 +39,10 @@ void StoreObjectManager::deviceReady(
 StoreObjectManager *StoreObjectManager::setVisible(const bool visible) {
   if (visible_ != visible) {
     visible_ = visible;
+    if (visible_)
+      activate();
+    else
+      deactivate();
     if (visible_) {
       refresh();
     }

@@ -111,19 +111,35 @@ keyNamed(std::string_view name) {
     mods = KeyMods::Shift;
     name.remove_prefix(6);
   }
-  static constexpr std::array<std::pair<std::string_view, Key>, 11> named = {{
-      {"escape", Key::Escape},
-      {"enter", Key::Return},
-      {"tab", Key::Tab},
-      {"backspace", Key::Backspace},
-      {"delete", Key::Delete},
-      {"left", Key::Left},
-      {"right", Key::Right},
-      {"up", Key::Up},
-      {"down", Key::Down},
-      {"home", Key::Home},
-      {"end", Key::End},
-  }};
+  static constexpr auto named =
+      std::to_array<std::pair<std::string_view, Key>>({
+          {"escape", Key::Escape},
+          {"enter", Key::Return},
+          {"tab", Key::Tab},
+          {"backspace", Key::Backspace},
+          {"delete", Key::Delete},
+          {"left", Key::Left},
+          {"right", Key::Right},
+          {"up", Key::Up},
+          {"down", Key::Down},
+          {"home", Key::Home},
+          {"end", Key::End},
+          {"pageup", Key::PageUp},
+          {"pagedown", Key::PageDown},
+          {"space", Key::Space},
+          {"f1", Key::F1},
+          {"f2", Key::F2},
+          {"f3", Key::F3},
+          {"f4", Key::F4},
+          {"f5", Key::F5},
+          {"f6", Key::F6},
+          {"f7", Key::F7},
+          {"f8", Key::F8},
+          {"f9", Key::F9},
+          {"f10", Key::F10},
+          {"f11", Key::F11},
+          {"f12", Key::F12},
+      });
   for (const auto &[spelling, key] : named) {
     if (spelling == name) {
       return std::pair{key, mods};
@@ -159,6 +175,36 @@ std::optional<gleditor::Key> modalKey(const int scancode) {
     return gleditor::Key::Home;
   case SDL_SCANCODE_END:
     return gleditor::Key::End;
+  case SDL_SCANCODE_PAGEUP:
+    return gleditor::Key::PageUp;
+  case SDL_SCANCODE_PAGEDOWN:
+    return gleditor::Key::PageDown;
+  case SDL_SCANCODE_SPACE:
+    return gleditor::Key::Space;
+  case SDL_SCANCODE_F1:
+    return gleditor::Key::F1;
+  case SDL_SCANCODE_F2:
+    return gleditor::Key::F2;
+  case SDL_SCANCODE_F3:
+    return gleditor::Key::F3;
+  case SDL_SCANCODE_F4:
+    return gleditor::Key::F4;
+  case SDL_SCANCODE_F5:
+    return gleditor::Key::F5;
+  case SDL_SCANCODE_F6:
+    return gleditor::Key::F6;
+  case SDL_SCANCODE_F7:
+    return gleditor::Key::F7;
+  case SDL_SCANCODE_F8:
+    return gleditor::Key::F8;
+  case SDL_SCANCODE_F9:
+    return gleditor::Key::F9;
+  case SDL_SCANCODE_F10:
+    return gleditor::Key::F10;
+  case SDL_SCANCODE_F11:
+    return gleditor::Key::F11;
+  case SDL_SCANCODE_F12:
+    return gleditor::Key::F12;
   default:
     return std::nullopt;
   }
@@ -527,6 +573,9 @@ bool CommandTable::run(const std::string_view name) const {
   if (bindings.end() == found) {
     return false;
   }
+  if (commandGate && !commandGate(found->name)) {
+    return false;
+  }
   found->run();
   return true;
 }
@@ -544,6 +593,9 @@ bool CommandTable::dispatch(const int scancode, const Mod mods) const {
     found = inScope({});
   }
   if (found == bindings.end()) {
+    return false;
+  }
+  if (commandGate && !commandGate(found->name)) {
     return false;
   }
   found->run();
@@ -1225,6 +1277,11 @@ int Application::run() {
     sdl::startTextInput(window.window);
   }
 
+  commandTable.setCommandGate([this](std::string_view name) {
+    state->syncFocus();
+    return state->focusManager.permitsCommand(name);
+  });
+
   // What a scripted --do reaches. Set before the render thread starts, since
   // that is the thread that carries a script out.
   state->runCommand = [this](const std::string &name) {
@@ -1241,7 +1298,7 @@ int Application::run() {
   // What the platform was last told about where typing lands, so it is told
   // again only when it moves.
   std::optional<gleditor::InputArea> toldAbout;
-  bool modalHadKeyboard = false;
+  bool modalHadKeyboard = textInput;
 
   // Touch gesture tracking. One finger pans the view, two pinch to zoom; both
   // are worked out from raw SDL_EVENT_FINGER_* events (see
@@ -1365,18 +1422,22 @@ int Application::run() {
   // What each input event does, shared by the platform's events and a
   // script's (AppState::SyntheticInput), so that automation exercises the
   // path a person's input takes rather than a side door.
-  const auto onKeyDown = [&](const int scancode, const Mod mods) {
-    // A modal has the keyboard while it is up, and gets first refusal on
-    // every key: a question on screen is not answered by editing the
-    // document behind it. A key it does not use falls through, so that
-    // quitting still works while one is open.
-    if (nullptr != state->modal && state->modal->grabbing()) {
-      const auto key = modalKey(scancode);
-      if (key && state->modal->keyPressed(*key, modalMods(mods))) {
-        return;
-      }
+  const auto onKeyDown = [&](const int scancode, const Mod mods,
+                             std::optional<char32_t> codepoint = std::nullopt) {
+    if (!codepoint && scancode >= SDL_SCANCODE_A &&
+        scancode <= SDL_SCANCODE_Z) {
+      codepoint = static_cast<char32_t>(
+          (held(modalMods(mods), KeyMods::Shift) ? U'A' : U'a') +
+          (scancode - SDL_SCANCODE_A));
     }
-    std::ignore = commandTable.dispatch(scancode, mods);
+    state->syncFocus();
+    const bool wasModal = state->focusManager.modalActive();
+    const bool consumed = state->focusManager.dispatchKey(
+        {modalKey(scancode).value_or(Key::Unknown), modalMods(mods),
+         codepoint});
+    if (!consumed || (wasModal && state->focusManager.modalActive())) {
+      std::ignore = commandTable.dispatch(scancode, mods);
+    }
   };
   const auto onMotion = [&](const int x, const int y,
                             const std::uint32_t held) {
@@ -1385,13 +1446,18 @@ int Application::run() {
     // convention is the GL backend's business, not the application's.
     state->mouseX = x;
     state->mouseY = y;
+    state->syncFocus();
+    if (state->focusManager.dispatchPointer({.phase = ui::PointerPhase::Move,
+                                             .x     = static_cast<float>(x),
+                                             .y     = static_cast<float>(y)})) {
+      return;
+    }
     if (state->mouseMotionHandler && state->mouseMotionHandler(x, y, held)) {
       return;
     }
     // Motion with the left button held is a drag, which extends the
     // selection rather than moving the caret on its own.
-    if (0 != (held & SDL_BUTTON_LMASK) &&
-        (nullptr == state->modal || !state->modal->grabbing())) {
+    if (0 != (held & SDL_BUTTON_LMASK) && !state->focusManager.modalActive()) {
       state->dragX       = x;
       state->dragY       = y;
       state->dragPending = true;
@@ -1406,7 +1472,17 @@ int Application::run() {
     state->mouseY = y;
     // Held while a modal is up, along with the drag above: the caret is not
     // what is being moved when there is a question on screen.
-    if (nullptr != state->modal && state->modal->grabbing()) {
+    state->syncFocus();
+    if (state->focusManager.dispatchPointer({.phase  = ui::PointerPhase::Press,
+                                             .button = button,
+                                             .x      = static_cast<float>(x),
+                                             .y = static_cast<float>(y)})) {
+      if (state->focusManager.modalActive()) {
+        state->clickX       = x;
+        state->clickY       = y;
+        state->clickButton  = button;
+        state->clickPending = true;
+      }
       return;
     }
     if (state->mouseDownHandler && state->mouseDownHandler(x, y, button)) {
@@ -1422,7 +1498,11 @@ int Application::run() {
   };
   const auto onButtonUp = [&](const int x, const int y,
                               const std::uint8_t button) {
-    if (nullptr != state->modal && state->modal->grabbing()) {
+    state->syncFocus();
+    if (state->focusManager.dispatchPointer({.phase = ui::PointerPhase::Release,
+                                             .button = button,
+                                             .x      = static_cast<float>(x),
+                                             .y = static_cast<float>(y)})) {
       return;
     }
     if (state->mouseUpHandler) {
@@ -1431,7 +1511,14 @@ int Application::run() {
   };
   const auto onWheel = [&](const float wx, const float wy,
                            const std::uint16_t sdlMods) {
-    if (nullptr != state->modal && state->modal->grabbing()) return;
+    state->syncFocus();
+    if (state->focusManager.dispatchPointer(
+            {.phase  = ui::PointerPhase::Wheel,
+             .x      = static_cast<float>(state->mouseX.load()),
+             .y      = static_cast<float>(state->mouseY.load()),
+             .deltaX = wx,
+             .deltaY = wy}))
+      return;
     if (state->wheelHandler && state->wheelHandler(wx, wy, sdlMods)) return;
 
     const std::scoped_lock locker(state->view);
@@ -1456,6 +1543,43 @@ int Application::run() {
     }
   };
 
+  const auto onTouch = [&](const SDL_Event &event, ui::PointerPhase phase) {
+    float x{}, y{};
+    {
+      const std::scoped_lock locker(state->view);
+      x = event.tfinger.x * static_cast<float>(state->view.screenWidth);
+      y = event.tfinger.y * static_cast<float>(state->view.screenHeight);
+    }
+    state->syncFocus();
+    return state->focusManager.dispatchPointer(
+        {.phase     = phase,
+         .button    = 1,
+         .x         = x,
+         .y         = y,
+         .pointerId = static_cast<std::uint32_t>(sdl::fingerId(event))});
+  };
+  const auto onText = [&](std::string_view text) {
+    state->syncFocus();
+    if (state->focusManager.dispatchText(text)) return;
+    if (textInput &&
+        (!state->documentTakesText || state->documentTakesText())) {
+      const std::scoped_lock locker(state->typedMutex);
+      state->typedText += text;
+    }
+  };
+  const auto onFocusLost = [&] {
+    state->syncFocus();
+    state->focusManager.focusLost();
+    state->focusLossEpoch.fetch_add(1);
+    SDL_SetModState(SDL_KMOD_NONE);
+    state->clickPending = false;
+    state->dragPending  = false;
+    fingerAId.reset();
+    fingerBId.reset();
+    pinchSpreadPixels.reset();
+    touchWasMultiFinger = false;
+  };
+
   while (state->alive) {
     sayWhatIsWaiting(true);
 
@@ -1468,29 +1592,22 @@ int Application::run() {
       std::ignore = publisher->pumpActions();
     }
 
-    // Text entry follows whatever has the keyboard. A modal is typed into even
-    // in a program that has text input off -- a question nobody can answer is
-    // not a question -- and the platform is told where the answer will appear,
-    // which is what puts an input method's candidate window and a phone's
-    // keyboard in the right place.
-    if (const bool grabbing =
-            nullptr != state->modal && state->modal->grabbing();
-        grabbing != modalHadKeyboard) {
-      modalHadKeyboard = grabbing;
-      if (grabbing && !textInput) {
+    state->syncFocus();
+    const bool grabbing  = state->focusManager.modalActive();
+    const auto area      = state->focusManager.textArea();
+    const bool wantsText = grabbing ? area.has_value() : textInput;
+    if (wantsText != modalHadKeyboard) {
+      modalHadKeyboard = wantsText;
+      if (wantsText)
         sdl::startTextInput(window.window);
-      } else if (!grabbing && !textInput) {
+      else
         sdl::stopTextInput(window.window);
-      }
-      toldAbout.reset();
     }
-    if (modalHadKeyboard) {
-      if (const auto area = state->modal->textArea(); area != toldAbout) {
-        toldAbout = area;
-        if (area) {
-          sdl::setTextInputArea(window.window, area->x, area->y, area->width,
-                                area->height);
-        }
+    if (area != toldAbout) {
+      toldAbout = area;
+      if (area) {
+        sdl::setTextInputArea(window.window, area->x, area->y, area->width,
+                              area->height);
       }
     }
 
@@ -1505,7 +1622,8 @@ int Application::run() {
         using Kind = AppState::SyntheticInput::Kind;
         switch (input.kind) {
         case Kind::KeyDown:
-          onKeyDown(input.scancode, static_cast<Mod>(input.mods));
+          onKeyDown(input.scancode, static_cast<Mod>(input.mods),
+                    input.codepoint);
           break;
         case Kind::Motion:
           onMotion(input.x, input.y, input.held);
@@ -1515,6 +1633,12 @@ int Application::run() {
           break;
         case Kind::ButtonUp:
           onButtonUp(input.x, input.y, input.button);
+          break;
+        case Kind::Text:
+          onText(input.text);
+          break;
+        case Kind::FocusLost:
+          onFocusLost();
           break;
         case Kind::Wheel:
           onWheel(input.wheelX, input.wheelY,
@@ -1538,8 +1662,17 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_KEY_DOWN: {
+#if GLEDITOR_SDL_MAJOR == 3
+        const auto symbol = static_cast<std::uint32_t>(evt.key.key);
+#else
+        const auto symbol = static_cast<std::uint32_t>(evt.key.keysym.sym);
+#endif
+        const auto codepoint =
+            symbol >= 0x20U && symbol <= 0x10FFFFU
+                ? std::optional<char32_t>{static_cast<char32_t>(symbol)}
+                : std::nullopt;
         onKeyDown(static_cast<int>(sdl::keyScancode(evt)),
-                  modsFromSdl(sdl::keyModifiers(evt)));
+                  modsFromSdl(sdl::keyModifiers(evt)), codepoint);
         break;
       }
       case SDL_EVENT_MOUSE_MOTION: {
@@ -1572,7 +1705,7 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_FINGER_DOWN: {
-        if (nullptr != state->modal && state->modal->grabbing()) {
+        if (onTouch(evt, ui::PointerPhase::Press)) {
           break;
         }
         const auto id = sdl::fingerId(evt);
@@ -1602,7 +1735,7 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_FINGER_MOTION: {
-        if (nullptr != state->modal && state->modal->grabbing()) {
+        if (onTouch(evt, ui::PointerPhase::Move)) {
           break;
         }
         const auto id = sdl::fingerId(evt);
@@ -1657,15 +1790,7 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_TEXT_INPUT: {
-        if (nullptr != state->modal && state->modal->grabbing()) {
-          state->modal->textTyped(evt.text.text);
-          break;
-        }
-        if (textInput &&
-            (!state->documentTakesText || state->documentTakesText())) {
-          const std::scoped_lock locker(state->typedMutex);
-          state->typedText += evt.text.text;
-        }
+        onText(evt.text.text);
         break;
       }
       default: {
@@ -1676,6 +1801,7 @@ int Application::run() {
           // the platform knows it. Without this an assistive technology would
           // believe the caret was in this window while somebody typed into
           // another.
+          if (!focused) onFocusLost();
           if (const auto &publisher = state->accessibility; publisher) {
             publisher->setWindowFocused(focused);
           }
@@ -1687,6 +1813,7 @@ int Application::run() {
         // event types where SDL2 has only one; fingerLifted() is true for
         // whichever one this build's SDL just delivered.
         if (sdl::fingerLifted(evt)) {
+          if (onTouch(evt, ui::PointerPhase::Release)) break;
           const auto id = sdl::fingerId(evt);
           if (fingerAId && id == *fingerAId) {
             if (fingerBId) {
@@ -1699,8 +1826,7 @@ int Application::run() {
               fingerBId.reset();
               pinchSpreadPixels.reset();
             } else {
-              if (!touchWasMultiFinger &&
-                  (nullptr == state->modal || !state->modal->grabbing())) {
+              if (!touchWasMultiFinger && !state->focusManager.modalActive()) {
                 const std::scoped_lock locker(state->view);
                 const int nowX = static_cast<int>(
                     evt.tfinger.x *

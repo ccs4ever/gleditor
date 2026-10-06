@@ -7,6 +7,7 @@ spatial.documentSpacingX	70.0
 spatial.depthZ	-45.0
 spatial.docArrivalSeconds	0.22
 spatial.backgroundOpacity	0.35
+input.modalGlobalCommands	quit
 keymap.new	Ctrl+N
 keymap.close	Ctrl+W
 keymap.save	Ctrl+S

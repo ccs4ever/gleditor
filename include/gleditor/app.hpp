@@ -178,6 +178,10 @@ public:
     scopeResolver = std::move(resolver);
   }
 
+  void setCommandGate(std::function<bool(std::string_view)> gate) {
+    commandGate = std::move(gate);
+  }
+
   /// Pairs of commands the same key reaches in the same scope, of which only
   /// the first registered can ever run: what a keymap load warns about.
   [[nodiscard]] std::vector<std::pair<std::string, std::string>>
@@ -190,6 +194,7 @@ public:
 private:
   std::vector<Command> bindings;
   std::function<std::string()> scopeResolver;
+  std::function<bool(std::string_view)> commandGate;
 };
 
 /**
