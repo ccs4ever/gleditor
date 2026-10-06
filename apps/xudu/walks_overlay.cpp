@@ -394,6 +394,7 @@ void WalksOverlay::describe(gleditor::a11y::Builder &builder) {
   children.push_back(builder.id(kNote));
   auto &status = builder.add(40, Role::Label);
   status.label = status_;
+  status.live  = Live::Polite;
   children.push_back(builder.id(40));
   auto &dialog    = builder.add(0, Role::Dialog);
   dialog.label    = "Walks";

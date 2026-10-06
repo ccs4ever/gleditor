@@ -61,6 +61,7 @@ keyboard input, text readback and Save note now pass on installed Debian, Arch, 
 packages. Native many-to-many endpoint actions, branching, references, exact-range restoration,
 restart and closed-target refusal now pass on installed Debian, Arch, Fedora and Nix packages.
 Actual keyboard input exposed an Alt+Shift+W text-insertion defect, which is fixed and checked by
-the native client. Document hashes remain unchanged across navigation and restart. Full
-screen-reader journeys and reopening closed targets through the UI remain validation gaps; see the
-distribution audit for platform evidence.
+the native client. Document hashes remain unchanged across navigation, restart and reopening.
+Reopening a closed target through the Open dialog and restoring its existing visit now passes on all
+four installed Linux packages without duplicate visits. Full screen-reader journeys remain a
+validation gap; see the distribution audit for platform evidence.

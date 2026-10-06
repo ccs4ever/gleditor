@@ -42,16 +42,16 @@ dangling reference in session initialization.
 
 ## Evidence and limits
 
-| Target          | Evidence                                                                                                                                                 | Remaining validation                                                         |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Linux native    | AT-SPI document text, New Document, Walks notes, many-to-many navigation, branches, references, exact Restore and restart/refusal checks                 | Complete screen-reader journeys and reopening a closed target through the UI |
-| Debian package  | Actual package build/install; installed GL/Vulkan rendering and native client checks                                                                     | Clean complete local Actions invocation after recipe repairs                 |
-| Arch / Fedora   | Actual packages build/install; installed GL/Vulkan rendering, text/action readback and Walks notes                                                       | Clean complete local Actions invocation; full screen-reader journeys         |
-| Nix             | Full application and AccessKit derivations build; installed GL/Vulkan, native text/action and Walks notes with matching runtime closure                  | Clean complete local Actions invocation; full screen-reader journeys         |
-| Android         | ARM64/x86_64 APKs; matching delegate and shaders verified; API 28/30 native text/focus/click/edit round trips; API 28 Save Document and saved-path label | ARM64 device and screen-reader journeys; native Xuzz remains separate        |
-| Browser adapter | Compiled C++ tree through Chromium accessibility; native actions, Unicode, modal focus, secrets, options and stale actions                               | Full applications blocked on media and networking ports                      |
-| macOS           | Official VLC SDK headers, real Mach-O dependency closure and relocation; native AX client added                                                          | Native runner access, application execution, signing and trusted AX checks   |
-| Windows         | Pinned RNP helper builds with selected backend; UIA client and PowerShell syntax checked                                                                 | Native runner access, MinGW package build, relocation and UIA execution      |
+| Target          | Evidence                                                                                                                                                 | Remaining validation                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Linux native    | AT-SPI document text, New Document, Walks notes, many-to-many navigation, branches, references, exact Restore, restart/refusal and UI reopening checks   | Complete screen-reader journeys                                            |
+| Debian package  | Actual package build/install; installed GL/Vulkan rendering and native client checks                                                                     | Clean complete local Actions invocation after recipe repairs               |
+| Arch / Fedora   | Actual packages build/install; installed GL/Vulkan rendering, text/action readback and Walks notes                                                       | Clean complete local Actions invocation; full screen-reader journeys       |
+| Nix             | Full application and AccessKit derivations build; installed GL/Vulkan, native text/action and Walks notes with matching runtime closure                  | Clean complete local Actions invocation; full screen-reader journeys       |
+| Android         | ARM64/x86_64 APKs; matching delegate and shaders verified; API 28/30 native text/focus/click/edit round trips; API 28 Save Document and saved-path label | ARM64 device and screen-reader journeys; native Xuzz remains separate      |
+| Browser adapter | Compiled C++ tree through Chromium accessibility; native actions, Unicode, modal focus, secrets, options and stale actions                               | Full applications blocked on media and networking ports                    |
+| macOS           | Official VLC SDK headers, real Mach-O dependency closure and relocation; native AX client added                                                          | Native runner access, application execution, signing and trusted AX checks |
+| Windows         | Pinned RNP helper builds with selected backend; UIA client and PowerShell syntax checked                                                                 | Native runner access, MinGW package build, relocation and UIA execution    |
 
 Repository format/lint gates and focused Clang analyzer checks pass. The preceding full regression
 runs passed 546 library tests, 1,218 engine tests, 59 Xuzz tests and 120 ZigZag tests. One video
@@ -79,8 +79,8 @@ evidence of native Windows UIA or macOS AX delivery. The remote packaging workfl
 disabled and were not enabled as part of this work.
 
 The earlier native accessibility gap is narrowed to the exact controls exercised above. Complete
-screen-reader journeys and reopening a closed target through the UI remain unverified. Remote
-authority discovery and unopened ZigZag formatting inheritance remain separate UX findings.
+screen-reader journeys remain unverified. Remote authority discovery and unopened ZigZag formatting
+inheritance remain separate UX findings.
 
 ## Installed-package follow-up
 
@@ -180,3 +180,60 @@ removed. These are retained failed attempts, not passing evidence. The final res
 `/tmp/ux-shortcut-modified-android-event-native.log`; both ABI builds and APK content checks use the
 same prefix. The emulator was hidden and used disposable fixture content. Live announcement delivery
 with TalkBack and ARM64 device execution remain unverified.
+
+## Closed-target reopening follow-up
+
+The installed Debian, Arch, Fedora and Nix packages now pass reopening the unavailable target
+through the Open dialog. After the restart/refusal check, the native client closes Walks, presses
+Ctrl+O, activates Document and the target's local-store option, then presses Tab and Enter to accept
+the form. Enter on the choice itself opens its list; the first attempt stopped there and is retained
+as a failed harness attempt, not a product failure.
+
+Native Walks Focus then reports the target available. Restore selects the original bytes 8–13,
+retains the reference and all three visits, and leaves Visit 2 current. Both visited stores'
+operation and table hashes remain identical to the pre-navigation hashes. Four additional frame/tree
+pairs cover the Open choice, reopened availability, exact Restore and unchanged visit count. Local
+evidence is under `/tmp/ux-native-reopen-{debian,arch,fedora,nix}-final/fixture/`, with run logs
+under `/tmp/ux-native-reopen-*.log`. This closes the focused reopening validation gap; it does not
+certify all of J5 or the complete J1–J6 screen-reader journeys.
+
+## Orca and status announcements
+
+Orca 50.3 ran beside the installed Arch application on the same private Xvfb and accessibility bus.
+Its actual speech-output log records document text, Walks visit names and current/reference state,
+the closed-target warning, the Open dialog and the editable note field. It recognizes the note's
+change from static text to an entry and echoes every character of `native branch note`. These
+focused checks still use the native client's actions; they do not establish keyboard-only J1–J6.
+
+The initial note run exposed a missing confirmation: Orca received the status name change but did
+not announce `Note saved`, because the status was an ordinary label. Walks now marks its status as a
+polite live region. The native note regression subscribes to AT-SPI's `object:announcement` and
+requires the saved confirmation, retaining its message and priority in `walks-announcements.json`.
+The rebuilt Arch, Debian, Fedora and Nix packages deliver `Note saved` with polite priority 1. A
+separate Orca run confirms actual speech output after allowing queued character echo to settle; a
+first attempt closed the reader too quickly and is retained as an inconclusive speech run.
+
+Orca evidence is in `/tmp/ux-orca-navigation-service-fixture/`, `/tmp/ux-orca-note-fixture/` and
+`/tmp/ux-orca-live-settled-fixture/`; the local probe driver is `/tmp/ux-orca-navigation-probe.py`.
+Native confirmation evidence uses `/tmp/ux-orca-live-{arch,debian,fedora,nix}-final/fixture/` and
+logs `/tmp/ux-orca-live-*.log`. The first two probe starts used buffered debug-file output as
+readiness and timed out despite Orca starting. The final probe checks ownership of Orca's
+session-bus service; those startup failures are harness failures, not application passes or
+failures. Evidence collection excludes runtime sockets.
+
+| Journey      | Step                                         | Affordance                                      | Outcome                                                 | Evidence                                              |
+| ------------ | -------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------- |
+| J5 (focused) | Restore with the target closed after restart | Native Restore visit                            | Pass: refusal; three visits retained                    | `walks-restarted-refused.{png,json}`                  |
+| J5 (focused) | Reopen the target                            | Ctrl+O, native Document/local option, Tab/Enter | Pass on Debian, Arch, Fedora and Nix                    | `target-open-dialog.{png,json}`                       |
+| J5 (focused) | Restore the existing visit                   | Native Focus and Restore visit                  | Pass: bytes 8–13, reference and current visit retained  | `walks-reopened-{restored,visit-count}.{png,json}`    |
+| J5 (focused) | Verify preservation                          | Closed-store dump and hash comparison           | Pass: visited stores unchanged                          | `reopened-document-hashes.json`, `*-ops.txt`          |
+| Walks notes  | Enter and save a note                        | Native Focus, keyboard input, Save note         | Pass: text readback and polite native confirmation      | `walks-note-*.{png,json}`, `walks-announcements.json` |
+| Walks notes  | Hear the confirmation                        | Orca attached to the private bus                | Pass on rebuilt Arch: actual `Note saved` speech output | `ux-orca-live-settled-fixture/orca-debug.log`         |
+
+With the final live-status change, all four rebuilt Linux packages again pass the complete native
+navigation/restart/refusal/reopening check. Final navigation evidence is under
+`/tmp/ux-native-reopen-live-{debian,arch,fedora,nix}-final/fixture/`; both documents'
+operation/table hashes remain unchanged. The Nix wrapper also passes installed GL/Vulkan rendering
+and both programs' native text/action checks with its matching runtime closure. The application
+build and Walks Clang analysis pass; repository formatting and lint gates pass. These focused checks
+do not replace the earlier full unit regression or complete local Actions invocations.

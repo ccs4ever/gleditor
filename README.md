@@ -260,9 +260,12 @@ desktop builds retain the optional adapter for development without AccessKit ins
 
 `packaging/check-accessibility-linux.py /path/to/xuzz` reads document text and activates New
 Document through an independent AT-SPI client in an isolated D-Bus session. It needs Python GI,
-AT-SPI introspection and the registry daemon. Native client checks for Windows and macOS live under
-their packaging directories; the macOS checker needs Accessibility permission on the test runner.
-`--no-present` keeps desktop test windows hidden while retaining their native accessibility host.
+AT-SPI introspection and the registry daemon. `--walks` checks note editing and the native saved
+announcement; `--navigation` checks branching, restart and restoration after reopening a closed
+target through the Open dialog. These modes use a private Xvfb display. Native client checks for
+Windows and macOS live under their packaging directories; the macOS checker needs Accessibility
+permission on the test runner. `--no-present` keeps desktop test windows hidden while retaining
+their native accessibility host.
 
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2

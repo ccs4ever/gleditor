@@ -630,6 +630,72 @@ def main():
                             "PASS: native branches/reference survive restart and unavailable Restore is refused",
                             flush=True,
                         )
+                        click("Close")
+                        subprocess.run(["xdotool", "key", "ctrl+o"], check=True)
+                        wait_for(lambda: named("Open Document or System Xanadoc"))
+                        click("Document")
+                        target_store = next(s for s in stores if s.name != "document")
+                        click("[Local] " + target_store.name)
+                        snapshot("target-open-dialog")
+                        # Enter on the choice opens its list; Tab reaches the
+                        # custom-path field where Enter accepts the form.
+                        subprocess.run(["xdotool", "key", "Tab", "Return"], check=True)
+                        wait_for(lambda: doc("one two three"))
+                        subprocess.run(["xdotool", "key", "alt+shift+w"], check=True)
+                        wait_for(lambda: named("Walks"))
+                        second = wait_for(
+                            lambda: next(
+                                (
+                                    n
+                                    for n in nodes(root)
+                                    if n.get_name().startswith("Visit 2 · parent 1")
+                                    and "reference" in n.get_name()
+                                ),
+                                None,
+                            )
+                        )
+                        if not Atspi.Component.grab_focus(second):
+                            raise RuntimeError("AT-SPI refused reopened visit preview")
+                        wait_for(
+                            lambda: next(
+                                (
+                                    n
+                                    for n in nodes(root)
+                                    if n.get_name().startswith("Target available")
+                                ),
+                                None,
+                            )
+                        )
+                        snapshot("walks-target-reopened")
+                        click("Restore visit")
+                        wait_for(lambda: selected("one two three", 8, 13))
+                        snapshot("walks-reopened-restored")
+                        subprocess.run(["xdotool", "key", "alt+shift+w"], check=True)
+                        wait_for(lambda: named("Walks"))
+                        visits = [
+                            n
+                            for n in nodes(root)
+                            if n.get_name().startswith("Visit ")
+                            and n.get_role() == Atspi.Role.LIST_ITEM
+                        ]
+                        if len(visits) != 3:
+                            raise RuntimeError("Reopened Restore appended a visit")
+                        if hashes() != original:
+                            raise RuntimeError(
+                                "Reopened Restore changed visited documents"
+                            )
+                        snapshot("walks-reopened-visit-count")
+                        (directory / "reopened-document-hashes.json").write_text(
+                            json.dumps(
+                                {"before": original, "after": hashes()}, indent=2
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                        print(
+                            "PASS: Open dialog reopens closed target; native Restore selects exact range without duplicate visits or document writes",
+                            flush=True,
+                        )
                         return 0
 
                     wait_for(lambda: named("Walks"))
@@ -699,11 +765,36 @@ def main():
                         raise RuntimeError("AT-SPI refused keyboard input")
                     wait_for(lambda: Atspi.Text.get_text(note, 0, -1) == note_text)
                     snapshot("walks-note-input")
+                    announcements = []
+
+                    def announced(event, *_):
+                        if event.source.get_process_id() == application.pid:
+                            announcements.append(
+                                {
+                                    "message": str(event.any_data),
+                                    "name": event.source.get_name(),
+                                    "politeness": event.detail1,
+                                }
+                            )
+
+                    listener = Atspi.EventListener.new(announced)
+                    if not listener.register("object:announcement"):
+                        raise RuntimeError("AT-SPI refused announcement subscription")
                     click("Save note")
                     wait_for(lambda: named("Visit note: " + note_text))
+                    wait_for(
+                        lambda: any(
+                            a["message"] == "Note saved" and a["politeness"] == 1
+                            for a in announcements
+                        )
+                    )
+                    listener.deregister("object:announcement")
+                    (directory / "walks-announcements.json").write_text(
+                        json.dumps(announcements, indent=2) + "\n", encoding="utf-8"
+                    )
                     snapshot("walks-note-saved")
                     print(
-                        "PASS: native note focus, keyboard input, text readback and Save note",
+                        "PASS: native note focus, keyboard input, text readback, Save note and live confirmation",
                         flush=True,
                     )
                     return 0
