@@ -514,7 +514,9 @@ PouchManager *PouchManager::loadManifest() {
               .itemId           = itemCell,
               .span             = span,
               .previewText      = std::move(previewText),
-              .originVersion    = store().segmentedOps().idOf(slot->birthOp),
+              .originVersion    = originDocState
+                                      ? originDocState->version
+                                      : store().segmentedOps().idOf(slot->birthOp),
               .originDocIndex   = 0,
               .originCharStart  = 0,
               .originCharEnd    = static_cast<std::uint32_t>(span.length),

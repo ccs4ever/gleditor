@@ -1093,7 +1093,7 @@ TEST(E2EBinaryOrchestrationTest, walksPreviewAndMetadataSurviveRestart) {
   const auto annotated =
       run("--chord Alt+Shift+W --key home --key down --chord Ctrl+N --chord "
           "Ctrl+Alt+B --chord Delete --type n"
-          " --chord Backspace --type 'Branch note' --key enter --click 300,310 "
+          " --chord Backspace --type 'Branch note' --key enter --type r "
           "--dump-a11y"
           " --capture " +
           (root / "annotated.ppm").string() + " --key escape");

@@ -5,9 +5,12 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 #include <gleditor/cpp26.hpp>
 
@@ -513,4 +516,65 @@ TEST(PouchTest, BackedBySystemStore) {
   const auto item = pm.dropSpan("notes", span, "Notes excerpt", store.latest());
   EXPECT_EQ(item.previewText, "Notes excerpt");
   EXPECT_EQ(pm.zoneById("notes")->items().size(), 1U);
+}
+
+// The audit found every item gone after a relaunch: zones were read back and
+// items were not. An item is a cell quoting its span, so a store saved with
+// items in it opens with the same items in the same zones, and a dismissed
+// one stays dismissed.
+TEST(PouchTest, ItemsSurviveSavingAndReopeningTheStore) {
+  const auto root = std::filesystem::temp_directory_path() /
+                    ("pouch_items_" + std::to_string(::getpid()));
+  std::filesystem::remove_all(root);
+  UserPermascroll::Config config;
+  config.storageDir = root / "permascroll";
+  const auto perma  = std::make_shared<UserPermascroll>(std::move(config));
+
+  Store source(perma);
+  const auto atCell =
+      source.makeCell(source.sliceGenesis(MicroversionId{}), "cell");
+  Scroll sealedAs;
+  sealedAs.publisher    = PublicKey::fromHex(std::string(64, 'e'));
+  sealedAs.salt         = "pouch_items_source";
+  const auto cellOrigin = opRefOf(source, source.cellRefOf(atCell), sealedAs);
+  ASSERT_FALSE(cellOrigin.empty());
+
+  Store store(perma);
+  initializeSystemStore(store, SystemDocKind::Pouches);
+  {
+    PouchManager pm(store);
+    const auto kept =
+        pm.dropSpan("notes", PrimediaSpan{.scroll = 0, .start = 7, .length = 5},
+                    "kept", MicroversionId::parse("3"), 1, 20, 25);
+    const auto gone = pm.dropSpan(
+        "scratch", PrimediaSpan{.scroll = 0, .start = 30, .length = 4}, "gone",
+        MicroversionId{});
+    static_cast<void>(pm.dropCell(
+        "to_link_left", PrimediaSpan{.scroll = 0, .start = 40, .length = 3},
+        "cell", cellOrigin, "d.x: #2"));
+    ASSERT_TRUE(pm.dismissItem(gone.itemId));
+    EXPECT_NE(kept.itemId, 0U);
+  }
+  store.save((root / "pouches").string());
+
+  Store reopened(perma);
+  reopened.load((root / "pouches").string());
+  PouchManager pm(reopened);
+  pm.loadManifest();
+  const auto notes = pm.zoneById("notes");
+  ASSERT_TRUE(notes.has_value());
+  ASSERT_EQ(notes->items().size(), 1U);
+  const auto &item = notes->items().front();
+  EXPECT_EQ(item.span.start, 7U);
+  EXPECT_EQ(item.span.length, 5U);
+  EXPECT_EQ(item.originVersion, MicroversionId::parse("3"));
+  ASSERT_TRUE(item.originDocState.has_value());
+  EXPECT_EQ(item.originDocState->version, MicroversionId::parse("3"));
+  EXPECT_TRUE(pm.zoneById("scratch")->items().empty());
+  const auto left = pm.zoneById("to_link_left");
+  ASSERT_EQ(left->items().size(), 1U);
+  EXPECT_EQ(left->items().front().span.start, 40U);
+  EXPECT_EQ(left->items().front().originKind, PouchOriginKind::ZigzagCell);
+  EXPECT_EQ(left->items().front().originOpRef, cellOrigin);
+  std::filesystem::remove_all(root);
 }

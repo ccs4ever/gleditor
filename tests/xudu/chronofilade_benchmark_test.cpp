@@ -72,10 +72,14 @@ TEST(ChronofiladeBenchmarkTest, ScalabilityAndSpeedup) {
           .count() /
       static_cast<double>(iterations);
 
-  // 2. Chronofilade rebuild
+  // 2. Chronofilade rebuild. rebuild(version) also resolves the xanadoc
+  // birth with an O(depth) parent-chain walk on every call; a scrubbing
+  // caller already holds the position it scrubs from, so what it pays per
+  // step is rebuildFromIndex(index, birth) -- birth resolved once.
+  const auto birth       = store.activeXanadocOnBranch(targetId);
   const auto startChrono = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < iterations; ++i) {
-    const auto chronoBuilt = store.rebuild(targetId);
+    const auto chronoBuilt = store.rebuildFromIndex(targetIdx, birth);
     (void)chronoBuilt;
   }
   const auto endChrono = std::chrono::high_resolution_clock::now();

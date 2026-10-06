@@ -85,7 +85,9 @@ private:
   std::optional<ImageResource> rasterize(std::span<const std::uint8_t> bytes,
                                          float width, float height);
 
-  render::RenderDevice *device_{nullptr};
+  // Read only under GLEDITOR_HAVE_SVG_THORVG; the stub keeps the field so both
+  // builds share one object layout.
+  [[maybe_unused]] render::RenderDevice *device_{nullptr};
   std::unordered_map<std::string, ImageResource> cache_;
   mutable std::mutex mutex_;
 };

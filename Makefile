@@ -1059,7 +1059,7 @@ $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK
 ifeq ($(HAVE_DECODE_INDEX_SPIKE),1)
 decode-index-spike: $(OBJDIR)/decode-index-spike
 $(OBJDIR)/tools/decode-index-spike.o: CXXFLAGS += \
-  $(shell pkg-config --cflags $(DECODE_INDEX_SPIKE_PKGS))
+  $(shell pkg-config --cflags $(DECODE_INDEX_SPIKE_PKGS) | sed 's|-I\([^ ]*\)|-isystem \1|g')
 # Links the core library now that the PNG/JPEG/video/MP3 mechanisms this
 # spike verifies live in gleditor::decode_index rather than duplicated here
 # -- see the file's own top comment. Still links DECODE_INDEX_SPIKE_PKGS

@@ -287,6 +287,16 @@ struct std::formatter<zigzag::DimVector> : std::formatter<std::string_view> {
 };
 
 template <>
+struct std::formatter<zigzag::OptionalCell> : std::formatter<std::string> {
+  template <typename FormatContext>
+  auto format(const zigzag::OptionalCell &cell, FormatContext &ctx) const {
+    return std::formatter<std::string>::format(
+        cell.has_value() ? std::to_string(cell.value()) : std::string("noCell"),
+        ctx);
+  }
+};
+
+template <>
 struct std::formatter<zigzag::DirectedDim> : std::formatter<std::string> {
   template <typename FormatContext>
   auto format(const zigzag::DirectedDim &dd, FormatContext &ctx) const {
