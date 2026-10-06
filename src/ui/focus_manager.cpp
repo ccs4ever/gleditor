@@ -24,10 +24,12 @@ struct FocusManager::State {
     FocusScope *scope{};
     ScopePolicy policy;
     bool forced{}, active{};
+    std::optional<std::uint32_t> node;
+    std::uint64_t nodeSequence{};
   };
   mutable std::mutex mutex;
   std::vector<Entry> entries;
-  std::uint64_t nextId{}, focused{};
+  std::uint64_t nextId{}, focused{}, revision{1};
   std::unordered_map<std::uint32_t, std::uint64_t> captures;
   std::vector<std::string> globalCommands{"quit"};
   KeyMods mods{KeyMods::None};
@@ -36,10 +38,50 @@ struct FocusManager::State {
     const auto it = std::ranges::find(entries, id, &Entry::id);
     return it == entries.end() ? Entry{} : *it;
   }
-  Entry refresh(FocusScope *priorFocus = nullptr) {
+  void notifyScope(FocusScope &scope, bool desired) {
+    std::size_t limit;
+    {
+      const std::lock_guard lock(mutex);
+      limit = 2 * (entries.size() + 1);
+    }
+    for (std::size_t attempt = 0; attempt < limit; ++attempt) {
+      scope.focusChanged(desired);
+      bool latest;
+      {
+        const std::lock_guard lock(mutex);
+        latest = find(focused).scope == &scope;
+      }
+      if (latest == desired) return;
+      desired = latest;
+    }
+  }
+  void notifyNode(Entry entry) {
+    std::size_t limit;
+    {
+      const std::lock_guard lock(mutex);
+      limit = 2 * (entries.size() + 1);
+    }
+    for (std::size_t attempt = 0; attempt < limit && entry.scope && entry.node;
+         ++attempt) {
+      entry.scope->focusedNodeChanged(*entry.node);
+      Entry latest;
+      {
+        const std::lock_guard lock(mutex);
+        latest = find(entry.id);
+      }
+      if (latest.scope != entry.scope ||
+          (latest.node == entry.node && latest.sequence == entry.sequence))
+        return;
+      entry = std::move(latest);
+    }
+  }
+  Entry refresh(FocusScope *priorFocus = nullptr, std::size_t attempt = 0) {
     std::vector<Entry> snapshot;
     {
       const std::lock_guard lock(mutex);
+      // Reentrant callbacks can keep changing focus. A bounded pass leaves
+      // the latest state intact and lets the next input/frame continue.
+      if (attempt >= 2 * (entries.size() + 1)) return find(focused);
       snapshot = entries;
     }
     for (auto &entry : snapshot) {
@@ -98,6 +140,7 @@ struct FocusManager::State {
           }
         }
       }
+      if (focused != selected.id || oldScope != selected.scope) ++revision;
       focused  = selected.id;
       newScope = selected.scope;
       std::erase_if(captures, [&](const auto &capture) {
@@ -117,14 +160,93 @@ struct FocusManager::State {
     }
     if (oldScope != newScope) {
       if (oldScope) {
-        oldScope->focusChanged(false);
+        notifyScope(*oldScope, false);
       }
       if (newScope) {
-        newScope->focusChanged(true);
+        notifyScope(*newScope, true);
       }
     }
-    if (oldScope != newScope || !cancelled.empty()) {
-      return refresh();
+    bool nodeChanged = false;
+    bool retry       = false;
+    if (selected.scope) {
+      const auto layout  = selected.scope->focusLayout();
+      const auto request = selected.scope->requestedNode_.exchange(0);
+      if (layout) {
+        const auto validNode = [&](std::uint32_t id) {
+          const auto *box = layout->find(id);
+          return box && box->focusable && box->enabled &&
+                 std::ranges::find(layout->focusOrder, id) !=
+                     layout->focusOrder.end();
+        };
+        auto node = selected.node;
+        if (selected.nodeSequence != selected.sequence) node.reset();
+        if (node && !validNode(*node)) node.reset();
+        if (request != 0 &&
+            validNode(static_cast<std::uint32_t>(request - 1))) {
+          node = static_cast<std::uint32_t>(request - 1);
+        }
+        if (!node) {
+          if (selected.policy.initial == FocusTarget::ExplicitNode &&
+              validNode(selected.policy.initialNode)) {
+            node = selected.policy.initialNode;
+          } else if (selected.policy.initial == FocusTarget::DefaultAction) {
+            for (const auto &box : layout->boxes) {
+              if (box.defaultAction && validNode(box.id)) {
+                node = box.id;
+                break;
+              }
+            }
+          }
+          if (!node) {
+            for (auto id : layout->focusOrder) {
+              if (validNode(id)) {
+                node = id;
+                break;
+              }
+            }
+          }
+        }
+        {
+          const std::lock_guard lock(mutex);
+          auto it = std::ranges::find(entries, selected.id, &Entry::id);
+          retry   = it == entries.end() || focused != selected.id ||
+                  it->sequence != selected.sequence ||
+                  it->node != selected.node ||
+                  it->nodeSequence != selected.nodeSequence;
+          if (!retry) {
+            nodeChanged = it->node != node ||
+                          (node && it->nodeSequence != selected.sequence);
+            if (nodeChanged) ++revision;
+            it->node         = node;
+            it->nodeSequence = selected.sequence;
+            selected         = *it;
+          }
+        }
+        if (retry && request != 0) {
+          std::uint64_t empty = 0;
+          selected.scope->requestedNode_.compare_exchange_strong(empty,
+                                                                 request);
+        }
+        if (nodeChanged && selected.node) {
+          notifyNode(selected);
+        }
+      } else if (selected.node) {
+        const std::lock_guard lock(mutex);
+        auto it = std::ranges::find(entries, selected.id, &Entry::id);
+        retry   = it == entries.end() || focused != selected.id ||
+                it->sequence != selected.sequence ||
+                it->node != selected.node ||
+                it->nodeSequence != selected.nodeSequence;
+        if (!retry) {
+          it->node.reset();
+          selected = *it;
+          ++revision;
+          nodeChanged = true;
+        }
+      }
+    }
+    if (oldScope != newScope || !cancelled.empty() || nodeChanged || retry) {
+      return refresh(nullptr, attempt + 1);
     }
     return selected;
   }
@@ -136,6 +258,7 @@ struct FocusManager::State {
       if (focused == id) {
         removed = entry.scope;
         focused = entry.previous;
+        ++revision;
       }
       for (auto &other : entries) {
         if (other.previous == id) {
@@ -179,8 +302,15 @@ FocusManager::insert(FocusScope &scope, ScopePolicy policy, bool forced) {
   {
     const std::lock_guard lock(state_->mutex);
     id = ++state_->nextId;
-    state_->entries.push_back({id, forced ? nextSequence() : 0, state_->focused,
-                               &scope, std::move(policy), forced, false});
+    state_->entries.push_back({id,
+                               forced ? nextSequence() : 0,
+                               state_->focused,
+                               &scope,
+                               std::move(policy),
+                               forced,
+                               false,
+                               {},
+                               0});
   }
   state_->refresh();
   return {state_, id};
@@ -199,13 +329,69 @@ FocusManager::ScopeHandle FocusManager::addPane(FocusScope &scope) {
   return insert(scope, std::move(policy), true);
 }
 FocusScope *FocusManager::focusedScope() { return state_->refresh().scope; }
+std::optional<std::uint32_t> nextFocusNode(std::span<const std::uint32_t> order,
+                                           std::optional<std::uint32_t> current,
+                                           bool reverse) {
+  if (order.empty()) return std::nullopt;
+  const auto found = current ? std::ranges::find(order, *current) : order.end();
+  if (found == order.end()) return reverse ? order.back() : order.front();
+  const auto index =
+      static_cast<std::size_t>(std::distance(order.begin(), found));
+  return order[(index + (reverse ? order.size() - 1 : 1)) % order.size()];
+}
+FocusSnapshot FocusManager::focusSnapshot() {
+  state_->refresh();
+  const std::lock_guard lock(state_->mutex);
+  const auto entry = state_->find(state_->focused);
+  return {entry.scope, entry.id != 0 && entry.policy.modal, entry.node,
+          state_->revision};
+}
+std::optional<std::uint32_t> FocusManager::focusedNode() {
+  return focusSnapshot().node;
+}
+std::uint64_t FocusManager::focusRevision() { return focusSnapshot().revision; }
+bool FocusManager::focusNode(std::uint32_t id) {
+  const auto entry = state_->refresh();
+  if (!entry.scope) return false;
+  const auto layout = entry.scope->focusLayout();
+  if (!layout) return false;
+  const auto box = layout->find(id);
+  if (!box || !box->focusable || !box->enabled ||
+      std::ranges::find(layout->focusOrder, id) == layout->focusOrder.end())
+    return false;
+  bool changed = false;
+  {
+    const std::lock_guard lock(state_->mutex);
+    auto it = std::ranges::find(state_->entries, entry.id, &State::Entry::id);
+    if (it == state_->entries.end() || state_->focused != entry.id ||
+        it->sequence != entry.sequence)
+      return false;
+    changed = it->node != id;
+    if (changed) {
+      it->node = id;
+      ++state_->revision;
+    }
+  }
+  if (changed) {
+    auto notification = entry;
+    notification.node = id;
+    state_->notifyNode(std::move(notification));
+  }
+  state_->refresh();
+  return true;
+}
 bool FocusManager::modalActive() {
   const auto entry = state_->refresh();
   return entry.id != 0 && entry.policy.modal;
 }
 std::optional<InputArea> FocusManager::textArea() {
-  const auto scope = focusedScope();
-  return scope ? scope->textArea() : std::nullopt;
+  const auto entry = state_->refresh();
+  if (!entry.scope) return std::nullopt;
+  if (const auto layout = entry.scope->focusLayout()) {
+    const auto box = entry.node ? layout->find(*entry.node) : nullptr;
+    if (!box || !box->textInput) return std::nullopt;
+  }
+  return entry.scope->textArea();
 }
 bool FocusManager::dispatchKey(const KeyEvent &event) {
   const auto entry = state_->refresh();
@@ -219,7 +405,54 @@ bool FocusManager::dispatchKey(const KeyEvent &event) {
   if (!entry.scope) {
     return false;
   }
+  const auto layout = entry.scope->focusLayout();
+  if (layout && event.key == Key::Tab && !held(event.mods, KeyMods::Ctrl) &&
+      !held(event.mods, KeyMods::Alt)) {
+    entry.scope->beforeFocusTraversal();
+    std::vector<std::uint32_t> order;
+    for (auto id : layout->focusOrder) {
+      const auto box = layout->find(id);
+      if (box && box->focusable && box->enabled) order.push_back(id);
+    }
+    if (const auto next = nextFocusNode(order, entry.node,
+                                        held(event.mods, KeyMods::Shift))) {
+      return focusNode(*next);
+    }
+    return entry.policy.modal;
+  }
+  if (layout && event.key == Key::Return) {
+    auto target = entry.node;
+    for (const auto &box : layout->boxes) {
+      if (box.defaultAction && box.focusable && box.enabled &&
+          std::ranges::find(layout->focusOrder, box.id) !=
+              layout->focusOrder.end()) {
+        target = box.id;
+        break;
+      }
+    }
+    if (target && entry.scope->activateNode(*target)) {
+      state_->refresh();
+      return true;
+    }
+  }
   const bool handled = entry.scope->keyPressed(event);
+  if (!handled && layout && entry.node &&
+      (event.key == Key::Left || event.key == Key::Right ||
+       event.key == Key::Up || event.key == Key::Down)) {
+    const auto current = layout->find(*entry.node);
+    if (current && current->focusGroup != 0) {
+      std::vector<std::uint32_t> order;
+      for (auto id : layout->focusOrder) {
+        const auto box = layout->find(id);
+        if (box && box->focusable && box->enabled &&
+            box->focusGroup == current->focusGroup)
+          order.push_back(id);
+      }
+      const bool reverse = event.key == Key::Left || event.key == Key::Up;
+      if (const auto next = nextFocusNode(order, entry.node, reverse))
+        return focusNode(*next);
+    }
+  }
   if (!handled && event.key == Key::Escape && entry.policy.modal) {
     entry.scope->cancel();
     {
@@ -232,6 +465,7 @@ bool FocusManager::dispatchKey(const KeyEvent &event) {
     }
     state_->refresh();
   }
+  if (handled) state_->refresh();
   return handled || entry.policy.modal;
 }
 bool FocusManager::dispatchText(std::string_view text) {
@@ -239,7 +473,12 @@ bool FocusManager::dispatchText(std::string_view text) {
   if (!entry.scope) {
     return false;
   }
+  if (const auto layout = entry.scope->focusLayout()) {
+    const auto box = entry.node ? layout->find(*entry.node) : nullptr;
+    if (!box || !box->textInput) return true;
+  }
   entry.scope->textTyped(text);
+  state_->refresh();
   return true;
 }
 bool FocusManager::dispatchPointer(const PointerEvent &event) {
@@ -293,6 +532,7 @@ bool FocusManager::dispatchPointer(const PointerEvent &event) {
       state_->captures.erase(event.pointerId);
     }
   }
+  state_->refresh();
   return handled || entry.policy.modal;
 }
 bool FocusManager::dispatch(const InputEvent &event) {
@@ -379,9 +619,9 @@ bool FocusManager::cyclePane(bool reverse) {
   }
   if (current.scope != next) {
     if (current.scope) {
-      current.scope->focusChanged(false);
+      state_->notifyScope(*current.scope, false);
     }
-    next->focusChanged(true);
+    state_->notifyScope(*next, true);
   }
   return true;
 }

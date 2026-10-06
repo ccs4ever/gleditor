@@ -1478,7 +1478,8 @@ int Application::run() {
                                              .button = button,
                                              .x      = static_cast<float>(x),
                                              .y = static_cast<float>(y)})) {
-      if (state->focusManager.modalActive()) {
+      if (state->focusManager.modalActive() &&
+          dynamic_cast<ModalInput *>(state->focusManager.focusedScope())) {
         state->clickX       = x;
         state->clickY       = y;
         state->clickButton  = button;

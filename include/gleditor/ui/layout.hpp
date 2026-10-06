@@ -1,6 +1,7 @@
 #ifndef GLEDITOR_UI_LAYOUT_HPP
 #define GLEDITOR_UI_LAYOUT_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <gleditor/ui/metrics.hpp>
 #include <limits>
@@ -31,12 +32,17 @@ struct LayoutBox {
   Rect rect;
   Rect contentRect;
   bool focusable{}, enabled{true};
+  std::uint32_t focusGroup{};
+  bool textInput{}, defaultAction{};
 };
 struct LayoutResult {
   Rect bounds;
   std::vector<LayoutBox> boxes;
   std::vector<std::uint32_t> focusOrder;
-  [[nodiscard]] const LayoutBox *find(std::uint32_t id) const;
+  [[nodiscard]] const LayoutBox *find(std::uint32_t id) const {
+    const auto it = std::ranges::find(boxes, id, &LayoutBox::id);
+    return it == boxes.end() ? nullptr : &*it;
+  }
   [[nodiscard]] const LayoutBox *hitTest(float x, float y) const;
   [[nodiscard]] std::optional<InputArea> inputArea(std::uint32_t id,
                                                    int screenHeight) const;

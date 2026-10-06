@@ -6,6 +6,7 @@
 #include <gleditor/text/fit.hpp>
 #include <gleditor/text/shaping_cache.hpp>
 #include <gleditor/ui/layout.hpp>
+#include <memory>
 #include <string>
 #include <variant>
 
@@ -72,6 +73,7 @@ struct TextField {
 struct Scrubber {
   std::string label, action;
   double value{}, minimum{}, maximum{1};
+  double keyboardStep{0.01};
   bool setFraction(double);
   [[nodiscard]] double fraction() const;
 };
@@ -102,9 +104,11 @@ struct Widget {
   FontRole fontRole{FontRole::Label};
   Tone tone{Tone::Normal};
   std::uint16_t maxLines{3};
+  bool defaultAction{};
 };
 struct WidgetVisual {
   WidgetId id{}, ownerId{};
+  std::uint16_t pickingId{};
   std::string text, accessibleLabel, value, action, fontDescription;
   FontRole fontRole{FontRole::Label};
   Tone tone{Tone::Normal};
@@ -122,7 +126,9 @@ struct WidgetVisual {
 struct WidgetScene {
   LayoutResult layout;
   std::vector<WidgetVisual> visuals;
+  std::shared_ptr<const std::vector<WidgetId>> pickingTargets;
   [[nodiscard]] const WidgetVisual *find(WidgetId) const;
+  [[nodiscard]] std::optional<WidgetId> resolvePickingId(std::uint32_t) const;
 };
 /// The same pixel boxes are used by drawing, hit testing, and accessibility.
 /// IDs must be nonzero and unique, including tabs and list rows.

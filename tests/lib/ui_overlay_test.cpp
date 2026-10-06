@@ -131,6 +131,7 @@ protected:
                                    .theme          = theme};
     device.drawn.clear();
     device.identities.clear();
+    state.beginPickScene();
     overlay.drawFrame(context);
   }
 };
@@ -176,8 +177,9 @@ TEST_F(ScreenOverlayTest, layoutDrawPickAndAccessibilityShareTheSameBounds) {
         draw(overlay, metrics, theme);
         ASSERT_FALSE(device.drawn.empty());
         for (const auto &quad : device.drawn) {
-          const auto id   = quad.paper & 65535U;
-          const auto *box = scene->layout.find(id);
+          const auto id = scene->resolvePickingId(quad.paper & 65535U);
+          ASSERT_TRUE(id.has_value());
+          const auto *box = scene->layout.find(*id);
           ASSERT_NE(box, nullptr)
               << "every drawn picking tag needs a layout box";
           expectContained(rectangleOf(quad), box->rect);
@@ -214,7 +216,7 @@ TEST_F(ScreenOverlayTest, layoutDrawPickAndAccessibilityShareTheSameBounds) {
         EXPECT_EQ(hit->id, 100U);
         const auto covered =
             std::ranges::any_of(device.drawn, [&](const auto &row) {
-              if ((row.paper & 65535U) != 100U ||
+              if (scene->resolvePickingId(row.paper & 65535U) != 100U ||
                   (row.foreground & Doc::VBORow::solidFlag) == 0)
                 return false;
               const auto rectangle = rectangleOf(row);
@@ -285,6 +287,44 @@ TEST_F(ScreenOverlayTest, metricsThemeAndContentChangesInvalidateExactlyOnce) {
   EXPECT_EQ(retained->find(1)->accessibleLabel, "Original content");
 }
 
+TEST_F(ScreenOverlayTest, focusDrawingRetainsTextBatchesAndStaysInsideBoxes) {
+  using namespace gleditor::ui;
+  Widget model{.id = 1, .model = Panel{"Focus geometry"}};
+  model.children = {
+      {.id = 10, .model = Button{"Accept", "accept"}},
+      {.id    = 20,
+       .model = TextField{.value = "A long editable field", .caret = 21}},
+  };
+  ScreenOverlay overlay(std::move(model));
+  const UiMetrics metrics{
+      .contentScale = 1.25F, .screenWidth = 641, .screenHeight = 481};
+  const Theme theme;
+  overlay.deviceReady(device, {});
+  const auto scene = overlay.prepare(metrics, theme);
+  FocusManager manager;
+  const auto registration = manager.registerScope(overlay);
+  draw(overlay, metrics, theme);
+  const auto revision = overlay.layoutRevision();
+  gleditor::text::ShapingStatsScope shaping;
+  EXPECT_CALL(device, createPipeline).Times(0);
+  for (int frame = 0; frame < 50; ++frame) {
+    ASSERT_TRUE(manager.focusNode(frame % 2 == 0 ? 20 : 10));
+    draw(overlay, metrics, theme);
+    ASSERT_FALSE(device.drawn.empty());
+    for (const auto &quad : device.drawn) {
+      const auto id = scene->resolvePickingId(quad.paper & 65535U);
+      ASSERT_TRUE(id.has_value());
+      const auto *box = scene->layout.find(*id);
+      ASSERT_NE(box, nullptr);
+      expectContained(rectangleOf(quad), box->rect);
+    }
+  }
+  EXPECT_EQ(overlay.layoutRevision(), revision);
+  const auto counters = shaping.stats();
+  EXPECT_EQ(counters.layoutCalls, 0U);
+  EXPECT_EQ(counters.harfbuzzCalls, 0U);
+}
+
 TEST_F(ScreenOverlayTest, hiddenOverlaysDrawAndExposeNothing) {
   using namespace gleditor::ui;
   ScreenOverlay overlay({.id = 1, .model = Button{"Visible action", "accept"}});
@@ -351,6 +391,72 @@ TEST_F(ScreenOverlayTest, drawnPickingIdentityActivatesOnlyItsOwningOverlay) {
   ASSERT_EQ(actions.size(), 1U);
   EXPECT_EQ(actions.front().id, 7U);
   EXPECT_EQ(actions.front().action, "open");
+}
+
+TEST_F(ScreenOverlayTest,
+       asynchronousPicksKeepFullIdsAcrossReorderingAndRemoval) {
+  using namespace gleditor::ui;
+  constexpr WidgetId largeId = 65543;
+  Widget model{.id = 1, .model = Panel{"Stable widget identity"}};
+  model.children = {
+      {.id = 7, .model = Button{"Small identity", "small"}},
+      {.id = largeId, .model = Button{"Large identity", "large"}},
+  };
+  ScreenOverlay overlay(model);
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  const Theme theme;
+  std::vector<WidgetAction> actions;
+  overlay.setActionHandler(
+      [&](const auto &action) { actions.push_back(action); });
+  overlay.deviceReady(device, {});
+  draw(overlay, metrics, theme);
+  const auto scene = overlay.snapshot();
+  ASSERT_NE(scene->find(7)->pickingId, scene->find(largeId)->pickingId);
+  render::PickingResult picked;
+  picked.requestId = 99;
+  bool found       = false;
+  for (std::size_t index = 0; index < device.drawn.size(); ++index) {
+    const auto &quad = device.drawn[index];
+    if (scene->resolvePickingId(quad.paper & 65535U) != largeId) continue;
+    const auto identity =
+        device.identities[index] |
+        ((quad.quad & 3U) << (render::tagDocBits + render::tagPageBits));
+    picked.tag = render::unpackPickingTag(identity, quad.paper & 65535U, 0);
+    found      = true;
+    break;
+  }
+  ASSERT_TRUE(found);
+  const auto captured    = state.overlayPickScene;
+  picked.overlayWidgetId = render::resolveOverlayWidget(captured, picked.tag);
+  ASSERT_EQ(picked.overlayWidgetId, largeId);
+  std::ranges::reverse(model.children);
+  overlay.setModel(model);
+  draw(overlay, metrics, theme);
+  EXPECT_EQ(overlay.snapshot()->resolvePickingId(picked.tag.clusterIndex), 7U);
+  EXPECT_TRUE(overlay.picked(picked, state));
+  ASSERT_EQ(actions.size(), 1U);
+  EXPECT_EQ(actions.front().id, largeId);
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 16);
+  overlay.describe(builder);
+  ASSERT_TRUE(tree.find(builder.id(largeId)));
+  EXPECT_EQ(tree.find(builder.id(largeId))->label, "Large identity");
+  model.children.erase(model.children.begin());
+  overlay.setModel(model);
+  draw(overlay, metrics, theme);
+  EXPECT_TRUE(overlay.picked(picked, state));
+  EXPECT_EQ(actions.size(), 1U);
+  picked.overlayWidgetId.reset();
+  EXPECT_TRUE(overlay.picked(picked, state));
+  EXPECT_EQ(actions.size(), 1U);
+  auto invalid         = picked.tag;
+  invalid.clusterIndex = 0;
+  EXPECT_FALSE(render::resolveOverlayWidget(captured, invalid));
+  invalid.clusterIndex = 65535;
+  EXPECT_FALSE(render::resolveOverlayWidget(captured, invalid));
+  invalid = picked.tag;
+  ++invalid.pageIndex;
+  EXPECT_FALSE(render::resolveOverlayWidget(captured, invalid));
 }
 
 TEST_F(ScreenOverlayTest, accessibilityEditingUsesTheSameActionPathAsTyping) {

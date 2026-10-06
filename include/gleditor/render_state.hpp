@@ -47,7 +47,15 @@ struct RenderState {
   render::PickScene overlayPickScene;
   std::uint32_t nextOverlayPickScope{1};
 
-  void beginPickScene() { overlayPickScene.overlays.clear(); }
+  void beginPickScene() {
+    overlayPickScene.overlays.clear();
+    overlayPickScene.widgetOverlays.clear();
+  }
+  void bindOverlayWidgets(
+      std::uint32_t identity,
+      std::shared_ptr<const std::vector<std::uint32_t>> targets) {
+    overlayPickScene.widgetOverlays.push_back({identity, std::move(targets)});
+  }
   [[nodiscard]] std::uint32_t allocateOverlayPickScope() {
     constexpr auto scopeCount = (1U << render::tagDocBits) - 1U;
     const auto scope          = nextOverlayPickScope++;

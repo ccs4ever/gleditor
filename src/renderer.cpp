@@ -811,6 +811,8 @@ void Renderer::collectPickingResults(RenderState &state) {
       continue;
     }
     auto resolvedPick = *pick;
+    resolvedPick.overlayWidgetId =
+        render::resolveOverlayWidget(scene.mapped(), resolvedPick.tag);
     if (render::tagKindOverlay == resolvedPick.tag.kind) {
       const std::uint64_t key =
           (static_cast<std::uint64_t>(resolvedPick.tag.kind) << 60U) |

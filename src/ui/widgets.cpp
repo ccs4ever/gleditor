@@ -242,6 +242,12 @@ const WidgetVisual *WidgetScene::find(WidgetId id) const {
   const auto it = std::ranges::find(visuals, id, &WidgetVisual::id);
   return it == visuals.end() ? nullptr : &*it;
 }
+std::optional<WidgetId>
+WidgetScene::resolvePickingId(std::uint32_t pickingId) const {
+  if (!pickingTargets || pickingId == 0 || pickingId > pickingTargets->size())
+    return std::nullopt;
+  return (*pickingTargets)[pickingId - 1];
+}
 namespace {
 class WidgetBuilder {
 public:
@@ -274,6 +280,10 @@ public:
     }
     place(root, clampToSafeArea(metrics_.rounded(bounds), scene_.layout.bounds),
           0);
+    auto targets = std::make_shared<std::vector<WidgetId>>();
+    targets->reserve(scene_.visuals.size());
+    for (const auto &visual : scene_.visuals) targets->push_back(visual.id);
+    scene_.pickingTargets = std::move(targets);
     return std::move(scene_);
   }
 
@@ -412,16 +422,20 @@ private:
                      enabled};
     result.contentRect = clampToSafeArea(result.contentRect, rect);
     scene_.layout.boxes.push_back(result);
-    if (focusable && enabled) scene_.layout.focusOrder.push_back(id);
+    if (focusable && enabled && rect.width > 0 && rect.height > 0)
+      scene_.layout.focusOrder.push_back(id);
     return result;
   }
   void visual(const Widget &w, LayoutBox geometry, std::string text,
               TextPurpose purpose, a11y::Role role, bool background = false,
               std::string action = {}, WidgetId owner = 0) {
+    if (scene_.visuals.size() >= std::numeric_limits<std::uint16_t>::max())
+      throw std::length_error("Widget scene exceeds 65535 picking targets");
     WidgetVisual item;
-    item.id              = geometry.id;
-    item.ownerId         = owner ? owner : w.id;
-    item.text            = text;
+    item.pickingId = static_cast<std::uint16_t>(scene_.visuals.size() + 1);
+    item.id        = geometry.id;
+    item.ownerId   = owner ? owner : w.id;
+    item.text      = text;
     item.accessibleLabel = text;
     item.action          = std::move(action);
     item.fontRole        = w.fontRole;
@@ -461,6 +475,10 @@ private:
     const auto p = std::holds_alternative<Label>(w.model) ? 0 : pad(w.fontRole);
     auto geometry =
         box(w.id, parent, rect, p, button || field || scrubber, enabled);
+    scene_.layout.boxes.back().textInput     = field;
+    scene_.layout.boxes.back().defaultAction = w.defaultAction;
+    if (parent && button) scene_.layout.boxes.back().focusGroup = parent;
+
     if (const auto *label = std::get_if<Label>(&w.model))
       visual(w, geometry, label->text, label->purpose, a11y::Role::Label);
     else if (buttonModel)
@@ -534,6 +552,8 @@ private:
                                  .align    = Align::Stretch,
                                  .parentId = w.id});
       scene_.layout.append(placed);
+      for (auto &entry : scene_.layout.boxes)
+        if (entry.parentId == w.id) entry.focusGroup = w.id;
       for (std::size_t i = 0; i < 4; ++i) {
         auto copy       = w;
         copy.fontRole   = i == 2 ? FontRole::Mono : FontRole::Label;
@@ -566,6 +586,8 @@ private:
                            .align    = Align::Stretch,
                            .parentId = w.id});
       scene_.layout.append(placed);
+      for (auto &entry : scene_.layout.boxes)
+        if (entry.parentId == w.id) entry.focusGroup = w.id;
       for (std::size_t i = 0; i < placed.boxes.size(); ++i) {
         visual(w, placed.boxes[i], tabs->tabs[i].text, TextPurpose::Label,
                a11y::Role::Button, true, tabs->tabs[i].action);
@@ -595,6 +617,7 @@ private:
         row.height       = top - bottom;
         const auto entry = box(list->rows[i].id, w.id, row, p * .5F, true,
                                list->rows[i].enabled);
+        scene_.layout.boxes.back().focusGroup = w.id;
         visual(w, entry, list->rows[i].text, TextPurpose::Label,
                a11y::Role::ListItem, true, list->rows[i].action);
         scene_.visuals.back().itemIndex = i;
@@ -615,6 +638,8 @@ private:
       auto placed =
           stack(geometry.contentRect, items, {.gap = gap(), .parentId = w.id});
       scene_.layout.append(placed);
+      for (auto &entry : scene_.layout.boxes)
+        if (entry.parentId == w.id) entry.focusGroup = w.id;
       visual(w, placed.boxes[0], card->title, TextPurpose::Title,
              a11y::Role::Label);
       auto copy     = w;

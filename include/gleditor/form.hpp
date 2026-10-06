@@ -133,8 +133,14 @@ public:
   // -- gleditor::ModalInput ---------------------------------------------------
   [[nodiscard]] bool grabbing() const override;
   bool keyPressed(Key key, KeyMods mods) override;
+  bool keyPressed(const ui::KeyEvent &) override;
+  void beforeFocusTraversal() override;
   void textTyped(const std::string &utf8) override;
   [[nodiscard]] std::optional<InputArea> textArea() const override;
+  [[nodiscard]] std::shared_ptr<const ui::LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
 
   /**
    * @brief Put the form up.
@@ -184,8 +190,10 @@ private:
   /// The label of the first required field with nothing in it, or nullopt
   /// when the form is complete.
   [[nodiscard]] std::optional<std::string> firstMissing() const;
-  /// Move the highlight within an open drop-down, or the focus between fields.
-  void step(int by);
+  void chooseOption(int by);
+  void moveFocus(bool reverse);
+  void setFocusedNode(std::uint32_t);
+  void resetFocusLayout();
 
   mutable std::mutex guard;
   std::string fontName;
@@ -210,6 +218,7 @@ private:
   /// out while drawing, because that is where the panel's geometry is decided,
   /// and read by the event thread to tell the platform where typing lands.
   std::optional<InputArea> typingAt;
+  std::shared_ptr<const ui::LayoutResult> focusLayout_;
 
   std::unique_ptr<Canvas> canvas;
   std::uint64_t builtFor{};

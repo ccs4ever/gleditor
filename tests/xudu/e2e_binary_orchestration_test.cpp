@@ -981,6 +981,14 @@ TEST(E2EBinaryOrchestrationTest,
     ASSERT_EQ(result.exitCode, 0) << result.output;
     ASSERT_THAT(result.output, testing::HasSubstr(modal.label))
         << "the modal must actually open before isolation is tested";
+    std::size_t modalReports = 0;
+    for (std::size_t at = 0;
+         (at = result.output.find("[modal]", at)) != std::string::npos; ++at) {
+      ++modalReports;
+    }
+    EXPECT_EQ(modalReports, 2U)
+        << "each of the two open-modal snapshots must have exactly one "
+           "manager-owned modal root";
     std::size_t caretReports = 0;
     for (std::size_t at = 0;
          (at = result.output.find("[caret 4]", at)) != std::string::npos;

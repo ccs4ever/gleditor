@@ -1,11 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <gleditor/app.hpp>
+#include <gleditor/form.hpp>
 #include <gleditor/ui/focus_manager.hpp>
 
+#include <atomic>
 #include <functional>
+#include <latch>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -300,4 +304,362 @@ TEST(FocusManagerTest, aDeniedScopedCommandCannotFallThroughToAnotherBinding) {
   EXPECT_FALSE(table.dispatch(4, gleditor::Mod::None));
   EXPECT_EQ(ran, 0);
 }
+struct NodeScope : Scope {
+  std::shared_ptr<LayoutResult> layout = std::make_shared<LayoutResult>();
+  std::vector<std::uint32_t> nodeFocus, activations;
+  bool handlesEditingArrow{};
+  std::function<void(std::uint32_t)> onNode;
+  NodeScope() {
+    layout->bounds     = {0.0F, 0.0F, 300.0F, 100.0F};
+    layout->boxes      = {{.id         = 10,
+                           .rect       = {0.0F, 0.0F, 100.0F, 50.0F},
+                           .focusable  = true,
+                           .focusGroup = 1,
+                           .textInput  = true},
+                          {.id         = 20,
+                           .rect       = {100.0F, 0.0F, 100.0F, 50.0F},
+                           .focusable  = true,
+                           .focusGroup = 1},
+                          {.id            = 30,
+                           .rect          = {200.0F, 0.0F, 100.0F, 50.0F},
+                           .focusable     = true,
+                           .focusGroup    = 2,
+                           .defaultAction = true}};
+    layout->focusOrder = {10, 20, 30};
+  }
+  std::shared_ptr<const LayoutResult> focusLayout() const override {
+    return layout;
+  }
+  void focusedNodeChanged(std::uint32_t id) override {
+    nodeFocus.push_back(id);
+    if (onNode) onNode(id);
+  }
+  bool activateNode(std::uint32_t id) override {
+    activations.push_back(id);
+    return true;
+  }
+  bool keyPressed(const KeyEvent &event) override {
+    keys.push_back(event);
+    return handlesEditingArrow &&
+           (event.key == Key::Left || event.key == Key::Right ||
+            event.key == Key::Up || event.key == Key::Down);
+  }
+};
+TEST(FocusTraversalTest, InitialTargetsUseValidatedLayoutNodes) {
+  FocusManager manager;
+  NodeScope scope;
+  auto handle = manager.push(scope);
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_EQ(scope.nodeFocus, (std::vector<std::uint32_t>{10}));
+  handle.reset();
+  handle = manager.push(scope, {.initial = FocusTarget::DefaultAction});
+  EXPECT_EQ(manager.focusedNode(), 30U);
+  handle.reset();
+  handle = manager.push(
+      scope, {.initial = FocusTarget::ExplicitNode, .initialNode = 20});
+  EXPECT_EQ(manager.focusedNode(), 20U);
+  handle.reset();
+  handle = manager.push(
+      scope, {.initial = FocusTarget::ExplicitNode, .initialNode = 999});
+  EXPECT_EQ(manager.focusedNode(), 10U);
+}
+TEST(FocusTraversalTest, TabWrapsLayoutOrderAndSkipsDisabledNodes) {
+  FocusManager manager;
+  NodeScope scope;
+  scope.layout->boxes[1].enabled = false;
+  const auto handle              = manager.push(scope);
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab}));
+  EXPECT_EQ(manager.focusedNode(), 30U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab}));
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab, KeyMods::Shift}));
+  EXPECT_EQ(manager.focusedNode(), 30U);
+  EXPECT_FALSE(manager.focusNode(20));
+  EXPECT_FALSE(manager.focusNode(999));
+}
+TEST(FocusTraversalTest,
+     EditingArrowsHavePriorityAndNavigationStaysWithinGroup) {
+  FocusManager manager;
+  NodeScope scope;
+  const auto handle         = manager.push(scope);
+  scope.handlesEditingArrow = true;
+  EXPECT_TRUE(manager.dispatchKey({Key::Right}));
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  scope.handlesEditingArrow = false;
+  EXPECT_TRUE(manager.dispatchKey({Key::Right}));
+  EXPECT_EQ(manager.focusedNode(), 20U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Right}));
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_TRUE(manager.focusNode(30));
+  EXPECT_TRUE(manager.dispatchKey({Key::Down}));
+  EXPECT_EQ(manager.focusedNode(), 30U);
+}
+TEST(FocusTraversalTest, ReturnUsesDefaultActionAndEscapeRestoresNode) {
+  FocusManager manager;
+  NodeScope pane, modal;
+  const auto paneHandle = manager.addPane(pane);
+  EXPECT_TRUE(manager.focusNode(20));
+  const auto modalHandle = manager.push(modal);
+  EXPECT_TRUE(manager.dispatchKey({Key::Return}));
+  EXPECT_EQ(modal.activations, (std::vector<std::uint32_t>{30}));
+  EXPECT_TRUE(manager.dispatchKey({Key::Escape}));
+  EXPECT_EQ(manager.focusedScope(), &pane);
+  EXPECT_EQ(manager.focusedNode(), 20U);
+}
+TEST(FocusTraversalTest, NodeRequestsAreValidatedAndSnapshotRevisionIsStable) {
+  FocusManager manager;
+  NodeScope scope;
+  const auto handle = manager.push(scope);
+  const auto before = manager.focusSnapshot();
+  EXPECT_EQ(before.scope, &scope);
+  EXPECT_TRUE(before.modal);
+  EXPECT_EQ(before.node, 10U);
+  EXPECT_EQ(manager.focusRevision(), before.revision);
+  scope.requestFocus(20);
+  const auto after = manager.focusSnapshot();
+  EXPECT_EQ(after.node, 20U);
+  EXPECT_GT(after.revision, before.revision);
+  EXPECT_EQ(manager.focusRevision(), after.revision);
+  scope.requestFocus(999);
+  EXPECT_EQ(manager.focusRevision(), after.revision);
+  EXPECT_EQ(manager.focusedNode(), 20U);
+}
+TEST(FocusTraversalTest, NonTextNodesDisableImeAndSwallowComposedText) {
+  FocusManager manager;
+  NodeScope scope;
+  scope.area        = InputArea{10, 20, 100, 50};
+  const auto handle = manager.push(scope);
+  EXPECT_EQ(manager.textArea(), scope.area);
+  EXPECT_TRUE(manager.dispatchText("typed"));
+  EXPECT_EQ(scope.text, "typed");
+  EXPECT_TRUE(manager.focusNode(20));
+  EXPECT_FALSE(manager.textArea());
+  EXPECT_TRUE(manager.dispatchText("ignored"));
+  EXPECT_EQ(scope.text, "typed");
+}
+TEST(FocusTraversalTest, FocusCallbacksCanRequestAnotherNodeReentrantly) {
+  FocusManager manager;
+  NodeScope scope;
+  scope.onNode = [&](std::uint32_t id) {
+    if (id == 10) scope.requestFocus(20);
+  };
+  const auto handle = manager.push(scope);
+  EXPECT_EQ(manager.focusedNode(), 20U);
+  EXPECT_EQ(scope.nodeFocus, (std::vector<std::uint32_t>{10, 20}));
+}
+TEST(FocusTraversalTest, LayoutChangesReplaceAnUnavailableFocusedNode) {
+  FocusManager manager;
+  NodeScope scope;
+  const auto handle = manager.push(scope);
+  EXPECT_TRUE(manager.focusNode(20));
+  const auto before              = manager.focusRevision();
+  scope.layout->boxes[1].enabled = false;
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_GT(manager.focusRevision(), before);
+  scope.layout->focusOrder.clear();
+  EXPECT_FALSE(manager.focusedNode());
+  EXPECT_FALSE(manager.textArea());
+}
+TEST(FocusTraversalTest, FormUsesSharedTraversalAndPreservesExpandedChoices) {
+  FocusManager manager;
+  gleditor::Form form("Sans 12");
+  form.open("Fields", "",
+            {{.label = "Name"},
+             {.label   = "Choice",
+              .kind    = gleditor::Form::Kind::Choice,
+              .options = {"One", "Two"}},
+             {.label = "Tail"}},
+            [](const auto &) {});
+  const auto handle = manager.registerScope(form);
+  EXPECT_EQ(manager.focusedNode(), 16U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab}));
+  EXPECT_EQ(form.focused(), 1U);
+  EXPECT_EQ(manager.focusedNode(), 80U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Return}));
+  EXPECT_TRUE(form.listOpen());
+  EXPECT_TRUE(manager.dispatchKey({Key::Down}));
+  EXPECT_EQ(manager.focusedNode(), 80U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Escape}));
+  EXPECT_TRUE(form.isOpen());
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_TRUE(manager.dispatchKey({Key::Return}));
+  EXPECT_TRUE(manager.dispatchKey({Key::Down}));
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab}));
+  EXPECT_EQ(manager.focusedNode(), 144U);
+  EXPECT_EQ(form.current()[1].chosen, 1U);
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_TRUE(manager.dispatchKey({Key::Up}));
+  EXPECT_EQ(form.focused(), 1U);
+  EXPECT_EQ(manager.focusedNode(), 80U);
+}
+TEST(FocusTraversalTest, OneFieldChoiceTabCommitsWithoutMovingToAnotherNode) {
+  FocusManager manager;
+  gleditor::Form form("Sans 12");
+  form.open("Choice", "",
+            {{.label   = "Pick",
+              .kind    = gleditor::Form::Kind::Choice,
+              .options = {"One", "Two"}}},
+            [](const auto &) {});
+  const auto handle = manager.registerScope(form);
+  EXPECT_TRUE(manager.dispatchKey({Key::Return}));
+  EXPECT_TRUE(manager.dispatchKey({Key::Down}));
+  EXPECT_TRUE(manager.dispatchKey({Key::Tab}));
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_EQ(form.current()[0].chosen, 1U);
+  EXPECT_EQ(manager.focusedNode(), 16U);
+}
+TEST(FocusTraversalTest, SpaceOperatesNonTextControlsWithoutComposedText) {
+  FocusManager manager;
+  gleditor::Form form("Sans 12");
+  form.open("Toggle", "",
+            {{.label = "On", .kind = gleditor::Form::Kind::Toggle}},
+            [](const auto &) {});
+  const auto handle = manager.registerScope(form);
+  EXPECT_TRUE(manager.dispatchKey({Key::Space}));
+  EXPECT_TRUE(form.current()[0].on);
+  EXPECT_TRUE(manager.dispatchText(" "));
+  EXPECT_TRUE(form.current()[0].on);
+}
+
+TEST(FocusTraversalTest, HiddenDefaultActionCannotOverrideAVisibleFocusedNode) {
+  FocusManager manager;
+  NodeScope scope;
+  scope.layout->focusOrder = {10, 20};
+  const auto handle =
+      manager.push(scope, {.initial = FocusTarget::DefaultAction});
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_TRUE(manager.dispatchKey({Key::Return}));
+  EXPECT_EQ(scope.activations, (std::vector<std::uint32_t>{10}));
+}
+
+TEST(FocusTraversalTest, ConcurrentLayoutReadCannotOverwriteNewerNodeFocus) {
+  struct ConcurrentScope : NodeScope {
+    mutable std::latch entered{1}, release{1};
+    std::atomic<bool> block{false};
+    mutable std::atomic<bool> paused{false};
+    std::atomic<std::uint32_t> lastNode{0};
+    const std::thread::id eventThread = std::this_thread::get_id();
+    std::shared_ptr<const LayoutResult> focusLayout() const override {
+      if (block.load() && std::this_thread::get_id() != eventThread &&
+          !paused.exchange(true)) {
+        entered.count_down();
+        release.wait();
+      }
+      return layout;
+    }
+    void focusChanged(bool) override {}
+    void focusedNodeChanged(std::uint32_t id) override { lastNode.store(id); }
+  };
+  FocusManager manager;
+  ConcurrentScope scope;
+  const auto handle = manager.push(scope);
+  scope.block.store(true);
+  FocusSnapshot read;
+  std::jthread reader([&] { read = manager.focusSnapshot(); });
+  scope.entered.wait();
+  EXPECT_TRUE(manager.focusNode(20));
+  scope.release.count_down();
+  reader.join();
+  EXPECT_EQ(read.node, 20U);
+  EXPECT_EQ(manager.focusedNode(), 20U);
+  EXPECT_EQ(scope.lastNode.load(), 20U);
+}
+
+TEST(FocusTraversalTest, RequestFromPreviousOpeningCannotChangeReopenedScope) {
+  struct ReopeningScope : NodeScope {
+    mutable std::latch entered{1}, release{1};
+    std::atomic<bool> block{false};
+    mutable std::atomic<unsigned> reads{0};
+    std::atomic<std::uint32_t> lastNode{0};
+    const std::thread::id eventThread = std::this_thread::get_id();
+    std::shared_ptr<const LayoutResult> focusLayout() const override {
+      if (block.load() && std::this_thread::get_id() != eventThread &&
+          ++reads == 2) {
+        entered.count_down();
+        release.wait();
+      }
+      return layout;
+    }
+    void focusChanged(bool) override {}
+    void focusedNodeChanged(std::uint32_t id) override { lastNode.store(id); }
+  };
+  FocusManager manager;
+  ReopeningScope scope;
+  scope.activate();
+  const auto handle = manager.registerScope(scope);
+  scope.block.store(true);
+  bool accepted = true;
+  std::jthread reader([&] { accepted = manager.focusNode(20); });
+  scope.entered.wait();
+  scope.deactivate();
+  scope.activate();
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  scope.release.count_down();
+  reader.join();
+  EXPECT_FALSE(accepted);
+  EXPECT_EQ(manager.focusedNode(), 10U);
+  EXPECT_EQ(scope.lastNode.load(), 10U);
+}
+TEST(FocusTraversalTest, DelayedNodeCallbackReappliesTheLatestNode) {
+  struct DelayedScope : NodeScope {
+    std::latch entered{1}, release{1};
+    std::atomic<bool> paused{false};
+    std::atomic<std::uint32_t> lastNode{0};
+    void focusChanged(bool) override {}
+    void focusedNodeChanged(std::uint32_t id) override {
+      if (id == 20 && !paused.exchange(true)) {
+        entered.count_down();
+        release.wait();
+      }
+      lastNode.store(id);
+    }
+  };
+  FocusManager manager;
+  DelayedScope scope;
+  const auto handle = manager.push(scope);
+  bool accepted     = false;
+  std::jthread earlier([&] { accepted = manager.focusNode(20); });
+  scope.entered.wait();
+  EXPECT_TRUE(manager.focusNode(30));
+  EXPECT_EQ(scope.lastNode.load(), 30U);
+  scope.release.count_down();
+  earlier.join();
+  EXPECT_TRUE(accepted);
+  EXPECT_EQ(manager.focusedNode(), 30U);
+  EXPECT_EQ(scope.lastNode.load(), 30U);
+}
+TEST(FocusTraversalTest, DelayedScopeGainDoesNotLeaveTheBackgroundFocused) {
+  struct DelayedScope : FocusScope {
+    std::latch entered{1}, release{1};
+    std::atomic<bool> delay{false}, paused{false}, isFocused{false};
+    void focusChanged(bool value) override {
+      if (value && delay.load() && !paused.exchange(true)) {
+        entered.count_down();
+        release.wait();
+      }
+      isFocused.store(value);
+    }
+  };
+  FocusManager manager;
+  DelayedScope first, second;
+  const auto firstHandle  = manager.registerScope(first);
+  const auto secondHandle = manager.registerScope(second);
+  first.delay.store(true);
+  FocusScope *read = nullptr;
+  std::jthread earlier([&] {
+    first.activate();
+    read = manager.focusedScope();
+  });
+  first.entered.wait();
+  second.activate();
+  EXPECT_EQ(manager.focusedScope(), &second);
+  EXPECT_TRUE(second.isFocused.load());
+  first.release.count_down();
+  earlier.join();
+  EXPECT_EQ(read, &second);
+  EXPECT_EQ(manager.focusedScope(), &second);
+  EXPECT_FALSE(first.isFocused.load());
+  EXPECT_TRUE(second.isFocused.load());
+}
+
 } // namespace

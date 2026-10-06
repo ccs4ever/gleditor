@@ -32,6 +32,10 @@
 #include <gleditor/a11y/platform.hpp>
 #include <gleditor/a11y/tree.hpp>
 
+namespace gleditor::ui {
+class FocusManager;
+}
+
 namespace gleditor::a11y {
 
 /**
@@ -51,7 +55,8 @@ public:
    *        because a bug report about a misdescribed widget has to be able to
    *        name what misdescribed it.
    */
-  Publisher(std::string aName, std::string aToolkit, std::string aVersion);
+  Publisher(std::string aName, std::string aToolkit, std::string aVersion,
+            std::unique_ptr<Platform> aPlatform = {});
   ~Publisher();
 
   Publisher(const Publisher &)            = delete;
@@ -68,7 +73,9 @@ public:
    * them, a modal last.
    *
    * Sources are held as bare pointers and not owned. One must outlive the
-   * publisher.
+   * publisher, or remain alive until all in-flight rebuild/action callbacks
+   * finish after removeSource(). Callbacks run without publisher locks and
+   * may register or unregister sources themselves.
    *
    * @param owner Which of the reserved numbers this is, for the library's own
    *        sources. Left alone by a program, which gets the next free one --
@@ -76,6 +83,9 @@ public:
    *        them, after everything the library describes for itself.
    */
   void addSource(Source *source, std::optional<std::uint16_t> owner = {});
+  /// Retains a dynamic source through any in-flight callback after removal.
+  void addSource(std::shared_ptr<Source> source,
+                 std::optional<std::uint16_t> owner = {});
 
   /**
    * @brief Unregister a source added by addSource().
@@ -86,6 +96,10 @@ public:
    * Harmless if @p source was never registered or already removed.
    */
   void removeSource(Source *source);
+
+  /// Non-owning; bind before input starts and keep the manager alive while
+  /// rebuilding or dispatching accessibility actions.
+  void setFocusManager(ui::FocusManager *manager);
 
   /**
    * @brief Open the platform's connection.
@@ -174,6 +188,7 @@ private:
   struct Registered {
     Source *source{};
     std::uint16_t owner{};
+    std::shared_ptr<Source> lifetime;
   };
 
   std::string name;
@@ -185,8 +200,13 @@ private:
   /// comes back -- so this is guarded even though registration happens once
   /// and early.
   mutable std::mutex sourcesGuard;
+  void registerSource(Registered registration,
+                      std::optional<std::uint16_t> owner);
   std::vector<Registered> sources;
+  std::shared_ptr<const std::vector<Registered>> registeredSnapshot =
+      std::make_shared<const std::vector<Registered>>();
   std::uint16_t nextOwner{Ids::firstProgramOwner};
+  std::uint64_t registrationRevision{};
 
   std::unique_ptr<Platform> platform;
 
@@ -196,9 +216,12 @@ private:
   Tree built;
   Tree sent;
   std::string windowTitle;
+  ui::FocusManager *focusManager{};
   /// The summed revisions the last rebuild was made from, so a frame where
   /// nothing changed costs one addition per source.
   std::uint64_t builtFrom{};
+  std::uint64_t builtRegistrations{}, builtFocus{};
+  int builtWidth{}, builtHeight{};
   bool everBuilt{};
 };
 

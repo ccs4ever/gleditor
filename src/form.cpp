@@ -157,12 +157,16 @@ void Form::describe(a11y::Builder &into) {
   }
 
   {
-    // Modal, which is the whole point of it: an assistive technology that
-    // knows a dialog is modal stops offering the document behind it, which is
-    // the same thing the keyboard grab does for somebody typing.
     auto &panel = into.add(panelId, a11y::Role::Dialog);
     panel.label = title;
-    panel.modal = true;
+    if (focusLayout_) {
+      const auto rect = focusLayout_->bounds;
+      panel.bounds    = a11y::Rect{
+             .left  = rect.left,
+             .top   = static_cast<double>(builtHeight) - rect.bottom - rect.height,
+             .right = rect.left + rect.width,
+             .bottom = static_cast<double>(builtHeight) - rect.bottom};
+    }
     panel.children.push_back(into.id(titleId));
     if (!note.empty() || !trouble.empty()) {
       panel.children.push_back(into.id(noteId));
@@ -201,6 +205,17 @@ void Form::describe(a11y::Builder &into) {
     node.placeholder = one.hint;
     node.focusable   = true;
     node.actions     = a11y::bit(a11y::Action::Focus);
+    if (focusLayout_) {
+      if (const auto box =
+              focusLayout_->find(static_cast<std::uint32_t>(fieldId(which)))) {
+        const auto rect = box->rect;
+        node.bounds     = a11y::Rect{
+                .left = rect.left,
+                .top = static_cast<double>(builtHeight) - rect.bottom - rect.height,
+                .right  = rect.left + rect.width,
+                .bottom = static_cast<double>(builtHeight) - rect.bottom};
+      }
+    }
 
     switch (one.kind) {
     case Kind::Text:
@@ -229,10 +244,6 @@ void Form::describe(a11y::Builder &into) {
       node.toggled = one.on;
       node.actions |= a11y::bit(a11y::Action::Click);
       break;
-    }
-
-    if (which == focus) {
-      into.takeFocus(into.id(fieldId(which)));
     }
 
     if (Kind::Choice == one.kind) {
@@ -275,7 +286,8 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
     if (a11y::Action::Click != action || option >= one.options.size()) {
       return false;
     }
-    focus      = which;
+    focus = which;
+    requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     one.chosen = option;
     expanded   = false;
     trouble.clear();
@@ -286,11 +298,13 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
   switch (action) {
   case a11y::Action::Focus:
     focus = which;
+    requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     caret = one.value.size();
     revision++;
     return true;
   case a11y::Action::Click:
     focus = which;
+    requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     if (Kind::Toggle == one.kind) {
       one.on = !one.on;
       revision++;
@@ -309,7 +323,8 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
     }
     one.value = value;
     focus     = which;
-    caret     = one.value.size();
+    requestFocus(static_cast<std::uint32_t>(fieldId(which)));
+    caret = one.value.size();
     trouble.clear();
     revision++;
     return true;
@@ -340,6 +355,7 @@ void Form::open(std::string aTitle, std::string aNote,
   // filled-in value wants to be.
   caret = fields.empty() ? 0 : fields.front().value.size();
   open_ = true;
+  resetFocusLayout();
   activate();
   // Where the last form's focused field was is not where this one's is, and
   // until this one has been drawn nobody knows where that will be. Saying
@@ -395,30 +411,76 @@ bool Form::secretsShown() const {
   });
 }
 
-void Form::step(const int by) {
-  if (fields.empty()) {
-    return;
+std::shared_ptr<const ui::LayoutResult> Form::focusLayout() const {
+  const std::scoped_lock locker(guard);
+  return open_ ? focusLayout_ : nullptr;
+}
+void Form::resetFocusLayout() {
+  auto layout = std::make_shared<ui::LayoutResult>();
+  for (std::size_t which = 0; which < fields.size(); ++which) {
+    const auto id = static_cast<std::uint32_t>(fieldId(which));
+    const bool takesText =
+        fields[which].kind == Kind::Text || fields[which].kind == Kind::Secret;
+    layout->boxes.push_back(
+        {.id = id, .focusable = true, .focusGroup = 1, .textInput = takesText});
+    layout->focusOrder.push_back(id);
   }
-  if (expanded) {
-    // Inside the list rather than between the fields: what is being moved is
-    // the highlight over the options.
-    const auto count = fields[focus].options.size();
-    if (0 == count) {
-      return;
-    }
-    if (by < 0) {
-      highlight = 0 == highlight ? count - 1 : highlight - 1;
-    } else {
-      highlight = (highlight + 1) % count;
-    }
-    return;
+  focusLayout_ = std::move(layout);
+}
+void Form::setFocusedNode(std::uint32_t id) {
+  if (id < firstField || (id - firstField) % perField != 0) return;
+  const auto which = static_cast<std::size_t>((id - firstField) / perField);
+  if (which >= fields.size()) return;
+  if (which != focus && expanded && focus < fields.size()) {
+    fields[focus].chosen = highlight;
+    expanded             = false;
   }
-  if (by < 0) {
-    focus = 0 == focus ? fields.size() - 1 : focus - 1;
-  } else {
-    focus = (focus + 1) % fields.size();
-  }
+  focus = which;
   caret = fields[focus].value.size();
+  typingAt.reset();
+  if (focusLayout_) {
+    if (const auto box = focusLayout_->find(id); box && box->textInput &&
+                                                 box->rect.width > 0.0F &&
+                                                 box->rect.height > 0.0F) {
+      typingAt = ui::toInputArea(box->rect, builtHeight);
+    }
+  }
+}
+void Form::focusedNodeChanged(std::uint32_t id) {
+  const std::scoped_lock locker(guard);
+  if (!open_) return;
+  setFocusedNode(id);
+  ++revision;
+}
+bool Form::activateNode(std::uint32_t id) {
+  {
+    const std::scoped_lock locker(guard);
+    if (!open_ || id < firstField || (id - firstField) % perField != 0 ||
+        (id - firstField) / perField >= fields.size())
+      return false;
+    // Enter operates the field's control; selecting the same field must not
+    // settle an expanded choice before its Return handler sees the list.
+    if (static_cast<std::size_t>((id - firstField) / perField) != focus) {
+      setFocusedNode(id);
+    }
+  }
+  return keyPressed(Key::Return, KeyMods::None);
+}
+void Form::moveFocus(bool reverse) {
+  if (!focusLayout_) resetFocusLayout();
+  if (const auto id = ui::nextFocusNode(
+          focusLayout_->focusOrder, static_cast<std::uint32_t>(fieldId(focus)),
+          reverse)) {
+    setFocusedNode(*id);
+    requestFocus(*id);
+  }
+}
+void Form::chooseOption(const int by) {
+  if (fields.empty() || !expanded) return;
+  const auto count = fields[focus].options.size();
+  if (count == 0) return;
+  highlight =
+      by < 0 ? (highlight + count - 1) % count : (highlight + 1) % count;
 }
 
 void Form::moveCaret(const int by) {
@@ -433,6 +495,22 @@ void Form::moveCaret(const int by) {
       caret >= value.size()
           ? value.size()
           : alignToCharacterEnd(value, static_cast<std::uint32_t>(caret + 1));
+}
+
+void Form::beforeFocusTraversal() {
+  const std::scoped_lock locker(guard);
+  if (expanded && focus < fields.size()) {
+    fields[focus].chosen = highlight;
+    expanded             = false;
+    ++revision;
+  }
+}
+bool Form::keyPressed(const ui::KeyEvent &event) {
+  if (event.key == Key::Up || event.key == Key::Down) {
+    const std::scoped_lock locker(guard);
+    if (!expanded) return false;
+  }
+  return keyPressed(event.key, event.mods);
 }
 
 bool Form::keyPressed(const Key key, const KeyMods mods) {
@@ -510,16 +588,35 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         fields[focus].chosen = highlight;
         expanded             = false;
       }
-      step(held(mods, KeyMods::Shift) ? -1 : 1);
+      moveFocus(held(mods, KeyMods::Shift));
       return true;
 
     case Key::Up:
-      step(-1);
+      if (expanded)
+        chooseOption(-1);
+      else
+        moveFocus(true);
       return true;
     case Key::Down:
-      step(1);
+      if (expanded)
+        chooseOption(1);
+      else
+        moveFocus(false);
       return true;
 
+    case Key::Space: {
+      auto &here = field();
+      if (Kind::Toggle == here.kind) {
+        here.on = !here.on;
+        return true;
+      }
+      if (Kind::Choice == here.kind && !here.options.empty()) {
+        expanded  = !expanded;
+        highlight = here.chosen;
+        return true;
+      }
+      return false;
+    }
     case Key::Left:
     case Key::Right: {
       auto &here = field();
@@ -681,6 +778,11 @@ void Form::drawFrame(FrameContext &ctx) {
     const auto left   = std::max(0.0F, (width - panelWidth) / 2.0F);
     const auto bottom = std::max(0.0F, (height - panelHeight) / 2.0F);
     canvas->addRect(left, bottom, panelWidth, panelHeight, ink(panelBack));
+    auto layout    = std::make_shared<ui::LayoutResult>();
+    layout->bounds = {left, bottom, panelWidth, panelHeight};
+    layout->boxes.push_back({.id          = static_cast<std::uint32_t>(panelId),
+                             .rect        = layout->bounds,
+                             .contentRect = layout->bounds});
 
     auto top = bottom + panelHeight - padding;
     // Ellipsised rather than allowed to run off the panel: a note saying where
@@ -722,6 +824,17 @@ void Form::drawFrame(FrameContext &ctx) {
       const auto boxWidth = panelWidth - (2 * padding) - labelWidth;
       canvas->addRect(boxLeft, top - boxHeight + lineGap, boxWidth, boxHeight,
                       ink(focused ? boxFocused : boxBack));
+      const auto id = static_cast<std::uint32_t>(fieldId(i));
+      const ui::Rect fieldRect{boxLeft, top - boxHeight + lineGap, boxWidth,
+                               boxHeight};
+      layout->boxes.push_back(
+          {.id          = id,
+           .rect        = fieldRect,
+           .contentRect = fieldRect,
+           .focusable   = true,
+           .focusGroup  = 1,
+           .textInput   = one.kind == Kind::Text || one.kind == Kind::Secret});
+      layout->focusOrder.push_back(id);
 
       // What the box says, which for a secret is not what it holds.
       const auto held = Kind::Secret == one.kind && !reveal
@@ -819,6 +932,10 @@ void Form::drawFrame(FrameContext &ctx) {
 
     canvas->setTextBounds(std::nullopt);
     canvas->commit();
+    {
+      const std::scoped_lock locker(guard);
+      if (seen == revision) focusLayout_ = std::move(layout);
+    }
   }
 
   const glm::mat4 projection =

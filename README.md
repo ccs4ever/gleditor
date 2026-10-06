@@ -276,6 +276,12 @@ needs version 2.0.22 or newer. SDL supplies windows and message boxes, not a wid
 editable forms such as xudu's publishing dialog are rendered with `gleditor::Form`. Text input area
 updates position input-method candidate windows beside the focused field.
 
+`ui::FocusManager` owns modal precedence and keyboard focus. Scopes publish immutable
+`ui::LayoutResult` snapshots so traversal, input-method placement, picking and accessibility use the
+same node identities and bounds. Tab follows layout order and wraps; arrows move within a focus
+group after the control has handled editing. The accessibility publisher follows the manager's
+active scope, reports one modal root and blocks background actions while that scope is modal.
+
 ## Tests and diagnostics
 
 `make` exports offscreen SDL video, dummy audio, software GL, and XDG data/config/cache directories

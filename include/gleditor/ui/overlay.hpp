@@ -5,6 +5,7 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/pick_observer.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/widgets.hpp>
 #include <mutex>
 
@@ -13,7 +14,8 @@ namespace gleditor::ui {
 /// receive action IDs without introducing dependencies on application types.
 class ScreenOverlay : public FrameContributor,
                       public PickObserver,
-                      public a11y::Source {
+                      public a11y::Source,
+                      public FocusScope {
 public:
   explicit ScreenOverlay(Widget);
   ~ScreenOverlay() override;
@@ -30,10 +32,24 @@ public:
   [[nodiscard]] std::shared_ptr<const WidgetScene> snapshot() const;
   [[nodiscard]] std::uint64_t layoutRevision() const;
   [[nodiscard]] text::ShapingCache::Stats shapingStats() const;
+  using FocusScope::activate;
   bool activate(WidgetId, std::optional<double> fraction = std::nullopt);
   bool typeInto(WidgetId, std::string_view);
   bool keyInto(WidgetId, Key, KeyMods = KeyMods::None);
   bool scrollList(WidgetId, float deltaPx);
+  [[nodiscard]] std::shared_ptr<const LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
+  bool keyPressed(const KeyEvent &) override;
+  void textTyped(std::string_view) override;
+  bool pointerEvent(const PointerEvent &) override;
+  void cancel() override;
+  void focusChanged(bool) override;
+  [[nodiscard]] std::optional<InputArea> textArea() const override;
+  [[nodiscard]] std::optional<InputArea> pointerArea() const override;
+  [[nodiscard]] bool acceptsCommand(std::string_view) const override;
+
   void deviceReady(render::RenderDevice &,
                    const render::PipelineDesc &) override;
   void drawFrame(FrameContext &) override;
@@ -46,6 +62,7 @@ public:
 private:
   void changed();
   void rebuildCanvas(RenderState &, const WidgetScene &);
+  void rebuildFocusCanvas(const WidgetScene &);
   mutable std::mutex guard_;
   Widget model_;
   bool visible_{true}, dirty_{true};
@@ -55,11 +72,14 @@ private:
   std::shared_ptr<const WidgetScene> scene_;
   text::ShapingCache shaping_;
   std::uint64_t revision_{1}, layoutRevision_{}, drawnRevision_{};
-  std::uint32_t identity_{};
+  std::uint32_t identity_{}, focusedNode_{}, pressedNode_{};
+  std::uint32_t pressedPointer_{};
+  bool scopeFocused_{};
+  std::uint64_t focusGeometryRevision_{}, drawnFocusRevision_{};
   std::function<void(const WidgetAction &)> actionHandler_;
   render::RenderDevice *device_{};
   std::optional<render::PipelineDesc> pipeline_;
-  std::unique_ptr<Canvas> background_;
+  std::unique_ptr<Canvas> background_, focusCanvas_;
   std::array<std::unique_ptr<Canvas>, kFontRoleCount> textCanvases_;
 };
 } // namespace gleditor::ui

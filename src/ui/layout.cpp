@@ -131,10 +131,6 @@ Rect axisRect(Rect bounds, Axis axis, float main, float cross, float mainSize,
           crossSize, mainSize};
 }
 } // namespace
-const LayoutBox *LayoutResult::find(std::uint32_t id) const {
-  const auto it = std::ranges::find(boxes, id, &LayoutBox::id);
-  return it == boxes.end() ? nullptr : &*it;
-}
 const LayoutBox *LayoutResult::hitTest(float x, float y) const {
   for (auto it = boxes.rbegin(); it != boxes.rend(); ++it) {
     const auto &rect = it->rect;

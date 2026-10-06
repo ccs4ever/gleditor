@@ -249,8 +249,12 @@ struct AppState {
    * it, and harmless afterwards on a machine where nothing accessible is
    * running.
    */
-  std::shared_ptr<gleditor::a11y::Publisher> accessibility =
-      std::make_shared<gleditor::a11y::Publisher>("gleditor", "gleditor", "");
+  std::shared_ptr<gleditor::a11y::Publisher> accessibility = [this] {
+    auto publisher =
+        std::make_shared<gleditor::a11y::Publisher>("gleditor", "gleditor", "");
+    publisher->setFocusManager(&focusManager);
+    return publisher;
+  }();
 
   /**
    * @brief Run a bound command by name, for a scripted run.

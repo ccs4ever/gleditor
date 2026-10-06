@@ -49,6 +49,11 @@ struct PickScene {
   std::vector<std::shared_ptr<const PickSemanticTarget>> documents;
   std::unordered_map<std::uint64_t, std::shared_ptr<const PickSemanticTarget>>
       overlays;
+  struct WidgetOverlay {
+    std::uint32_t identity{};
+    std::shared_ptr<const std::vector<std::uint32_t>> targets;
+  };
+  std::vector<WidgetOverlay> widgetOverlays;
 };
 
 /**
@@ -429,7 +434,22 @@ struct PickingResult {
   PickingTag tag;
   std::shared_ptr<const PickSemanticTarget> semanticTarget;
   std::uint8_t button{1};
+  std::optional<std::uint32_t> overlayWidgetId;
 };
+
+/// Resolve against the requested frame, so reordering a live overlay cannot
+/// change the meaning of an asynchronous GPU result.
+inline std::optional<std::uint32_t>
+resolveOverlayWidget(const PickScene &scene, const PickingTag &tag) {
+  if (tag.kind != tagKindOverlay || tag.clusterIndex == 0) return {};
+  const auto identity = packTagIdentity(tag.kind, tag.docIndex, tag.pageIndex);
+  const auto found    = std::ranges::find(scene.widgetOverlays, identity,
+                                          &PickScene::WidgetOverlay::identity);
+  if (found == scene.widgetOverlays.end() || !found->targets ||
+      tag.clusterIndex > found->targets->size())
+    return {};
+  return (*found->targets)[tag.clusterIndex - 1];
+}
 
 /**
  * @brief One highlighted span of text, matching the shader's std140 element.
