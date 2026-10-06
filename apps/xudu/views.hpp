@@ -73,6 +73,10 @@ public:
     pendingCamera_ = std::move(place);
   }
   void keepInView(const Doc &doc, std::uint32_t offset);
+  void setComparisonCameraReady(std::function<bool()> ready) {
+    comparisonCameraReady_ = std::move(ready);
+  }
+  void frameNewestComparison();
 
   [[nodiscard]] std::optional<Doc::Anchor>
   widgetRectFor(const Doc &doc, std::uint32_t docOffset) const;
@@ -172,6 +176,8 @@ public:
                                 float screenX = 0.0F, float screenY = 0.0F);
   void summonPublication(const PublicationEntry &entry);
   void publicationDownloadStatus(const std::string &id);
+  void publicationUpdates(const std::string &subscription = {},
+                          std::int64_t sequence           = -1);
   void discoverPublications(const std::string &query = {});
   void publicationDiscoveryStatus(const std::string &id);
   void setPublicationCatalog(SwarmCatalog *catalog) {
@@ -217,6 +223,8 @@ private:
     std::size_t rightCells{};
   };
 
+  std::chrono::steady_clock::time_point nextPublicationNotice_{};
+  bool publicationNoticeError_{};
   Session &session;
   RendererRef renderer;
   HypertimeMap &map;
@@ -226,10 +234,12 @@ private:
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
   float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  float chromeTopPx_{};
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
   std::function<bool()> pendingCamera_;
+  std::function<bool()> comparisonCameraReady_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;

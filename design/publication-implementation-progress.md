@@ -325,13 +325,48 @@ cases and both publication integrations. The local publication UI runner passed 
 the host tree. Repository format-check and lint passed; clang-format 19 comparison found no new
 deviations, while unchanged regions retain the baseline differences described in the report.
 
+## Verified update subscriptions (2026-10-06)
+
+Completed downloads now offer Notify me of updates. `Ctrl+Shift+U` opens a keyboard-accessible
+review palette with verified sequence changes, the author's selected old/new microversions,
+comparison opening, acknowledgement, immediate checking, pause and resume. Updates open as separate
+retained reader stores. Polling never changes an edition, chooses a version from hypertime order, or
+replaces the earlier snapshot.
+
+A worker resolves the pinned publishing key and salt, then passes the observed signed sequence and
+hash as a minimum to the inbox. Notices require a completely downloaded and verified native store.
+Rollback, conflicting equal-sequence pointers, wrong authorship and failed dependencies cannot
+advance the accepted sequence or generate a notice. A private LMDB subscription record (`XPS1`)
+persists accepted sequences, pending transfers and delivered/reviewed notices. Pause cancels work;
+restart and resume recover missed updates. Unsupported private versions are refused numerically.
+Native store format 4 and publication format 2 are unchanged.
+
+Notifications enter the existing shared toast/accessibility path one at a time. Unreviewed updates
+remain in the palette after a toast expires or the application restarts. `publicationPollSeconds` in
+`system://settings` defaults to 30 seconds and is read at startup; the explicit mock swarm uses two
+seconds. Opening comparisons waits for the shared-content layout to settle and then fits both page
+widths. A narrow viewport gives an overview; normal reading still requires zooming or focusing a
+passage.
+
+Validation and remaining limitations are recorded in
+[the update report](ux_publication_updates_validation_2026-10-06.md). The real namespace fixture
+proves Bob's live notification, Carl's missed-update recovery, independent old/new snapshots, review
+and restart without duplicate notices. Alice's revised store is fixture-provided. This completes the
+update prerequisite for P5, not the commentary-discovery or full P1–P7 acceptance journeys.
+
+The full headless run passed 539 library, 1,269 engine, 57 Xuzz and 119 ZigZag tests, 12 namespace
+transport/mutable-name cases and all three publication integrations. After the final title-boundary
+fix, 60 focused cases and 1,270 engine cases passed. The local publication runner passed with
+evidence in `build/publication-local/run-2gytb_n4/`. Docker image `gleditor-swarm-test:local`
+(`331764ac1df1`) passed 115 smoke tests with networking disabled; its fourteen changed/new C++
+sources match the host and no private identity directories were found in its source or work tree.
+Format-check and lint passed; the separate clang-format 19 comparison found no new deviations.
+
 ## Remaining work
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
-1. Add persisted update subscriptions, sequence polling, dependency verification, retry and
-   acknowledgement, including missed updates after reconnect.
 1. Add commentary/backlink and independent link-package creation, review, announcement and
    discovery. Package visibility must be a private reader preference that filters contributions
    without appending operations to visited stores.

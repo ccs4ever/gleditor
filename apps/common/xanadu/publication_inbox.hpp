@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -34,6 +35,8 @@ struct PublicationDownloadStatus {
   std::uint64_t dependencyCount{};
   std::filesystem::path storePath;
   MicroversionId version;
+  std::int64_t sequence{-1};
+  InfoHash manifestHash;
   std::string error;
 };
 
@@ -68,7 +71,10 @@ public:
   PublicationInbox(const PublicationInbox &)            = delete;
   PublicationInbox &operator=(const PublicationInbox &) = delete;
 
-  std::string submit(const MutableLink &link);
+  /// A subscription pins its observed lower bound; newer signed responses
+  /// are admitted, while rollback and equal-sequence conflicts are refused.
+  std::string submit(const MutableLink &link,
+                     std::optional<MutablePointer> minimum = std::nullopt);
   void cancel(std::string_view id);
   void retry(std::string_view id);
   [[nodiscard]] std::vector<PublicationDownloadStatus> statuses() const;

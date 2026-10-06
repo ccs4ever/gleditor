@@ -303,6 +303,7 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
 // the same unavoidable risk any other noexcept-adjacent code accepts.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
+  publicationSubscriptions_.reset();
   publicationDiscovery_.reset();
   publicationInbox_.reset();
   try {
@@ -586,7 +587,8 @@ const MutableKeys &Session::identity() {
 void Session::configureTestPublicationSwarm(
     const std::string &listen,
     std::vector<std::pair<std::string, std::uint16_t>> nodes) {
-  if (publicationOutbox_ || publicationInbox_ || publicationDiscovery_)
+  if (publicationOutbox_ || publicationInbox_ || publicationDiscovery_ ||
+      publicationSubscriptions_)
     throw std::logic_error("publication outbox is already running");
   testPublicationSwarm_ = true;
   publicationListen_    = listen;
@@ -658,6 +660,38 @@ PublicationDiscovery &Session::publicationDiscovery() {
         std::make_unique<PublicationDiscovery>(std::move(options));
   }
   return *publicationDiscovery_;
+}
+
+PublicationSubscriptions &Session::publicationSubscriptions() {
+  if (!publicationSubscriptions_) {
+    PublicationSubscriptions::Options options;
+    options.directory =
+        xanadocsDirectory().parent_path() / "publication-subscriptions";
+    options.inbox = &publicationInbox();
+    const auto model =
+        SystemStoreModel::fromStore(systemStore(SystemDocKind::Settings));
+    const auto seconds =
+        model.getInt64(xanadu::settings::kPublicationPollSeconds, 30);
+    if (seconds < 1 ||
+        seconds > std::chrono::milliseconds::max().count() / 1000)
+      throw std::invalid_argument(
+          "publicationPollSeconds must be positive and fit the polling clock");
+    options.pollInterval = std::chrono::seconds{seconds};
+    if (testPublicationSwarm_) {
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationDownloadSwarmTransport(
+          swarm, publicationNodes_, {}, std::chrono::seconds{30});
+      options.pollInterval = std::chrono::seconds{2};
+    }
+    publicationSubscriptions_ =
+        std::make_unique<PublicationSubscriptions>(std::move(options));
+  }
+  return *publicationSubscriptions_;
 }
 
 std::pair<std::size_t, MicroversionId>

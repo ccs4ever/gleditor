@@ -1106,6 +1106,11 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
     dynamic_cast<const RenderItemRunState &>(item)(state);
     break;
   }
+  case RenderItem::Type::Notification: {
+    const auto &notice = dynamic_cast<const RenderItemNotification &>(item);
+    toasts->post(notice.severity, notice.message, state);
+    break;
+  }
   }
 }
 

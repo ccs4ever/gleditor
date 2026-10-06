@@ -151,6 +151,7 @@ std::string_view publicationDownloadPhaseName(PublicationDownloadPhase phase) {
 struct PublicationInbox::Impl {
   struct Job {
     MutableLink link;
+    std::optional<MutablePointer> minimum;
     PublicationDownloadStatus status;
     std::stop_source cancel;
   };
@@ -197,14 +198,15 @@ struct PublicationInbox::Impl {
       job.status.phase     = PublicationDownloadPhase::Ready;
       job.status.storePath = entry.path() / "store";
       job.status.version   = pub->version;
+      job.status.sequence  = pub->sequence;
       jobs.emplace(id, std::move(job));
     }
     worker = std::jthread([this](std::stop_token stop) { run(stop); });
   }
   ~Impl() {
-    worker.request_stop();
     {
       const std::scoped_lock lock(guard);
+      worker.request_stop();
       for (auto &[id, job] : jobs) job.cancel.request_stop();
     }
     changed.notify_all();
@@ -231,7 +233,12 @@ struct PublicationInbox::Impl {
       if (!transport)
         throw std::runtime_error("Publication transport unavailable");
       const auto pointer = transport->resolve(job.link, stop);
-      const auto cache   = root / "cache";
+      if (job.minimum && (pointer.sequence < job.minimum->sequence ||
+                          (pointer.sequence == job.minimum->sequence &&
+                           pointer.hash != job.minimum->hash)))
+        throw std::runtime_error("Publication pointer rolls back or conflicts "
+                                 "with the subscription's observed sequence");
+      const auto cache = root / "cache";
       transport->fetch(pointer.hash, cache / pointer.hash.hex(),
                        options.maximumManifestBytes, stop);
       const auto seed =
@@ -294,9 +301,11 @@ struct PublicationInbox::Impl {
         checkCancelled(stop);
         std::filesystem::rename(root / "publication.xanadoc.partial",
                                 root / "publication.xanadoc");
-        status.phase     = PublicationDownloadPhase::Ready;
-        status.version   = pub->version;
-        status.storePath = root / "store";
+        status.phase        = PublicationDownloadPhase::Ready;
+        status.version      = pub->version;
+        status.sequence     = pub->sequence;
+        status.manifestHash = pointer.hash;
+        status.storePath    = root / "store";
       });
     } catch (const std::exception &error) {
       std::error_code ignored;
@@ -335,10 +344,13 @@ struct PublicationInbox::Impl {
 PublicationInbox::PublicationInbox(Options options)
     : impl_(std::make_unique<Impl>(std::move(options))) {}
 PublicationInbox::~PublicationInbox() = default;
-std::string PublicationInbox::submit(const MutableLink &link) {
+std::string PublicationInbox::submit(const MutableLink &link,
+                                     std::optional<MutablePointer> minimum) {
   if (link.key.isZero() || link.salt.empty() || link.salt.size() > 64)
     throw std::invalid_argument(
         "A publication needs a nonzero author key and document salt");
+  if (minimum && (minimum->sequence < 0 || minimum->hash.isZero()))
+    throw std::invalid_argument("Invalid subscription pointer lower bound");
   const std::scoped_lock lock(impl_->guard);
   std::string id;
   do {
@@ -347,6 +359,7 @@ std::string PublicationInbox::submit(const MutableLink &link) {
            std::filesystem::exists(impl_->options.directory / id));
   Impl::Job job;
   job.link       = link;
+  job.minimum    = minimum;
   job.status.id  = id;
   job.status.uri = link.uri();
   impl_->jobs.emplace(id, std::move(job));

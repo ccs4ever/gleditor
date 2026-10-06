@@ -226,6 +226,8 @@ inline constexpr std::string_view kFontFamily      = "fontFamily";
 inline constexpr std::string_view kLineHeight      = "lineHeight";
 inline constexpr std::string_view kTheme           = "theme";
 inline constexpr std::string_view kAutoSaveSeconds = "autoSaveSeconds";
+inline constexpr std::string_view kPublicationPollSeconds =
+    "publicationPollSeconds";
 inline constexpr std::string_view kThemeBackground = "theme.background";
 
 // UI
@@ -316,6 +318,8 @@ inline constexpr std::string_view kKeymapPublicationStatus =
     "std:xudu/publication_status";
 inline constexpr std::string_view kKeymapPublicationDiscovery =
     "std:xudu/publication_discovery";
+inline constexpr std::string_view kKeymapPublicationUpdates =
+    "std:xudu/publication_updates";
 inline constexpr std::string_view kKeymapHistory   = "std:xudu/history";
 inline constexpr std::string_view kKeymapDelete    = "std:xudu/delete";
 inline constexpr std::string_view kKeymapPageBreak = "std:xudu/page_break";

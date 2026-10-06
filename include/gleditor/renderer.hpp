@@ -48,6 +48,7 @@ struct RenderItem {
     SaveDoc,
     Run,
     RunState,
+    Notification,
   };
   Type type;
 
@@ -143,6 +144,18 @@ struct RenderItemRunState : RenderItem {
   explicit RenderItemRunState(std::invocable<RenderState &> auto fun)
       : RenderItem(Type::RunState), fun(std::move(fun)) {}
   void operator()(RenderState &state) const { fun(state); }
+};
+
+/// Applications enqueue notifications through the same render-thread toast
+/// and accessibility path as library diagnostics.
+struct RenderItemNotification : RenderItem {
+  std::string message;
+  render::DiagnosticSeverity severity;
+  explicit RenderItemNotification(
+      std::string text,
+      render::DiagnosticSeverity level = render::DiagnosticSeverity::Info)
+      : RenderItem(Type::Notification), message(std::move(text)),
+        severity(level) {}
 };
 
 // Abstract interface for the renderer used by external components

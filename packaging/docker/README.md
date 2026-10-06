@@ -19,8 +19,8 @@ enabled; the image does not force a compiler or language standard.
 
 The image includes `xuzz` (and its compatibility aliases), `xudu-dump`, `xudu-swarm-peer`, engine
 tests, GnuPG, Python, iproute2 and software OpenGL. Build-time smoke tests exercise publication, V5
-history, complete-store inventory restoration, durable outbox and signed link-package primitives.
-The default container command repeats those tests:
+history, complete-store inventory restoration, durable outbox, signed catalog/discovery, update
+subscriptions and signed link-package primitives. The default container command repeats those tests:
 
 ```sh
 docker run --rm --network none gleditor-swarm-test:local
@@ -33,7 +33,9 @@ starting `xudu-swarm-peer`, and pass its container IP as the listen address. Kee
 read-only separately. Xuzz accepts `--test-publication-swarm HOST:PORT` with repeatable
 `--dht-node HOST:PORT` for fixture provisioning. This enables the form's explicit mock verification
 and Test swarm destination. The Publish and status/retry steps remain keyboard actions in Xuzz.
-Topics are signed metadata; catalog ingestion and topic rendezvous are still pending.
+Signed author catalogs and topic rendezvous feed the download controls. Enable notifications from a
+completed download and review verified updates with `Ctrl+Shift+U`; author enrollment remains an
+explicit mock boundary in this test setup.
 
 ```sh
 docker network create --internal publication-test

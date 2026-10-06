@@ -672,6 +672,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Interval in seconds between auto-saves",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{5}}}}},
+        {.name  = std::string(settings::kPublicationPollSeconds),
+         .notes = "Positive seconds between signed publication checks; read at "
+                  "startup",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{30}}}}},
         {.name    = std::string(settings::kTheme),
          .notes   = "Active UI theme name",
          .schemas = {{.expectedTypes = {"string"},
@@ -905,6 +910,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Browse signed publications by author key or topic",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Ctrl+Shift+D"}}}}},
+        {.name    = std::string(settings::kKeymapPublicationUpdates),
+         .notes   = "Review verified publication updates and notification "
+                    "subscriptions",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Shift+U"}}}}},
         {.name    = std::string(settings::kKeymapTensionPhysicsToggle),
          .notes   = "Function key to toggle 3-way tension spring layout",
          .schemas = {{.expectedTypes = {"string"},

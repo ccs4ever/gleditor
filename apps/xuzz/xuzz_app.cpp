@@ -501,6 +501,12 @@ int XuzzApp::run(const int argc, char **argv) {
   xudu::SwarmCatalog swarmCatalog;
   views.setPublicationCatalog(&swarmCatalog);
   try {
+    (void)session->publicationSubscriptions();
+  } catch (const std::exception &error) {
+    GLEDITOR_LOG_DEBUG("xudu.publication", "Subscription cache refused: {}",
+                       error.what());
+  }
+  try {
     for (const auto &key : session->publicationDiscovery().followedAuthors())
       swarmCatalog.followAuthor(key);
     for (const auto &catalog : session->publicationDiscovery().cachedCatalogs())
@@ -695,6 +701,11 @@ int XuzzApp::run(const int argc, char **argv) {
   xudu::LinkBeams links(*session, renderer);
   links.setVisible(!opts.noBeams);
   links.setSworph(!opts.noSworph);
+  views.setComparisonCameraReady([&links] {
+    if (links.busy()) return false;
+    links.releaseCamera();
+    return true;
+  });
   if (opts.physicsEnabled) {
     links.setPhysicsEnabled(true);
   }
@@ -1866,6 +1877,12 @@ int XuzzApp::run(const int argc, char **argv) {
       [&views, &swarmTelescope] {
         swarmTelescope.setVisible(false);
         views.discoverPublications();
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPublicationUpdates),
+      "review verified publication updates", [&views, &swarmTelescope] {
+        swarmTelescope.setVisible(false);
+        views.publicationUpdates();
       });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTelescopeToggle),

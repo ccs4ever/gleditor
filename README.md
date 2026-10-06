@@ -206,8 +206,12 @@ dependency before installation. `Ctrl+Shift+D` discovers signed publications fro
 publishing key or a topic. In Telescope, Return on a simple topic such as `Ideas` starts a DHT
 rendezvous query; `author:<key>` follows that publishing key. Readers review the signed catalog,
 choose a publication, and use the same download/open controls. Author signatures do not establish
-Oracle enrollment. Catalogs and followed keys persist across restart; update notifications and
-background subscription polling remain pending. See
+Oracle enrollment. Catalogs and followed keys persist across restart. A completed download offers
+Notify me of updates; `Ctrl+Shift+U` reviews verified updates, opens earlier and newer snapshots
+together, marks updates reviewed, and pauses or resumes a subscription. Polling retains accepted
+sequences and catches missed updates after reconnect. It preserves earlier snapshots and the
+author's edition choices. `publicationPollSeconds` in `system://settings` defaults to 30 and is read
+at startup; the isolated mock swarm uses a shorter interval. See
 [publication implementation progress](design/publication-implementation-progress.md) for the
 repaired prerequisites and remaining network/UI work.
 

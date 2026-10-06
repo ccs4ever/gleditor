@@ -68,6 +68,33 @@ void Views::deviceReady(render::RenderDevice &device,
 }
 
 void Views::drawFrame(gleditor::FrameContext &ctx) {
+  chromeTopPx_ = std::max(ctx.chrome.top, ctx.settledChrome.top);
+  if (auto *subscriptions = session.activePublicationSubscriptions();
+      subscriptions &&
+      std::chrono::steady_clock::now() >= nextPublicationNotice_) {
+    try {
+      for (const auto &[id, notice] : subscriptions->takeNotifications()) {
+        nextPublicationNotice_ =
+            std::chrono::steady_clock::now() + ToastOverlay::lifetime;
+        const auto link = MutableLink::parse(subscriptions->status(id).uri);
+        renderer->push(RenderItemNotification(
+            "Publication update: " + notice.title + " — " +
+            link.key.hex().substr(0, 12) + " #" +
+            std::to_string(notice.previousSequence) + " → #" +
+            std::to_string(notice.sequence) + ". Review with Ctrl+Shift+U."));
+      }
+      publicationNoticeError_ = false;
+    } catch (const std::exception &error) {
+      if (!publicationNoticeError_) {
+        renderer->push(RenderItemNotification(
+            "Publication notifications unavailable. Review with Ctrl+Shift+U.",
+            render::DiagnosticSeverity::Error));
+        publicationNoticeError_ = true;
+      }
+      GLEDITOR_LOG_DEBUG("xudu.publication",
+                         "Update notice delivery failed: {}", error.what());
+    }
+  }
   if (ctx.state.documentsVisible) frameForReading(ctx);
   if (pendingCamera_ && pendingCamera_()) {
     pendingCamera_ = {};
@@ -113,6 +140,53 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
                              topLeft.z + *distance);
   readingFramed_ = true;
   frameTarget_.reset();
+}
+
+void Views::frameNewestComparison() {
+  renderer->runWithState([this](RenderState &rState) {
+    if (rState.docs.size() < 2) return;
+    const std::weak_ptr<Doc> earlier = rState.docs[rState.docs.size() - 2];
+    const std::weak_ptr<Doc> updated = rState.docs.back();
+    placeCameraWhenReady([this, earlier, updated] {
+      const auto oldDoc = earlier.lock();
+      const auto newDoc = updated.lock();
+      if (!oldDoc || !newDoc) return true;
+      // Shared-content beams first settle the pair. Fitting before their
+      // alignment finishes lets its later camera move hide the earlier text.
+      if (auto *timeline = renderer->animTimeline();
+          timeline && !timeline->empty())
+        return false;
+      const auto oldFrame = oldDoc->pageFrame(0);
+      const auto newFrame = newDoc->pageFrame(0);
+      if (!oldFrame || !newFrame) return false;
+      if (comparisonCameraReady_ && !comparisonCameraReady_()) return false;
+      const auto corner = [](const Doc::PageFrame &frame, float x) {
+        return glm::vec3(frame.localToWorld *
+                         glm::vec4(x, frame.topPx, 0.0F, 1.0F));
+      };
+      const auto oldLeft  = corner(*oldFrame, oldFrame->leftPx);
+      const auto oldRight = corner(*oldFrame, oldFrame->rightPx);
+      const auto newLeft  = corner(*newFrame, newFrame->leftPx);
+      const auto newRight = corner(*newFrame, newFrame->rightPx);
+      const float left    = std::min(oldLeft.x, newLeft.x);
+      const float right   = std::max(oldRight.x, newRight.x);
+      std::scoped_lock locker(state->view);
+      auto &view = state->view;
+      if (view.screenWidth <= 0 || view.screenHeight <= 0) return false;
+      const float aspect = static_cast<float>(view.screenWidth) /
+                           static_cast<float>(view.screenHeight);
+      const float distance =
+          xanadu::framingDistance(right - left, 0.0F, view.fov, aspect);
+      const float halfH = distance * std::tan(glm::radians(view.fov) * 0.5F);
+      const float worldPerPx =
+          2.0F * halfH / static_cast<float>(view.screenHeight);
+      view.pos = glm::vec3(0.5F * (left + right),
+                           std::max(oldLeft.y, newLeft.y) - halfH +
+                               chromeTopPx_ * worldPerPx,
+                           std::max(oldLeft.z, newLeft.z) + distance);
+      return true;
+    });
+  });
 }
 
 void Views::keepInView(const Doc &doc, const std::uint32_t offset) {
@@ -1253,9 +1327,14 @@ void Views::publicationDownloadStatus(const std::string &id) {
       action.label         = "Action";
       action.kind          = gleditor::Form::Kind::Choice;
       action.submitOnEnter = true;
-      action.options       = {"Refresh progress", "Open completed publication",
-                              "Retry download", "Cancel download", "Close"};
-      action.optionValues  = {"refresh", "open", "retry", "cancel", "close"};
+      action.options       = {"Refresh progress",
+                              "Open completed publication",
+                              "Retry download",
+                              "Cancel download",
+                              "Close",
+                              "Notify me of updates"};
+      action.optionValues  = {"refresh", "open",  "retry",
+                              "cancel",  "close", "subscribe"};
       auto note = std::string(publicationDownloadPhaseName(downloaded.phase));
       if (downloaded.dependencyCount)
         note += " (" + std::to_string(downloaded.completedDependencies) + "/" +
@@ -1278,6 +1357,12 @@ void Views::publicationDownloadStatus(const std::string &id) {
                         session.publicationInbox().retry(id);
                       if (action == "cancel")
                         session.publicationInbox().cancel(id);
+                      if (action == "subscribe") {
+                        const auto subscription =
+                            session.publicationSubscriptions().subscribe(id);
+                        publicationUpdates(subscription);
+                        return;
+                      }
                       publicationDownloadStatus(id);
                     } catch (const std::exception &error) {
                       // Keep failures in the drawn, accessible form; native
@@ -1304,6 +1389,150 @@ void Views::publicationDownloadStatus(const std::string &id) {
       back.submitOnEnter = true;
       form.open("Downloads unavailable", error.what(), {std::move(back)},
                 [this](const auto &) { openDocumentPalette(); });
+    }
+  });
+}
+
+void Views::publicationUpdates(const std::string &selected,
+                               std::int64_t sequence) {
+  renderer->runWithState([this, selected, sequence](RenderState &) {
+    using Field = gleditor::Form::Field;
+    try {
+      auto &subscriptions = session.publicationSubscriptions();
+      const auto statuses = subscriptions.statuses();
+      Field action;
+      action.label         = "Action";
+      action.kind          = gleditor::Form::Kind::Choice;
+      action.options       = {"Refresh updates",
+                              "Open update alongside earlier version",
+                              "Open earlier version",
+                              "Mark update reviewed",
+                              "Check selected subscription now",
+                              "Pause selected notifications",
+                              "Resume selected notifications",
+                              "Close"};
+      action.optionValues  = {"refresh", "open",  "earlier", "ack",
+                              "check",   "pause", "resume",  "close"};
+      action.submitOnEnter = true;
+      Field followed;
+      followed.label = "Subscription";
+      followed.kind  = gleditor::Form::Kind::Choice;
+      Field updates;
+      updates.label    = "Verified update";
+      updates.kind     = gleditor::Form::Kind::Choice;
+      std::string note = "No subscriptions. Choose Notify me of updates in a "
+                         "completed download.";
+      for (const auto &status : statuses) {
+        const auto link = MutableLink::parse(status.uri);
+        followed.options.push_back(status.title + " — " +
+                                   link.key.hex().substr(0, 12) + " #" +
+                                   std::to_string(status.sequence));
+        followed.optionValues.push_back(status.id);
+        if (status.id == selected)
+          followed.chosen = followed.options.size() - 1;
+        for (const auto &notice : status.notices) {
+          if (notice.acknowledged) continue;
+          updates.options.push_back(notice.title + " — " +
+                                    link.key.hex().substr(0, 12) + " #" +
+                                    std::to_string(notice.previousSequence) +
+                                    " → #" + std::to_string(notice.sequence));
+          updates.optionValues.push_back(status.id + "@" +
+                                         std::to_string(notice.sequence));
+          if (status.id == selected && notice.sequence == sequence)
+            updates.chosen = updates.options.size() - 1;
+        }
+      }
+      if (!statuses.empty()) {
+        const auto &status = statuses[followed.chosen];
+        note = std::string(publicationSubscriptionPhaseName(status.phase));
+        if (!status.error.empty()) note += ": " + status.error;
+      } else {
+        followed.options      = {"No notification subscriptions"};
+        followed.optionValues = {""};
+      }
+      if (updates.options.empty()) {
+        updates.options      = {"No unreviewed verified updates"};
+        updates.optionValues = {""};
+      } else {
+        const auto value  = updates.optionValues[updates.chosen];
+        const auto split  = value.find('@');
+        const auto status = subscriptions.status(value.substr(0, split));
+        const auto seq    = std::stoll(value.substr(split + 1));
+        const auto found  = std::ranges::find(
+            status.notices, seq, &PublicationUpdateNotice::sequence);
+        note = "Verified update — earlier " + found->previousVersion.str() +
+               " → " + found->version.str();
+      }
+      form.open(
+          "Publication updates", std::move(note),
+          {std::move(action), std::move(followed), std::move(updates)},
+          [this](const auto &answers) {
+            const auto action   = answers[0].answer();
+            const auto selected = answers[1].answer();
+            const auto update   = answers[2].answer();
+            if (action == "close") return;
+            try {
+              auto &subscriptions = session.publicationSubscriptions();
+              std::string id;
+              std::int64_t seq{-1};
+              if (!update.empty()) {
+                const auto split = update.find('@');
+                id               = update.substr(0, split);
+                seq              = std::stoll(update.substr(split + 1));
+              }
+              if (action == "open" || action == "earlier" || action == "ack") {
+                if (id.empty())
+                  throw std::logic_error("No verified update selected");
+                const auto status = subscriptions.status(id);
+                const auto found  = std::ranges::find(
+                    status.notices, seq, &PublicationUpdateNotice::sequence);
+                if (found == status.notices.end())
+                  throw std::logic_error("Update is no longer pending");
+                if (action != "ack") {
+                  if (action == "open") {
+                    const auto [earlier, version] =
+                        session.openDownloadedPublication(
+                            found->previousSnapshotId);
+                    showAlongside(version, 0.0F, earlier);
+                  }
+                  const auto [index, version] =
+                      session.openDownloadedPublication(
+                          action == "open" ? found->snapshotId
+                                           : found->previousSnapshotId);
+                  showAlongside(version, 0.0F, index);
+                  activateNewest();
+                  if (action == "open") {
+                    frameNewestComparison();
+                    subscriptions.acknowledge(id, seq);
+                  }
+                  return;
+                }
+                subscriptions.acknowledge(id, seq);
+              }
+              if (action == "check") subscriptions.checkNow(selected);
+              if (action == "pause" || action == "resume")
+                subscriptions.setEnabled(selected, action == "resume");
+              publicationUpdates(selected, seq);
+            } catch (const std::exception &error) {
+              Field back;
+              back.label         = "Action";
+              back.kind          = gleditor::Form::Kind::Choice;
+              back.options       = {"Back to updates"};
+              back.submitOnEnter = true;
+              form.open("Update unavailable", error.what(), {std::move(back)},
+                        [this, selected](const auto &) {
+                          publicationUpdates(selected);
+                        });
+            }
+          });
+    } catch (const std::exception &error) {
+      Field close;
+      close.label         = "Action";
+      close.kind          = gleditor::Form::Kind::Choice;
+      close.options       = {"Close"};
+      close.submitOnEnter = true;
+      form.open("Updates unavailable", error.what(), {std::move(close)},
+                [](const auto &) {});
     }
   });
 }
