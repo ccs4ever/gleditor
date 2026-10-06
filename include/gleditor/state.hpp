@@ -19,6 +19,7 @@
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
+#include <gleditor/ui/metrics.hpp>
 
 struct RenderItem;
 class Doc;
@@ -27,6 +28,14 @@ struct AppState {
   /// Shared state between main and renderer threads
   // set before the render thread starts, no need to synchronize
   std::string defaultFontName;
+  // Theme snapshots can be replaced by live app configuration without
+  // copying font descriptions on every frame.
+  std::atomic<std::shared_ptr<const gleditor::ui::Theme>> uiTheme{
+      std::make_shared<const gleditor::ui::Theme>()};
+  std::atomic<float> contentScale{1.0F};
+  std::atomic<float> uiScale{1.0F};
+  std::atomic<float> fontScale{1.0F};
+  std::atomic<float> uiSafeMarginShare{gleditor::ui::kSafeMarginShare};
   /**
    * @brief Whether "settled" should wait for RenderState::docs to be
    *        non-empty and fully loaded.

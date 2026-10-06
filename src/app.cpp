@@ -1288,6 +1288,7 @@ int Application::run() {
     return commandTable.run(name);
   };
 
+  state->contentScale = sdl::windowContentScale(window.window);
   AutoJoinThread renderThread(std::ref(*renderer), std::ref(window));
 
   // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than spinning
@@ -1592,6 +1593,7 @@ int Application::run() {
       std::ignore = publisher->pumpActions();
     }
 
+    state->contentScale = sdl::windowContentScale(window.window);
     state->syncFocus();
     const bool grabbing  = state->focusManager.modalActive();
     const auto area      = state->focusManager.textArea();
@@ -1656,6 +1658,7 @@ int Application::run() {
     // The event already received above from SDL_WaitEventTimeout must be
     // processed at least once before polling for any more that queued up.
     do { // NOLINT(cppcoreguidelines-avoid-do-while)
+      const auto pixelRatio = sdl::windowPixelRatio(window.window);
       switch (evt.type) {
       case SDL_EVENT_QUIT: {
         state->alive = false;
@@ -1676,19 +1679,20 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_MOUSE_MOTION: {
-        onMotion(static_cast<int>(evt.motion.x), static_cast<int>(evt.motion.y),
+        onMotion(static_cast<int>(evt.motion.x * pixelRatio.x),
+                 static_cast<int>(evt.motion.y * pixelRatio.y),
                  static_cast<std::uint32_t>(evt.motion.state));
         break;
       }
       case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-        onButtonDown(static_cast<int>(evt.button.x),
-                     static_cast<int>(evt.button.y),
+        onButtonDown(static_cast<int>(evt.button.x * pixelRatio.x),
+                     static_cast<int>(evt.button.y * pixelRatio.y),
                      static_cast<std::uint8_t>(evt.button.button));
         break;
       }
       case SDL_EVENT_MOUSE_BUTTON_UP: {
-        onButtonUp(static_cast<int>(evt.button.x),
-                   static_cast<int>(evt.button.y),
+        onButtonUp(static_cast<int>(evt.button.x * pixelRatio.x),
+                   static_cast<int>(evt.button.y * pixelRatio.y),
                    static_cast<std::uint8_t>(evt.button.button));
         break;
       }

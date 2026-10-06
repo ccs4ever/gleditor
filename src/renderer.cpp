@@ -434,13 +434,23 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // over them, and before the notifications, which must be over everything.
   if (!frameContributors.empty()) {
     state.beginPickScene();
-    gleditor::FrameContext ctx{.state          = state,
-                               .viewProjection = viewProjection,
-                               .screenWidth    = screenWidth,
-                               .screenHeight   = screenHeight,
-                               .timeline       = timeline,
-                               .settledChrome  = lastChrome};
+    const auto theme = this->state->uiTheme.load();
+    gleditor::FrameContext ctx{
+        .state          = state,
+        .viewProjection = viewProjection,
+        .screenWidth    = screenWidth,
+        .screenHeight   = screenHeight,
+        .timeline       = timeline,
+        .settledChrome  = lastChrome,
+        .metrics        = {.contentScale = this->state->contentScale.load(),
+                           .userScale    = this->state->uiScale.load(),
+                           .fontScale    = this->state->fontScale.load(),
+                           .screenWidth  = screenWidth,
+                           .screenHeight = screenHeight,
+                           .marginShare  = this->state->uiSafeMarginShare.load()},
+        .theme          = theme ? *theme : gleditor::ui::defaultTheme()};
     for (auto *const contributor : frameContributors) {
+      ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);
     }
     lastChrome = ctx.chrome;

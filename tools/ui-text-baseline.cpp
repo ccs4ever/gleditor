@@ -38,6 +38,7 @@
 #include <gleditor/sdl_wrap.hpp>
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text/font.hpp>
+#include <gleditor/ui/overlay.hpp>
 
 namespace {
 
@@ -365,6 +366,115 @@ void runScenario(
             << '\t' << overflows.height << '\t' << inkPixels << '\n';
 }
 
+void runOverlayScenario(const Options &options,
+                        const std::vector<std::string> &labels,
+                        render::RenderDevice &device, RenderState &state) {
+  using namespace gleditor::ui;
+  Theme theme;
+  if (const auto at = options.font.rfind(' '); at != std::string::npos) {
+    theme.fonts[static_cast<std::size_t>(FontRole::Caption)] = {
+        options.font.substr(0, at), std::stof(options.font.substr(at + 1))};
+  }
+  UiMetrics metrics{.screenWidth  = screenWidth,
+                    .screenHeight = screenHeight,
+                    .marginShare  = 0.0F};
+  Widget model{.id = 1, .model = Panel{}};
+  model.children.push_back(Widget{.id = 2, .model = ButtonFlow{}});
+  for (int index = 0; index < labelCount; ++index) {
+    model.children.front().children.push_back(Widget{
+        .id = static_cast<WidgetId>(index + 3),
+        .model =
+            Label{labels.at(static_cast<std::size_t>(index) % labels.size())},
+        .preferred = {370.0F, 40.0F},
+        .fontRole  = FontRole::Caption});
+  }
+  ScreenOverlay overlay(model);
+  overlay.setBounds(Rect{margin, margin, screenWidth - 2 * margin,
+                         screenHeight - 2 * margin});
+  overlay.deviceReady(device, glyphPipeline());
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  gleditor::FrameContext frame{.state          = state,
+                               .viewProjection = projection,
+                               .screenWidth    = screenWidth,
+                               .screenHeight   = screenHeight,
+                               .timeline       = timeline,
+                               .metrics        = metrics,
+                               .theme          = theme};
+  const auto draw = [&] {
+    if (!device.beginFrame()) throw std::runtime_error("overlay frame skipped");
+    overlay.drawFrame(frame);
+    device.endFrame();
+    device.waitIdle();
+  };
+  draw();
+  Samples samples;
+  for (int index = 0; index < options.warmup + options.frames; ++index) {
+    gleditor::text::ShapingStatsScope shaping;
+    const auto start = Clock::now();
+    draw();
+    const auto elapsed =
+        std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+    if (index >= options.warmup) {
+      const auto stats = shaping.stats();
+      samples.frameMs.push_back(elapsed);
+      samples.layouts.push_back(stats.layoutCalls);
+      samples.harfbuzz.push_back(stats.harfbuzzCalls);
+      samples.fallbacks.push_back(stats.fallbackCalls);
+      samples.bytes.push_back(stats.inputBytes);
+    }
+  }
+  const auto scene = overlay.snapshot();
+  int widthOverflow{}, heightOverflow{};
+  for (const auto &visual : scene->visuals) {
+    const auto *box = scene->layout.find(visual.id);
+    widthOverflow += visual.fitted.widthPx > box->contentRect.width;
+    heightOverflow += visual.fitted.heightPx > box->contentRect.height;
+  }
+  const auto image = device.captureColorTarget();
+  if (!options.screenshotPrefix.empty()) {
+    writeScreenshot(image, options.screenshotPrefix + ".overlay-retained.ppm");
+  }
+  for (auto &child : model.children.front().children)
+    std::get<Label>(child.model).text.clear();
+  overlay.setModel(std::move(model));
+  draw();
+  const auto blank = device.captureColorTarget();
+  std::size_t ink{};
+  for (std::size_t offset = 0; offset < image.rgba.size(); offset += 4) {
+    if (std::equal(image.rgba.begin() + static_cast<std::ptrdiff_t>(offset),
+                   image.rgba.begin() + static_cast<std::ptrdiff_t>(offset + 3),
+                   blank.rgba.begin() + static_cast<std::ptrdiff_t>(offset)))
+      continue;
+    ++ink;
+    const float x = static_cast<float>((offset / 4) % image.width) + 0.5F;
+    const float y = static_cast<float>(image.height) -
+                    static_cast<float>((offset / 4) / image.width) - 0.5F;
+    const bool contained =
+        std::ranges::any_of(scene->visuals, [&](const auto &visual) {
+          const auto box = scene->layout.find(visual.id)->contentRect;
+          return !visual.text.empty() && x >= box.left &&
+                 x < box.left + box.width && y >= box.bottom &&
+                 y < box.bottom + box.height;
+        });
+    if (!contained)
+      throw std::runtime_error("overlay glyph outside allocated box");
+  }
+  std::cout << render::backendName(options.backend) << "\toverlay-retained\t"
+            << options.font << '\t' << labels.size() << '\t' << labelCount
+            << '\t' << options.frames << '\t' << std::fixed
+            << std::setprecision(3) << percentile(samples.frameMs, .50) << '\t'
+            << percentile(samples.frameMs, .95) << '\t'
+            << percentile(samples.layouts, .50) << '\t'
+            << percentile(samples.layouts, .95) << '\t'
+            << percentile(samples.harfbuzz, .50) << '\t'
+            << percentile(samples.harfbuzz, .95) << '\t'
+            << percentile(samples.fallbacks, .50) << '\t'
+            << percentile(samples.fallbacks, .95) << '\t'
+            << percentile(samples.bytes, .50) << '\t' << widthOverflow << '\t'
+            << heightOverflow << '\t' << ink << '\n';
+}
+
 int run(const Options &options) {
   if (!render::backendCompiledIn(options.backend)) {
     std::cout << "unavailable backend=" << render::backendName(options.backend)
@@ -418,6 +528,7 @@ int run(const Options &options) {
     runScenario(options, "boxed-clip-rebuild", true, false, labels, *device,
                 state, canvas, projection, lineHeight,
                 gleditor::text::Overflow::Clip);
+    runOverlayScenario(options, labels, *device, state);
     device->waitIdle();
   }
   device->shutdown();

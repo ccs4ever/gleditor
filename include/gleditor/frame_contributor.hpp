@@ -19,6 +19,7 @@
 #include <glm/ext/matrix_float4x4.hpp>
 
 #include <gleditor/render/types.hpp>
+#include <gleditor/ui/metrics.hpp>
 
 struct RenderState;
 
@@ -29,17 +30,6 @@ class RenderDevice;
 }
 
 namespace gleditor {
-
-/// Window-pixel bands along each edge that chrome drawn over the scene
-/// occupies: a tab bar, a status line.
-struct ScreenInsets {
-  float top{};
-  float bottom{};
-  float left{};
-  float right{};
-
-  friend bool operator==(const ScreenInsets &, const ScreenInsets &) = default;
-};
 
 /// What a contributor is given when the frame asks it to draw.
 struct FrameContext {
@@ -77,6 +67,8 @@ struct FrameContext {
    * after it, which has not claimed its band yet this frame.
    */
   ScreenInsets settledChrome{};
+  ui::UiMetrics metrics;
+  const ui::Theme &theme{ui::defaultTheme()};
 };
 
 /**

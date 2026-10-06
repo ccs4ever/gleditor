@@ -30,6 +30,8 @@
 #error GLEDITOR_SDL_MAJOR must be defined by the build (2 or 3)
 #endif
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <tuple>
@@ -74,6 +76,7 @@
 // this aliased UP to the same value as some other constant. fingerLifted()
 // below is the shape-difference predicate instead, same reasoning as
 // windowSizeChanged() and friends.
+#define SDL_KMOD_NONE KMOD_NONE
 #define SDL_KMOD_SHIFT KMOD_SHIFT
 #define SDL_KMOD_CTRL KMOD_CTRL
 #define SDL_KMOD_ALT KMOD_ALT
@@ -144,6 +147,33 @@ inline SDL_Surface *convertSurfaceToRgba32(SDL_Surface *surface) {
 #else
   return SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
 #endif
+}
+
+struct WindowPixelRatio {
+  float x{1.0F}, y{1.0F};
+};
+/// SDL pointer coordinates use window units; picking uses framebuffer pixels.
+inline WindowPixelRatio windowPixelRatio(SDL_Window *window) {
+  int width{}, height{}, pixelWidth{}, pixelHeight{};
+  SDL_GetWindowSize(window, &width, &height);
+  SDL_GetWindowSizeInPixels(window, &pixelWidth, &pixelHeight);
+  return {width > 0 && pixelWidth > 0 ? static_cast<float>(pixelWidth) / width
+                                      : 1.0F,
+          height > 0 && pixelHeight > 0
+              ? static_cast<float>(pixelHeight) / height
+              : 1.0F};
+}
+
+/// Called on the window's event thread; physical UI dimensions are resolved
+/// separately on the render thread from this scale snapshot.
+inline float windowContentScale(SDL_Window *window) {
+#if GLEDITOR_SDL_MAJOR == 3
+  const float scale = SDL_GetWindowDisplayScale(window);
+#else
+  const auto ratio  = windowPixelRatio(window);
+  const float scale = std::max(ratio.x, ratio.y);
+#endif
+  return std::isfinite(scale) && scale > 0.0F ? scale : 1.0F;
 }
 
 /**
@@ -276,13 +306,24 @@ inline void stopTextInput([[maybe_unused]] SDL_Window *window) {
  * the field being typed into. Ignored by platforms with neither, which is why
  * it is cheap to call whenever the focus moves.
  *
- * Coordinates are window pixels from the top left, which is SDL's convention
- * and not the bottom-up one the glyph pipeline draws in.
+ * Coordinates are framebuffer pixels from the top left. Convert to SDL's
+ * window units here, so the candidate window follows the same physical box
+ * used for drawing and picking on high-DPI displays.
  */
 inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
                              const int posX, const int posY, const int width,
                              const int height) {
-  const SDL_Rect area{.x = posX, .y = posY, .w = width, .h = height};
+  const auto ratio = windowPixelRatio(window);
+  const auto left  = static_cast<int>(std::floor(posX / ratio.x));
+  const auto top   = static_cast<int>(std::floor(posY / ratio.y));
+  const SDL_Rect area{.x = left,
+                      .y = top,
+                      .w = static_cast<int>(std::ceil(
+                               (static_cast<float>(posX) + width) / ratio.x)) -
+                           left,
+                      .h = static_cast<int>(std::ceil(
+                               (static_cast<float>(posY) + height) / ratio.y)) -
+                           top};
 #if GLEDITOR_SDL_MAJOR == 3
   // The third argument is where the caret is within the area, which SDL3 uses
   // to place a candidate window against the insertion point rather than the
