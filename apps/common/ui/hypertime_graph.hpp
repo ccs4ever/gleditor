@@ -16,11 +16,16 @@
 #ifndef XANADU_UI_HYPERTIME_GRAPH_HPP
 #define XANADU_UI_HYPERTIME_GRAPH_HPP
 
+#include "common/xanadu/system_docs.hpp"
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <gleditor/ui/overlay.hpp>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gleditor/a11y/tree.hpp>
@@ -47,12 +52,15 @@ class HypertimeGraph : public gleditor::FrameContributor,
                        public gleditor::ModalInput,
                        public gleditor::a11y::Source {
 public:
-  [[nodiscard]] bool grabbing() const override { return visible_; }
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
-    if (key != gleditor::Key::Escape || !grabbing()) return false;
-    setVisible(false);
-    return true;
-  }
+  [[nodiscard]] bool grabbing() const override { return visible_.load(); }
+  bool keyPressed(gleditor::Key, gleditor::KeyMods) override;
+  std::shared_ptr<const gleditor::ui::LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
+  void focusChanged(bool) override;
+  bool pointerEvent(const gleditor::ui::PointerEvent &) override;
+  std::optional<gleditor::InputArea> pointerArea() const override;
   void textTyped(const std::string &) override {}
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
@@ -83,7 +91,7 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
-  [[nodiscard]] bool busy() const override { return false; }
+  [[nodiscard]] bool busy() const override;
 
   // -- PickObserver -----------------------------------------------------------
   [[nodiscard]] bool picked(const render::PickingResult &pick,
@@ -92,46 +100,26 @@ public:
   // -- a11y::Source -----------------------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return revision_;
+    return revision_.load() + overlay_.accessibilityRevision();
   }
 
   // -- Visibility & Navigation ------------------------------------------------
-  HypertimeGraph *setVisible(bool show) noexcept {
-    if (visible_ == show) return this;
-    visible_ = show;
-    if (visible_)
-      activate();
-    else
-      deactivate();
-    revision_++;
-    return this;
-  }
-  HypertimeGraph *toggle() noexcept { return setVisible(!visible_); }
-  [[nodiscard]] bool isVisible() const noexcept { return visible_; }
+  HypertimeGraph *setVisible(bool);
+  HypertimeGraph *toggle() { return setVisible(!visible_.load()); }
+  [[nodiscard]] bool isVisible() const noexcept { return visible_.load(); }
   void scroll(float horizontal, float vertical, bool zoom, bool shift,
               float pointerX, float pointerY);
-
-  HypertimeGraph *setCurrent(const MicroversionId &id) {
-    if (current_ == id) return this;
-    current_ = id;
-    revision_++;
-    return this;
+  HypertimeGraph *setCurrent(const MicroversionId &);
+  HypertimeGraph *invalidate();
+  HypertimeGraph *setStoreIndex(std::size_t);
+  HypertimeGraph *setConfig(const ModalPresentationConfig &);
+  [[nodiscard]] std::shared_ptr<const gleditor::ui::WidgetScene>
+  prepare(const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &);
+  [[nodiscard]] gleditor::text::ShapingCache::Stats shapingStats() const {
+    return overlay_.shapingStats();
   }
-  HypertimeGraph *invalidate() {
-    nodes_.clear();
-    revision_++;
-    return this;
-  }
-  HypertimeGraph *setStoreIndex(std::size_t index) {
-    if (storeIndex_ == index) return this;
-    storeIndex_ = index;
-    nodes_.clear();
-    comparedVersions_.clear();
-    selectedOperation_.reset();
-    diffNeedsUpdate_ = true;
-    revision_++;
-    return this;
-  }
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
   [[nodiscard]] std::size_t storeIndex() const noexcept { return storeIndex_; }
   [[nodiscard]] const std::optional<MicroversionId> &
   selectedOperation() const noexcept {
@@ -219,17 +207,17 @@ private:
     std::size_t lane{0};
   };
 
-  void layout(RenderState &state, float screenW, float screenH);
-  void computeUnobstructedAliasPosition(GraphNode &node,
-                                        const std::vector<GraphEdge> &allEdges,
-                                        float panelTop, float panelBottom);
+  void layout(float screenW, float screenH);
+  void computeUnobstructedAliasPosition(GraphNode &,
+                                        const std::vector<GraphEdge> &, float,
+                                        float);
 
   std::string fontName_;
   std::function<const Store &(std::size_t)> storeAt_;
   std::function<std::uint64_t()> generation_;
   std::unique_ptr<gleditor::Canvas> canvas_;
   std::size_t storeIndex_{0};
-  bool visible_{false};
+  std::atomic<bool> visible_{false};
   MicroversionId current_;
   std::optional<MicroversionId> selectedOperation_;
   std::vector<MicroversionId> comparedVersions_;
@@ -248,11 +236,6 @@ private:
   float laidOutWidth_{0.0F};
   float laidOutHeight_{0.0F};
 
-  float scrubberTrackX_{0.0F};
-  float scrubberTrackY_{0.0F};
-  float scrubberTrackW_{0.0F};
-  float scrubberThumbX_{0.0F};
-
   MultiVersionDiffResult diffResult_;
   bool diffNeedsUpdate_{false};
 
@@ -265,7 +248,34 @@ private:
   std::function<void(const std::vector<MicroversionId> &)> onionSkinHandler_;
 
   std::uint64_t builtAt{0};
-  std::uint64_t revision_{1};
+  std::atomic<std::uint64_t> revision_{1};
+  mutable std::recursive_mutex guard_;
+  gleditor::ui::ScreenOverlay overlay_;
+  gleditor::ui::UiMetrics metrics_;
+  gleditor::ui::Theme theme_, sourceTheme_;
+  ModalPresentationConfig config_{640, 460, .95F, .95F};
+  gleditor::ui::Rect graphBounds_;
+  bool dirty_{true}, decorationDirty_{true}, comparisonPage_{};
+  float comparisonScroll_{}, comparisonMaxScroll_{}, rowHeight_{};
+  std::uint64_t epoch_{1}, modelGeneration_{};
+  gleditor::ui::WidgetId nextId_{16};
+  std::map<MicroversionId, gleditor::ui::WidgetId> nodeIds_, aliasIds_;
+  std::map<std::string, gleditor::ui::WidgetId> controlIds_;
+  gleditor::text::ShapingCache measurements_;
+  struct Action {
+    std::string kind;
+    std::optional<MicroversionId> version;
+    std::vector<MicroversionId> compared;
+    std::uint64_t epoch{};
+    bool modified{};
+  };
+  std::unordered_map<gleditor::ui::WidgetId, Action> actions_;
+  std::vector<Action> pending_;
+  void changed(bool retire = false);
+  void queue(const gleditor::ui::WidgetAction &);
+  void drain();
+  void dispatch(const Action &);
+  void rebuildDecoration();
 };
 
 } // namespace xanadu::ui

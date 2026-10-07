@@ -239,6 +239,13 @@ Right to resize with the keyboard, or activate it to widen by one step. A comple
 `pouchPanel.widthPx` in `system://ui`; cancelling a drag restores the previous width. The drawer
 clamps its width to the available safe area.
 
+The quotation builder has Source, Selector, Preview and Commit pages; large font settings keep every
+control reachable through these pages. The telescope provides Channels, Publications and Inspector
+pages, with Refresh for catalog changes. The hypertime graph switches between Graph and Comparison.
+Their preferred sizes and safe-area limits use the `quotationModal`, `telescopeModal` and
+`hypertimeModal` settings in `system://ui`, with `widthPx`, `heightPx`, `maxWidthShare` and
+`maxHeightShare` fields.
+
 The plain editor's chrome typography is independent of its document font. Its configuration accepts
 `ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minTouchPx`, `ui.minFontPx`, and
 `ui.font.<caption|label|body|title|mono>.<family|points>`. UI and font scales multiply the display

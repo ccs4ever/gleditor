@@ -5,41 +5,14 @@
 #include "common/ui/quotation_builder_overlay.hpp"
 
 #include <algorithm>
-#include <format>
+#include <cmath>
+#include <gleditor/text/font.hpp>
+#include <limits>
 #include <ranges>
-
-#include <glm/gtc/matrix_transform.hpp>
+#include <stdexcept>
 
 namespace xanadu {
-
-namespace {
-
-constexpr std::uint32_t kColorBgOverlay   = 0x0B0F19F5;
-constexpr std::uint32_t kColorHeaderBg    = 0x111827FF;
-constexpr std::uint32_t kColorBorder      = 0x334155FF;
-constexpr std::uint32_t kColorBorderCyan  = 0x38BDF8FF;
-constexpr std::uint32_t kColorCanvasBg    = 0x050811FF;
-constexpr std::uint32_t kColorActiveTab   = 0x0284C7DD;
-constexpr std::uint32_t kColorInactiveTab = 0x1E293B88;
-constexpr std::uint32_t kColorTextWhite   = 0xFFFFFFFF;
-constexpr std::uint32_t kColorTextMuted   = 0x94A3B8CC;
-constexpr std::uint32_t kColorSkyBlue     = 0x38BDF8FF;
-constexpr std::uint32_t kColorCellBg      = 0x1E293BCC;
-constexpr std::uint32_t kColorCellFocusBg = 0x0369A1CC;
-constexpr std::uint32_t kColorEdge        = 0x38BDF888;
-constexpr std::uint32_t kColorSuccess     = 0x10B981FF;
-constexpr std::uint32_t kColorDanger      = 0xEF4444FF;
-constexpr std::uint32_t kColorCommitBtn   = 0x059669EE;
-
-[[maybe_unused]] std::string truncateString(std::string_view str,
-                                            const std::size_t maxLen) {
-  if (str.size() <= maxLen) {
-    return std::string(str);
-  }
-  return std::string(str.substr(0, maxLen - 3)) + "...";
-}
-
-} // namespace
+namespace ui = gleditor::ui;
 
 QuotationBuilderOverlay::QuotationBuilderOverlay(
     Store &localStore, MicroversionId activeVersion, RendererRef renderer,
@@ -49,34 +22,51 @@ QuotationBuilderOverlay::QuotationBuilderOverlay(
       renderer_(std::move(renderer)), catalog_(catalog),
       fontName_(std::move(fontName)),
       openStoresProvider_(std::move(openStores)),
-      onCommit_(std::move(onCommit)) {
+      onCommit_(std::move(onCommit)),
+      overlay_({.id = 1, .model = ui::Modal{}}) {
+  overlay_.setVisible(false);
+  overlay_.setActionHandler([this](const auto &action) { queue(action); });
+  fields_ = {
+      {{vqlQueryText_, "VQL query", "query", vqlQueryText_.size()},
+       {localDimName_, "Local dimension", "local-dim", localDimName_.size()},
+       {labelText_, "Quotation label", "label", labelText_.size()}}};
   refreshSources();
 }
 
-QuotationBuilderOverlay::~QuotationBuilderOverlay() = default;
+QuotationBuilderOverlay::~QuotationBuilderOverlay() { releaseFocus(); }
 
 void QuotationBuilderOverlay::deviceReady(
     render::RenderDevice &device, const render::PipelineDesc &pipeline) {
-  canvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
-  canvas_->createPipeline(pipeline, false);
+  overlay_.deviceReady(device, pipeline);
 }
 
-bool QuotationBuilderOverlay::busy() const { return false; }
+bool QuotationBuilderOverlay::busy() const {
+  const std::scoped_lock lock(guard_);
+  return !pending_.empty();
+}
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::setVisible(const bool visible) {
-  if (visible && !visible_) activate();
-  if (!visible) deactivate();
+  const std::scoped_lock lock(guard_);
+  if (visible_.load() == visible) return this;
   visible_ = visible;
-  if (visible_) {
+  ++epoch_;
+  pending_.clear();
+  actions_.clear();
+  overlay_.setVisible(visible);
+  if (visible) {
+    closeId_ = allocate();
+    for (auto &id : tabIds_) id = allocate();
+    for (auto &id : fieldIds_) id = allocate();
+    activate();
     if (activeVersion_.isZero() &&
-        !localStore_.primaryCurrentVersion().isZero()) {
+        !localStore_.primaryCurrentVersion().isZero())
       activeVersion_ = localStore_.primaryCurrentVersion();
-    }
     refreshSources();
-    recomputePreview();
+  } else {
+    deactivate();
   }
-  ++a11yRevision_;
+  changed(true);
   return this;
 }
 
@@ -86,6 +76,7 @@ QuotationBuilderOverlay *QuotationBuilderOverlay::toggle() {
 }
 
 QuotationBuilderOverlay *QuotationBuilderOverlay::refreshSources() {
+  const std::scoped_lock lock(guard_);
   foreignStores_.clear();
   const auto &reg = localStore_.scrollRegistry();
   for (const auto &rec : reg.scrolls) {
@@ -126,6 +117,7 @@ QuotationBuilderOverlay *QuotationBuilderOverlay::refreshSources() {
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::selectStore(const std::size_t index) {
+  const std::scoped_lock lock(guard_);
   if (index >= foreignStores_.size()) {
     return this;
   }
@@ -149,6 +141,9 @@ QuotationBuilderOverlay::selectStore(const std::size_t index) {
 
   builder_.setForeignStore(key, targetStore);
 
+  selectedRankDimIndex_  = 0;
+  selectedRootCellIndex_ = 0;
+  scrollPx_              = 0;
   // Populate candidate roots from the store
   candidateRootCells_.clear();
   const auto home = targetStore->homeCell();
@@ -163,9 +158,6 @@ QuotationBuilderOverlay::selectStore(const std::size_t index) {
       candidateRootCells_.emplace_back(
           c.birthOp,
           txt.empty() ? ("cell #" + std::to_string(c.birthOp)) : txt);
-      if (candidateRootCells_.size() >= 20U) {
-        break;
-      }
     }
   }
 
@@ -191,6 +183,7 @@ QuotationBuilderOverlay::selectStore(const std::size_t index) {
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
+  const std::scoped_lock lock(guard_);
   if (index >= candidateRootCells_.size()) {
     return this;
   }
@@ -205,6 +198,7 @@ QuotationBuilderOverlay::selectRootCell(const std::size_t index) {
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
+  const std::scoped_lock lock(guard_);
   builder_.setMode(mode);
   recomputePreview();
   return this;
@@ -212,6 +206,7 @@ QuotationBuilderOverlay::setMode(const Selector::Kind mode) {
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
+  const std::scoped_lock lock(guard_);
   if (selectedCarriedDims_.contains(dim)) {
     selectedCarriedDims_.erase(dim);
   } else {
@@ -223,13 +218,17 @@ QuotationBuilderOverlay::toggleCarriedDimension(const zigzag::DimRef dim) {
 
 QuotationBuilderOverlay *
 QuotationBuilderOverlay::setVqlQuery(std::string query) {
-  vqlQueryText_ = std::move(query);
+  const std::scoped_lock lock(guard_);
+  vqlQueryText_    = std::move(query);
+  fields_[0].value = vqlQueryText_;
+  fields_[0].caret = vqlQueryText_.size();
   builder_.setVqlQuery(vqlQueryText_);
   recomputePreview();
   return this;
 }
 
 void QuotationBuilderOverlay::recomputePreview() {
+  const std::scoped_lock lock(guard_);
   const auto *st = selectedTargetStore_ ? selectedTargetStore_ : &localStore_;
   const auto scrollKey =
       foreignStores_.empty() ? "" : foreignStores_[selectedStoreIndex_];
@@ -269,10 +268,13 @@ void QuotationBuilderOverlay::recomputePreview() {
       .deadline   = std::chrono::milliseconds(500),
   };
   builder_.recomputePreview(budget);
-  ++a11yRevision_;
+  observedLocalOps_  = localStore_.opCount();
+  observedTargetOps_ = st->opCount();
+  changed(true);
 }
 
 bool QuotationBuilderOverlay::commitQuotation() {
+  const std::scoped_lock lock(guard_);
   if (!builder_.preview().isValid) {
     return false;
   }
@@ -318,511 +320,555 @@ bool QuotationBuilderOverlay::commitQuotation() {
   return true;
 }
 
-bool QuotationBuilderOverlay::keyPressed(const gleditor::Key key,
-                                         const gleditor::KeyMods /*mods*/) {
-  if (!visible_) {
+ui::WidgetId QuotationBuilderOverlay::allocate() {
+  if (nextId_ == std::numeric_limits<ui::WidgetId>::max())
+    throw std::length_error("Quotation action identities exhausted");
+  return nextId_++;
+}
+ui::WidgetId QuotationBuilderOverlay::contentId(std::string_view name,
+                                                zigzag::CellRef ref) {
+  const auto key = std::to_string(page_) + ":" + std::string(name) + ":" +
+                   std::to_string(ref);
+  const auto found = contentIds_.find(key);
+  if (found != contentIds_.end()) return found->second;
+  const auto id = allocate();
+  contentIds_.emplace(key, id);
+  return id;
+}
+void QuotationBuilderOverlay::changed(bool semantic) {
+  dirty_ = true;
+  ++a11yRevision_;
+  if (semantic) {
+    ++semanticRevision_;
+    contentIds_.clear();
+  }
+}
+QuotationBuilderOverlay *
+QuotationBuilderOverlay::setConfig(const ModalPresentationConfig &config) {
+  const std::scoped_lock lock(guard_);
+  if (config_ != config) {
+    config_ = config;
+    changed();
+  }
+  return this;
+}
+std::shared_ptr<const ui::WidgetScene>
+QuotationBuilderOverlay::prepare(const ui::UiMetrics &metrics,
+                                 const ui::Theme &sourceTheme) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return {};
+  observeStores();
+  if (!dirty_ && metrics_ == metrics && sourceTheme_ == sourceTheme)
+    return overlay_.snapshot();
+  metrics_     = metrics;
+  sourceTheme_ = sourceTheme;
+  theme_ = ui::withFontOverride(sourceTheme, ui::FontRole::Label, fontName_);
+  // Paging keeps configured typography intact in a short viewport.
+  theme_.paddingEm = std::min(theme_.paddingEm, .1F);
+  theme_.gapEm     = std::min(theme_.gapEm, .1F);
+  const auto font  = gleditor::text::FontManager::instance().getFont(
+      metrics.fontDescription(ui::FontRole::Label, theme_));
+  const auto line = std::ceil(font->metrics().lineHeight) + 2;
+  const auto safe = metrics.pixelSafeArea();
+  const ModalPresentationConfig defaults;
+  const auto share = [](float value, float fallback) {
+    return std::isfinite(value) ? std::clamp(value, .1F, 1.F) : fallback;
+  };
+  const auto length = [&](float value, float fallback) {
+    return metrics.px(std::isfinite(value) && value > 0 ? value : fallback);
+  };
+  const auto width       = std::floor(std::min(
+      length(config_.widthPx, defaults.widthPx),
+      safe.width * share(config_.maxWidthShare, defaults.maxWidthShare)));
+  const auto height      = std::floor(std::min(
+      length(config_.heightPx, defaults.heightPx),
+      safe.height * share(config_.maxHeightShare, defaults.maxHeightShare)));
+  const auto basePadding = theme_.paddingEm;
+  const auto baseGap     = theme_.gapEm;
+  const auto required    = [&](float factor) {
+    const auto p = font->metrics().lineHeight * basePadding * factor;
+    const auto g = font->metrics().lineHeight * baseGap * factor;
+    const auto t =
+        std::ceil(std::max(metrics.px(theme_.type.minTouchPx), line + p * 2)) +
+        2;
+    // Include nested flow padding and rounding slack. Compact Preview reserves
+    // two complete candidate rows alongside its inspector.
+    return std::max(t * 5 + p * 8 + g * 4 + 16,
+                       t * 4 + line + p * 10 + g * 3 + 16);
+  };
+  float factor = 1;
+  if (required(factor) > height) {
+    float lower = 0, upper = 1;
+    for (int i = 0; i < 20; ++i) {
+      const auto middle = (lower + upper) * .5F;
+      if (required(middle) <= height)
+        lower = middle;
+      else
+        upper = middle;
+    }
+    factor = lower;
+  }
+  theme_.paddingEm = basePadding * factor;
+  theme_.gapEm     = baseGap * factor;
+  const auto pad   = font->metrics().lineHeight * theme_.paddingEm;
+  const auto gap   = font->metrics().lineHeight * theme_.gapEm;
+  const auto touch =
+      std::ceil(std::max(metrics.px(theme_.type.minTouchPx), line + pad * 2)) +
+      2;
+  const auto flowHeight = touch + pad * 2 + 2;
+  const auto inner      = std::max(0.F, width - pad * 2);
+  ui::Widget model{
+      .id        = 1,
+      .model     = ui::Modal{},
+      .preferred = {metrics.logical(width), metrics.logical(height)}};
+  actions_.clear();
+  listActions_.clear();
+  const auto action = [&](ui::WidgetId id, std::string name,
+                          std::size_t index   = 0,
+                          zigzag::CellRef ref = zigzag::noCell) {
+    actions_.emplace(
+        id, Action{std::move(name), {}, index, epoch_, semanticRevision_, ref});
+  };
+  const auto button = [&](std::string label, std::string name, float w,
+                          bool enabled = true, std::size_t index = 0,
+                          zigzag::CellRef ref = zigzag::noCell) {
+    const auto id = contentId(name, ref);
+    action(id, name, index, ref);
+    return ui::Widget{
+        .id        = id,
+        .model     = ui::Button{std::move(label), std::move(name), enabled},
+        .preferred = {metrics.logical(w), metrics.logical(touch)}};
+  };
+  const auto row = [&](std::vector<ui::Widget> children) {
+    return ui::Widget{.id        = allocate(),
+                      .model     = ui::ButtonFlow{},
+                      .children  = std::move(children),
+                      .preferred = {0, metrics.logical(flowHeight)}};
+  };
+  const auto rowWidth = std::max(0.F, inner - pad * 2);
+  const auto closeWidth =
+      std::min(rowWidth * .3F,
+               std::max(metrics.px(theme_.type.minTouchPx), line * 2.5F));
+  action(closeId_, "close");
+  model.children.push_back(row(
+      {{.id        = 2,
+        .model     = ui::Label{"Quotation Builder"},
+        .preferred = {metrics.logical(
+                          std::max(0.F, rowWidth - closeWidth - gap - 2)),
+                      metrics.logical(touch)}},
+       {.id        = closeId_,
+        .model     = ui::Button{"Close", "close"},
+        .preferred = {metrics.logical(closeWidth), metrics.logical(touch)}}}));
+  ui::Tabs tabs{.selected = page_};
+  const std::array<std::string, 4> names{"Source", "Selector", "Preview",
+                                         "Commit"};
+  for (std::size_t i = 0; i < names.size(); ++i) {
+    tabs.tabs.push_back({tabIds_[i], names[i], "page"});
+    action(tabIds_[i], "page", i);
+  }
+  model.children.push_back({.id        = 3,
+                            .model     = std::move(tabs),
+                            .preferred = {0, metrics.logical(flowHeight)}});
+  const auto bodyHeight =
+      std::max(0.F, height - pad * 2 - flowHeight * 2 - gap * 2 - 2);
+  const auto &preview = builder_.preview();
+  if (page_ == 0) {
+    const auto store =
+        foreignStores_.empty() ? "none" : foreignStores_[selectedStoreIndex_];
+    const auto root = candidateRootCells_.empty()
+                          ? "none"
+                          : candidateRootCells_[selectedRootCellIndex_].second;
+    model.children.push_back(button("Source store: " + store, "store-next",
+                                    inner, foreignStores_.size() > 1));
+    model.children.push_back(button("Root cell: " + root, "root-next", inner,
+                                    candidateRootCells_.size() > 1));
+    model.children.push_back(row({button("Previous store", "store-prev",
+                                         std::floor((rowWidth - gap - 2) / 2),
+                                         foreignStores_.size() > 1),
+                                  button("Previous root", "root-prev",
+                                         std::floor((rowWidth - gap - 2) / 2),
+                                         candidateRootCells_.size() > 1)}));
+  } else if (page_ == 1) {
+    const auto mode = builder_.mode();
+    const auto name = mode == Selector::Kind::Rank      ? "Rank"
+                      : mode == Selector::Kind::Closure ? "Closure"
+                                                        : "VQL Query";
+    model.children.push_back(
+        button(std::string("Selector: ") + name, "mode", inner));
+    if (mode == Selector::Kind::Rank) {
+      const auto dim = availableForeignDims_.empty()
+                           ? "none"
+                           : availableForeignDims_[selectedRankDimIndex_ %
+                                                   availableForeignDims_.size()]
+                                 .second;
+      model.children.push_back(button("Rank dimension: " + dim, "rank-dim",
+                                      inner, !availableForeignDims_.empty()));
+      model.children.push_back(button(rankDir_ == zigzag::DimVector::POS
+                                          ? "Direction: POS (+)"
+                                          : "Direction: NEG (-)",
+                                      "direction", inner));
+    } else if (mode == Selector::Kind::Query) {
+      const auto id = fieldIds_[0];
+      action(id, "query");
+      model.children.push_back({.id        = id,
+                                .model     = fields_[0],
+                                .preferred = {0, metrics.logical(touch)}});
+      model.children.push_back({.id    = 4,
+                                .model = ui::Label{preview.statusMessage.empty()
+                                                       ? "Enter a VQL query"
+                                                       : preview.statusMessage},
+                                .preferred = {0, metrics.logical(touch)},
+                                .maxLines  = 1});
+    } else {
+      ui::List list{.scrollPx = scrollPx_, .rowHeightPx = touch, .overscan = 0};
+      for (const auto &[dim, name] : availableForeignDims_) {
+        const auto id = contentId("carried-dim", dim);
+        action(id, "carried-dim", 0, dim);
+        listActions_.push_back(actions_.at(id));
+        list.rows.push_back(
+            {id,
+             std::string(selectedCarriedDims_.contains(dim) ? "Carried: "
+                                                            : "Excluded: ") +
+                 name,
+             "carried-dim"});
+      }
+      listHeight_ = std::max(touch, bodyHeight - touch - gap - pad * 2 - 2);
+      rowHeight_  = touch;
+      model.children.push_back(
+          {.id        = 5,
+           .model     = std::move(list),
+           .preferred = {0, metrics.logical(listHeight_)}});
+    }
+  } else if (page_ == 2) {
+    const auto budget = std::to_string(preview.cells.size()) + " cells / " +
+                        std::to_string(preview.totalOpBytes) + " B ops · ";
+    std::string inspector = budget + "No cell focused";
+    if (preview.isValid && preview.focusedIndex < preview.cells.size()) {
+      const auto &cell = preview.cells[preview.focusedIndex];
+      inspector        = budget + "Cell #" + std::to_string(cell.foreignCell) +
+                  " · Op " + cell.birthRef.produces.str() + " · Degree " +
+                  std::to_string(cell.outboundEdges.size()) + " · " + cell.text;
+    }
+    const std::uint16_t inspectorLines =
+        bodyHeight >= line * 2 + pad * 4 + gap + touch * 2 + 8 ? 2 : 1;
+    const auto inspectorHeight = line * inspectorLines + pad * 2 + 2;
+    model.children.push_back(
+        {.id    = 4,
+         .model = ui::Label{std::move(inspector), ui::TextPurpose::Description},
+         .preferred = {0, metrics.logical(inspectorHeight)},
+         .maxLines  = inspectorLines});
+    if (!preview.isValid) {
+      model.children.push_back(
+          {.id = 5,
+           .model =
+               ui::Label{preview.statusMessage.empty() ? "No preview available"
+                                                       : preview.statusMessage,
+                         ui::TextPurpose::Description},
+           .preferred = {
+               0, metrics.logical(
+                      std::max(0.F, bodyHeight - inspectorHeight - gap - 2))}});
+    } else {
+      ui::List list{.scrollPx = scrollPx_, .rowHeightPx = touch, .overscan = 0};
+      for (std::size_t i = 0; i < preview.cells.size(); ++i) {
+        const auto &cell = preview.cells[i];
+        const auto id    = contentId("preview-cell", cell.foreignCell);
+        action(id, "preview-cell", i, cell.foreignCell);
+        listActions_.push_back(actions_.at(id));
+        list.rows.push_back(
+            {id,
+             std::string(i == preview.focusedIndex ? "Focused " : "") +
+                 "Cell #" + std::to_string(cell.foreignCell) + ": " +
+                 (cell.text.empty() ? "(empty)" : cell.text),
+             "preview-cell"});
+      }
+      rowHeight_  = touch;
+      listHeight_ = std::max(touch, bodyHeight - inspectorHeight - gap - 2);
+      model.children.push_back(
+          {.id        = 5,
+           .model     = std::move(list),
+           .preferred = {0, metrics.logical(listHeight_)}});
+    }
+  } else {
+    const auto field = [&](std::size_t index) {
+      const auto id = fieldIds_[index];
+      action(id, fields_[index].action);
+      return ui::Widget{.id        = id,
+                        .model     = fields_[index],
+                        .preferred = {0, metrics.logical(touch)}};
+    };
+    model.children.push_back(field(1));
+    model.children.push_back(field(2));
+    model.children.push_back(
+        row({button("Commit quotation", "commit",
+                    std::floor((rowWidth - gap - 2) / 2), preview.isValid),
+             button("Cancel", "close", std::floor((rowWidth - gap - 2) / 2))}));
+  }
+  overlay_.setModel(std::move(model));
+  overlay_.setBounds(ui::clampToSafeArea(
+      metrics.rounded({safe.left + (safe.width - width) / 2,
+                       safe.bottom + (safe.height - height) / 2, width,
+                       height}),
+      safe));
+  dirty_ = false;
+  return overlay_.prepare(metrics, theme_);
+}
+void QuotationBuilderOverlay::queue(const ui::WidgetAction &incoming) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_) return;
+  if (incoming.id == 5 && incoming.itemIndex < listActions_.size()) {
+    pending_.push_back(listActions_[incoming.itemIndex]);
+    return;
+  }
+  // Tabs report their owner rather than the selected child's identity.
+  const auto id    = incoming.id == 3 && incoming.itemIndex < tabIds_.size()
+                         ? tabIds_[incoming.itemIndex]
+                         : incoming.id;
+  const auto found = actions_.find(id);
+  if (found == actions_.end()) return;
+  auto action  = found->second;
+  action.value = incoming.value;
+  for (std::size_t i = 0; i < fieldIds_.size(); ++i)
+    if (incoming.id == fieldIds_[i]) {
+      fields_[i].value = incoming.value;
+      fields_[i].caret = incoming.caret.value_or(fields_[i].caret);
+    }
+  if ((action.name == "query" && incoming.value == vqlQueryText_) ||
+      (action.name == "label" && incoming.value == labelText_) ||
+      (action.name == "local-dim" && incoming.value == localDimName_))
+    return;
+  pending_.push_back(std::move(action));
+}
+void QuotationBuilderOverlay::observeStores() {
+  if (observedLocalOps_ != localStore_.opCount() ||
+      (selectedTargetStore_ &&
+       observedTargetOps_ != selectedTargetStore_->opCount()))
+    recomputePreview();
+}
+void QuotationBuilderOverlay::drain() {
+  const std::scoped_lock lock(guard_);
+  auto pending = std::move(pending_);
+  pending_.clear();
+  const auto startingSemantic = semanticRevision_;
+  for (const auto &action : pending) {
+    const auto editing = action.name == "query" || action.name == "label" ||
+                         action.name == "local-dim";
+    if (!visible_ || action.epoch != epoch_ ||
+        action.semantic != (editing ? startingSemantic : semanticRevision_))
+      continue;
+    const auto &name = action.name;
+    if (name == "close")
+      setVisible(false);
+    else if (name == "page") {
+      page_     = action.index;
+      scrollPx_ = 0;
+      changed();
+    } else if (name == "store-next" || name == "store-prev") {
+      if (!foreignStores_.empty())
+        selectStore((selectedStoreIndex_ + foreignStores_.size() +
+                     (name == "store-next" ? 1 : -1)) %
+                    foreignStores_.size());
+    } else if (name == "root-next" || name == "root-prev") {
+      if (!candidateRootCells_.empty())
+        selectRootCell((selectedRootCellIndex_ + candidateRootCells_.size() +
+                        (name == "root-next" ? 1 : -1)) %
+                       candidateRootCells_.size());
+    } else if (name == "mode") {
+      const auto mode = builder_.mode();
+      setMode(mode == Selector::Kind::Rank      ? Selector::Kind::Closure
+              : mode == Selector::Kind::Closure ? Selector::Kind::Query
+                                                : Selector::Kind::Rank);
+    } else if (name == "rank-dim") {
+      ++selectedRankDimIndex_;
+      recomputePreview();
+    } else if (name == "direction") {
+      rankDir_ = rankDir_ == zigzag::DimVector::POS ? zigzag::DimVector::NEG
+                                                    : zigzag::DimVector::POS;
+      recomputePreview();
+    } else if (name == "carried-dim") {
+      if (std::ranges::any_of(availableForeignDims_, [&](const auto &dim) {
+            return dim.first == action.ref;
+          }))
+        toggleCarriedDimension(action.ref);
+    } else if (name == "preview-cell") {
+      const auto &cells = builder_.preview().cells;
+      if (action.index < cells.size() &&
+          cells[action.index].foreignCell == action.ref) {
+        builder_.focusPreviewCell(action.index);
+        changed();
+      }
+    } else if (name == "query") {
+      vqlQueryText_ = action.value;
+      builder_.setVqlQuery(vqlQueryText_);
+      recomputePreview();
+    } else if (name == "label") {
+      labelText_ = action.value;
+      changed();
+    } else if (name == "local-dim") {
+      localDimName_ = action.value;
+      changed();
+    } else if (name == "commit")
+      commitQuotation();
+  }
+}
+void QuotationBuilderOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const std::scoped_lock lock(guard_);
+  observeStores();
+  drain();
+  if (!visible_) return;
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
+  std::ignore          = prepare(metrics, ctx.theme);
+  gleditor::FrameContext draw{
+      ctx.state,    ctx.viewProjection, ctx.screenWidth,   ctx.screenHeight,
+      ctx.timeline, ctx.chrome,         ctx.settledChrome, metrics,
+      theme_};
+  overlay_.drawFrame(draw);
+}
+bool QuotationBuilderOverlay::picked(const render::PickingResult &pick,
+                                     RenderState &state) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
+  if (dirty_) return pick.tag.kind == render::tagKindOverlay;
+  if (pick.requestId || pick.tag.docIndex || pick.tag.pageIndex) {
+    if (pick.overlayWidgetId) requestFocus(*pick.overlayWidgetId);
+    return overlay_.picked(pick, state);
+  }
+  // Legacy synthetic domain picks never originate from the retained renderer.
+  if (pick.tag.kind != render::tagKindOverlay) return false;
+  switch (pick.tag.clusterIndex) {
+  case kTagClose:
+  case kTagCancel:
+    setVisible(false);
+    return true;
+  case kTagCommit:
+    return commitQuotation();
+  case kTagModeRank:
+    setMode(Selector::Kind::Rank);
+    return true;
+  case kTagModeClosure:
+    setMode(Selector::Kind::Closure);
+    return true;
+  case kTagModeQuery:
+    setMode(Selector::Kind::Query);
+    return true;
+  default:
     return false;
   }
-
+}
+void QuotationBuilderOverlay::describe(gleditor::a11y::Builder &builder) {
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder retained(tree, builder.owner());
+  overlay_.describe(retained);
+  for (const auto &node : tree.nodes) {
+    auto &copy = builder.add(gleditor::a11y::Ids::localOf(node.id), node.role);
+    copy       = node;
+    if (gleditor::a11y::Ids::localOf(node.id) == 1)
+      copy.label = "Quotation Builder Dialog";
+  }
+  for (auto root : retained.roots()) builder.contribute(root);
+}
+bool QuotationBuilderOverlay::performAction(std::uint64_t id,
+                                            gleditor::a11y::Action action,
+                                            std::string_view value) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_) return false;
+  const auto local = gleditor::a11y::Ids::localOf(id);
+  const auto scene = overlay_.snapshot();
+  if (scene && scene->find(static_cast<ui::WidgetId>(local)))
+    requestFocus(static_cast<ui::WidgetId>(local));
+  return overlay_.performAction(id, action, value);
+}
+std::shared_ptr<const ui::LayoutResult>
+QuotationBuilderOverlay::focusLayout() const {
+  return overlay_.focusLayout();
+}
+void QuotationBuilderOverlay::focusedNodeChanged(std::uint32_t id) {
+  const std::scoped_lock lock(guard_);
+  overlay_.focusedNodeChanged(id);
+}
+bool QuotationBuilderOverlay::activateNode(std::uint32_t id) {
+  const std::scoped_lock lock(guard_);
+  return visible_ && !dirty_ && overlay_.activateNode(id);
+}
+void QuotationBuilderOverlay::focusChanged(bool focused) {
+  overlay_.focusChanged(focused);
+}
+std::optional<gleditor::InputArea> QuotationBuilderOverlay::textArea() const {
+  return overlay_.textArea();
+}
+std::optional<gleditor::InputArea>
+QuotationBuilderOverlay::pointerArea() const {
+  return overlay_.pointerArea();
+}
+void QuotationBuilderOverlay::scroll(float delta) {
+  const std::scoped_lock lock(guard_);
+  scrollPx_ = std::clamp(
+      scrollPx_ + delta, 0.F,
+      std::max(0.F, static_cast<float>(listActions_.size()) * rowHeight_ -
+                        listHeight_ + 2));
+  changed();
+}
+bool QuotationBuilderOverlay::pointerEvent(const ui::PointerEvent &event) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_) return false;
+  if (event.phase == ui::PointerPhase::Wheel && !listActions_.empty()) {
+    const auto area = pointerArea();
+    if (!area || event.x < area->x || event.x >= area->x + area->width ||
+        event.y < area->y || event.y >= area->y + area->height)
+      return false;
+    scroll(-event.deltaY * rowHeight_);
+    return true;
+  }
+  if (event.phase == ui::PointerPhase::Press && event.button == 1) {
+    const auto scene = overlay_.snapshot();
+    const auto *hit =
+        scene
+            ? scene->layout.hitTest(
+                  event.x, static_cast<float>(metrics_.screenHeight) - event.y)
+            : nullptr;
+    if (hit && hit->focusable && hit->enabled) requestFocus(hit->id);
+  }
+  return overlay_.pointerEvent(event);
+}
+bool QuotationBuilderOverlay::keyPressed(gleditor::Key key,
+                                         gleditor::KeyMods mods) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
   if (key == gleditor::Key::Escape) {
     setVisible(false);
     return true;
   }
-
+  if (dirty_) return false;
+  if (overlay_.keyPressed({key, mods})) return true;
+  if ((key == gleditor::Key::PageDown || key == gleditor::Key::PageUp) &&
+      !listActions_.empty()) {
+    scroll((key == gleditor::Key::PageDown ? 1 : -1) * listHeight_);
+    return true;
+  }
+  if (page_ == 2 &&
+      (key == gleditor::Key::Left || key == gleditor::Key::Right)) {
+    builder_.navigatePreview(key == gleditor::Key::Left ? -1 : 1);
+    changed();
+    return true;
+  }
   if (key == gleditor::Key::Return) {
-    if (activeInput_ == ActiveInput::None) {
-      return commitQuotation();
+    const auto input = overlay_.textArea();
+    if (!input && overlay_.keyPressed({gleditor::Key::Space, mods}))
+      return true;
+    if (!input && page_ == 3) {
+      pending_.push_back({"commit", {}, 0, epoch_, semanticRevision_});
+      return true;
     }
-    activeInput_ = ActiveInput::None;
-    recomputePreview();
     return true;
   }
-
-  // Navigation across preview cells
-  if (key == gleditor::Key::Left) {
-    builder_.navigatePreview(-1);
-    return true;
-  }
-  if (key == gleditor::Key::Right) {
-    builder_.navigatePreview(1);
-    return true;
-  }
-
-  // Text box editing
-  if (activeInput_ != ActiveInput::None) {
-    std::string *target = nullptr;
-    if (activeInput_ == ActiveInput::Query) {
-      target = &vqlQueryText_;
-    } else if (activeInput_ == ActiveInput::Label) {
-      target = &labelText_;
-    } else if (activeInput_ == ActiveInput::LocalDim) {
-      target = &localDimName_;
-    }
-
-    if (target != nullptr) {
-      if (key == gleditor::Key::Backspace && !target->empty()) {
-        target->pop_back();
-        if (activeInput_ == ActiveInput::Query) {
-          builder_.setVqlQuery(vqlQueryText_);
-          recomputePreview();
-        }
-        return true;
-      }
-    }
-  }
-
-  return true; // Consume modal keys
+  return false;
 }
-
 void QuotationBuilderOverlay::textTyped(const std::string &utf8) {
-  if (!visible_ || activeInput_ == ActiveInput::None) {
-    return;
-  }
-
-  if (activeInput_ == ActiveInput::Query) {
-    vqlQueryText_ += utf8;
-    builder_.setVqlQuery(vqlQueryText_);
-    recomputePreview();
-  } else if (activeInput_ == ActiveInput::Label) {
-    labelText_ += utf8;
-  } else if (activeInput_ == ActiveInput::LocalDim) {
-    localDimName_ += utf8;
+  const std::scoped_lock lock(guard_);
+  if (visible_ && !dirty_) {
+    overlay_.textTyped(utf8);
   }
 }
-
-std::optional<gleditor::InputArea> QuotationBuilderOverlay::textArea() const {
-  if (!visible_) {
-    return std::nullopt;
-  }
-  return gleditor::InputArea{.x = 100, .y = 100, .width = 400, .height = 30};
-}
-
-bool QuotationBuilderOverlay::picked(const render::PickingResult &pick,
-                                     RenderState & /*state*/) {
-  if (!visible_ || pick.tag.kind != render::tagKindOverlay) {
-    return false;
-  }
-
-  const auto tag = pick.tag.clusterIndex;
-  if (tag == 0U) {
-    return false;
-  }
-
-  if (tag == kTagClose || tag == kTagCancel) {
-    setVisible(false);
-    return true;
-  }
-
-  if (tag == kTagCommit) {
-    return commitQuotation();
-  }
-
-  if (tag == kTagModeRank) {
-    setMode(Selector::Kind::Rank);
-    return true;
-  }
-  if (tag == kTagModeClosure) {
-    setMode(Selector::Kind::Closure);
-    return true;
-  }
-  if (tag == kTagModeQuery) {
-    setMode(Selector::Kind::Query);
-    return true;
-  }
-
-  if (tag == kTagDirToggle) {
-    rankDir_ = (rankDir_ == zigzag::DimVector::POS) ? zigzag::DimVector::NEG
-                                                    : zigzag::DimVector::POS;
-    recomputePreview();
-    return true;
-  }
-
-  if (tag == kTagStorePrev) {
-    if (selectedStoreIndex_ > 0) {
-      selectStore(selectedStoreIndex_ - 1);
-    }
-    return true;
-  }
-  if (tag == kTagStoreNext) {
-    if (selectedStoreIndex_ + 1 < foreignStores_.size()) {
-      selectStore(selectedStoreIndex_ + 1);
-    }
-    return true;
-  }
-
-  if (tag == kTagRootPrev) {
-    if (selectedRootCellIndex_ > 0) {
-      selectRootCell(selectedRootCellIndex_ - 1);
-    }
-    return true;
-  }
-  if (tag == kTagRootNext) {
-    if (selectedRootCellIndex_ + 1 < candidateRootCells_.size()) {
-      selectRootCell(selectedRootCellIndex_ + 1);
-    }
-    return true;
-  }
-
-  if (tag == kTagInputQuery) {
-    activeInput_ = ActiveInput::Query;
-    return true;
-  }
-  if (tag == kTagInputLabel) {
-    activeInput_ = ActiveInput::Label;
-    return true;
-  }
-  if (tag == kTagInputDim) {
-    activeInput_ = ActiveInput::LocalDim;
-    return true;
-  }
-
-  // Carried dimensions toggles
-  if (tag >= kTagDimBase && tag < kTagDimBase + availableForeignDims_.size()) {
-    const auto idx = tag - kTagDimBase;
-    toggleCarriedDimension(availableForeignDims_[idx].first);
-    return true;
-  }
-
-  // Preview cell picking
-  const auto &preview = builder_.preview();
-  if (tag >= kTagPreviewBase && tag < kTagPreviewBase + preview.cells.size()) {
-    const auto idx = tag - kTagPreviewBase;
-    builder_.focusPreviewCell(idx);
-    return true;
-  }
-
-  return true;
-}
-
-void QuotationBuilderOverlay::drawFrame(gleditor::FrameContext &ctx) {
-  if (!visible_ || !canvas_) {
-    return;
-  }
-
-  const auto screenW = static_cast<float>(ctx.screenWidth);
-  const auto screenH = static_cast<float>(ctx.screenHeight);
-  const auto ortho   = glm::ortho(0.0F, screenW, 0.0F, screenH, -1.0F, 1.0F);
-
-  // Modal dimensions: 840x560 centered
-  const float modalW = std::min(840.0F, screenW - 40.0F);
-  const float modalH = std::min(560.0F, screenH - 40.0F);
-  const float modalX = (screenW - modalW) * 0.5F;
-  const float modalY = (screenH - modalH) * 0.5F;
-  const float topY   = modalY + modalH;
-
-  canvas_->clear();
-
-  // Background scrim
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(0.0F, 0.0F, screenW, screenH, 0x00000088);
-
-  // Modal background & borders
-  canvas_->addRect(modalX, modalY, modalW, modalH, kColorBgOverlay);
-  canvas_->addLine(modalX, topY, modalX + modalW, topY, 2.0F, kColorBorderCyan);
-  canvas_->addLine(modalX, modalY, modalX + modalW, modalY, 1.0F, kColorBorder);
-  canvas_->addLine(modalX, modalY, modalX, topY, 1.0F, kColorBorder);
-  canvas_->addLine(modalX + modalW, modalY, modalX + modalW, topY, 1.0F,
-                   kColorBorder);
-
-  // Header
-  canvas_->addRect(modalX, topY - 40.0F, modalW, 40.0F, kColorHeaderBg);
-  canvas_->addText(ctx.state, modalX + 16.0F, topY - 26.0F,
-                   "Quotation Builder (Section 5.10)", kColorSkyBlue, 0);
-
-  // Close button [x]
-  canvas_->setTag(render::tagKindOverlay, kTagClose);
-  canvas_->addRect(modalX + modalW - 36.0F, topY - 32.0F, 24.0F, 24.0F,
-                   0xDC2626CC);
-  canvas_->addText(ctx.state, modalX + modalW - 28.0F, topY - 18.0F, "x",
-                   kColorTextWhite, 0);
-
-  // 1. Source & Root configuration row
-  const float row1Y = topY - 76.0F;
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addText(ctx.state, modalX + 16.0F, row1Y + 4.0F,
-                   "Foreign Store:", kColorTextMuted, 0);
-
-  const auto curStoreName =
-      foreignStores_.empty() ? "none" : foreignStores_[selectedStoreIndex_];
-  canvas_->setTag(render::tagKindOverlay, kTagStorePrev);
-  canvas_->addRect(modalX + 120.0F, row1Y, 24.0F, 24.0F, kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 128.0F, row1Y + 5.0F, "<",
-                   kColorTextWhite, 0);
-
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(modalX + 148.0F, row1Y, 180.0F, 24.0F, 0x1E293BEE);
-  canvas_->addText(ctx.state, modalX + 154.0F, row1Y + 5.0F,
-                   truncateString(curStoreName, 20), kColorSkyBlue, 0);
-
-  canvas_->setTag(render::tagKindOverlay, kTagStoreNext);
-  canvas_->addRect(modalX + 332.0F, row1Y, 24.0F, 24.0F, kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 340.0F, row1Y + 5.0F, ">",
-                   kColorTextWhite, 0);
-
-  // Root cell selector
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addText(ctx.state, modalX + 375.0F, row1Y + 4.0F,
-                   "Root Cell:", kColorTextMuted, 0);
-  const auto curRootName =
-      candidateRootCells_.empty()
-          ? "none"
-          : candidateRootCells_[selectedRootCellIndex_].second;
-
-  canvas_->setTag(render::tagKindOverlay, kTagRootPrev);
-  canvas_->addRect(modalX + 450.0F, row1Y, 24.0F, 24.0F, kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 458.0F, row1Y + 5.0F, "<",
-                   kColorTextWhite, 0);
-
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(modalX + 478.0F, row1Y, 180.0F, 24.0F, 0x1E293BEE);
-  canvas_->addText(ctx.state, modalX + 484.0F, row1Y + 5.0F,
-                   truncateString(curRootName, 20), kColorSkyBlue, 0);
-
-  canvas_->setTag(render::tagKindOverlay, kTagRootNext);
-  canvas_->addRect(modalX + 662.0F, row1Y, 24.0F, 24.0F, kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 670.0F, row1Y + 5.0F, ">",
-                   kColorTextWhite, 0);
-
-  // 2. Selector Mode Tabs
-  const float tabY   = row1Y - 36.0F;
-  const auto curMode = builder_.mode();
-
-  canvas_->setTag(render::tagKindOverlay, kTagModeRank);
-  canvas_->addRect(modalX + 16.0F, tabY, 80.0F, 26.0F,
-                   curMode == Selector::Kind::Rank ? kColorActiveTab
-                                                   : kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 36.0F, tabY + 6.0F, "Rank",
-                   kColorTextWhite, 0);
-
-  canvas_->setTag(render::tagKindOverlay, kTagModeClosure);
-  canvas_->addRect(modalX + 104.0F, tabY, 80.0F, 26.0F,
-                   curMode == Selector::Kind::Closure ? kColorActiveTab
-                                                      : kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 118.0F, tabY + 6.0F, "Closure",
-                   kColorTextWhite, 0);
-
-  canvas_->setTag(render::tagKindOverlay, kTagModeQuery);
-  canvas_->addRect(modalX + 192.0F, tabY, 90.0F, 26.0F,
-                   curMode == Selector::Kind::Query ? kColorActiveTab
-                                                    : kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + 204.0F, tabY + 6.0F, "VQL Query",
-                   kColorTextWhite, 0);
-
-  // Selector controls based on mode
-  const float ctrlY = tabY - 34.0F;
-  if (curMode == Selector::Kind::Closure) {
-    canvas_->setTag(render::tagKindOverlay, 0);
-    canvas_->addText(ctx.state, modalX + 16.0F, ctrlY + 4.0F,
-                     "Carried Dims:", kColorTextMuted, 0);
-    float dimX = modalX + 110.0F;
-    for (std::size_t i = 0; i < availableForeignDims_.size(); ++i) {
-      const auto &dimPair   = availableForeignDims_[i];
-      const bool isSelected = selectedCarriedDims_.contains(dimPair.first);
-      const auto btnW       = 80.0F;
-      if (dimX + btnW > modalX + modalW - 16.0F) {
-        break;
-      }
-      canvas_->setTag(render::tagKindOverlay, kTagDimBase + i);
-      canvas_->addRect(dimX, ctrlY, btnW, 22.0F,
-                       isSelected ? 0x059669EE : 0x1E293B88);
-      canvas_->addText(ctx.state, dimX + 6.0F, ctrlY + 4.0F,
-                       truncateString(dimPair.second, 9), kColorTextWhite, 0);
-      dimX += btnW + 6.0F;
-    }
-  } else if (curMode == Selector::Kind::Rank) {
-    canvas_->setTag(render::tagKindOverlay, 0);
-    canvas_->addText(ctx.state, modalX + 16.0F, ctrlY + 4.0F,
-                     "Direction:", kColorTextMuted, 0);
-    canvas_->setTag(render::tagKindOverlay, kTagDirToggle);
-    canvas_->addRect(modalX + 85.0F, ctrlY, 70.0F, 22.0F, kColorActiveTab);
-    canvas_->addText(ctx.state, modalX + 92.0F, ctrlY + 4.0F,
-                     rankDir_ == zigzag::DimVector::POS ? "POS (+)" : "NEG (-)",
-                     kColorTextWhite, 0);
-  } else if (curMode == Selector::Kind::Query) {
-    canvas_->setTag(render::tagKindOverlay, 0);
-    canvas_->addText(ctx.state, modalX + 16.0F, ctrlY + 4.0F,
-                     "VQL Query:", kColorTextMuted, 0);
-    canvas_->setTag(render::tagKindOverlay, kTagInputQuery);
-    canvas_->addRect(modalX + 90.0F, ctrlY, 400.0F, 22.0F,
-                     activeInput_ == ActiveInput::Query ? 0x0369A1CC
-                                                        : 0x1E293BEE);
-    canvas_->addText(ctx.state, modalX + 96.0F, ctrlY + 4.0F,
-                     vqlQueryText_ +
-                         (activeInput_ == ActiveInput::Query ? "_" : ""),
-                     kColorSkyBlue, 0);
-  }
-
-  // 3. 2D Navigable Preview Canvas
-  const float cvsX = modalX + 16.0F;
-  const float cvsY = modalY + 60.0F;
-  const float cvsW = modalW - 240.0F;
-  const float cvsH = ctrlY - cvsY - 12.0F;
-
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(cvsX, cvsY, cvsW, cvsH, kColorCanvasBg);
-  canvas_->addLine(cvsX, cvsY, cvsX + cvsW, cvsY, 1.0F, kColorBorder);
-  canvas_->addLine(cvsX, cvsY + cvsH, cvsX + cvsW, cvsY + cvsH, 1.0F,
-                   kColorBorder);
-  canvas_->addLine(cvsX, cvsY, cvsX, cvsY + cvsH, 1.0F, kColorBorder);
-  canvas_->addLine(cvsX + cvsW, cvsY, cvsX + cvsW, cvsY + cvsH, 1.0F,
-                   kColorBorder);
-
-  const auto &preview = builder_.preview();
-  if (!preview.isValid) {
-    canvas_->addText(ctx.state, cvsX + 20.0F, cvsY + cvsH * 0.5F,
-                     preview.statusMessage.empty() ? "No preview available"
-                                                   : preview.statusMessage,
-                     kColorDanger, 0);
-  } else {
-    // Render preview cells in a grid layout
-    const float cellW = 100.0F;
-    const float cellH = 40.0F;
-    const float gapX  = 24.0F;
-    const float gapY  = 16.0F;
-    const int cols =
-        std::max(1, static_cast<int>((cvsW - 20.0F) / (cellW + gapX)));
-
-    for (std::size_t i = 0; i < preview.cells.size(); ++i) {
-      const auto &c  = preview.cells[i];
-      const int col  = static_cast<int>(i % cols);
-      const int row  = static_cast<int>(i / cols);
-      const float px = cvsX + 16.0F + static_cast<float>(col) * (cellW + gapX);
-      const float py =
-          cvsY + cvsH - 56.0F - static_cast<float>(row) * (cellH + gapY);
-
-      if (py < cvsY) {
-        break; // Bounded by viewport
-      }
-
-      const bool isFocused = (i == preview.focusedIndex);
-      canvas_->setTag(render::tagKindOverlay, kTagPreviewBase + i);
-      canvas_->addRect(px, py, cellW, cellH,
-                       isFocused ? kColorCellFocusBg : kColorCellBg);
-      canvas_->addLine(px, py, px + cellW, py, 1.0F,
-                       isFocused ? kColorSkyBlue : kColorBorder);
-      canvas_->addLine(px, py + cellH, px + cellW, py + cellH, 1.0F,
-                       isFocused ? kColorSkyBlue : kColorBorder);
-      canvas_->addLine(px, py, px, py + cellH, 1.0F,
-                       isFocused ? kColorSkyBlue : kColorBorder);
-      canvas_->addLine(px + cellW, py, px + cellW, py + cellH, 1.0F,
-                       isFocused ? kColorSkyBlue : kColorBorder);
-
-      canvas_->addText(ctx.state, px + 6.0F, py + 22.0F,
-                       truncateString(c.text.empty() ? "(cell)" : c.text, 10),
-                       isFocused ? kColorSkyBlue : kColorTextWhite, 0);
-      canvas_->addText(ctx.state, px + 6.0F, py + 6.0F,
-                       "#" + std::to_string(c.foreignCell), kColorTextMuted, 0);
-
-      // Directional link connector
-      if (col < cols - 1 && i + 1 < preview.cells.size()) {
-        canvas_->setTag(render::tagKindOverlay, 0);
-        canvas_->addRect(px + cellW, py + cellH * 0.5F - 1.0F, gapX, 2.0F,
-                         kColorEdge);
-      }
-    }
-  }
-
-  // 4. Candidate Inspector Sidebar
-  const float inspX = cvsX + cvsW + 12.0F;
-  const float inspW = modalW - (inspX - modalX) - 16.0F;
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(inspX, cvsY, inspW, cvsH, 0x0B0F19EE);
-  canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 22.0F,
-                   "Candidate Inspector", kColorSkyBlue, 0);
-
-  if (preview.isValid && preview.focusedIndex < preview.cells.size()) {
-    const auto &focused = preview.cells[preview.focusedIndex];
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 46.0F,
-                     "Foreign ID: #" + std::to_string(focused.foreignCell),
-                     kColorSkyBlue, 0);
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 66.0F,
-                     "Op ID: #" + focused.birthRef.produces.str(),
-                     kColorTextMuted, 0);
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 86.0F,
-                     "Degree: " + std::to_string(focused.outboundEdges.size()),
-                     kColorTextMuted, 0);
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 110.0F,
-                     "Content:", kColorTextWhite, 0);
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 130.0F,
-                     truncateString(focused.text, 18), kColorTextWhite, 0);
-  } else {
-    canvas_->addText(ctx.state, inspX + 10.0F, cvsY + cvsH - 50.0F,
-                     "(No cell focused)", kColorTextMuted, 0);
-  }
-
-  // 5. Footer Configuration & Commit Bar
-  const float footY = modalY + 16.0F;
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addText(ctx.state, modalX + 16.0F, footY + 4.0F,
-                   "Local Dim:", kColorTextMuted, 0);
-  canvas_->setTag(render::tagKindOverlay, kTagInputDim);
-  canvas_->addRect(modalX + 85.0F, footY, 90.0F, 24.0F,
-                   activeInput_ == ActiveInput::LocalDim ? 0x0369A1CC
-                                                         : 0x1E293BEE);
-  canvas_->addText(ctx.state, modalX + 90.0F, footY + 4.0F,
-                   localDimName_ +
-                       (activeInput_ == ActiveInput::LocalDim ? "_" : ""),
-                   kColorSkyBlue, 0);
-
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addText(ctx.state, modalX + 185.0F, footY + 4.0F,
-                   "Label:", kColorTextMuted, 0);
-  canvas_->setTag(render::tagKindOverlay, kTagInputLabel);
-  canvas_->addRect(modalX + 230.0F, footY, 130.0F, 24.0F,
-                   activeInput_ == ActiveInput::Label ? 0x0369A1CC
-                                                      : 0x1E293BEE);
-  canvas_->addText(ctx.state, modalX + 236.0F, footY + 4.0F,
-                   labelText_ + (activeInput_ == ActiveInput::Label ? "_" : ""),
-                   kColorSkyBlue, 0);
-
-  // Budget status indicator
-  const auto budgetStr =
-      preview.isValid ? std::format("{} cells / {} B ops [OK]",
-                                    preview.cells.size(), preview.totalOpBytes)
-                      : "Budget / state invalid";
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addText(ctx.state, modalX + 375.0F, footY + 4.0F, budgetStr,
-                   preview.isValid ? kColorSuccess : kColorDanger, 0);
-
-  // Commit / Cancel Buttons
-  canvas_->setTag(render::tagKindOverlay, kTagCommit);
-  canvas_->addRect(modalX + modalW - 200.0F, footY, 110.0F, 28.0F,
-                   preview.isValid ? kColorCommitBtn : 0x1E293B88);
-  canvas_->addText(ctx.state, modalX + modalW - 192.0F, footY + 6.0F,
-                   "Commit (Enter)", kColorTextWhite, 0);
-
-  canvas_->setTag(render::tagKindOverlay, kTagCancel);
-  canvas_->addRect(modalX + modalW - 80.0F, footY, 65.0F, 28.0F,
-                   kColorInactiveTab);
-  canvas_->addText(ctx.state, modalX + modalW - 70.0F, footY + 6.0F, "Cancel",
-                   kColorTextWhite, 0);
-
-  canvas_->commit();
-  canvas_->draw(ctx.state, ortho);
-}
-
-void QuotationBuilderOverlay::describe(gleditor::a11y::Builder &into) {
-  if (!visible_) {
-    return;
-  }
-  constexpr std::uint64_t kDialogNodeId = 0x80000000ULL;
-  const std::string storeKey =
-      foreignStores_.empty() ? "none" : foreignStores_[selectedStoreIndex_];
-  constexpr std::uint64_t kStoreNodeId = 0x80000001ULL;
-  auto &storeNode = into.add(kStoreNodeId, gleditor::a11y::Role::Label);
-  storeNode.label = "Source Store: " + storeKey;
-
-  constexpr std::uint64_t kPreviewNodeId = 0x80000002ULL;
-  auto &previewNode = into.add(kPreviewNodeId, gleditor::a11y::Role::Group);
-  previewNode.label = "Quotation Preview (" +
-                      std::to_string(builder_.preview().cells.size()) +
-                      " cells)";
-
-  // Builder references survive only until the next add.
-  auto &dialogNode    = into.add(kDialogNodeId, gleditor::a11y::Role::Group);
-  dialogNode.label    = "Quotation Builder Dialog";
-  dialogNode.children = {into.id(kStoreNodeId), into.id(kPreviewNodeId)};
-  into.contribute(into.id(kDialogNodeId));
-}
-
 } // namespace xanadu

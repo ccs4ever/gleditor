@@ -239,4 +239,111 @@ TEST(UiWidgetTest,
   scrubber.minimum = 20;
   EXPECT_THROW(scrubber.setFraction(0.5), std::invalid_argument);
 }
+TEST(UiWidgetTest, positionedDiagramClipsAndCullsNodesAcrossDisplayScales) {
+  for (const float scale : {1.F, 1.25F, 2.F}) {
+    const UiMetrics metrics{
+        .contentScale = scale, .screenWidth = 640, .screenHeight = 480};
+    Theme theme;
+    theme.paddingEm = 0;
+    Widget root{
+        .id       = 1,
+        .model    = PositionedPanel{.childBounds = {{10, 10, 80, 44},
+                                                    {-20, 60, 80, 44},
+                                                    {210, 0, 80, 44}}},
+        .children = {
+            {.id    = 2,
+             .model = Button{"I", "visit", true,
+                             "Insert operation with complete identity"}},
+            {.id = 3, .model = Button{"Partly visible", "visit"}},
+            {.id = 4, .model = Button{"Outside", "visit"}}}};
+    ScreenOverlay overlay(root);
+    overlay.setBounds(Rect{40, 40, 200 * scale, 140 * scale});
+    const auto scene    = overlay.prepare(metrics, theme);
+    const auto *first   = scene->layout.find(2);
+    const auto *partial = scene->layout.find(3);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(partial, nullptr);
+    EXPECT_NEAR(first->rect.left, 40 + 10 * scale, .5F);
+    EXPECT_NEAR(first->rect.bottom, 40 + 10 * scale, .5F);
+    EXPECT_FLOAT_EQ(partial->rect.left, 40);
+    EXPECT_FLOAT_EQ(partial->rect.width, 60 * scale);
+    EXPECT_EQ(scene->layout.find(4), nullptr);
+    EXPECT_EQ(scene->find(4), nullptr);
+    EXPECT_EQ(scene->layout.focusOrder, (std::vector<std::uint32_t>{2, 3}));
+    EXPECT_EQ(scene->find(2)->accessibleLabel,
+              "Insert operation with complete identity");
+    EXPECT_EQ(scene->find(2)->text, "I");
+    EXPECT_EQ(scene->resolvePickingId(scene->find(2)->pickingId), 2U);
+    EXPECT_FALSE(scene->find(1)->background);
+  }
+}
+
+TEST(UiWidgetTest, positionedDiagramRejectsInvalidGeometry) {
+  gleditor::text::ShapingCache cache;
+  UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  Theme theme;
+  Widget root{.id       = 1,
+              .model    = PositionedPanel{},
+              .children = {{.id = 2, .model = Button{"Node", "visit"}}}};
+  EXPECT_THROW(
+      (void)layoutWidgets(root, {0, 0, 200, 140}, metrics, theme, cache),
+      std::invalid_argument);
+  std::get<PositionedPanel>(root.model)
+      .childBounds.push_back(
+          {std::numeric_limits<float>::quiet_NaN(), 0, 80, 44});
+  EXPECT_THROW(
+      (void)layoutWidgets(root, {0, 0, 200, 140}, metrics, theme, cache),
+      std::invalid_argument);
+}
+
+TEST(UiWidgetTest, textFieldCallbacksRetainCaretAcrossOwnerRebuilds) {
+  TextField input{.value = "á界Z", .placeholder = "Query", .action = "query"};
+  input.caret = input.value.size();
+  ScreenOverlay overlay({.id = 1, .model = input});
+  overlay.setActionHandler([&](const WidgetAction &action) {
+    ASSERT_TRUE(action.caret.has_value());
+    input.value = action.value;
+    input.caret = *action.caret;
+    overlay.setModel({.id = 1, .model = input});
+  });
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  const Theme theme;
+  std::ignore = overlay.prepare(metrics, theme);
+  ASSERT_TRUE(overlay.keyInto(1, Key::Home));
+  std::ignore = overlay.prepare(metrics, theme);
+  ASSERT_TRUE(overlay.typeInto(1, "前"));
+  EXPECT_EQ(input.value, "前á界Z");
+  EXPECT_EQ(input.caret, std::string("前").size());
+  std::ignore = overlay.prepare(metrics, theme);
+  ASSERT_TRUE(overlay.keyInto(1, Key::Right));
+  std::ignore = overlay.prepare(metrics, theme);
+  ASSERT_TRUE(overlay.keyInto(1, Key::Backspace));
+  EXPECT_EQ(input.value, "前界Z");
+  EXPECT_EQ(input.caret, std::string("前").size());
+}
+
+TEST(UiWidgetTest,
+     virtualRowsUseIdentifierAndDescriptionFittingWithoutLosingLabels) {
+  const std::string identifier =
+      "Key: abcdefghijklmnopqrstuvwxyz0123456789TAIL";
+  const std::string description =
+      "A long description contains several words and Unicode 名称, preserving "
+      "the complete accessible text while wrapping.";
+  List list{
+      .rows        = {{2, identifier, "inspect", true, TextPurpose::Identifier},
+                      {3, description, "inspect", true, TextPurpose::Description}},
+      .rowHeightPx = 110};
+  ScreenOverlay overlay({.id = 1, .model = std::move(list), .maxLines = 3});
+  overlay.setBounds(Rect{40, 40, 180, 220});
+  const auto scene =
+      overlay.prepare({.screenWidth = 640, .screenHeight = 480}, Theme{});
+  ASSERT_NE(scene->find(2), nullptr);
+  ASSERT_NE(scene->find(3), nullptr);
+  EXPECT_EQ(scene->find(2)->accessibleLabel, identifier);
+  EXPECT_EQ(scene->find(3)->accessibleLabel, description);
+  EXPECT_TRUE(scene->find(2)->fitted.truncated);
+  EXPECT_GT(scene->find(3)->fitted.shaping.lines.size(), 1U);
+  EXPECT_LE(scene->find(3)->fitted.shaping.lines.size(), 3U);
+}
+
 } // namespace

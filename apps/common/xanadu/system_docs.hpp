@@ -251,7 +251,31 @@ inline constexpr std::string_view kOverviewPageColour = "overview.pageColour";
 inline constexpr std::string_view kOverviewViewportColour =
     "overview.viewportColour";
 inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
-inline constexpr std::string_view kPouchPanelWidthPx  = "pouchPanel.widthPx";
+inline constexpr std::string_view kQuotationModalWidthPx =
+    "quotationModal.widthPx";
+inline constexpr std::string_view kQuotationModalHeightPx =
+    "quotationModal.heightPx";
+inline constexpr std::string_view kQuotationModalMaxWidthShare =
+    "quotationModal.maxWidthShare";
+inline constexpr std::string_view kQuotationModalMaxHeightShare =
+    "quotationModal.maxHeightShare";
+inline constexpr std::string_view kTelescopeModalWidthPx =
+    "telescopeModal.widthPx";
+inline constexpr std::string_view kTelescopeModalHeightPx =
+    "telescopeModal.heightPx";
+inline constexpr std::string_view kTelescopeModalMaxWidthShare =
+    "telescopeModal.maxWidthShare";
+inline constexpr std::string_view kTelescopeModalMaxHeightShare =
+    "telescopeModal.maxHeightShare";
+inline constexpr std::string_view kHypertimeModalWidthPx =
+    "hypertimeModal.widthPx";
+inline constexpr std::string_view kHypertimeModalHeightPx =
+    "hypertimeModal.heightPx";
+inline constexpr std::string_view kHypertimeModalMaxWidthShare =
+    "hypertimeModal.maxWidthShare";
+inline constexpr std::string_view kHypertimeModalMaxHeightShare =
+    "hypertimeModal.maxHeightShare";
+inline constexpr std::string_view kPouchPanelWidthPx = "pouchPanel.widthPx";
 inline constexpr std::string_view kPouchPanelMaxWidthShare =
     "pouchPanel.maxWidthShare";
 inline constexpr std::string_view kPouchPanelMaxHeightShare =
@@ -1081,6 +1105,15 @@ struct StorePanelConfig {
   bool operator==(const StorePanelConfig &) const = default;
 };
 
+/// Preferred logical size; shares constrain modal bounds to the safe area.
+struct ModalPresentationConfig {
+  float widthPx{840.0F};
+  float heightPx{560.0F};
+  float maxWidthShare{0.95F};
+  float maxHeightShare{0.95F};
+  bool operator==(const ModalPresentationConfig &) const = default;
+};
+
 struct UIConfig {
   bool tabBarVisible{true};
   bool statusBarVisible{true};
@@ -1092,6 +1125,9 @@ struct UIConfig {
   OverviewConfig overview;
   PouchPanelConfig pouchPanel;
   StorePanelConfig storePanel;
+  ModalPresentationConfig quotationModal;
+  ModalPresentationConfig telescopeModal{860.0F, 560.0F};
+  ModalPresentationConfig hypertimeModal{640.0F, 460.0F};
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

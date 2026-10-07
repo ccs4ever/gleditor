@@ -317,7 +317,8 @@ private:
     return ++largest_;
   }
   static bool container(const Widget &w) {
-    return std::holds_alternative<Panel>(w.model) ||
+    return std::holds_alternative<PositionedPanel>(w.model) ||
+           std::holds_alternative<Panel>(w.model) ||
            std::holds_alternative<Modal>(w.model) ||
            std::holds_alternative<Dock>(w.model) ||
            std::holds_alternative<ButtonFlow>(w.model);
@@ -369,7 +370,15 @@ private:
       size.height = std::min(static_cast<float>(list->rows.size()),
                              static_cast<float>(w.maxLines)) *
                     rowHeight(w, *list);
-    else if (container(w)) {
+    else if (const auto *positioned = std::get_if<PositionedPanel>(&w.model)) {
+      if (positioned->childBounds.size() != w.children.size())
+        throw std::invalid_argument(
+            "Positioned panel bounds must match children");
+      size.height = 2 * p;
+      for (const auto &bounds : positioned->childBounds)
+        size.height = std::max(
+            size.height, metrics_.px(bounds.bottom + bounds.height) + 2 * p);
+    } else if (container(w)) {
       size.height    = p * 2;
       float rowWidth = 0, rowHeight = 0;
       for (const auto &child : w.children) {
@@ -481,10 +490,12 @@ private:
 
     if (const auto *label = std::get_if<Label>(&w.model))
       visual(w, geometry, label->text, label->purpose, a11y::Role::Label);
-    else if (buttonModel)
+    else if (buttonModel) {
       visual(w, geometry, buttonModel->text, TextPurpose::Label,
              a11y::Role::Button, true, buttonModel->action);
-    else if (const auto *badge = std::get_if<Badge>(&w.model)) {
+      if (!buttonModel->accessibleLabel.empty())
+        scene_.visuals.back().accessibleLabel = buttonModel->accessibleLabel;
+    } else if (const auto *badge = std::get_if<Badge>(&w.model)) {
       visual(w, geometry, badge->text, TextPurpose::Label, a11y::Role::Label,
              true);
       scene_.visuals.back().tone = badge->tone;
@@ -624,7 +635,7 @@ private:
         const auto entry = box(list->rows[i].id, w.id, row, p * .5F, true,
                                list->rows[i].enabled);
         scene_.layout.boxes.back().focusGroup = w.id;
-        visual(w, entry, list->rows[i].text, TextPurpose::Label,
+        visual(w, entry, list->rows[i].text, list->rows[i].purpose,
                a11y::Role::ListItem, true, list->rows[i].action);
         scene_.visuals.back().itemIndex = i;
       }
@@ -652,6 +663,32 @@ private:
       copy.fontRole = FontRole::Body;
       visual(copy, placed.boxes[1], card->description, TextPurpose::Description,
              a11y::Role::Label);
+    } else if (const auto *positioned =
+                   std::get_if<PositionedPanel>(&w.model)) {
+      if (positioned->childBounds.size() != w.children.size())
+        throw std::invalid_argument(
+            "Positioned panel bounds must match children");
+      visual(w, geometry, {}, TextPurpose::Label, a11y::Role::Group);
+      for (std::size_t i = 0; i < w.children.size(); ++i) {
+        const auto &bounds = positioned->childBounds[i];
+        if (!std::isfinite(bounds.left) || !std::isfinite(bounds.bottom) ||
+            !std::isfinite(bounds.width) || !std::isfinite(bounds.height) ||
+            bounds.width < 0 || bounds.height < 0)
+          throw std::invalid_argument("Invalid positioned child bounds");
+        const auto &area = geometry.contentRect;
+        const Rect proposed{area.left + metrics_.px(bounds.left),
+                            area.bottom + metrics_.px(bounds.bottom),
+                            metrics_.px(bounds.width),
+                            metrics_.px(bounds.height)};
+        const auto left   = std::max(area.left, proposed.left);
+        const auto bottom = std::max(area.bottom, proposed.bottom);
+        const auto right =
+            std::min(area.left + area.width, proposed.left + proposed.width);
+        const auto top = std::min(area.bottom + area.height,
+                                  proposed.bottom + proposed.height);
+        if (right <= left || top <= bottom) continue;
+        place(w.children[i], {left, bottom, right - left, top - bottom}, w.id);
+      }
     } else if (container(w)) {
       const auto title = heading(w);
       visual(w, geometry, title, TextPurpose::Label, a11y::Role::Group,

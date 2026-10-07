@@ -9,22 +9,27 @@
 #ifndef COMMON_UI_QUOTATION_BUILDER_OVERLAY_HPP
 #define COMMON_UI_QUOTATION_BUILDER_OVERLAY_HPP
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/system_docs.hpp"
 #include <gleditor/a11y/tree.hpp>
-#include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/overlay.hpp>
 
 #include "common/xanadu/quotation_builder.hpp"
 #include "common/xanadu/store.hpp"
@@ -73,7 +78,7 @@ public:
 
   QuotationBuilderOverlay(Store &localStore, MicroversionId activeVersion,
                           RendererRef renderer, SwarmCatalog *catalog = nullptr,
-                          std::string fontName           = "Sans 10",
+                          std::string fontName           = {},
                           OpenStoresProvider openStores  = nullptr,
                           VersionCommitCallback onCommit = nullptr);
   ~QuotationBuilderOverlay() override;
@@ -85,7 +90,7 @@ public:
   [[nodiscard]] bool busy() const override;
 
   // ModalInput
-  [[nodiscard]] bool grabbing() const override { return visible_; }
+  [[nodiscard]] bool grabbing() const override { return visible_.load(); }
   bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
   void textTyped(const std::string &utf8) override;
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
@@ -97,17 +102,35 @@ public:
   // a11y::Source
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return a11yRevision_;
+    return a11yRevision_.load() + overlay_.accessibilityRevision();
   }
 
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
+  std::shared_ptr<const gleditor::ui::LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
+  bool pointerEvent(const gleditor::ui::PointerEvent &) override;
+  void focusChanged(bool) override;
+  std::optional<gleditor::InputArea> pointerArea() const override;
+  QuotationBuilderOverlay *setConfig(const ModalPresentationConfig &);
+  [[nodiscard]] std::shared_ptr<const gleditor::ui::WidgetScene>
+  prepare(const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &);
+  [[nodiscard]] gleditor::text::ShapingCache::Stats shapingStats() const {
+    return overlay_.shapingStats();
+  }
   QuotationBuilderOverlay *setVisible(bool visible);
   QuotationBuilderOverlay *toggle();
-  [[nodiscard]] bool isVisible() const noexcept { return visible_; }
+  [[nodiscard]] bool isVisible() const noexcept { return visible_.load(); }
   QuotationBuilderOverlay *setActiveVersion(MicroversionId version) noexcept {
+    const std::scoped_lock lock(guard_);
+    if (activeVersion_ != version) changed(true);
     activeVersion_ = version;
     return this;
   }
   [[nodiscard]] MicroversionId activeVersion() const noexcept {
+    const std::scoped_lock lock(guard_);
     return activeVersion_;
   }
 
@@ -134,10 +157,40 @@ private:
   OpenStoresProvider openStoresProvider_;
   VersionCommitCallback onCommit_;
 
-  std::unique_ptr<gleditor::Canvas> canvas_;
-
-  bool visible_{false};
-  std::uint64_t a11yRevision_{1};
+  gleditor::ui::ScreenOverlay overlay_;
+  mutable std::recursive_mutex guard_;
+  std::atomic<bool> visible_{false};
+  std::atomic<std::uint64_t> a11yRevision_{1};
+  ModalPresentationConfig config_;
+  gleditor::ui::UiMetrics metrics_;
+  gleditor::ui::Theme sourceTheme_, theme_;
+  bool dirty_{true};
+  std::size_t page_{};
+  float scrollPx_{}, rowHeight_{}, listHeight_{};
+  std::uint64_t epoch_{1}, semanticRevision_{1};
+  gleditor::ui::WidgetId nextId_{1024};
+  std::array<gleditor::ui::WidgetId, 4> tabIds_{};
+  gleditor::ui::WidgetId closeId_{};
+  std::array<gleditor::ui::WidgetId, 3> fieldIds_{};
+  std::array<gleditor::ui::TextField, 3> fields_{};
+  std::size_t observedLocalOps_{}, observedTargetOps_{};
+  void observeStores();
+  struct Action {
+    std::string name, value;
+    std::size_t index{};
+    std::uint64_t epoch{}, semantic{};
+    zigzag::CellRef ref{zigzag::noCell};
+  };
+  std::unordered_map<gleditor::ui::WidgetId, Action> actions_;
+  std::unordered_map<std::string, gleditor::ui::WidgetId> contentIds_;
+  gleditor::ui::WidgetId contentId(std::string_view,
+                                   zigzag::CellRef = zigzag::noCell);
+  std::vector<Action> listActions_, pending_;
+  void changed(bool semantic = false);
+  void queue(const gleditor::ui::WidgetAction &);
+  void drain();
+  void scroll(float);
+  gleditor::ui::WidgetId allocate();
 
   QuotationBuilder builder_;
 
@@ -158,9 +211,6 @@ private:
   std::string vqlQueryText_{"##/d.vars"};
   std::string localDimName_{"d.vars"};
   std::string labelText_{"Quotation"};
-
-  enum class ActiveInput : std::uint8_t { None, Query, Label, LocalDim };
-  ActiveInput activeInput_{ActiveInput::None};
 
   void recomputePreview();
 };

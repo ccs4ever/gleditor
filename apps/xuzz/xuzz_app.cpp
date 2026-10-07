@@ -441,7 +441,7 @@ int XuzzApp::run(const int argc, char **argv) {
   auto renderer = Renderer::create(state, opts.backend);
 
   xanadu::ui::HypertimeGraph map(
-      "Sans 10",
+      "",
       [&session](const std::size_t index) -> const xanadu::Store & {
         return session->store(index);
       },
@@ -499,7 +499,7 @@ int XuzzApp::run(const int argc, char **argv) {
                     docSwitcher);
 
   xudu::SwarmCatalog swarmCatalog;
-  xudu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "Sans 10");
+  xudu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "");
   swarmTelescope.setOnSummon([&views](const xudu::PublicationEntry &entry) {
     views.summonPublication(entry);
   });
@@ -511,7 +511,7 @@ int XuzzApp::run(const int argc, char **argv) {
       session->store(),
       session->views().empty() ? xanadu::MicroversionId{}
                                : session->versionOf(0),
-      renderer, &swarmCatalog, "Sans 10",
+      renderer, &swarmCatalog, "",
       [&session] {
         std::vector<xanadu::Store *> openStores;
         for (std::size_t i = 0; i < session->storeCount(); ++i) {
@@ -2687,8 +2687,9 @@ int XuzzApp::run(const int argc, char **argv) {
   // 8. System Store Change Watcher Callback
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
-       &views, &overview, &storeObjectManager, readablePx, &session,
-       zigzagPresentation, &bridgeCoordinator, &showKeyHints,
+       &views, &overview, &storeObjectManager, &quotationOverlay,
+       &swarmTelescope, readablePx, &session, zigzagPresentation,
+       &bridgeCoordinator, &showKeyHints,
        state](const xudu::SystemDocKind kind, const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
                   << ")\n";
@@ -2738,6 +2739,9 @@ int XuzzApp::run(const int argc, char **argv) {
           overview.setConfig(uiCfg.overview);
           pouchDrawer.setConfig(uiCfg.pouchPanel);
           storeObjectManager.setConfig(uiCfg.storePanel);
+          quotationOverlay.setConfig(uiCfg.quotationModal);
+          swarmTelescope.setConfig(uiCfg.telescopeModal);
+          map.setConfig(uiCfg.hypertimeModal);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
           map.setVisible(uiCfg.hypertimeMapVisible);
           break;
@@ -2773,6 +2777,9 @@ int XuzzApp::run(const int argc, char **argv) {
       overview.setConfig(uiCfg.overview);
       pouchDrawer.setConfig(uiCfg.pouchPanel);
       storeObjectManager.setConfig(uiCfg.storePanel);
+      quotationOverlay.setConfig(uiCfg.quotationModal);
+      swarmTelescope.setConfig(uiCfg.telescopeModal);
+      map.setConfig(uiCfg.hypertimeModal);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
       map.setVisible(uiCfg.hypertimeMapVisible);
     }

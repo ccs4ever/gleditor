@@ -27,6 +27,8 @@ struct Label {
 struct Button {
   std::string text, action;
   bool enabled{true};
+  /// A concise drawn caption can retain the complete action identity for AT.
+  std::string accessibleLabel;
 };
 struct ButtonFlow {};
 struct Tab {
@@ -42,6 +44,7 @@ struct ListRow {
   WidgetId id{};
   std::string text, action;
   bool enabled{true};
+  TextPurpose purpose{TextPurpose::Label};
 };
 struct List {
   std::vector<ListRow> rows;
@@ -80,6 +83,11 @@ struct Scrubber {
 struct Tooltip {
   std::string text;
 };
+/// Diagram children have logical bounds relative to the panel content origin.
+/// Bounds and children correspond by index; off-panel children are culled.
+struct PositionedPanel {
+  std::vector<Rect> childBounds;
+};
 struct Panel {
   std::string title;
 };
@@ -91,9 +99,9 @@ struct Dock {
   std::string title;
   DockSide side{DockSide::Left};
 };
-using WidgetModel =
-    std::variant<Label, Button, ButtonFlow, Tabs, List, Card, Badge, Stepper,
-                 TextField, Scrubber, Tooltip, Panel, Modal, Dock>;
+using WidgetModel = std::variant<Label, Button, ButtonFlow, Tabs, List, Card,
+                                 Badge, Stepper, TextField, Scrubber, Tooltip,
+                                 PositionedPanel, Panel, Modal, Dock>;
 struct Widget {
   WidgetId id{};
   WidgetModel model{Label{}};
@@ -139,6 +147,8 @@ struct WidgetAction {
   WidgetId id{};
   std::string action, value;
   std::size_t itemIndex{};
+  /// Text field byte position after the shared editor processes the event.
+  std::optional<std::size_t> caret;
 };
 } // namespace gleditor::ui
 #endif

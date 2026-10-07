@@ -36,3 +36,32 @@ TEST(PanelConfigTest, DefaultsAndLiveLimitsComeFromSystemUi) {
   EXPECT_FLOAT_EQ(xanadu::UIConfig::fromStore(store).pouchPanel.widthPx,
                   xanadu::PouchPanelConfig{}.widthPx);
 }
+
+TEST(PanelConfigTest, bigModalGeometryIsSeededAndValidatedInSystemUi) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  const auto defaults = xanadu::UIConfig{};
+  auto config         = xanadu::UIConfig::fromStore(store);
+  EXPECT_EQ(config.quotationModal, defaults.quotationModal);
+  EXPECT_EQ(config.telescopeModal, defaults.telescopeModal);
+  EXPECT_EQ(config.hypertimeModal, defaults.hypertimeModal);
+  auto head = store.primaryCurrentVersion();
+  head      = xanadu::setSetting(store, head,
+                                 xanadu::settings::kQuotationModalWidthPx, 900.);
+  head      = xanadu::setSetting(store, head,
+                                 xanadu::settings::kTelescopeModalHeightPx, 700.);
+  head      = xanadu::setSetting(store, head,
+                                 xanadu::settings::kHypertimeModalMaxWidthShare, 8.);
+  head      = xanadu::setSetting(
+      store, head, xanadu::settings::kHypertimeModalMaxHeightShare, .01);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kQuotationModalHeightPx, -1.);
+  store.repointCurrentVersion(head);
+  config = xanadu::UIConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(config.quotationModal.widthPx, 900.F);
+  EXPECT_FLOAT_EQ(config.quotationModal.heightPx,
+                  defaults.quotationModal.heightPx);
+  EXPECT_FLOAT_EQ(config.telescopeModal.heightPx, 700.F);
+  EXPECT_FLOAT_EQ(config.hypertimeModal.maxWidthShare, 1.F);
+  EXPECT_FLOAT_EQ(config.hypertimeModal.maxHeightShare, .1F);
+}

@@ -205,6 +205,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overview.viewportColour, overview.markColour: Its colours as RGBA "
            "integers; marks show the selected link's chosen places and the "
            "focused ZigZag card.\n"
+           "quotationModal, telescopeModal and hypertimeModal: Preferred "
+           "widthPx and heightPx in logical pixels, defaults 840 by 560, "
+           "860 by 560 and 640 by 460. Positive finite values are required. "
+           "Their maxWidthShare and maxHeightShare bound the modal to "
+           "safe-area shares, range 0.1 to 1, default 0.95.\n"
            "pouchPanel.widthPx and storePanel.widthPx: Preferred panel widths "
            "in logical pixels, defaults 320 and 340. Positive finite values "
            "are required. The panels grow for readable controls within their "
@@ -707,6 +712,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     const OverviewConfig overview;
     const PouchPanelConfig pouchPanel;
     const StorePanelConfig storePanel;
+    const UIConfig modals;
     const auto colourSpec = [](std::string_view name, const char *notes,
                                const std::uint32_t colour) {
       return SettingSpec{
@@ -723,6 +729,48 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                                       .defaultValues = {double{px}}}}};
     };
     specs = {
+        lengthSpec(settings::kQuotationModalWidthPx,
+                   "Quotation modal preferred width in logical pixels",
+                   modals.quotationModal.widthPx),
+        lengthSpec(settings::kQuotationModalHeightPx,
+                   "Quotation modal preferred height in logical pixels",
+                   modals.quotationModal.heightPx),
+        lengthSpec(
+            settings::kQuotationModalMaxWidthShare,
+            "Quotation modal maximum share of safe width, range 0.1 to 1",
+            modals.quotationModal.maxWidthShare),
+        lengthSpec(
+            settings::kQuotationModalMaxHeightShare,
+            "Quotation modal maximum share of safe height, range 0.1 to 1",
+            modals.quotationModal.maxHeightShare),
+        lengthSpec(settings::kTelescopeModalWidthPx,
+                   "Telescope modal preferred width in logical pixels",
+                   modals.telescopeModal.widthPx),
+        lengthSpec(settings::kTelescopeModalHeightPx,
+                   "Telescope modal preferred height in logical pixels",
+                   modals.telescopeModal.heightPx),
+        lengthSpec(
+            settings::kTelescopeModalMaxWidthShare,
+            "Telescope modal maximum share of safe width, range 0.1 to 1",
+            modals.telescopeModal.maxWidthShare),
+        lengthSpec(
+            settings::kTelescopeModalMaxHeightShare,
+            "Telescope modal maximum share of safe height, range 0.1 to 1",
+            modals.telescopeModal.maxHeightShare),
+        lengthSpec(settings::kHypertimeModalWidthPx,
+                   "Hypertime modal preferred width in logical pixels",
+                   modals.hypertimeModal.widthPx),
+        lengthSpec(settings::kHypertimeModalHeightPx,
+                   "Hypertime modal preferred height in logical pixels",
+                   modals.hypertimeModal.heightPx),
+        lengthSpec(
+            settings::kHypertimeModalMaxWidthShare,
+            "Hypertime modal maximum share of safe width, range 0.1 to 1",
+            modals.hypertimeModal.maxWidthShare),
+        lengthSpec(
+            settings::kHypertimeModalMaxHeightShare,
+            "Hypertime modal maximum share of safe height, range 0.1 to 1",
+            modals.hypertimeModal.maxHeightShare),
         lengthSpec(settings::kPouchPanelWidthPx,
                    "Pouch dock preferred width in logical pixels",
                    pouchPanel.widthPx),
@@ -3004,6 +3052,34 @@ UIConfig UIConfig::fromStore(const Store &store) {
                                              cfg.storePanel.maxWidthShare);
   cfg.storePanel.maxHeightShare = panelShare(
       settings::kStorePanelMaxHeightShare, cfg.storePanel.maxHeightShare);
+
+  cfg.quotationModal.widthPx =
+      panelLength(settings::kQuotationModalWidthPx, cfg.quotationModal.widthPx);
+  cfg.quotationModal.heightPx = panelLength(settings::kQuotationModalHeightPx,
+                                            cfg.quotationModal.heightPx);
+  cfg.quotationModal.maxWidthShare = panelShare(
+      settings::kQuotationModalMaxWidthShare, cfg.quotationModal.maxWidthShare);
+  cfg.quotationModal.maxHeightShare =
+      panelShare(settings::kQuotationModalMaxHeightShare,
+                 cfg.quotationModal.maxHeightShare);
+  cfg.telescopeModal.widthPx =
+      panelLength(settings::kTelescopeModalWidthPx, cfg.telescopeModal.widthPx);
+  cfg.telescopeModal.heightPx = panelLength(settings::kTelescopeModalHeightPx,
+                                            cfg.telescopeModal.heightPx);
+  cfg.telescopeModal.maxWidthShare = panelShare(
+      settings::kTelescopeModalMaxWidthShare, cfg.telescopeModal.maxWidthShare);
+  cfg.telescopeModal.maxHeightShare =
+      panelShare(settings::kTelescopeModalMaxHeightShare,
+                 cfg.telescopeModal.maxHeightShare);
+  cfg.hypertimeModal.widthPx =
+      panelLength(settings::kHypertimeModalWidthPx, cfg.hypertimeModal.widthPx);
+  cfg.hypertimeModal.heightPx = panelLength(settings::kHypertimeModalHeightPx,
+                                            cfg.hypertimeModal.heightPx);
+  cfg.hypertimeModal.maxWidthShare = panelShare(
+      settings::kHypertimeModalMaxWidthShare, cfg.hypertimeModal.maxWidthShare);
+  cfg.hypertimeModal.maxHeightShare =
+      panelShare(settings::kHypertimeModalMaxHeightShare,
+                 cfg.hypertimeModal.maxHeightShare);
 
   auto &overview = cfg.overview;
   overview.visible =

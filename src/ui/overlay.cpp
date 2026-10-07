@@ -139,7 +139,7 @@ bool ScreenOverlay::typeInto(WidgetId id, std::string_view text) {
     if (!visible_ || !input) return false;
     input->insert(text);
     changed();
-    action   = {id, input->action, input->value, 0};
+    action   = {id, input->action, input->value, 0, input->caret};
     callback = actionHandler_;
   }
   if (callback) callback(action);
@@ -154,7 +154,7 @@ bool ScreenOverlay::keyInto(WidgetId id, Key key, KeyMods mods) {
     auto *input  = widget ? std::get_if<TextField>(&widget->model) : nullptr;
     if (!visible_ || !input || !input->key(key, mods)) return false;
     changed();
-    action   = {id, input->action, input->value, 0};
+    action   = {id, input->action, input->value, 0, input->caret};
     callback = actionHandler_;
   }
   if (callback) callback(action);
@@ -576,7 +576,7 @@ bool ScreenOverlay::performAction(std::uint64_t id, a11y::Action action,
       next.insert(value);
       *input = std::move(next);
       changed();
-      notification = {widgetId, input->action, input->value, 0};
+      notification = {widgetId, input->action, input->value, 0, input->caret};
     } else if (auto *scrubber = std::get_if<Scrubber>(&widget->model)) {
       double number{};
       const auto parsed =

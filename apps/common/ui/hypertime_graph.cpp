@@ -25,8 +25,16 @@
 #include <gleditor/sdl_compat.hpp>
 
 namespace xanadu::ui {
+namespace ui = gleditor::ui;
 
 namespace {
+
+// Keep the established gesture response while presentation dimensions follow
+// the live theme. One wheel notch pans about one touch target.
+constexpr float kPanStepLogicalPx = 48.F;
+constexpr float kZoomNotchFactor  = 1.12F;
+constexpr float kMinimumZoom      = .4F;
+constexpr float kMaximumZoom      = 3.F;
 
 constexpr std::array<std::uint32_t, 6> kLineageHues = {
     0x00E5FFFF, // Cyan
@@ -37,28 +45,16 @@ constexpr std::array<std::uint32_t, 6> kLineageHues = {
     0x42A5F5FF, // Blue
 };
 
-std::string passagePreview(const SingleVersionDiff &version,
-                           const DiffKind kind,
-                           const std::size_t maxBytes = 18) {
+std::string passagePreview(const SingleVersionDiff &version, DiffKind kind) {
   const auto found =
       std::ranges::find_if(version.spans, [kind](const auto &span) {
         return span.kind == kind && span.length > 0;
       });
-  if (found == version.spans.end() || found->offset >= version.text.size()) {
+  if (found == version.spans.end() || found->offset >= version.text.size())
     return "none";
-  }
   auto text = version.text.substr(found->offset, found->length);
   std::ranges::replace(text, '\n', ' ');
   std::ranges::replace(text, '\r', ' ');
-  if (text.size() > maxBytes) {
-    auto end = maxBytes;
-    while (end > 0 &&
-           (static_cast<unsigned char>(text[end]) & 0xC0U) == 0x80U) {
-      --end;
-    }
-    text.resize(end);
-    text += "…";
-  }
   return text;
 }
 
@@ -68,34 +64,44 @@ HypertimeGraph::HypertimeGraph(
     std::string aFontName, std::function<const Store &(std::size_t)> storeAt,
     std::function<std::uint64_t()> generation)
     : fontName_(std::move(aFontName)), storeAt_(std::move(storeAt)),
-      generation_(std::move(generation)) {}
+      generation_(std::move(generation)),
+      overlay_({.id = 1, .model = gleditor::ui::PositionedPanel{}}) {
+  overlay_.setVisible(false);
+  overlay_.setActionHandler([this](const auto &action) { queue(action); });
+}
 
-HypertimeGraph::~HypertimeGraph() = default;
+HypertimeGraph::~HypertimeGraph() { releaseFocus(); }
 
 void HypertimeGraph::scroll(const float horizontal, const float vertical,
                             const bool zoom, const bool shift,
                             const float pointerX, const float pointerY) {
+  const std::scoped_lock lock(guard_);
   if (!visible_) return;
   if (zoom) {
-    const float next =
-        std::clamp(zoom_ * std::pow(1.12F, vertical), 0.4F, 3.0F);
-    const float factor  = next / zoom_;
-    const float originX = panelX_ + 36.0F;
-    const float originY = panelY_ + panelH_ - 100.0F;
+    const float next = std::clamp(zoom_ * std::pow(kZoomNotchFactor, vertical),
+                                  kMinimumZoom, kMaximumZoom);
+    const float factor   = next / zoom_;
+    const float diameter = nodes_.empty() ? 0 : nodes_.front().radius * 2;
+    const float originX  = graphBounds_.left + diameter;
+    const float originY  = graphBounds_.bottom + graphBounds_.height - diameter;
     panX_ = pointerX - originX - (pointerX - originX - panX_) * factor;
     panY_ = pointerY - originY - (pointerY - originY - panY_) * factor;
     zoom_ = next;
   } else {
-    panX_ += (-horizontal + (shift ? vertical : 0.0F)) * 48.0F;
-    panY_ -= (shift ? 0.0F : vertical) * 48.0F;
+    panX_ += (-horizontal + (shift ? vertical : 0.0F)) *
+             metrics_.px(kPanStepLogicalPx);
+    panY_ -= (shift ? 0.0F : vertical) * metrics_.px(kPanStepLogicalPx);
   }
   builtAt = std::numeric_limits<std::uint64_t>::max();
-  revision_++;
+  changed();
 }
 
 void HypertimeGraph::deviceReady(render::RenderDevice &device,
                                  const render::PipelineDesc &documentPipeline) {
-  canvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
+  const std::scoped_lock lock(guard_);
+  overlay_.deviceReady(device, documentPipeline);
+  canvas_ = std::make_unique<gleditor::Canvas>(
+      &device, fontName_.empty() ? "Sans 12" : fontName_);
   canvas_->createPipeline(documentPipeline, false);
 }
 
@@ -182,12 +188,17 @@ void HypertimeGraph::drawPolyline(gleditor::Canvas &canvas, const float fromX,
 void HypertimeGraph::computeUnobstructedAliasPosition(
     GraphNode &node, const std::vector<GraphEdge> &allEdges,
     const float panelTop, const float panelBottom) {
-  if (node.alias.empty() || nullptr == canvas_) {
+  if (node.alias.empty()) {
     return;
   }
-  const auto metrics = canvas_->measureText(node.alias);
-  const float bw     = std::max(28.0F, metrics.width + 12.0F);
-  const float bh     = std::max(18.0F, metrics.height + 6.0F);
+  const auto font = gleditor::text::FontManager::instance().getFont(
+      metrics_.fontDescription(ui::FontRole::Label, theme_));
+  const auto measured = measurements_.fitted(node.alias, font, {});
+  const float bw =
+      std::min(graphBounds_.width,
+               std::max(node.radius * 2,
+                        std::min(measured.widthPx + 4, node.radius * 4)));
+  const float bh = std::ceil(font->metrics().lineHeight) + 4;
 
   // Candidate placements around node
   struct Candidate {
@@ -212,8 +223,9 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
   auto testBoxCollision = [&](const float bx, const float by) -> int {
     int collisions = 0;
     // Boundary check
-    if (bx < panelX_ + 8.0F || bx + bw > panelX_ + panelW_ - 8.0F ||
-        by < panelBottom + 32.0F || by + bh > panelTop - 36.0F) {
+    if (bx < graphBounds_.left ||
+        bx + bw > graphBounds_.left + graphBounds_.width || by < panelBottom ||
+        by + bh > panelTop) {
       collisions += 100;
     }
 
@@ -301,14 +313,17 @@ void HypertimeGraph::computeUnobstructedAliasPosition(
     }
   }
 
+  if (bestScore >= 100) {
+    node.aliasW = 0;
+    return;
+  }
   node.aliasX = bestCandidate.x;
   node.aliasY = bestCandidate.y;
   node.aliasW = bw;
   node.aliasH = bh;
 }
 
-void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
-                            const float screenH) {
+void HypertimeGraph::layout(const float screenW, const float screenH) {
   if (builtAt == generation_() && !nodes_.empty() && laidOutWidth_ == screenW &&
       laidOutHeight_ == screenH) {
     return;
@@ -416,550 +431,621 @@ void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
   }
   const std::size_t maxLanes = std::max<std::size_t>(1, nextLane);
 
-  panelW_ = std::min(screenW - 32.0F, 640.0F);
-  panelH_ = std::min(screenH - 80.0F, 460.0F);
-  panelX_ = 16.0F;
-  panelY_ = 50.0F;
-
-  const float topY       = panelY_ + panelH_;
-  const float graphAreaW = panelW_ - 80.0F;
-  const float graphAreaH = panelH_ - 140.0F;
-
-  const float dx =
-      maxDepth > 0
-          ? std::clamp(graphAreaW / static_cast<float>(maxDepth), 36.0F, 65.0F)
-          : 50.0F;
+  const float graphAreaW = graphBounds_.width;
+  const float graphAreaH = graphBounds_.height;
+  const auto font        = gleditor::text::FontManager::instance().getFont(
+      metrics_.fontDescription(gleditor::ui::FontRole::Label, theme_));
+  const float diameter = std::ceil(std::max(metrics_.px(theme_.type.minTouchPx),
+                                            font->metrics().lineHeight + 4));
+  const float dx       = std::max(
+      diameter * 2.2F, maxDepth ? graphAreaW / static_cast<float>(maxDepth + 1)
+                                      : diameter * 2.2F);
   const float dy =
-      maxLanes > 1
-          ? std::clamp(graphAreaH / static_cast<float>(maxLanes), 32.0F, 55.0F)
-          : 45.0F;
-
-  const float graphLeft   = panelX_ + 16.0F;
-  const float graphRight  = panelX_ + panelW_ - 16.0F;
-  const float graphBottom = panelY_ + 58.0F;
-  const float graphTop    = topY - 80.0F;
-  const float originX     = panelX_ + 36.0F;
-  const float originY     = topY - 100.0F;
+      std::max(diameter * 1.4F, graphAreaH / static_cast<float>(maxLanes + 1));
+  const float originX = graphBounds_.left + diameter;
+  const float originY = graphBounds_.bottom + graphAreaH - diameter;
   panX_ =
       std::clamp(panX_,
-                 std::min(0.0F, graphRight - 15.0F - originX -
-                                    static_cast<float>(maxDepth) * dx * zoom_),
-                 std::max(0.0F, graphLeft + 15.0F - originX));
-  panY_ = std::clamp(
-      panY_, std::min(0.0F, graphTop - 15.0F - originY),
-      std::max(0.0F, graphBottom + 15.0F - originY +
-                         static_cast<float>(maxLanes - 1) * dy * zoom_));
-
+                 std::min(0.F, graphAreaW - diameter * 2 -
+                                   static_cast<float>(maxDepth) * dx * zoom_),
+                 0.F);
+  panY_ =
+      std::clamp(panY_, 0.F,
+                 std::max(0.F, static_cast<float>(maxLanes - 1) * dy * zoom_ -
+                                   graphAreaH + diameter * 2));
   for (auto &node : nodes_) {
     node.x      = originX + static_cast<float>(node.depth) * dx * zoom_ + panX_;
     node.y      = originY - static_cast<float>(node.lane) * dy * zoom_ + panY_;
-    node.radius = 13.0F * zoom_;
+    node.radius = diameter * .5F;
   }
+
+  for (auto &node : nodes_)
+    computeUnobstructedAliasPosition(node, edges_,
+                                     graphBounds_.bottom + graphBounds_.height,
+                                     graphBounds_.bottom);
 
   for (auto &edge : edges_) {
     if (edge.toIdx < nodes_.size()) {
       edge.lane = nodes_[edge.toIdx].lane;
     }
   }
-
-  for (auto &node : nodes_) {
-    if (!node.alias.empty()) {
-      computeUnobstructedAliasPosition(node, edges_, topY, panelY_);
-    }
-  }
-
-  scrubberTrackX_ = panelX_ + 20.0F;
-  scrubberTrackY_ = panelY_ + 26.0F;
-  scrubberTrackW_ = panelW_ - 40.0F;
 }
 
-void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
-  if (!visible_ || nullptr == canvas_) {
-    return;
+void HypertimeGraph::changed(bool retire) {
+  dirty_ = decorationDirty_ = true;
+  ++revision_;
+  if (retire) {
+    ++epoch_;
+    actions_.clear();
+    nodeIds_.clear();
+    aliasIds_.clear();
+    controlIds_.clear();
+    overlay_.setVisible(false);
   }
-  layout(ctx.state, static_cast<float>(ctx.screenWidth),
-         static_cast<float>(ctx.screenHeight));
-  if (nodes_.empty()) {
-    return;
+}
+HypertimeGraph *HypertimeGraph::setVisible(bool show) {
+  const std::scoped_lock lock(guard_);
+  if (visible_ == show) return this;
+  visible_ = show;
+  changed(true);
+  if (show)
+    activate();
+  else
+    deactivate();
+  return this;
+}
+HypertimeGraph *HypertimeGraph::setCurrent(const MicroversionId &id) {
+  const std::scoped_lock lock(guard_);
+  if (current_ != id) {
+    current_ = id;
+    changed();
   }
+  return this;
+}
+HypertimeGraph *HypertimeGraph::invalidate() {
+  const std::scoped_lock lock(guard_);
+  nodes_.clear();
+  diffNeedsUpdate_ = true;
+  changed(true);
+  return this;
+}
+HypertimeGraph *HypertimeGraph::setStoreIndex(std::size_t index) {
+  const std::scoped_lock lock(guard_);
+  if (index == storeIndex_) return this;
+  storeIndex_ = index;
+  nodes_.clear();
+  comparedVersions_.clear();
+  selectedOperation_.reset();
+  diffNeedsUpdate_ = true;
+  changed(true);
+  return this;
+}
+HypertimeGraph *
+HypertimeGraph::setConfig(const ModalPresentationConfig &config) {
+  const std::scoped_lock lock(guard_);
+  if (config_ != config) {
+    config_ = config;
+    changed();
+  }
+  return this;
+}
+HypertimeGraph *HypertimeGraph::toggleComparison(const MicroversionId &id) {
+  const std::scoped_lock lock(guard_);
+  const auto found = std::ranges::find(comparedVersions_, id);
+  if (found == comparedVersions_.end())
+    comparedVersions_.push_back(id);
+  else
+    comparedVersions_.erase(found);
+  diffNeedsUpdate_ = true;
+  changed(true);
+  return this;
+}
+HypertimeGraph *HypertimeGraph::clearComparison() {
+  const std::scoped_lock lock(guard_);
+  comparedVersions_.clear();
+  comparisonPage_  = false;
+  diffNeedsUpdate_ = true;
+  changed(true);
+  return this;
+}
 
-  const auto width  = static_cast<float>(ctx.screenWidth);
-  const auto height = static_cast<float>(ctx.screenHeight);
-  // Correct left,right,bottom,top order for a screen-space projection.
-  const auto ortho = glm::ortho( // NOLINT(readability-suspicious-call-argument)
-      0.0F, width, 0.0F, height, -1.0F, 1.0F);
+std::shared_ptr<const ui::WidgetScene>
+HypertimeGraph::prepare(const ui::UiMetrics &metrics, const ui::Theme &source) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return {};
+  const auto generation = generation_();
+  if (!dirty_ && builtAt == generation && metrics_ == metrics &&
+      sourceTheme_ == source)
+    return overlay_.snapshot();
+  if (modelGeneration_ != generation && !nodes_.empty()) changed(true);
+  modelGeneration_ = generation;
+  metrics_         = metrics;
+  sourceTheme_     = source;
+  theme_ = ui::withFontOverride(source, ui::FontRole::Label, fontName_);
+  // Graph coordinates carry their own spacing; nested chrome has no padding.
+  theme_.paddingEm = 0;
+  theme_.gapEm     = 0;
+  const auto font  = gleditor::text::FontManager::instance().getFont(
+      metrics.fontDescription(ui::FontRole::Label, theme_));
+  const float line = std::ceil(font->metrics().lineHeight) + 2;
+  const float touch =
+      std::ceil(std::max(metrics.px(theme_.type.minTouchPx), line + 4));
+  const auto safe    = metrics.pixelSafeArea();
+  const auto bounded = [](float value, float fallback, float minimum,
+                          float maximum) {
+    return std::isfinite(value) ? std::clamp(value, minimum, maximum)
+                                : fallback;
+  };
+  panelW_ = std::floor(
+      std::min(metrics.px(bounded(config_.widthPx, 640, 1, 10000)),
+               safe.width * bounded(config_.maxWidthShare, .95F, .1F, 1)));
+  panelH_ = std::floor(
+      std::min(std::max(metrics.px(bounded(config_.heightPx, 460, 1, 10000)),
+                        line + touch * 4),
+               safe.height * bounded(config_.maxHeightShare, .95F, .1F, 1)));
+  panelX_ = std::round(safe.left);
+  panelY_ = std::round(safe.bottom + (safe.height - panelH_) * .5F);
 
-  canvas_->clear();
+  graphBounds_ = {panelX_ + 2, panelY_ + touch + 4, std::max(0.F, panelW_ - 4),
+                  std::max(0.F, panelH_ - line - touch * 2 - 10)};
 
-  // 1. Panel backdrop
-  canvas_->setTag(render::tagKindOverlay, 0);
-  canvas_->addRect(panelX_, panelY_, panelW_, panelH_, 0x0F172AE6);
-  canvas_->addLine(panelX_, panelY_, panelX_ + panelW_, panelY_, 1.0F,
-                   0x334155FF);
-  canvas_->addLine(panelX_ + panelW_, panelY_, panelX_ + panelW_,
-                   panelY_ + panelH_, 1.0F, 0x334155FF);
-  canvas_->addLine(panelX_ + panelW_, panelY_ + panelH_, panelX_,
-                   panelY_ + panelH_, 1.0F, 0x334155FF);
-  canvas_->addLine(panelX_, panelY_ + panelH_, panelX_, panelY_, 1.0F,
-                   0x334155FF);
-
-  const float topY = panelY_ + panelH_;
-  canvas_->addText(ctx.state, panelX_ + 14.0F, topY - 24.0F,
-                   "HYPERTIME BRANCHING DAG & N-WAY DIFF", 0x38BDF8FF, 0);
-  canvas_->addText(ctx.state, panelX_ + 14.0F, topY - 40.0F,
-                   "Wheel: pan | Shift+Wheel: sideways | Ctrl+Wheel: zoom",
-                   0x94A3B8FF, 0);
+  // Every rebuild can change typography or positioning; warm frames exit above.
+  builtAt = std::numeric_limits<std::uint64_t>::max();
+  layout(static_cast<float>(metrics.screenWidth),
+         static_cast<float>(metrics.screenHeight));
+  ui::Widget model{
+      .id        = 1,
+      .model     = ui::PositionedPanel{},
+      .preferred = {metrics.logical(panelW_), metrics.logical(panelH_)}};
+  auto add = [&](ui::Widget widget, ui::Rect bounds) {
+    auto &positioned = std::get<ui::PositionedPanel>(model.model);
+    positioned.childBounds.push_back({metrics.logical(bounds.left - panelX_),
+                                      metrics.logical(bounds.bottom - panelY_),
+                                      metrics.logical(bounds.width),
+                                      metrics.logical(bounds.height)});
+    widget.preferred = {metrics.logical(bounds.width),
+                        metrics.logical(bounds.height)};
+    model.children.push_back(std::move(widget));
+  };
+  actions_.clear();
+  auto actionButton = [&](std::string label, std::string kind, ui::Rect rect,
+                          std::optional<MicroversionId> version = {}) {
+    const auto key           = kind + (version ? version->str() : "");
+    auto [identity, created] = controlIds_.try_emplace(key, nextId_);
+    if (created) ++nextId_;
+    const auto id = identity->second;
+    actions_.emplace(id, Action{kind, version, comparedVersions_, epoch_});
+    add({.id = id, .model = ui::Button{std::move(label), kind}, .maxLines = 1},
+        rect);
+  };
+  add({.id       = 2,
+       .model    = ui::Label{"Hypertime Branching DAG & N-Way Diff"},
+       .maxLines = 1},
+      {panelX_ + 2, panelY_ + panelH_ - line - 2, panelW_ - 4, line});
+  const float headerY = panelY_ + panelH_ - line - touch - 4;
+  const std::size_t headerCount =
+      3 + (selectedOperation_ ? 1 : 0) +
+      (selectedOperation_ && annotateHandler_ ? 1 : 0);
+  const float buttonWidth =
+      std::floor((panelW_ - 4) / static_cast<float>(headerCount));
+  std::size_t column = 0;
+  auto header        = [&](std::string label, std::string kind,
+                    std::optional<MicroversionId> version = {}) {
+    actionButton(std::move(label), std::move(kind),
+                        {panelX_ + 2 + static_cast<float>(column++) * buttonWidth,
+                  headerY, buttonWidth, touch},
+                        version);
+  };
+  header("Close hypertime", "close");
+  header("Graph", "graph");
+  header("Comparison", "comparison");
   if (selectedOperation_) {
     const bool included =
         std::ranges::find(comparedVersions_, *selectedOperation_) !=
         comparedVersions_.end();
-    canvas_->setTag(render::tagKindOverlay, kTagCompareSelection);
-    canvas_->addRect(panelX_ + 14.0F, topY - 72.0F, 185.0F, 24.0F,
-                     included ? 0x9A3412FF : 0x0F766EFF);
-    canvas_->addText(ctx.state, panelX_ + 19.0F, topY - 55.0F,
-                     included ? "Remove from comparison" : "Add to comparison",
-                     0xFFFFFFFF, 0);
+    header((included ? "Remove " : "Add ") + selectedOperation_->str() +
+               (included ? " from comparison" : " to comparison"),
+           "toggle", selectedOperation_);
+    if (annotateHandler_)
+      header("Annotate operation " + selectedOperation_->str() +
+                 " and place handle on d.1",
+             "annotate", selectedOperation_);
   }
-  if (selectedOperation_ && annotateHandler_) {
-    canvas_->setTag(render::tagKindOverlay, kTagAnnotateButton);
-    canvas_->addRect(panelX_ + panelW_ - 220.0F, topY - 72.0F, 206.0F, 24.0F,
-                     0x2563EBFF);
-    canvas_->addText(ctx.state, panelX_ + panelW_ - 215.0F, topY - 55.0F,
-                     "Annotate and place handle", 0xFFFFFFFF, 0);
-  }
-
-  // 2. Directed branch edges
-  const float graphLeft   = panelX_ + 8.0F;
-  const float graphRight  = panelX_ + panelW_ - 8.0F;
-  const float graphBottom = panelY_ + 52.0F;
-  const float graphTop    = topY - 76.0F;
-  const auto insideGraph  = [&](const GraphNode &node) {
-    return node.x - node.radius >= graphLeft &&
-           node.x + node.radius <= graphRight &&
-           node.y - node.radius >= graphBottom &&
-           node.y + node.radius <= graphTop;
-  };
-  for (const auto &edge : edges_) {
-    if (edge.fromIdx < nodes_.size() && edge.toIdx < nodes_.size()) {
-      const auto &n1 = nodes_[edge.fromIdx];
-      const auto &n2 = nodes_[edge.toIdx];
-      if (!insideGraph(n1) || !insideGraph(n2)) continue;
-      const auto edgeCol = kLineageHues[edge.lane % kLineageHues.size()];
-      drawPolyline(*canvas_, n1.x, n1.y, n2.x, n2.y, 2.5F, edgeCol);
-    }
-  }
-
-  // 3. Circular nodes
-  for (std::size_t i = 0; i < nodes_.size(); ++i) {
-    const auto &n = nodes_[i];
-    if (!insideGraph(n)) continue;
-    const bool isCur = (n.id == current_);
-    const bool isComp =
-        std::ranges::find(comparedVersions_, n.id) != comparedVersions_.end();
-
-    canvas_->setTag(render::tagKindOverlay,
-                    kTagNodeBase + static_cast<std::uint32_t>(i));
-
-    if (isCur) {
-      drawDisc(*canvas_, n.x, n.y, n.radius + 3.5F, 0x10B98144, 0x10B981FF,
-               1.5F);
-    }
-    if (isComp) {
-      drawDisc(*canvas_, n.x, n.y, n.radius + (isCur ? 6.0F : 3.5F), 0xFFD70044,
-               0xFFD700FF, 1.5F);
-    }
-
-    const auto pickByState = [isCur, isComp](const std::uint32_t curVal,
-                                             const std::uint32_t compVal,
-                                             const std::uint32_t defaultVal) {
-      if (isCur) {
-        return curVal;
-      }
-      if (isComp) {
-        return compVal;
-      }
-      return defaultVal;
-    };
-
-    const std::uint32_t fillCol =
-        pickByState(0x064E3BFF, 0x78350FFF, 0x1E293BFF);
-    const std::uint32_t borderCol =
-        pickByState(0x10B981FF, 0xF59E0BFF, 0x64748BFF);
-    drawDisc(*canvas_, n.x, n.y, n.radius, fillCol, borderCol, 1.5F);
-
-    const std::string letterStr(1, n.opLetter);
-    const auto m = canvas_->measureText(letterStr);
-    const std::uint32_t letterCol =
-        pickByState(0x6EE7B7FF, 0xFDE68AFF, 0xF1F5F9FF);
-    canvas_->addText(ctx.state, n.x - m.width * 0.5F,
-                     n.y + m.height * 0.5F - 2.0F, letterStr, letterCol, 0);
-
-    // Unobstructed alias badge
-    if (!n.alias.empty() && n.aliasX >= graphLeft &&
-        n.aliasX + n.aliasW <= graphRight && n.aliasY >= graphBottom &&
-        n.aliasY + n.aliasH <= graphTop) {
-      canvas_->setTag(render::tagKindOverlay,
-                      kTagNodeBase + static_cast<std::uint32_t>(i));
-      canvas_->addRect(n.aliasX, n.aliasY, n.aliasW, n.aliasH, 0x0F172AEE);
-      canvas_->addLine(n.aliasX, n.aliasY, n.aliasX + n.aliasW, n.aliasY, 1.0F,
-                       0x475569FF);
-      canvas_->addLine(n.aliasX + n.aliasW, n.aliasY, n.aliasX + n.aliasW,
-                       n.aliasY + n.aliasH, 1.0F, 0x475569FF);
-      canvas_->addLine(n.aliasX + n.aliasW, n.aliasY + n.aliasH, n.aliasX,
-                       n.aliasY + n.aliasH, 1.0F, 0x475569FF);
-      canvas_->addLine(n.aliasX, n.aliasY + n.aliasH, n.aliasX, n.aliasY, 1.0F,
-                       0x475569FF);
-
-      canvas_->addText(ctx.state, n.aliasX + 5.0F, n.aliasY + n.aliasH - 4.0F,
-                       n.alias, 0xFCD34DFF, 0);
-    }
-  }
-
-  // 4. Continuous time scrubber
-  canvas_->setTag(render::tagKindOverlay, kTagScrubberTrack);
-  constexpr float trackH = 6.0F;
-  canvas_->addRect(scrubberTrackX_, scrubberTrackY_, scrubberTrackW_, trackH,
-                   0x1E293BFF);
-  canvas_->addLine(scrubberTrackX_, scrubberTrackY_,
-                   scrubberTrackX_ + scrubberTrackW_, scrubberTrackY_, 1.0F,
-                   0x334155FF);
-  canvas_->addLine(scrubberTrackX_, scrubberTrackY_ + trackH,
-                   scrubberTrackX_ + scrubberTrackW_, scrubberTrackY_ + trackH,
-                   1.0F, 0x334155FF);
-
-  const std::size_t numVers = chronologicalOrder_.size();
-  std::size_t currentIdx    = 0;
-  for (std::size_t i = 0; i < numVers; ++i) {
-    const float tx =
-        scrubberTrackX_ + (numVers > 1 ? (static_cast<float>(i) /
-                                          static_cast<float>(numVers - 1)) *
-                                             scrubberTrackW_
-                                       : scrubberTrackW_ * 0.5F);
-    canvas_->addRect(tx - 0.5F, scrubberTrackY_ - 2.0F, 1.0F, trackH + 4.0F,
-                     0x475569FF);
-    if (chronologicalOrder_[i] == current_) {
-      currentIdx = i;
-    }
-  }
-
-  scrubberThumbX_ =
-      scrubberTrackX_ + (numVers > 1 ? (static_cast<float>(currentIdx) /
-                                        static_cast<float>(numVers - 1)) *
-                                           scrubberTrackW_
-                                     : scrubberTrackW_ * 0.5F);
-  canvas_->setTag(render::tagKindOverlay, kTagScrubberThumb);
-  drawDisc(*canvas_, scrubberThumbX_, scrubberTrackY_ + trackH * 0.5F, 8.0F,
-           0x10B981FF, 0xFFFFFFFF, 1.5F);
-
-  const std::string scrubLabel = "Time: " + current_.str() + " (" +
-                                 std::to_string(currentIdx + 1) + "/" +
-                                 std::to_string(numVers) + ")";
-  canvas_->addText(ctx.state, scrubberTrackX_, scrubberTrackY_ + 16.0F,
-                   scrubLabel, 0x94A3B8FF, 0);
-
-  // 5. Unlimited N-way comparative diff panel
-  if (comparedVersions_.size() >= 2) {
-    if (diffNeedsUpdate_) {
+  if (comparisonPage_) {
+    if (diffNeedsUpdate_ && comparedVersions_.size() >= 2) {
       diffResult_      = storeAt_(storeIndex_).diffVersions(comparedVersions_);
       diffNeedsUpdate_ = false;
     }
+    ui::List rows;
+    rowHeight_       = line + 4;
+    rows.rowHeightPx = rowHeight_;
 
-    constexpr float diffW = 325.0F;
-    const float diffH     = comparedVersions_.size() == 3 ? 205.0F : 145.0F;
-    const float diffX     = panelX_ + panelW_ - diffW - 14.0F;
-    const float diffY     = panelY_ + 55.0F;
-
-    canvas_->setTag(render::tagKindOverlay, 0);
-    canvas_->addRect(diffX, diffY, diffW, diffH, 0x1E1E2EDD);
-    canvas_->addLine(diffX, diffY, diffX + diffW, diffY, 1.0F, 0xF59E0BFF);
-    canvas_->addLine(diffX + diffW, diffY, diffX + diffW, diffY + diffH, 1.0F,
-                     0xF59E0BFF);
-    canvas_->addLine(diffX + diffW, diffY + diffH, diffX, diffY + diffH, 1.0F,
-                     0xF59E0BFF);
-    canvas_->addLine(diffX, diffY + diffH, diffX, diffY, 1.0F, 0xF59E0BFF);
-
-    const std::string diffTitle =
-        "N-WAY DIFF: " + std::to_string(comparedVersions_.size()) + " VERSIONS";
-    canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 16.0F, diffTitle,
-                     0xF59E0BFF, 0);
-
-    std::size_t uChars = 0;
-    std::size_t sChars = 0;
-    std::size_t qChars = 0;
-    std::size_t dChars = 0;
-    if (!diffResult_.versions.empty()) {
-      uChars = diffResult_.versions[0].universalChars;
-      sChars = diffResult_.versions[0].sharedChars;
-      qChars = diffResult_.versions[0].uniqueChars;
-      dChars = diffResult_.versions[0].deletedChars;
-    }
-
-    const std::string uStr =
-        "Universal (Gold): " + std::to_string(uChars) + " chars";
-    const std::string sStr =
-        "Shared (Amber):    " + std::to_string(sChars) + " chars";
-    const std::string qStr =
-        "Unique (Mint):     " + std::to_string(qChars) + " chars";
-    const std::string dStr =
-        "Limbo (Crimson):   " + std::to_string(dChars) + " chars";
-
-    if (comparedVersions_.size() == 3) {
-      auto ancestor = comparedVersions_[1];
-      while (ancestor != comparedVersions_[2] &&
-             !ancestor.isAncestorOf(comparedVersions_[2]) &&
-             !ancestor.isZero()) {
-        ancestor = ancestor.parent();
+    auto row = [&](std::string label) {
+      rows.rows.push_back({nextId_++, std::move(label), {}, false});
+    };
+    row("Comparative Diff (" + std::to_string(comparedVersions_.size()) +
+        " versions)");
+    if (comparedVersions_.size() < 2)
+      row("Select versions, then add them to comparison.");
+    else {
+      if (comparedVersions_.size() == 3) {
+        auto ancestor = comparedVersions_[1];
+        while (ancestor != comparedVersions_[2] &&
+               !ancestor.isAncestorOf(comparedVersions_[2]) &&
+               !ancestor.isZero())
+          ancestor = ancestor.parent();
+        const bool before = comparedVersions_[0] != ancestor &&
+                            comparedVersions_[0].isAncestorOf(ancestor);
+        row("Ancestor " + ancestor.str() +
+            (before ? " | base before" : " | check base"));
       }
-      const bool beforeAncestor = comparedVersions_[0] != ancestor &&
-                                  comparedVersions_[0].isAncestorOf(ancestor);
-      canvas_->addText(
-          ctx.state, diffX + 8.0F, diffY + diffH - 36.0F,
-          "Ancestor " + ancestor.str() +
-              (beforeAncestor ? " | base before" : " | check base"),
-          beforeAncestor ? 0x94A3B8FF : 0xEF4444FF, 0);
-      for (std::size_t i = 0; i < 3; ++i) {
-        const auto &version = diffResult_.versions[i];
-        const float rowY =
-            diffY + diffH - 54.0F - static_cast<float>(i) * 36.0F;
-        canvas_->addText(
-            ctx.state, diffX + 8.0F, rowY,
-            version.version.str() + ": " + std::to_string(version.uniqueChars) +
-                " unique chars, " +
-                std::to_string(version.changedCells.size()) + " changed cells",
-            0xE2E8F0FF, 0);
-        const auto universal = passagePreview(version, DiffKind::Universal, 10);
-        const auto shared    = passagePreview(version, DiffKind::Shared, 10);
-        const auto unique    = passagePreview(version, DiffKind::Unique, 10);
-        canvas_->addText(ctx.state, diffX + 8.0F, rowY - 16.0F,
-                         "all:\"" + universal + "\" some:\"" + shared +
-                             "\" only:\"" + unique + "\"",
-                         0x94A3B8FF, 0);
-      }
-    } else {
-      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 34.0F, uStr,
-                       0xFFD700FF, 0);
-      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 50.0F, sStr,
-                       0xF59E0BFF, 0);
-      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 66.0F, qStr,
-                       0x10B981FF, 0);
-      canvas_->addText(ctx.state, diffX + 8.0F, diffY + diffH - 82.0F, dStr,
-                       0xEF4444FF, 0);
-    }
-
-    // Buttons
-    canvas_->setTag(render::tagKindOverlay, kTagQuoteButton);
-    canvas_->addRect(diffX + 6.0F, diffY + 10.0F, 106.0F, 22.0F, 0x2563EBFF);
-    canvas_->addText(ctx.state, diffX + 10.0F, diffY + 26.0F, "Quote into Head",
-                     0xFFFFFFFF, 0);
-
-    canvas_->setTag(render::tagKindOverlay, kTagOpen3DButton);
-    canvas_->addRect(diffX + 116.0F, diffY + 10.0F, 72.0F, 22.0F, 0x059669FF);
-    canvas_->addText(ctx.state, diffX + 120.0F, diffY + 26.0F, "Open in 3D",
-                     0xFFFFFFFF, 0);
-
-    canvas_->setTag(render::tagKindOverlay, kTagOnionSkinButton);
-    canvas_->addRect(diffX + 192.0F, diffY + 10.0F, 82.0F, 22.0F, 0x7C3AEDFF);
-    canvas_->addText(ctx.state, diffX + 196.0F, diffY + 26.0F, "Onion Skin",
-                     0xFFFFFFFF, 0);
-
-    canvas_->setTag(render::tagKindOverlay, kTagClearComp);
-    canvas_->addRect(diffX + 278.0F, diffY + 10.0F, 42.0F, 22.0F, 0xDC2626FF);
-    canvas_->addText(ctx.state, diffX + 282.0F, diffY + 26.0F, "Clear",
-                     0xFFFFFFFF, 0);
-  }
-
-  canvas_->commit();
-  canvas_->draw(ctx.state, ortho);
-}
-
-bool HypertimeGraph::picked(const render::PickingResult &pick,
-                            RenderState & /*state*/) {
-  if (!visible_ || pick.tag.kind != render::tagKindOverlay) {
-    return false;
-  }
-  const auto tag = pick.tag.clusterIndex;
-
-  if (tag == kTagScrubberThumb || tag == kTagScrubberTrack) {
-    if (chronologicalOrder_.empty() || scrubberTrackW_ <= 0.0F) {
-      return false;
-    }
-    const float relX = static_cast<float>(pick.x) - scrubberTrackX_;
-    const float frac = std::clamp(relX / scrubberTrackW_, 0.0F, 1.0F);
-    const auto targetIdx =
-        std::min(chronologicalOrder_.size() - 1,
-                 static_cast<std::size_t>(
-                     frac * static_cast<float>(chronologicalOrder_.size())));
-    current_ = chronologicalOrder_[targetIdx];
-    if (scrubHandler_) {
-      scrubHandler_(current_);
-    } else if (goer_) {
-      goer_(current_);
-    }
-    return true;
-  }
-
-  if (tag == kTagQuoteButton) {
-    if (quoteHandler_ && !comparedVersions_.empty()) {
-      const auto &srcVer =
-          (comparedVersions_.size() > 1 && comparedVersions_[0] == current_)
-              ? comparedVersions_[1]
-              : comparedVersions_[0];
-      const auto &st  = storeAt_(storeIndex_);
-      const auto text = st.textOf(srcVer);
-      if (!text.empty()) {
-        quoteHandler_(srcVer, 0, static_cast<std::uint32_t>(text.size()));
+      for (const auto &version : diffResult_.versions) {
+        row("Version " + version.version.str() + ": " +
+            std::to_string(version.uniqueChars) + " unique characters, " +
+            std::to_string(version.changedCells.size()) + " changed cells");
+        row("Universal (Gold): " + std::to_string(version.universalChars) +
+            " chars | " + passagePreview(version, DiffKind::Universal));
+        row("Shared (Amber): " + std::to_string(version.sharedChars) +
+            " chars | " + passagePreview(version, DiffKind::Shared));
+        row("Unique (Mint): " + std::to_string(version.uniqueChars) +
+            " chars | " + passagePreview(version, DiffKind::Unique));
+        row("Limbo (Crimson): " + std::to_string(version.deletedChars) +
+            " chars");
       }
     }
-    return true;
-  }
-
-  if (tag == kTagCompareSelection) {
-    if (selectedOperation_) toggleComparison(*selectedOperation_);
-    return true;
-  }
-
-  if (tag == kTagOpen3DButton) {
-    if (compareHandler_ && !comparedVersions_.empty()) {
-      compareHandler_(comparedVersions_);
-    }
-    return true;
-  }
-
-  if (tag == kTagOnionSkinButton) {
-    if (onionSkinHandler_ && !comparedVersions_.empty()) {
-      onionSkinHandler_(comparedVersions_);
-    }
-    return true;
-  }
-
-  if (tag == kTagClearComp) {
-    clearComparison();
-    return true;
-  }
-
-  if (tag == kTagAnnotateButton) {
-    if (selectedOperation_ && annotateHandler_) {
-      annotateHandler_(*selectedOperation_);
-    }
-    return true;
-  }
-
-  if (tag >= kTagNodeBase) {
-    const std::size_t nodeIdx = tag - kTagNodeBase;
-    if (nodeIdx < nodes_.size()) {
-      const auto &targetId   = nodes_[nodeIdx].id;
-      const SDL_Keymod mods  = SDL_GetModState();
-      const bool shiftOrCtrl = (mods & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
-      if (shiftOrCtrl) {
-        toggleComparison(targetId);
-      } else {
-        if (!targetId.isZero()) selectedOperation_ = targetId;
-        current_ = targetId;
-        revision_++;
-        if (goer_) {
-          goer_(targetId);
-        }
-      }
-      return true;
-    }
-  }
-
-  return false;
-}
-
-HypertimeGraph *HypertimeGraph::toggleComparison(const MicroversionId &id) {
-  const auto it = std::ranges::find(comparedVersions_, id);
-  if (it != comparedVersions_.end()) {
-    comparedVersions_.erase(it);
+    comparisonMaxScroll_ =
+        std::max(0.F, static_cast<float>(rows.rows.size()) * rowHeight_ -
+                          std::max(0.F, graphBounds_.height - touch - 2));
+    comparisonScroll_ =
+        std::clamp(comparisonScroll_, 0.F, comparisonMaxScroll_);
+    rows.scrollPx = comparisonScroll_;
+    add({.id = 3, .model = std::move(rows), .maxLines = 1},
+        {graphBounds_.left, graphBounds_.bottom + touch + 2, graphBounds_.width,
+         std::max(0.F, graphBounds_.height - touch - 2)});
+    const float width = std::floor(graphBounds_.width / 4);
+    const std::array<std::pair<const char *, const char *>, 4> buttons{
+        {{"Quote into Head", "quote"},
+         {"Open in 3D", "open3d"},
+         {"Onion Skin", "onion"},
+         {"Clear comparison", "clear"}}};
+    for (std::size_t i = 0; i < buttons.size(); ++i)
+      actionButton(buttons[i].first, buttons[i].second,
+                   {graphBounds_.left + static_cast<float>(i) * width,
+                    graphBounds_.bottom, width, touch});
   } else {
-    comparedVersions_.push_back(id);
+    for (const auto &node : nodes_) {
+      const ui::Rect bounds{node.x - node.radius, node.y - node.radius,
+                            node.radius * 2, node.radius * 2};
+      if (bounds.left < graphBounds_.left ||
+          bounds.bottom < graphBounds_.bottom ||
+          bounds.left + bounds.width > graphBounds_.left + graphBounds_.width ||
+          bounds.bottom + bounds.height >
+              graphBounds_.bottom + graphBounds_.height)
+        continue;
+      auto [entry, created] = nodeIds_.try_emplace(node.id, nextId_);
+      if (created) ++nextId_;
+      const auto label = std::string(1, node.opLetter) + " · Version " +
+                         node.id.str() +
+                         (node.alias.empty() ? "" : " (" + node.alias + ")");
+      actions_.emplace(entry->second, Action{"node", node.id, {}, epoch_});
+      add({.id = entry->second,
+           .model =
+               ui::Button{std::string(1, node.opLetter), "node", true, label},
+           .maxLines = 1},
+          bounds);
+      if (!node.alias.empty() && node.aliasW > 0) {
+        auto [alias, newAlias] = aliasIds_.try_emplace(node.id, nextId_);
+        if (newAlias) ++nextId_;
+        actions_.emplace(alias->second, Action{"node", node.id, {}, epoch_});
+        add({.id       = alias->second,
+             .model    = ui::Button{node.alias, "node", true,
+                                 "Alias " + node.alias + " for version " +
+                                     node.id.str()},
+             .maxLines = 1},
+            {node.aliasX, node.aliasY, node.aliasW, node.aliasH});
+      }
+    }
   }
-  diffNeedsUpdate_ = true;
-  revision_++;
-  return this;
+  const auto current       = std::ranges::find(chronologicalOrder_, current_);
+  const auto index         = current == chronologicalOrder_.end()
+                                 ? 0
+                                 : std::distance(chronologicalOrder_.begin(), current);
+  auto [time, createdTime] = controlIds_.try_emplace("time", nextId_);
+  if (createdTime) ++nextId_;
+  const auto timeId = time->second;
+  actions_.emplace(timeId, Action{"time", {}, chronologicalOrder_, epoch_});
+  add({.id = timeId,
+       .model =
+           ui::Scrubber{"Time: " + current_.str() + " (" +
+                            std::to_string(index + 1) + "/" +
+                            std::to_string(chronologicalOrder_.size()) + ")",
+                        "time", static_cast<double>(index), 0,
+                        static_cast<double>(chronologicalOrder_.size() - 1),
+                        1.0 / static_cast<double>(std::max<std::size_t>(
+                                  1, chronologicalOrder_.size() - 1))},
+       .maxLines = 1},
+      {panelX_ + 2, panelY_ + 2, panelW_ - 4, touch});
+  overlay_.setModel(std::move(model));
+  overlay_.setBounds(ui::Rect{panelX_, panelY_, panelW_, panelH_});
+  overlay_.setVisible(true);
+  dirty_           = false;
+  decorationDirty_ = true;
+  return overlay_.prepare(metrics_, theme_);
 }
-
-HypertimeGraph *HypertimeGraph::clearComparison() {
-  comparedVersions_.clear();
-  diffNeedsUpdate_ = true;
-  revision_++;
-  return this;
+void HypertimeGraph::queue(const ui::WidgetAction &widget) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_ || modelGeneration_ != generation_()) return;
+  const auto found = actions_.find(widget.id);
+  if (found == actions_.end()) return;
+  auto action = found->second;
+  if (action.kind == "node") {
+    const auto mods = SDL_GetModState();
+    action.modified = (mods & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+  }
+  if (action.kind == "time") {
+    try {
+      const auto value = std::stod(widget.value);
+      if (!std::isfinite(value) || action.compared.empty()) return;
+      const auto index = static_cast<std::size_t>(std::clamp(
+          value, 0., static_cast<double>(action.compared.size() - 1)));
+      action.version   = action.compared[index];
+    } catch (const std::exception &) {
+      return;
+    }
+  }
+  pending_.push_back(std::move(action));
 }
-
-void HypertimeGraph::describe(gleditor::a11y::Builder &into) {
-  if (!visible_ || nodes_.empty()) {
+void HypertimeGraph::drain() {
+  auto pending = std::move(pending_);
+  pending_.clear();
+  for (const auto &action : pending)
+    if (visible_ && action.epoch == epoch_ && modelGeneration_ == generation_())
+      dispatch(action);
+}
+void HypertimeGraph::dispatch(const Action &action) {
+  const auto &kind = action.kind;
+  if (kind == "close") {
+    setVisible(false);
     return;
   }
-  constexpr std::uint64_t mapId = 1;
-  auto &mapNode                 = into.add(mapId, gleditor::a11y::Role::List);
-  mapNode.label                 = "Hypertime Branching DAG";
-  for (std::size_t i = 0; i < nodes_.size(); ++i) {
-    mapNode.children.push_back(into.id(1000U + i));
-  }
-  mapNode.children.push_back(into.id(2000U));
-  if (selectedOperation_ && annotateHandler_) {
-    mapNode.children.push_back(into.id(2001U));
-  }
-  if (selectedOperation_) mapNode.children.push_back(into.id(2002U));
-  if (comparedVersions_.size() >= 2) {
-    mapNode.children.push_back(into.id(3000U));
-  }
-  into.contribute(into.id(mapId));
-
-  for (std::size_t i = 0; i < nodes_.size(); ++i) {
-    const auto &n     = nodes_[i];
-    const auto nodeId = 1000U + i;
-    auto &node        = into.add(nodeId, gleditor::a11y::Role::ListItem);
-    std::string label =
-        "Version " + n.id.str() + " [" + std::string(1, n.opLetter) + "]";
-    if (!n.alias.empty()) {
-      label += " (" + n.alias + ")";
+  if (kind == "graph" || kind == "comparison") {
+    comparisonPage_ = kind == "comparison";
+    changed(true);
+  } else if (kind == "toggle" && action.version)
+    toggleComparison(*action.version);
+  else if (kind == "clear")
+    clearComparison();
+  else if (kind == "annotate" && action.version && annotateHandler_)
+    annotateHandler_(*action.version);
+  else if (kind == "open3d" && compareHandler_ && !action.compared.empty())
+    compareHandler_(action.compared);
+  else if (kind == "onion" && onionSkinHandler_ && !action.compared.empty())
+    onionSkinHandler_(action.compared);
+  else if (kind == "quote" && quoteHandler_ && !action.compared.empty()) {
+    const auto source =
+        action.compared.size() > 1 && action.compared[0] == current_
+            ? action.compared[1]
+            : action.compared[0];
+    const auto text = storeAt_(storeIndex_).textOf(source);
+    if (!text.empty())
+      quoteHandler_(source, 0, static_cast<std::uint32_t>(text.size()));
+  } else if (kind == "node" && action.version) {
+    if (action.modified)
+      toggleComparison(*action.version);
+    else {
+      if (!action.version->isZero()) selectedOperation_ = action.version;
+      current_ = *action.version;
+      changed();
+      if (goer_) goer_(current_);
     }
-    node.label = label;
-    node.value = selectedOperation_ == n.id ? "selected operation"
-                 : n.id == current_         ? "current view"
-                                            : "";
-    if (std::ranges::find(comparedVersions_, n.id) != comparedVersions_.end()) {
-      node.value += node.value.empty() ? "in comparison" : ", in comparison";
-    }
-  }
-
-  auto &sliderNode = into.add(2000U, gleditor::a11y::Role::Group);
-  sliderNode.label = "Time Scrubber";
-  sliderNode.value = current_.str();
-
-  if (selectedOperation_ && annotateHandler_) {
-    auto &annotate = into.add(2001U, gleditor::a11y::Role::Button);
-    annotate.label = "Annotate operation " + selectedOperation_->str() +
-                     " and place handle on d.1";
-    annotate.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
-  }
-  if (selectedOperation_) {
-    auto &compare = into.add(2002U, gleditor::a11y::Role::Button);
-    const bool included =
-        std::ranges::find(comparedVersions_, *selectedOperation_) !=
-        comparedVersions_.end();
-    compare.label = std::string(included ? "Remove " : "Add ") +
-                    selectedOperation_->str() +
-                    (included ? " from comparison" : " to comparison");
-    compare.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click);
-  }
-
-  if (comparedVersions_.size() >= 2) {
-    auto &diffNode = into.add(3000U, gleditor::a11y::Role::Group);
-    diffNode.label = "Comparative Diff (" +
-                     std::to_string(comparedVersions_.size()) + " versions)";
-    for (const auto &version : diffResult_.versions) {
-      diffNode.label +=
-          " [" + version.version.str() + ": " +
-          std::to_string(version.uniqueChars) + " unique characters, " +
-          std::to_string(version.changedCells.size()) + " changed cells; " +
-          "universal passage '" + passagePreview(version, DiffKind::Universal) +
-          "'; shared passage '" + passagePreview(version, DiffKind::Shared) +
-          "'; unique passage '" + passagePreview(version, DiffKind::Unique) +
-          "']";
-    }
+  } else if (kind == "time" && action.version) {
+    current_ = *action.version;
+    changed();
+    if (scrubHandler_)
+      scrubHandler_(current_);
+    else if (goer_)
+      goer_(current_);
   }
 }
-
+void HypertimeGraph::rebuildDecoration() {
+  if (!canvas_) return;
+  canvas_->clear();
+  canvas_->setTag(render::tagKindOverlay, 0);
+  canvas_->addRect(panelX_, panelY_, panelW_, panelH_,
+                   ui::rgba(theme_.colours.surface));
+  if (!comparisonPage_) {
+    const auto inside = [&](const GraphNode &node) {
+      return node.x - node.radius >= graphBounds_.left &&
+             node.x + node.radius <= graphBounds_.left + graphBounds_.width &&
+             node.y - node.radius >= graphBounds_.bottom &&
+             node.y + node.radius <= graphBounds_.bottom + graphBounds_.height;
+    };
+    for (const auto &edge : edges_) {
+      if (edge.fromIdx >= nodes_.size() || edge.toIdx >= nodes_.size())
+        continue;
+      const auto &from = nodes_[edge.fromIdx];
+      const auto &to   = nodes_[edge.toIdx];
+      if (inside(from) && inside(to))
+        drawPolyline(*canvas_, from.x, from.y, to.x, to.y, metrics_.px(2),
+                     kLineageHues[edge.lane % kLineageHues.size()]);
+    }
+    for (const auto &node : nodes_) {
+      if (!inside(node)) continue;
+      const bool selected = node.id == current_;
+      const bool compared = std::ranges::find(comparedVersions_, node.id) !=
+                            comparedVersions_.end();
+      if (selected || compared)
+        drawDisc(*canvas_, node.x, node.y, node.radius + 2,
+                 selected ? 0x10B981FF : 0xFFD700FF);
+    }
+  }
+  canvas_->commit();
+  decorationDirty_ = false;
+}
+void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
+  const std::scoped_lock lock(guard_);
+  drain();
+  if (!visible_ || !canvas_) return;
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
+  std::ignore          = prepare(metrics, ctx.theme);
+  if (decorationDirty_) rebuildDecoration();
+  const auto ortho =
+      glm::ortho(0.F, static_cast<float>(ctx.screenWidth), 0.F,
+                 static_cast<float>(ctx.screenHeight), -1.F, 1.F);
+  canvas_->draw(ctx.state, ortho);
+  gleditor::FrameContext draw{
+      ctx.state,    ctx.viewProjection, ctx.screenWidth,   ctx.screenHeight,
+      ctx.timeline, ctx.chrome,         ctx.settledChrome, metrics,
+      theme_};
+  overlay_.drawFrame(draw);
+}
+bool HypertimeGraph::busy() const {
+  const std::scoped_lock lock(guard_);
+  return !pending_.empty();
+}
+bool HypertimeGraph::picked(const render::PickingResult &pick,
+                            RenderState &state) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
+  if (pick.requestId || pick.tag.docIndex || pick.tag.pageIndex) {
+    if (dirty_ || modelGeneration_ != generation_())
+      return pick.tag.kind == render::tagKindOverlay;
+    const auto handled = overlay_.picked(pick, state);
+    if (handled && pick.overlayWidgetId) requestFocus(*pick.overlayWidgetId);
+    return handled;
+  }
+  // Existing synthetic domain tests use the historical tags. Real picks resolve
+  // the retained scene's immutable identity instead of these array indices.
+  if (pick.tag.kind != render::tagKindOverlay) return false;
+  const auto tag = pick.tag.clusterIndex;
+  Action action{.epoch = epoch_};
+  action.compared = comparedVersions_;
+  if (tag >= kTagNodeBase && tag - kTagNodeBase < nodes_.size()) {
+    action.kind    = "node";
+    action.version = nodes_[tag - kTagNodeBase].id;
+    action.modified =
+        (SDL_GetModState() & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL)) != 0;
+  } else if (tag == kTagCompareSelection) {
+    action.kind    = "toggle";
+    action.version = selectedOperation_;
+  } else if (tag == kTagAnnotateButton) {
+    action.kind    = "annotate";
+    action.version = selectedOperation_;
+  } else if (tag == kTagQuoteButton)
+    action.kind = "quote";
+  else if (tag == kTagOpen3DButton)
+    action.kind = "open3d";
+  else if (tag == kTagOnionSkinButton)
+    action.kind = "onion";
+  else if (tag == kTagClearComp)
+    action.kind = "clear";
+  else if (tag == kTagScrubberTrack || tag == kTagScrubberThumb) {
+    if (chronologicalOrder_.empty() || panelW_ <= 0) return false;
+    action.kind = "time";
+    const auto fraction =
+        std::clamp((static_cast<float>(pick.x) - panelX_) / panelW_, 0.F, 1.F);
+    const auto index = std::min(
+        chronologicalOrder_.size() - 1,
+        static_cast<std::size_t>(
+            fraction * static_cast<float>(chronologicalOrder_.size())));
+    action.version = chronologicalOrder_[index];
+  } else
+    return false;
+  dispatch(action);
+  return true;
+}
+void HypertimeGraph::describe(gleditor::a11y::Builder &builder) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_) return;
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder presentation(tree, builder.owner());
+  overlay_.describe(presentation);
+  for (auto &node : tree.nodes) {
+    const auto local  = static_cast<ui::WidgetId>(node.id);
+    const auto action = actions_.find(local);
+    if (action != actions_.end() && action->second.kind == "node" &&
+        action->second.version) {
+      const auto &version = *action->second.version;
+      auto state          = [&](std::string_view value) {
+        if (!node.value.empty()) node.value += ", ";
+        node.value += value;
+      };
+      if (version == current_) state("current view");
+      if (selectedOperation_ == version) state("selected operation");
+      if (std::ranges::find(comparedVersions_, version) !=
+          comparedVersions_.end())
+        state("in comparison");
+    }
+    builder.add(local, node.role) = std::move(node);
+  }
+  for (const auto root : presentation.roots()) builder.contribute(root);
+  if (tree.focus) builder.takeFocus(tree.focus);
+}
+bool HypertimeGraph::performAction(std::uint64_t id,
+                                   gleditor::a11y::Action action,
+                                   std::string_view value) {
+  const std::scoped_lock lock(guard_);
+  return visible_ && !dirty_ && modelGeneration_ == generation_() &&
+         overlay_.performAction(id, action, value);
+}
+std::shared_ptr<const ui::LayoutResult> HypertimeGraph::focusLayout() const {
+  const std::scoped_lock lock(guard_);
+  // A pending geometry refresh keeps the previous immutable focus identity.
+  // Activation remains guarded until the replacement scene is published.
+  return visible_ ? overlay_.focusLayout() : nullptr;
+}
+void HypertimeGraph::focusedNodeChanged(std::uint32_t id) {
+  overlay_.focusedNodeChanged(id);
+}
+bool HypertimeGraph::activateNode(std::uint32_t id) {
+  const std::scoped_lock lock(guard_);
+  return visible_ && !dirty_ && modelGeneration_ == generation_() &&
+         overlay_.activateNode(id);
+}
+void HypertimeGraph::focusChanged(bool focused) {
+  overlay_.focusChanged(focused);
+}
+std::optional<gleditor::InputArea> HypertimeGraph::pointerArea() const {
+  const std::scoped_lock lock(guard_);
+  return visible_ && !dirty_ ? overlay_.pointerArea() : std::nullopt;
+}
+bool HypertimeGraph::keyPressed(gleditor::Key key, gleditor::KeyMods mods) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_) return false;
+  if (key == gleditor::Key::Escape) {
+    setVisible(false);
+    return true;
+  }
+  if (comparisonPage_ &&
+      (key == gleditor::Key::PageUp || key == gleditor::Key::PageDown)) {
+    const float direction = key == gleditor::Key::PageDown ? 1.F : -1.F;
+    comparisonScroll_ =
+        std::clamp(comparisonScroll_ + direction * graphBounds_.height, 0.F,
+                   comparisonMaxScroll_);
+    changed();
+    return true;
+  }
+  return !dirty_ && overlay_.keyPressed({key, mods});
+}
+bool HypertimeGraph::pointerEvent(const ui::PointerEvent &event) {
+  const std::scoped_lock lock(guard_);
+  if (!visible_ || dirty_) return false;
+  if (event.phase == ui::PointerPhase::Wheel) {
+    if (comparisonPage_) {
+      comparisonScroll_ =
+          std::clamp(comparisonScroll_ - event.deltaY * rowHeight_, 0.F,
+                     comparisonMaxScroll_);
+      changed();
+    } else
+      scroll(event.deltaX, event.deltaY,
+             (SDL_GetModState() & SDL_KMOD_CTRL) != 0,
+             (SDL_GetModState() & SDL_KMOD_SHIFT) != 0, event.x,
+             static_cast<float>(metrics_.screenHeight) - event.y);
+    return true;
+  }
+  return overlay_.pointerEvent(event);
+}
 } // namespace xanadu::ui

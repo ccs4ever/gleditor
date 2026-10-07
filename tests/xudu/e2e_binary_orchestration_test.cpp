@@ -1040,6 +1040,89 @@ TEST(E2EBinaryOrchestrationTest,
   }
 }
 
+TEST(E2EBinaryOrchestrationTest, quotationCommitsThroughNamedDrawnControls) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_quotation_ui";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  Store original(permascrollAt(scroll));
+  auto head            = original.sliceGenesis({});
+  const auto dimension = original.makeDimension(head, "d.vars");
+  head =
+      original.makeCell(dimension.version, "Quoted source cell remains intact");
+  const auto source = original.cellRefOf(head);
+  head              = original.setLink(head, original.homeCell(), dimension.dim,
+                                       zigzag::DimVector::POS, source);
+  original.save(path.string());
+  const auto operations = original.opCount();
+  const auto result     = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() + " XDG_DATA_HOME=" +
+      (root / "data").string() + " timeout 120 " + binary.string() +
+      permascrollFlag(scroll) + " --backend " + activeBackend() +
+      " --profile --do quotation-toggle --click-label \"Selector\""
+          " --click-label \"Preview\""
+          " --dump-a11y --click-label \"Commit\""
+          " --click-label \"Quotation label\" --key home --type \"Adopted \""
+          " --click-label \"Commit quotation\" --dump-a11y --do save-document " +
+      path.string());
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output,
+              testing::HasSubstr("click-label \"Commit quotation\""));
+  Store after(permascrollAt(scroll));
+  after.load(path.string());
+  EXPECT_GT(after.opCount(), operations);
+  const auto manifold = after.rebuildManifold(after.latest());
+  EXPECT_EQ(manifold.textOf(source, after),
+            "Quoted source cell remains intact");
+  EXPECT_TRUE(std::ranges::any_of(manifold.cells(), [&](const auto &cell) {
+    return manifold.textOf(cell.birthOp, after) == "Adopted Quotation";
+  })) << result.output;
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     bigModalPagesUseNamedControlsWithoutEditingDocument) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const std::vector<std::pair<std::string, std::string>> scripts{
+      {"telescope",
+       "--do telescope-toggle --click-label \"Recent local\""
+       " --click-label \"Refresh\" --click-label \"Channels\""
+       " --click-label \"Publications\" --click-label \"Inspector\""
+       " --click-label \"Search publications\" --type \"Café 界\""
+       " --dump-a11y --click-label \"Close\""},
+      {"hypertime",
+       "--do map --click-label \"Comparison\" --dump-a11y"
+       " --click-label \"Graph\" --click-label \"Close hypertime\""}};
+  for (const auto &[name, script] : scripts) {
+    SCOPED_TRACE(name);
+    const auto root = fs::current_path() / "build" /
+                      ("integration_workspace_big_modal_" + name);
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const auto scroll = root / "permascroll";
+    const auto path   = root / "store";
+    Store original(permascrollAt(scroll));
+    const std::string text = "The document behind the modal stays unchanged.";
+    std::ignore            = original.insert({}, 0, text);
+    const auto operations  = original.opCount();
+    original.save(path.string());
+    const auto result = executeProcess(
+        "XDG_CONFIG_HOME=" + (root / "config").string() + " XDG_DATA_HOME=" +
+        (root / "data").string() + " timeout 120 " + binary.string() +
+        permascrollFlag(scroll) + " --backend " + activeBackend() +
+        " --profile " + script + " --do save-document " + path.string());
+    ASSERT_EQ(result.exitCode, 0) << result.output;
+    Store after(permascrollAt(scroll));
+    after.load(path.string());
+    EXPECT_EQ(after.opCount(), operations);
+    EXPECT_EQ(after.textOf(after.latest()), text);
+  }
+}
+
 TEST(E2EBinaryOrchestrationTest,
      storePanelCreatesObjectsThroughNamedDrawnControls) {
   const auto binary = findXuduBinary();
