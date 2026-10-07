@@ -30,6 +30,9 @@ struct ZigzagCommandHooks {
   /// Called after any command that moves the focus, so a host can bring the
   /// new focus into view.
   std::function<void()> focusMoved;
+  /// Marshal the whole action to the host thread that owns the visualizer,
+  /// including layout caches and accessibility. Empty for single-thread hosts.
+  std::function<void(std::function<void()>)> dispatch;
 };
 
 /**

@@ -203,6 +203,12 @@ public:
   /// default, does not wrap or ellipsise at all.
   void setTextWidthLimit(int pixels) { textWidthLimit = pixels; }
 
+  /// Changes the font used by later text additions and measurements without
+  /// creating a new pipeline. Callers must rebuild existing text geometry.
+  void setFontDescription(std::string description) {
+    fontName = std::move(description);
+  }
+
   /// Opt into debug-level ui.layout overflow reports for subsequent text.
   /// This is the caller's allocated row or container, in Y-up canvas pixels.
   /// clear() resets it; nullopt ends the diagnostic scope without a rebuild.

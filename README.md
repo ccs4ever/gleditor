@@ -274,6 +274,13 @@ journey, not a completed persistent activity navigator. The
 [prototype gallery](design/ui/prototypes/README.md) contains generated mock-ups rather than
 screenshots of the running UI.
 
+World-space labels fit their local cards and hide when their projected font size becomes too small
+for reading. Their objects remain selectable and retain full accessible names. ZigZag Cell Content
+View preserves rich cell text; Topology View uses compact fitted labels. The floating satelloid,
+blueprint and loading cards follow live typography and the `satelloidCard`, `tetherCard` and
+`hullCard` dimensions, safe-area shares and preview line limits in `system://ui`. Publication hull
+telemetry follows the phase and dependency progress shown by the download form's Refresh action.
+
 ## Accessibility and SDL
 
 The GPU draws quads, which do not describe themselves to a screen reader. A separate accessibility

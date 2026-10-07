@@ -11,9 +11,12 @@
 
 #include <glm/vec2.hpp>
 
+#include "common/xanadu/system_docs.hpp"
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/world_panel.hpp>
 
 #include "common/xanadu/kinetic_tether.hpp"
 
@@ -25,10 +28,11 @@ using namespace ::xanadu;
  * @brief Renders the luminous Hookean spring curve, floating blueprint quad,
  *        and corner bracket accents.
  */
-class KineticTetherOverlay : public gleditor::FrameContributor {
+class KineticTetherOverlay : public gleditor::FrameContributor,
+                             public gleditor::a11y::Source {
 public:
   explicit KineticTetherOverlay(KineticTetherEngine &engine,
-                                std::string fontName = "Sans 10");
+                                std::string fontName = {});
   ~KineticTetherOverlay() override;
 
   // FrameContributor interface
@@ -37,12 +41,20 @@ public:
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool busy() const override;
 
+  void setConfig(const WorldCardConfig &);
+  void describe(gleditor::a11y::Builder &) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
+  [[nodiscard]] std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>>
+  snapshots() const;
+
 private:
+  struct Presentation;
+  std::unique_ptr<Presentation> presentation_;
   static void drawTether(gleditor::Canvas &canvas, RenderState &state,
                          const glm::vec2 &p0, const glm::vec2 &p1,
                          bool detached);
-  void drawBlueprintQuad(gleditor::Canvas &canvas, RenderState &state,
-                         const glm::vec2 &pos, bool detached);
 
   KineticTetherEngine &engine_;
   std::string fontName_;

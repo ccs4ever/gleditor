@@ -33,6 +33,7 @@
 #include <gleditor/text/font.hpp>
 
 namespace zigzag {
+namespace ui = gleditor::ui;
 
 namespace {
 
@@ -101,19 +102,27 @@ ZigzagVisualizer *ZigzagVisualizer::setPresentationConfig(
 void ZigzagVisualizer::deviceReady(
     render::RenderDevice &device,
     const render::PipelineDesc &documentPipeline) {
-  worldCanvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
+  const auto metrics = ui::UiMetrics{};
+  const auto theme   = ui::defaultTheme();
+  valueFontName_ =
+      ui::scaledFontDescription(fontName_, ui::FontRole::Body, metrics, theme);
+  captionFontName_ = metrics.fontDescription(
+      ui::FontRole::Caption,
+      ui::withFontOverride(theme, ui::FontRole::Caption, fontName_));
+  hudFontName_ =
+      ui::scaledFontDescription(fontName_, ui::FontRole::Label, metrics, theme);
+  valueFont_ = gleditor::text::FontManager::instance().getFont(valueFontName_);
+  captionFont_ =
+      gleditor::text::FontManager::instance().getFont(captionFontName_);
+  hudFont_     = gleditor::text::FontManager::instance().getFont(hudFontName_);
+  worldCanvas_ = std::make_unique<gleditor::Canvas>(&device, valueFontName_);
   worldCanvas_->createPipeline(documentPipeline, true);
-
-  const auto normalFont =
-      gleditor::text::FontManager::instance().getFont(fontName_);
-  const auto ancillaryFont = std::format("{} {:.1f}", normalFont->family(),
-                                         normalFont->pointSize() * 0.75);
-  ancillaryCanvas_ = std::make_unique<gleditor::Canvas>(&device, ancillaryFont);
+  ancillaryCanvas_ =
+      std::make_unique<gleditor::Canvas>(&device, captionFontName_);
   ancillaryCanvas_->createPipeline(documentPipeline, true);
-
-  hudCanvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
+  hudCanvas_ = std::make_unique<gleditor::Canvas>(&device, hudFontName_);
   hudCanvas_->createPipeline(documentPipeline, false);
-  card_line_px_ = worldCanvas_->measureText("Ag").height;
+  card_line_px_ = valueFont_->metrics().lineHeight;
 
   beams_ = std::make_unique<gleditor::Beams>(&device);
   beams_->createPipeline(gleditor::assetPath("shaders"),
@@ -272,6 +281,9 @@ void ZigzagVisualizer::adoptDocument(
 
   preview_cell_.reset();
   visible_cells_.clear();
+  projectedCells_.clear();
+  labelMasks_.clear();
+  ++projectionRevision_;
   fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
@@ -351,6 +363,9 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   preview_cell_.reset();
   visible_cells_.clear();
+  projectedCells_.clear();
+  labelMasks_.clear();
+  ++projectionRevision_;
   fitViewToHome();
   rebuildActiveViewTopology();
   for (auto &[id, cell] : visible_cells_) {
@@ -822,7 +837,7 @@ std::string ZigzagVisualizer::cellBadge(const CellRef id,
           scroll ? scroll->globalKey : std::to_string(target->scroll);
       // The full persistent key stays in accessibility; the card is a compact
       // cue that must fit beside other cells in the neighborhood.
-      if (key.size() > 24) key = key.substr(0, 21) + "…";
+
       return "extern / " + key + " @ " + target->produces.str();
     }
     return "extern / unresolved";
@@ -1048,9 +1063,10 @@ CellLayoutMetrics
 ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
                                     const bool isFocus) const {
   static_cast<void>(isFocus);
-  const float widthLimit = view_mode_ == ViewMode::CellContent
-                               ? presentation_config_.contentMaxWidthPx
-                               : presentation_config_.topologyMaxWidthPx;
+  const float widthLimit =
+      uiMetrics_.px(view_mode_ == ViewMode::CellContent
+                        ? presentation_config_.contentMaxWidthPx
+                        : presentation_config_.topologyMaxWidthPx);
 
   CellLayoutMetrics metrics;
   metrics.idText = std::format("#{}", cell.id);
@@ -1095,44 +1111,62 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
     return metrics;
   }
 
-  const auto titleMetrics = ancillaryCanvas_->measureText(metrics.idText);
-  worldCanvas_->setTextWidthLimit(static_cast<int>(widthLimit));
-  const auto labelMetrics = worldCanvas_->measureText(cell.text);
-  worldCanvas_->setTextWidthLimit(0);
-  const auto badgeMetrics =
-      metrics.badgeText.empty()
-          ? gleditor::TextMetrics{}
-          : ancillaryCanvas_->measureText(metrics.badgeText);
-
-  // The value's own em is the minimum breathing room around its text.
-  const float valueEm = worldCanvas_->measureText("M").height;
+  const bool content = view_mode_ == ViewMode::CellContent;
+  if (content) {
+    gleditor::text::LayoutOptions options{.maxWidthPx      = widthLimit,
+                                          .maxHeightPx     = 0,
+                                          .singleParagraph = false,
+                                          .ellipsize       = false,
+                                          .decoratedRanges =
+                                              cell.decorated_ranges,
+                                          .blockStyles = cell.block_styles};
+    metrics.value.shaping      = shaping_.page(cell.text, valueFont_, options);
+    metrics.value.widthPx      = metrics.value.shaping.textWidthPx;
+    metrics.value.heightPx     = metrics.value.shaping.textHeightPx;
+    metrics.value.visibleBytes = cell.text.size();
+    metrics.value.lines        = static_cast<std::uint16_t>(
+        std::min<std::size_t>(65535, metrics.value.shaping.lines.size()));
+  } else {
+    metrics.value = shaping_.fitted(cell.text, valueFont_,
+                                    {.maxWidthPx = widthLimit, .maxLines = 1});
+    // Glyph decorations carry format identity even in the bounded overview.
+    for (auto &glyph : metrics.value.shaping.glyphs) {
+      const auto byte =
+          metrics.value.shaping.clusters[glyph.clusterIndex].byteStart;
+      for (const auto &range : cell.decorated_ranges)
+        if (byte >= range.start && byte < range.end)
+          glyph.decorations |= range.decorations;
+    }
+  }
+  metrics.title = shaping_.fitted(metrics.idText, captionFont_,
+                                  {.overflow = gleditor::text::Overflow::Clip});
+  metrics.badge = shaping_.fitted(metrics.badgeText, captionFont_,
+                                  {.maxWidthPx = widthLimit, .maxLines = 1});
   const float horizontalPadding =
-      std::max(presentation_config_.cellHorizontalPaddingPx, valueEm);
+      std::max(uiMetrics_.px(presentation_config_.cellHorizontalPaddingPx),
+               valueFont_->metrics().lineHeight);
   const float verticalPadding =
-      std::max(presentation_config_.cellVerticalPaddingPx, valueEm);
+      std::max(uiMetrics_.px(presentation_config_.cellVerticalPaddingPx),
+               valueFont_->metrics().lineHeight);
+  const float gap           = uiMetrics_.px(presentation_config_.cellBandGapPx);
   metrics.horizontalPadding = horizontalPadding;
+  metrics.labelWidthLimit   = widthLimit;
+  metrics.labelLineHeight   = valueFont_->metrics().lineHeight;
+  const float contentWidth =
+      content ? std::max({metrics.title.widthPx, metrics.value.widthPx,
+                          metrics.badge.widthPx})
+              : std::max(widthLimit, metrics.title.widthPx);
+  metrics.width = contentWidth + horizontalPadding * 2;
+  const float valueHeight =
+      content ? metrics.value.heightPx : valueFont_->metrics().lineHeight;
+  const float badgeHeight =
+      metrics.badgeText.empty() ? 0 : captionFont_->metrics().lineHeight;
+  metrics.height = verticalPadding * 2 + metrics.title.heightPx + valueHeight +
+                   badgeHeight + gap * (badgeHeight ? 2 : 1);
+  metrics.titleTop = metrics.height - verticalPadding;
+  metrics.labelTop = metrics.titleTop - metrics.title.heightPx - gap;
+  metrics.badgeTop = verticalPadding + badgeHeight;
 
-  metrics.labelWidthLimit = widthLimit;
-  metrics.labelLineHeight = labelMetrics.height;
-  metrics.width =
-      std::max({titleMetrics.width, labelMetrics.width, badgeMetrics.width}) +
-      (2.0F * horizontalPadding);
-
-  const bool hasBadge = !metrics.badgeText.empty();
-  const float gaps =
-      presentation_config_.cellBandGapPx * (hasBadge ? 2.0F : 1.0F);
-  metrics.height = (2.0F * verticalPadding) + titleMetrics.height +
-                   labelMetrics.height + badgeMetrics.height + gaps;
-
-  metrics.titleTop         = metrics.height - verticalPadding;
-  const float titleBottom  = metrics.titleTop - titleMetrics.height;
-  const float labelBottom  = hasBadge ? verticalPadding + badgeMetrics.height +
-                                           presentation_config_.cellBandGapPx
-                                      : verticalPadding;
-  const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
-  metrics.labelTop =
-      labelBottom + ((labelCeiling - labelBottom + labelMetrics.height) / 2.0F);
-  metrics.badgeTop = verticalPadding + badgeMetrics.height;
   return metrics;
 }
 
@@ -1420,9 +1454,14 @@ void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
     }
   }
 
-  std::erase_if(visible_cells_, [](const auto &pair) {
-    return pair.second.target_alpha <= 0.0F &&
-           pair.second.current_alpha < 0.01F;
+  std::erase_if(visible_cells_, [this](const auto &pair) {
+    const bool retired =
+        pair.second.target_alpha <= 0.0F && pair.second.current_alpha < 0.01F;
+    if (retired) {
+      if (projectedCells_.erase(pair.first)) ++projectionRevision_;
+      labelMasks_.erase(pair.first);
+    }
+    return retired;
   });
 }
 
@@ -1608,11 +1647,67 @@ void ZigzagVisualizer::applyReadableScale(const gleditor::FrameContext &ctx) {
                  glm::vec3{readable_scale_, readable_scale_, 1.0F});
 }
 
+void ZigzagVisualizer::refreshTypography(const gleditor::FrameContext &ctx) {
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
+  const bool changed   = !typographyReady_ || uiTheme_ != ctx.theme ||
+                       metrics.fontScale != uiMetrics_.fontScale ||
+                       metrics.userScale != uiMetrics_.userScale ||
+                       metrics.contentScale != uiMetrics_.contentScale;
+  uiMetrics_ = metrics;
+  if (!changed) return;
+  uiTheme_         = ctx.theme;
+  valueFontName_   = ui::scaledFontDescription(fontName_, ui::FontRole::Body,
+                                               metrics, uiTheme_);
+  captionFontName_ = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
+                                               metrics, uiTheme_);
+  hudFontName_     = ui::scaledFontDescription(fontName_, ui::FontRole::Label,
+                                               metrics, uiTheme_);
+  valueFont_ = gleditor::text::FontManager::instance().getFont(valueFontName_);
+  captionFont_ =
+      gleditor::text::FontManager::instance().getFont(captionFontName_);
+  hudFont_ = gleditor::text::FontManager::instance().getFont(hudFontName_);
+  if (worldCanvas_) worldCanvas_->setFontDescription(valueFontName_);
+  if (ancillaryCanvas_) ancillaryCanvas_->setFontDescription(captionFontName_);
+  if (hudCanvas_) hudCanvas_->setFontDescription(hudFontName_);
+  card_line_px_       = valueFont_->metrics().lineHeight;
+  typographyReady_    = true;
+  cell_layouts_dirty_ = true;
+  drawnModelRevision_ = hudRevision_ = 0;
+}
+
+std::optional<ui::ProjectedPlane>
+ZigzagVisualizer::projectedCell(CellRef cell) const {
+  const auto found = projectedCells_.find(cell);
+  return found == projectedCells_.end() ? std::nullopt
+                                        : std::optional{found->second};
+}
+bool ZigzagVisualizer::labelVisible(CellRef cell) const {
+  const auto found = labelMasks_.find(cell);
+  return found != labelMasks_.end() && (found->second & 2);
+}
+std::size_t ZigzagVisualizer::visibleWorldLabelCount() const {
+  return static_cast<std::size_t>(std::ranges::count_if(
+      labelMasks_, [](const auto &entry) { return (entry.second & 2) != 0; }));
+}
+void ZigzagVisualizer::describeCellBounds(gleditor::a11y::Node &node,
+                                          CellRef cell) const {
+  const auto found = projectedCell(cell);
+  if (!found) return;
+  const auto &box = found->bounds;
+  node.bounds     = gleditor::a11y::Rect{
+      box.left, projectedViewport_.height - box.bottom - box.height,
+      box.left + box.width, projectedViewport_.height - box.bottom};
+}
+
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   if (!presentation_visible_) {
     last_frame_time_ = std::chrono::steady_clock::now();
     return;
   }
+  refreshTypography(ctx);
   if (presentationTransformResolver_) {
     const auto transform = presentationTransformResolver_();
     if (!transform) {
@@ -1646,6 +1741,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   if (cell_layouts_dirty_) {
+    drawnModelRevision_ = 0;
     // The first pass measures the existing neighborhood; rebuilding can add a
     // newly discovered neighbour, so measure once more before publishing this
     // stable geometry to drawing, anchors, and the next rank walk.
@@ -1655,116 +1751,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     cell_layouts_dirty_ = false;
   }
 
-  // --- 1. Draw 3D Connection Beams ---
-  beams_->clear();
-  drawnEdges_.clear();
-
-  if (engine_) {
-    const auto &manifold = engine_->manifold();
-    const auto &store    = engine_->store();
-
-    // Resolved once per frame, not once per cell. Which cell an axis is
-    // asked about does not change which dimension the axis names, and the
-    // lookup is a rank walk that reads each dimension cell's content through
-    // the SpanReader -- a std::string per dimension per call. Sixty visible
-    // cells times three axes times a dozen dimensions was a couple of thousand
-    // allocations a frame, in the one path that exists to stage without them.
-    const auto axisOf = [this](const DimID &name) {
-      return std::pair{name, dimensionRef(name).value_or(zigzag::noCell)};
-    };
-    const std::array<std::pair<DimID, DimRef>, 3> viewAxes{
-        axisOf(current_view_.x_dimension),
-        axisOf(current_view_.y_dimension),
-        axisOf(current_view_.z_dimension),
-    };
-
-    for (const auto &[id, cell] : visible_cells_) {
-      if (!shown(cell)) {
-        continue;
-      }
-      const auto cellRef = static_cast<CellRef>(id);
-
-      // 1) View dimensions (covers ephemeral meta-dims and clones as well)
-      for (const auto &[dimName, dimRef] : viewAxes) {
-        if (dimRef == zigzag::noCell) {
-          continue;
-        }
-        for (const auto dir : {DimVector::POS, DimVector::NEG}) {
-          const auto neighborId = engine_->linked(cellRef, dimRef, dir);
-          if (neighborId == 0 || neighborId == cellRef ||
-              !visible_cells_.contains(neighborId) ||
-              !shown(visible_cells_.at(neighborId))) {
-            continue;
-          }
-          const auto edge =
-              std::pair{std::min(id, static_cast<CellID>(neighborId)),
-                        std::max(id, static_cast<CellID>(neighborId))};
-          if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
-            continue;
-          }
-          drawnEdges_.push_back(edge);
-
-          const auto &neighborCell = visible_cells_.at(neighborId);
-          const auto visual        = dimensionVisual(dimName);
-          const float edgeAlpha =
-              std::min(cell.current_alpha, neighborCell.current_alpha);
-          const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
-                                             visual.color.b, edgeAlpha);
-
-          beams_->add(cell.current_pos, neighborCell.current_pos,
-                      presentation_config_.connectionBeamWidthPx, col,
-                      static_cast<std::uint32_t>(id));
-        }
-      }
-
-      // 2) Stored dimensions of normal cells
-      if (!isEphemeral(cellRef)) {
-        for (const auto &link : manifold.dimensionsOf(cellRef)) {
-          const auto dimName = manifold.textOf(link.dim, store);
-          if (dimName == "d.role" || dimName == "d.mime" ||
-              dimName == "d.media") {
-            continue;
-          }
-          const DimensionVisual visual = dimensionVisual(dimName);
-          for (const CellRef neighborId : {link.pos, link.neg}) {
-            if (neighborId == 0 || neighborId == cellRef ||
-                !visible_cells_.contains(neighborId)) {
-              continue;
-            }
-
-            const auto edge =
-                std::pair{std::min(id, static_cast<CellID>(neighborId)),
-                          std::max(id, static_cast<CellID>(neighborId))};
-            if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
-              continue;
-            }
-            drawnEdges_.push_back(edge);
-
-            const auto &neighborCell = visible_cells_.at(neighborId);
-            const float edgeAlpha =
-                std::min(cell.current_alpha, neighborCell.current_alpha);
-            const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
-                                               visual.color.b, edgeAlpha);
-
-            beams_->add(cell.current_pos, neighborCell.current_pos,
-                        presentation_config_.connectionBeamWidthPx, col,
-                        static_cast<std::uint32_t>(id));
-          }
-        }
-      }
-    }
-  }
-
-  if (beams_->pending() > 0) {
-    beams_->commit();
-    beams_->draw(ctx.state, ctx.viewProjection * presentation_transform_, 1.0F,
-                 0);
-  }
-
-  // --- 2. Draw 3D Cell Nodes & Text ---
-  worldCanvas_->clear();
-  ancillaryCanvas_->clear();
-  const auto pickScope = ctx.state.allocateOverlayPickScope();
+  if (!worldPickScope_)
+    worldPickScope_ = ctx.state.allocatePersistentOverlayPickScope();
+  const auto pickScope = worldPickScope_;
   worldCanvas_->setIdentity(pickScope, 0);
   ancillaryCanvas_->setIdentity(pickScope, 0);
   const auto &pickStore  = engine_->store();
@@ -1809,368 +1798,601 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                                      .clusterIndex =
                                          static_cast<std::uint32_t>(id)};
     ctx.state.bindOverlayPick(pickTag, target);
-    worldCanvas_->setTag(render::tagKindOverlay,
-                         static_cast<std::uint32_t>(id));
-    ancillaryCanvas_->setTag(render::tagKindOverlay,
-                             static_cast<std::uint32_t>(id));
-
-    const bool isFocus     = (id == accursed_cell_focus_);
-    const auto &layout     = cellLayout(id, cell, isFocus);
-    const float nodeWidth  = layout.width;
-    const float nodeHeight = layout.height;
-
-    const auto cellMvp =
-        vpPresentation * glm::translate(glm::mat4(1.0F), cell.current_pos);
-    if (!isFocus &&
-        outsideFrustum(cellMvp, nodeWidth / 2.0F, nodeHeight / 2.0F, 10.0F)) {
+  }
+  const bool projectionChanged =
+      projectedMatrix_ != vpPresentation ||
+      projectedViewport_ != ui::Size{static_cast<float>(ctx.screenWidth),
+                                     static_cast<float>(ctx.screenHeight)};
+  if (projectionChanged) ++projectionRevision_;
+  projectedMatrix_   = vpPresentation;
+  projectedViewport_ = {static_cast<float>(ctx.screenWidth),
+                        static_cast<float>(ctx.screenHeight)};
+  bool moving = false, lodChanged = false;
+  for (const auto &[id, cell] : visible_cells_) {
+    moving |= cell.current_pos != cell.target_pos ||
+              cell.current_alpha != cell.target_alpha;
+    if (!shown(cell)) {
+      if (projectedCells_.erase(id)) ++projectionRevision_;
+      labelMasks_.erase(id);
       continue;
     }
+    const auto &layout = cellLayout(id, cell, id == accursed_cell_focus_);
+    const ui::Rect body{cell.current_pos.x - layout.width / 2,
+                        cell.current_pos.y - layout.height / 2, layout.width,
+                        layout.height};
+    const auto plane =
+        ui::projectPlane(body, vpPresentation, projectedViewport_);
+    unsigned mask = 0;
+    if (plane) {
+      mask |= 8;
+      const auto previous = projectedCells_.find(id);
+      if (previous == projectedCells_.end() ||
+          previous->second.bounds.left != plane->bounds.left ||
+          previous->second.bounds.bottom != plane->bounds.bottom ||
+          previous->second.bounds.width != plane->bounds.width ||
+          previous->second.bounds.height != plane->bounds.height)
+        ++projectionRevision_;
+      projectedCells_[id] = *plane;
+      const auto visible  = [&](const gleditor::text::FittedText &text,
+                               const gleditor::text::FontFacePtr &font) {
+        return ui::labelLOD(
+            *plane, font->metrics().lineHeight,
+            {text.widthPx * plane->minPixelsPerUnit > 0
+                  ? std::min(plane->widthPx, font->metrics().lineHeight)
+                  : 0,
+             uiTheme_.type.minFontPx});
+      };
+      if (visible(layout.title, captionFont_)) mask |= 1;
+      if (visible(layout.value, valueFont_)) mask |= 2;
+      if (visible(layout.badge, captionFont_)) mask |= 4;
+    } else if (projectedCells_.erase(id))
+      ++projectionRevision_;
+    const auto found = labelMasks_.find(id);
+    lodChanged |= found == labelMasks_.end() || found->second != mask;
+    labelMasks_[id] = mask;
+  }
+  const bool rebuildWorld =
+      drawnModelRevision_ != revision_ || moving || worldMoving_ || lodChanged;
+  if (rebuildWorld) {
+    // --- 1. Draw 3D Connection Beams ---
+    beams_->clear();
+    drawnEdges_.clear();
 
-    const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
-    const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
+    if (engine_) {
+      const auto &manifold = engine_->manifold();
+      const auto &store    = engine_->store();
 
-    const std::uint32_t bgCol =
-        packRgba(cell.base_color.r * 0.25F, cell.base_color.g * 0.25F,
-                 cell.base_color.b * 0.25F, cell.current_alpha);
-    const std::uint32_t borderCol =
-        cell.link_highlighted
-            ? ((linkHighlightBorder_ & 0xFFFFFF00U) |
-               static_cast<std::uint32_t>(cell.current_alpha * 255.0F))
-            : packRgba(cell.base_color.r, cell.base_color.g, cell.base_color.b,
-                       cell.current_alpha);
-    const std::uint32_t textCol =
-        isFocus ? 0xFFFFFFFFU : packRgba(0.9F, 0.9F, 0.9F, cell.current_alpha);
+      // Resolved once per frame, not once per cell. Which cell an axis is
+      // asked about does not change which dimension the axis names, and the
+      // lookup is a rank walk that reads each dimension cell's content through
+      // the SpanReader -- a std::string per dimension per call. Sixty visible
+      // cells times three axes times a dozen dimensions was a couple of
+      // thousand allocations a frame, in the one path that exists to stage
+      // without them.
+      const auto axisOf = [this](const DimID &name) {
+        return std::pair{name, dimensionRef(name).value_or(zigzag::noCell)};
+      };
+      const std::array<std::pair<DimID, DimRef>, 3> viewAxes{
+          axisOf(current_view_.x_dimension),
+          axisOf(current_view_.y_dimension),
+          axisOf(current_view_.z_dimension),
+      };
 
-    // Node Box Body
-    worldCanvas_->addRect(left, bottom, nodeWidth, nodeHeight, bgCol);
+      for (const auto &[id, cell] : visible_cells_) {
+        if (!shown(cell)) {
+          continue;
+        }
+        const auto cellRef = static_cast<CellRef>(id);
 
-    // Image Preview (if image cell with media path)
-    if (cell.is_image && !cell.media_path.empty() && imageCache_) {
-      std::string resolvedPath = cell.media_path;
-      if (!current_slice_path_.empty() && !resolvedPath.starts_with("/")) {
-        const auto parent =
-            std::filesystem::path(current_slice_path_).parent_path();
-        if (!parent.empty()) {
-          resolvedPath = (parent / resolvedPath).string();
+        // 1) View dimensions (covers ephemeral meta-dims and clones as well)
+        for (const auto &[dimName, dimRef] : viewAxes) {
+          if (dimRef == zigzag::noCell) {
+            continue;
+          }
+          for (const auto dir : {DimVector::POS, DimVector::NEG}) {
+            const auto neighborId = engine_->linked(cellRef, dimRef, dir);
+            if (neighborId == 0 || neighborId == cellRef ||
+                !visible_cells_.contains(neighborId) ||
+                !shown(visible_cells_.at(neighborId))) {
+              continue;
+            }
+            const auto edge =
+                std::pair{std::min(id, static_cast<CellID>(neighborId)),
+                          std::max(id, static_cast<CellID>(neighborId))};
+            if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
+              continue;
+            }
+            drawnEdges_.push_back(edge);
+
+            const auto &neighborCell = visible_cells_.at(neighborId);
+            const auto visual        = dimensionVisual(dimName);
+            const float edgeAlpha =
+                std::min(cell.current_alpha, neighborCell.current_alpha);
+            const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
+                                               visual.color.b, edgeAlpha);
+
+            beams_->add(cell.current_pos, neighborCell.current_pos,
+                        presentation_config_.connectionBeamWidthPx, col,
+                        static_cast<std::uint32_t>(id));
+          }
+        }
+
+        // 2) Stored dimensions of normal cells
+        if (!isEphemeral(cellRef)) {
+          for (const auto &link : manifold.dimensionsOf(cellRef)) {
+            const auto dimName = manifold.textOf(link.dim, store);
+            if (dimName == "d.role" || dimName == "d.mime" ||
+                dimName == "d.media") {
+              continue;
+            }
+            const DimensionVisual visual = dimensionVisual(dimName);
+            for (const CellRef neighborId : {link.pos, link.neg}) {
+              if (neighborId == 0 || neighborId == cellRef ||
+                  !visible_cells_.contains(neighborId)) {
+                continue;
+              }
+
+              const auto edge =
+                  std::pair{std::min(id, static_cast<CellID>(neighborId)),
+                            std::max(id, static_cast<CellID>(neighborId))};
+              if (std::ranges::find(drawnEdges_, edge) != drawnEdges_.end()) {
+                continue;
+              }
+              drawnEdges_.push_back(edge);
+
+              const auto &neighborCell = visible_cells_.at(neighborId);
+              const float edgeAlpha =
+                  std::min(cell.current_alpha, neighborCell.current_alpha);
+              const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
+                                                 visual.color.b, edgeAlpha);
+
+              beams_->add(cell.current_pos, neighborCell.current_pos,
+                          presentation_config_.connectionBeamWidthPx, col,
+                          static_cast<std::uint32_t>(id));
+            }
+          }
         }
       }
-      auto imgRes = imageCache_->find(resolvedPath);
-      if (!imgRes) {
-        imgRes = imageCache_->loadFile(resolvedPath);
+    }
+
+    if (beams_->pending() > 0) beams_->commit();
+    worldCanvas_->clear();
+    ancillaryCanvas_->clear();
+    for (const auto &[id, cell] : visible_cells_) {
+      if (!shown(cell)) continue;
+      worldCanvas_->setTag(render::tagKindOverlay,
+                           static_cast<std::uint32_t>(id));
+      ancillaryCanvas_->setTag(render::tagKindOverlay,
+                               static_cast<std::uint32_t>(id));
+      const bool isFocus     = (id == accursed_cell_focus_);
+      const auto &layout     = cellLayout(id, cell, isFocus);
+      const float nodeWidth  = layout.width;
+      const float nodeHeight = layout.height;
+
+      const auto cellMvp =
+          vpPresentation * glm::translate(glm::mat4(1.0F), cell.current_pos);
+      if (!isFocus &&
+          outsideFrustum(cellMvp, nodeWidth / 2.0F, nodeHeight / 2.0F, 10.0F)) {
+        continue;
       }
-      if (imgRes && imgRes->valid()) {
-        const float imgMargin = presentation_config_.cellHorizontalPaddingPx;
-        const float imgW      = nodeWidth - (imgMargin * 2.0F);
-        const float imgH      = std::min(
-            imgW * (static_cast<float>(imgRes->height) /
-                    static_cast<float>(imgRes->width)),
-            nodeHeight - (2.0F * presentation_config_.cellVerticalPaddingPx));
-        const float imgLeft = left + imgMargin;
-        const float imgBottom =
-            bottom + presentation_config_.cellVerticalPaddingPx;
-        worldCanvas_->addImage(imgLeft, imgBottom, imgW, imgH, *imgRes,
-                               packRgba(1.0F, 1.0F, 1.0F, cell.current_alpha));
+
+      const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
+      const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
+
+      const std::uint32_t bgCol =
+          packRgba(cell.base_color.r * 0.25F, cell.base_color.g * 0.25F,
+                   cell.base_color.b * 0.25F, cell.current_alpha);
+      const std::uint32_t borderCol =
+          cell.link_highlighted
+              ? ((linkHighlightBorder_ & 0xFFFFFF00U) |
+                 static_cast<std::uint32_t>(cell.current_alpha * 255.0F))
+              : packRgba(cell.base_color.r, cell.base_color.g,
+                         cell.base_color.b, cell.current_alpha);
+      const std::uint32_t textCol =
+          isFocus ? 0xFFFFFFFFU
+                  : packRgba(0.9F, 0.9F, 0.9F, cell.current_alpha);
+
+      // Node Box Body
+      worldCanvas_->addRect(left, bottom, nodeWidth, nodeHeight, bgCol);
+
+      // Image Preview (if image cell with media path)
+      if (cell.is_image && !cell.media_path.empty() && imageCache_) {
+        std::string resolvedPath = cell.media_path;
+        if (!current_slice_path_.empty() && !resolvedPath.starts_with("/")) {
+          const auto parent =
+              std::filesystem::path(current_slice_path_).parent_path();
+          if (!parent.empty()) {
+            resolvedPath = (parent / resolvedPath).string();
+          }
+        }
+        auto imgRes = imageCache_->find(resolvedPath);
+        if (!imgRes) {
+          imgRes = imageCache_->loadFile(resolvedPath);
+        }
+        if (imgRes && imgRes->valid()) {
+          const float imgMargin = presentation_config_.cellHorizontalPaddingPx;
+          const float imgW      = nodeWidth - (imgMargin * 2.0F);
+          const float imgH      = std::min(
+              imgW * (static_cast<float>(imgRes->height) /
+                      static_cast<float>(imgRes->width)),
+              nodeHeight - (2.0F * presentation_config_.cellVerticalPaddingPx));
+          const float imgLeft = left + imgMargin;
+          const float imgBottom =
+              bottom + presentation_config_.cellVerticalPaddingPx;
+          worldCanvas_->addImage(
+              imgLeft, imgBottom, imgW, imgH, *imgRes,
+              packRgba(1.0F, 1.0F, 1.0F, cell.current_alpha));
+        }
+      }
+
+      // Node Border
+      const float borderThick = scene_.border_thickness;
+      worldCanvas_->addLine(left, bottom, left + nodeWidth, bottom, borderThick,
+                            borderCol);
+      worldCanvas_->addLine(left + nodeWidth, bottom, left + nodeWidth,
+                            bottom + nodeHeight, borderThick, borderCol);
+      worldCanvas_->addLine(left + nodeWidth, bottom + nodeHeight, left,
+                            bottom + nodeHeight, borderThick, borderCol);
+      worldCanvas_->addLine(left, bottom + nodeHeight, left, bottom,
+                            borderThick, borderCol);
+
+      const auto mask = labelMasks_.at(id);
+      const ui::Rect titleBox{left + layout.horizontalPadding,
+                              bottom + layout.titleTop - layout.title.heightPx,
+                              nodeWidth - layout.horizontalPadding * 2,
+                              layout.title.heightPx};
+      if (mask & 1)
+        ancillaryCanvas_->addText(ctx.state, titleBox, layout.title, borderCol,
+                                  bgCol);
+      const ui::Rect valueBox{left + layout.horizontalPadding,
+                              bottom + layout.labelTop - layout.value.heightPx,
+                              nodeWidth - layout.horizontalPadding * 2,
+                              layout.value.heightPx};
+      if (mask & 2)
+        worldCanvas_->addText(ctx.state, valueBox, layout.value, textCol,
+                              bgCol);
+      const ui::Rect badgeBox{left + layout.horizontalPadding,
+                              bottom + layout.badgeTop - layout.badge.heightPx,
+                              nodeWidth - layout.horizontalPadding * 2,
+                              layout.badge.heightPx};
+      if ((mask & 4) && !layout.badgeText.empty())
+        ancillaryCanvas_->addText(ctx.state, badgeBox, layout.badge, borderCol,
+                                  bgCol);
+    }
+
+    worldCanvas_->commit();
+    ancillaryCanvas_->commit();
+    drawnModelRevision_ = revision_;
+    worldMoving_        = moving;
+  }
+  if (beams_->pending() > 0) beams_->draw(ctx.state, vpPresentation, 1.F, 0);
+  worldCanvas_->draw(ctx.state, vpPresentation, 1.F);
+  ancillaryCanvas_->draw(ctx.state, vpPresentation, 1.F);
+
+  const auto width        = static_cast<float>(ctx.screenWidth);
+  const auto height       = static_cast<float>(ctx.screenHeight);
+  const auto beforeChrome = ctx.chrome;
+  const bool rebuildHud =
+      hudRevision_ != revision_ || hudMetrics_ != uiMetrics_ ||
+      hudKeyboardMoves_ != keyboardMoves_.load() ||
+      hudEditText_ != cellEditText_ || hudCommandText_ != commandBarText_ ||
+      hudFeedback_ != commandBarFeedback_ ||
+      hudPaletteFilter_ != paletteFilter_ ||
+      hudPaletteSelected_ != paletteSelectedIndex_ ||
+      hudPaletteVisible_ != paletteVisible_ ||
+      hudCommandVisible_ != commandBarVisible_ || hudEditing_ != cellEditing_;
+  if (rebuildHud) {
+    const auto hudMeasure = [&](std::string_view value) {
+      const auto &fit = shaping_.fitted(
+          value, hudFont_, {.overflow = gleditor::text::Overflow::Clip});
+      return gleditor::TextMetrics{fit.widthPx, fit.heightPx};
+    };
+    const auto hudText = [&](RenderState &state, float left, float top,
+                             std::string_view value, std::uint32_t colour,
+                             std::uint32_t background, bool input = false) {
+      const float line = std::ceil(hudFont_->metrics().lineHeight) + 2;
+      const ui::Rect box{
+          std::max(0.F, left), std::max(0.F, top - line),
+          std::max(0.F, width - std::max(0.F, left) -
+                            uiMetrics_.px(
+                                presentation_config_.hudHorizontalPaddingPx)),
+          std::min(line, std::max(0.F, top))};
+      if (input) {
+        const auto &fit = shaping_.fitted(
+            value, hudFont_, {.overflow = gleditor::text::Overflow::Clip});
+        hudCanvas_->pushClip(box);
+        hudCanvas_->addText(state,
+                            {box.left - std::max(0.F, fit.widthPx - box.width),
+                             box.bottom, std::max(box.width, fit.widthPx),
+                             box.height},
+                            fit, colour, background);
+        hudCanvas_->popClip();
+        hudInputArea_ = ui::toInputArea(box, ctx.screenHeight);
+      } else {
+        const auto &fit = shaping_.fitted(value, hudFont_,
+                                          {.maxWidthPx  = box.width,
+                                           .maxHeightPx = box.height,
+                                           .maxLines    = 1});
+        hudCanvas_->addText(state, box, fit, colour, background);
+      }
+    };
+    hudInputArea_.reset();
+    // --- 3. Draw 2D Screen Overlay HUD ---
+    hudCanvas_->clear();
+    hudCanvas_->setTag(render::tagKindNone, 0);
+
+    std::string focusLabel = "Focus: none";
+    if (engine_ && accursed_cell_focus_ != 0) {
+      const auto cur = inspectCell(static_cast<CellRef>(accursed_cell_focus_));
+      std::string mediaTag;
+      if (!cur.mime_type.empty()) {
+        mediaTag = std::format(" <{}>", cur.mime_type);
+      }
+      focusLabel = std::format(
+          "Focus: #{}{} \"{}\" {}", cur.id, mediaTag, cur.text,
+          cur.role.empty() ? "" : "[" + cellBadge(cur.id, cur.role) + "]");
+      if (cur.is_clone) {
+        focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
+      }
+      if (0 != markedCell_) {
+        focusLabel += std::format("  marked #{}", markedCell_);
       }
     }
 
-    // Node Border
-    const float borderThick = scene_.border_thickness;
-    worldCanvas_->addLine(left, bottom, left + nodeWidth, bottom, borderThick,
-                          borderCol);
-    worldCanvas_->addLine(left + nodeWidth, bottom, left + nodeWidth,
-                          bottom + nodeHeight, borderThick, borderCol);
-    worldCanvas_->addLine(left + nodeWidth, bottom + nodeHeight, left,
-                          bottom + nodeHeight, borderThick, borderCol);
-    worldCanvas_->addLine(left, bottom + nodeHeight, left, bottom, borderThick,
-                          borderCol);
+    const auto structureMetrics = hudMeasure(structure_name_);
+    const auto focusMetrics =
+        gleditor::TextMetrics{0, std::ceil(hudFont_->metrics().lineHeight)};
+    const float topBarHeight =
+        (3.0F * presentation_config_.hudVerticalPaddingPx) +
+        structureMetrics.height + focusMetrics.height;
+    // Under whatever chrome is already along the top (xuzz's tab bar), so the
+    // two bars stack rather than one hiding the other.
+    const float hudTop       = height - ctx.chrome.top;
+    const float topBarBottom = hudTop - topBarHeight;
+    ctx.chrome.top += topBarHeight;
 
-    // Title / ID
-    ancillaryCanvas_->addText(ctx.state, left + layout.horizontalPadding,
-                              bottom + layout.titleTop, layout.idText,
-                              borderCol, bgCol);
-    // Label Text
-    worldCanvas_->setTextWidthLimit(static_cast<int>(layout.labelWidthLimit));
-    const auto textMetrics = worldCanvas_->measureText(cell.text);
-    const float textLeft =
-        left + std::max(layout.horizontalPadding,
-                        (nodeWidth - textMetrics.width) / 2.0F);
-    const float textTop = bottom + layout.labelTop;
-    worldCanvas_->addText(ctx.state, textLeft, textTop, cell.text, textCol,
-                          bgCol, cell.decorated_ranges);
-    worldCanvas_->setTextWidthLimit(0);
+    // Top Bar Background
+    hudCanvas_->addRect(0.0F, topBarBottom, width, topBarHeight, 0x0D0D12DDU);
+    hudCanvas_->addLine(0.0F, topBarBottom, width, topBarBottom, 1.0F,
+                        0x333344FFU);
 
-    // Badges: type, mime, clone
-    if (!layout.badgeText.empty()) {
-      ancillaryCanvas_->addText(ctx.state, left + layout.horizontalPadding,
-                                bottom + layout.badgeTop, layout.badgeText,
-                                borderCol, bgCol);
-    }
-  }
+    const float structureTop =
+        hudTop - presentation_config_.hudVerticalPaddingPx;
+    const float focusTop = structureTop - structureMetrics.height -
+                           presentation_config_.hudVerticalPaddingPx;
+    hudText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
+            structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
+    hudText(ctx.state, presentation_config_.hudHorizontalPaddingPx, focusTop,
+            focusLabel, 0xFFFFFFFFU, 0x0D0D12DDU);
 
-  worldCanvas_->commit();
-  worldCanvas_->draw(ctx.state, ctx.viewProjection * presentation_transform_,
-                     1.0F);
-  ancillaryCanvas_->commit();
-  ancillaryCanvas_->draw(ctx.state,
-                         ctx.viewProjection * presentation_transform_, 1.0F);
+    // Dimension Bindings on Top Right
+    const DimensionVisual xVis = dimensionVisual(current_view_.x_dimension);
+    const DimensionVisual yVis = dimensionVisual(current_view_.y_dimension);
+    const DimensionVisual zVis = dimensionVisual(current_view_.z_dimension);
 
-  // --- 3. Draw 2D Screen Overlay HUD ---
-  hudCanvas_->clear();
-  hudCanvas_->setTag(render::tagKindNone, 0);
+    const std::string dimsInfo = std::format(
+        "[X: {}] [Y: {}] [Z: {}]",
+        xVis.label.empty() ? current_view_.x_dimension : xVis.label,
+        yVis.label.empty() ? current_view_.y_dimension : yVis.label,
+        zVis.label.empty() ? current_view_.z_dimension : zVis.label);
 
-  const auto width  = static_cast<float>(ctx.screenWidth);
-  const auto height = static_cast<float>(ctx.screenHeight);
-
-  std::string focusLabel = "Focus: none";
-  if (engine_ && accursed_cell_focus_ != 0) {
-    const auto cur = inspectCell(static_cast<CellRef>(accursed_cell_focus_));
-    std::string mediaTag;
-    if (!cur.mime_type.empty()) {
-      mediaTag = std::format(" <{}>", cur.mime_type);
-    }
-    focusLabel = std::format(
-        "Focus: #{}{} \"{}\" {}", cur.id, mediaTag, cur.text,
-        cur.role.empty() ? "" : "[" + cellBadge(cur.id, cur.role) + "]");
-    if (cur.is_clone) {
-      focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
-    }
-    if (0 != markedCell_) {
-      focusLabel += std::format("  marked #{}", markedCell_);
-    }
-  }
-
-  const auto structureMetrics = hudCanvas_->measureText(structure_name_);
-  const auto focusMetrics     = hudCanvas_->measureText(focusLabel);
-  const float topBarHeight =
-      (3.0F * presentation_config_.hudVerticalPaddingPx) +
-      structureMetrics.height + focusMetrics.height;
-  // Under whatever chrome is already along the top (xuzz's tab bar), so the
-  // two bars stack rather than one hiding the other.
-  const float hudTop       = height - ctx.chrome.top;
-  const float topBarBottom = hudTop - topBarHeight;
-  ctx.chrome.top += topBarHeight;
-
-  // Top Bar Background
-  hudCanvas_->addRect(0.0F, topBarBottom, width, topBarHeight, 0x0D0D12DDU);
-  hudCanvas_->addLine(0.0F, topBarBottom, width, topBarBottom, 1.0F,
-                      0x333344FFU);
-
-  const float structureTop = hudTop - presentation_config_.hudVerticalPaddingPx;
-  const float focusTop     = structureTop - structureMetrics.height -
-                         presentation_config_.hudVerticalPaddingPx;
-  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
-                      structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
-  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
-                      focusTop, focusLabel, 0xFFFFFFFFU, 0x0D0D12DDU);
-
-  // Dimension Bindings on Top Right
-  const DimensionVisual xVis = dimensionVisual(current_view_.x_dimension);
-  const DimensionVisual yVis = dimensionVisual(current_view_.y_dimension);
-  const DimensionVisual zVis = dimensionVisual(current_view_.z_dimension);
-
-  const std::string dimsInfo =
-      std::format("[X: {}] [Y: {}] [Z: {}]",
-                  xVis.label.empty() ? current_view_.x_dimension : xVis.label,
-                  yVis.label.empty() ? current_view_.y_dimension : yVis.label,
-                  zVis.label.empty() ? current_view_.z_dimension : zVis.label);
-
-  // Right-aligned from the dimensions leftwards, each label only while it
-  // still clears the structure name: a narrow window drops the bundle, then
-  // the view mode, rather than drawing them over the name and off the edge.
-  const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
-                                    ? "[ View: 📄 Content ]"
-                                    : "[ View: 🌐 Topology ]";
-  const std::string bundleLabel =
-      std::format("[ Bundle: {} ]", dimensionBundleName(dimension_bundle_));
-  const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
-                          structureMetrics.width +
-                          presentation_config_.hudColumnGapPx;
-  float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
-  for (const auto &[label, colour] :
-       {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
-        std::pair{std::cref(modeLabel), 0xF59E0BFFU},
-        std::pair{std::cref(bundleLabel), 0x38BDF8FFU}}) {
-    const float labelWidth = hudCanvas_->measureText(label.get()).width;
-    if (rightEdge - labelWidth < leftLimit) {
-      break;
-    }
-    hudCanvas_->addText(ctx.state, rightEdge - labelWidth, structureTop,
-                        label.get(), colour, 0x0D0D12DDU);
-    rightEdge -= labelWidth + presentation_config_.hudColumnGapPx;
-  }
-
-  // Bottom Command Key Hints
-  const std::string &hints =
-      keyboardHere_.load() ? keyHintsHere_ : keyHintsElsewhere_;
-  const auto hintsMetrics = hudCanvas_->measureText(hints);
-  const float bottomBarHeight =
-      hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
-  const float hudBottom = ctx.chrome.bottom;
-  hudCanvas_->addRect(0.0F, hudBottom, width, bottomBarHeight, 0x0D0D12DDU);
-  hudCanvas_->addLine(0.0F, hudBottom + bottomBarHeight, width,
-                      hudBottom + bottomBarHeight, 1.0F, 0x222233FFU);
-  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
-                      hudBottom + bottomBarHeight -
-                          presentation_config_.hudVerticalPaddingPx,
-                      hints, 0x888899FFU, 0x0D0D12DDU);
-  ctx.chrome.bottom += bottomBarHeight;
-
-  // Palette HUD Overlay
-  if (paletteVisible_) {
-    const auto items      = paletteItems();
-    const float palWidth  = std::min(520.0F, width - 40.0F);
-    const float palHeight = std::min(360.0F, height - 120.0F);
-    const float palX      = (width - palWidth) * 0.5F;
-    const float palY      = (height - palHeight) * 0.5F;
-
-    // Palette background & border
-    hudCanvas_->addRect(palX, palY, palWidth, palHeight, 0x141624F0U);
-    hudCanvas_->addLine(palX, palY, palX + palWidth, palY, 1.5F, 0x475569FFU);
-    hudCanvas_->addLine(palX, palY + palHeight, palX + palWidth,
-                        palY + palHeight, 1.5F, 0x475569FFU);
-    hudCanvas_->addLine(palX, palY, palX, palY + palHeight, 1.5F, 0x475569FFU);
-    hudCanvas_->addLine(palX + palWidth, palY, palX + palWidth,
-                        palY + palHeight, 1.5F, 0x475569FFU);
-
-    // Title bar
-    const std::string palTitle = "Vortex Opcode & Library Palette [F4 / Esc]";
-    const float titleTop       = palY + palHeight - 14.0F;
-    hudCanvas_->addText(ctx.state, palX + 16.0F, titleTop, palTitle,
-                        0xF59E0BFFU, 0x141624F0U);
-    hudCanvas_->addLine(palX, palY + palHeight - 32.0F, palX + palWidth,
-                        palY + palHeight - 32.0F, 1.0F, 0x334155FFU);
-
-    // Items list
-    const int maxVisible = 8;
-    const int total      = static_cast<int>(items.size());
-    int startIdx         = 0;
-    if (total > maxVisible) {
-      startIdx =
-          std::clamp(static_cast<int>(paletteSelectedIndex_) - (maxVisible / 2),
-                     0, total - maxVisible);
-    }
-    const int endIdx = std::min(total, startIdx + maxVisible);
-
-    const float itemLineHeight = 28.0F;
-    float currentY             = palY + palHeight - 64.0F;
-    for (int i = startIdx; i < endIdx; ++i) {
-      const bool isSelected = std::cmp_equal(i, paletteSelectedIndex_);
-      if (isSelected) {
-        hudCanvas_->addRect(palX + 8.0F, currentY - 6.0F, palWidth - 16.0F,
-                            itemLineHeight, 0x1E3A8ABBU);
+    // Right-aligned from the dimensions leftwards, each label only while it
+    // still clears the structure name: a narrow window drops the bundle, then
+    // the view mode, rather than drawing them over the name and off the edge.
+    const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
+                                      ? "[ View: 📄 Content ]"
+                                      : "[ View: 🌐 Topology ]";
+    const std::string bundleLabel =
+        std::format("[ Bundle: {} ]", dimensionBundleName(dimension_bundle_));
+    const float leftLimit = presentation_config_.hudHorizontalPaddingPx +
+                            structureMetrics.width +
+                            presentation_config_.hudColumnGapPx;
+    float rightEdge = width - presentation_config_.hudHorizontalPaddingPx;
+    for (const auto &[label, colour] :
+         {std::pair{std::cref(dimsInfo), 0x70B0FFFFU},
+          std::pair{std::cref(modeLabel), 0xF59E0BFFU},
+          std::pair{std::cref(bundleLabel), 0x38BDF8FFU}}) {
+      const float labelWidth = hudMeasure(label.get()).width;
+      if (rightEdge - labelWidth < leftLimit) {
+        break;
       }
-      const auto &item = items[static_cast<std::size_t>(i)];
-      std::uint32_t fg = 0xE2E8F0FFU;
-      if (item.starts_with("#")) {
-        fg = 0xFBBF24FFU; // gold for opcodes
-      } else if (item.starts_with("std:zigzag")) {
-        fg = 0x38BDF8FFU; // sky blue for zigzag stdlib
-      } else if (item.starts_with("std:gc")) {
-        fg = 0x34D399FFU; // emerald for gc stdlib
-      } else if (item.starts_with("VQL: ")) {
-        fg = 0xC084FCFFU; // lavender for VQL compilation
+      hudText(ctx.state, rightEdge - labelWidth, structureTop, label.get(),
+              colour, 0x0D0D12DDU);
+      rightEdge -= labelWidth + presentation_config_.hudColumnGapPx;
+    }
+
+    // Bottom Command Key Hints
+    const std::string &hints =
+        keyboardHere_.load() ? keyHintsHere_ : keyHintsElsewhere_;
+    const auto hintsMetrics = hudMeasure(hints);
+    const float bottomBarHeight =
+        hintsMetrics.height +
+        (2.0F * presentation_config_.hudVerticalPaddingPx);
+    const float hudBottom = ctx.chrome.bottom;
+    hudCanvas_->addRect(0.0F, hudBottom, width, bottomBarHeight, 0x0D0D12DDU);
+    hudCanvas_->addLine(0.0F, hudBottom + bottomBarHeight, width,
+                        hudBottom + bottomBarHeight, 1.0F, 0x222233FFU);
+    hudText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
+            hudBottom + bottomBarHeight -
+                presentation_config_.hudVerticalPaddingPx,
+            hints, 0x888899FFU, 0x0D0D12DDU);
+    ctx.chrome.bottom += bottomBarHeight;
+
+    // Palette HUD Overlay
+    if (paletteVisible_) {
+      const auto items      = paletteItems();
+      const float palWidth  = std::min(520.0F, width - 40.0F);
+      const float palHeight = std::min(360.0F, height - 120.0F);
+      const float palX      = (width - palWidth) * 0.5F;
+      const float palY      = (height - palHeight) * 0.5F;
+
+      // Palette background & border
+      hudCanvas_->addRect(palX, palY, palWidth, palHeight, 0x141624F0U);
+      hudCanvas_->addLine(palX, palY, palX + palWidth, palY, 1.5F, 0x475569FFU);
+      hudCanvas_->addLine(palX, palY + palHeight, palX + palWidth,
+                          palY + palHeight, 1.5F, 0x475569FFU);
+      hudCanvas_->addLine(palX, palY, palX, palY + palHeight, 1.5F,
+                          0x475569FFU);
+      hudCanvas_->addLine(palX + palWidth, palY, palX + palWidth,
+                          palY + palHeight, 1.5F, 0x475569FFU);
+
+      // Title bar
+      const std::string palTitle = "Vortex Opcode & Library Palette [F4 / Esc]";
+      const float titleTop       = palY + palHeight - 14.0F;
+      hudText(ctx.state, palX + 16.0F, titleTop, palTitle, 0xF59E0BFFU,
+              0x141624F0U);
+      hudCanvas_->addLine(palX, palY + palHeight - 32.0F, palX + palWidth,
+                          palY + palHeight - 32.0F, 1.0F, 0x334155FFU);
+
+      // Items list
+      const int maxVisible = 8;
+      const int total      = static_cast<int>(items.size());
+      int startIdx         = 0;
+      if (total > maxVisible) {
+        startIdx = std::clamp(static_cast<int>(paletteSelectedIndex_) -
+                                  (maxVisible / 2),
+                              0, total - maxVisible);
       }
-      const std::string label = (isSelected ? " > " : "   ") + item;
-      hudCanvas_->addText(ctx.state, palX + 12.0F, currentY + 14.0F, label, fg,
-                          0x00000000U);
-      currentY -= itemLineHeight;
+      const int endIdx = std::min(total, startIdx + maxVisible);
+
+      const float itemLineHeight = 28.0F;
+      float currentY             = palY + palHeight - 64.0F;
+      for (int i = startIdx; i < endIdx; ++i) {
+        const bool isSelected = std::cmp_equal(i, paletteSelectedIndex_);
+        if (isSelected) {
+          hudCanvas_->addRect(palX + 8.0F, currentY - 6.0F, palWidth - 16.0F,
+                              itemLineHeight, 0x1E3A8ABBU);
+        }
+        const auto &item = items[static_cast<std::size_t>(i)];
+        std::uint32_t fg = 0xE2E8F0FFU;
+        if (item.starts_with("#")) {
+          fg = 0xFBBF24FFU; // gold for opcodes
+        } else if (item.starts_with("std:zigzag")) {
+          fg = 0x38BDF8FFU; // sky blue for zigzag stdlib
+        } else if (item.starts_with("std:gc")) {
+          fg = 0x34D399FFU; // emerald for gc stdlib
+        } else if (item.starts_with("VQL: ")) {
+          fg = 0xC084FCFFU; // lavender for VQL compilation
+        }
+        const std::string label = (isSelected ? " > " : "   ") + item;
+        hudText(ctx.state, palX + 12.0F, currentY + 14.0F, label, fg,
+                0x00000000U);
+        currentY -= itemLineHeight;
+      }
+
+      // Bottom prompt
+      const std::string palHelp = "Up/Down: Navigate | Enter: Clone / Compile "
+                                  "VQL | F5: Translate VQL | "
+                                  "Esc: Close";
+      hudText(ctx.state, palX + 16.0F, palY + 24.0F, palHelp, 0x94A3B8FFU,
+              0x141624F0U);
     }
 
-    // Bottom prompt
-    const std::string palHelp =
-        "Up/Down: Navigate | Enter: Clone / Compile VQL | F5: Translate VQL | "
-        "Esc: Close";
-    hudCanvas_->addText(ctx.state, palX + 16.0F, palY + 24.0F, palHelp,
-                        0x94A3B8FFU, 0x141624F0U);
-  }
-
-  // Editing the focused cell's text: the same bar as the omnibar, so the
-  // line being typed is where the eye already goes for typed input.
-  if (cellEditing_) {
-    const float barWidth  = std::min(700.0F, width - 40.0F);
-    const float barHeight = 56.0F;
-    const float barX      = (width - barWidth) * 0.5F;
-    const float barY      = height - topBarBottom - barHeight - 20.0F;
-    hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
-    hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0xF4C542FFU);
-    hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
-                        barY + barHeight, 1.5F, 0xF4C542FFU);
-    hudCanvas_->addText(ctx.state, barX + 16.0F, barY + barHeight - 12.0F,
-                        std::format("Cell #{} -- Return keeps, Esc drops",
-                                    accursed_cell_focus_),
-                        0xF4C542FFU, 0x0F172AF0U);
-    hudCanvas_->addText(ctx.state, barX + 16.0F, barY + 18.0F,
-                        cellEditWhole_ ? "> [" + cellEditText_ + "]"
-                                       : "> " + cellEditText_ + "_",
-                        0xFFFFFFFFU, 0x00000000U);
-  }
-
-  // Command Omnibar HUD Overlay
-  if (commandBarVisible_) {
-    const float barWidth  = std::min(700.0F, width - 40.0F);
-    const float barHeight = 76.0F;
-    const float barX      = (width - barWidth) * 0.5F;
-    const float barY      = height - topBarBottom - barHeight - 20.0F;
-
-    // Background & borders
-    hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
-    hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0x38BDF8FFU);
-    hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
-                        barY + barHeight, 1.5F, 0x38BDF8FFU);
-    hudCanvas_->addLine(barX, barY, barX, barY + barHeight, 1.5F, 0x38BDF8FFU);
-    hudCanvas_->addLine(barX + barWidth, barY, barX + barWidth,
-                        barY + barHeight, 1.5F, 0x38BDF8FFU);
-
-    // Mode badge
-    std::string badge;
-    std::uint32_t badgeColor = 0x38BDF8FFU; // Sky blue
-    if (commandBarText_.starts_with(":macro")) {
-      badge      = "[MACRO DEF]";
-      badgeColor = 0xF59E0BFFU; // Amber
-    } else if (commandBarText_.starts_with(":")) {
-      badge      = "[COMMAND]";
-      badgeColor = 0x818CF8FFU; // Indigo
-    } else if (commandBarText_.starts_with("/") ||
-               commandBarText_.starts_with("##")) {
-      badge      = "[VQL NAV]";
-      badgeColor = 0x34D399FFU; // Emerald
-    } else if (commandBarText_.starts_with("weave") ||
-               commandBarText_.starts_with("let") ||
-               commandBarText_.starts_with("for")) {
-      badge      = "[VQL SCRIPT]";
-      badgeColor = 0xC084FCFFU; // Purple
-    } else {
-      badge      = "[VQL OMNIBAR]";
-      badgeColor = 0x38BDF8FFU; // Sky blue
+    // Editing the focused cell's text: the same bar as the omnibar, so the
+    // line being typed is where the eye already goes for typed input.
+    if (cellEditing_) {
+      const float barWidth  = std::min(700.0F, width - 40.0F);
+      const float barHeight = 56.0F;
+      const float barX      = (width - barWidth) * 0.5F;
+      const float barY      = height - topBarBottom - barHeight - 20.0F;
+      hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
+      hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0xF4C542FFU);
+      hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
+                          barY + barHeight, 1.5F, 0xF4C542FFU);
+      hudText(ctx.state, barX + 16.0F, barY + barHeight - 12.0F,
+              std::format("Cell #{} -- Return keeps, Esc drops",
+                          accursed_cell_focus_),
+              0xF4C542FFU, 0x0F172AF0U);
+      hudText(ctx.state, barX + 16.0F, barY + 18.0F,
+              cellEditWhole_ ? "> [" + cellEditText_ + "]"
+                             : "> " + cellEditText_ + "_",
+              0xFFFFFFFFU, 0x00000000U, true);
     }
 
-    const float badgeY = barY + barHeight - 16.0F;
-    hudCanvas_->addText(ctx.state, barX + 16.0F, badgeY, badge, badgeColor,
-                        0x0F172AF0U);
+    // Command Omnibar HUD Overlay
+    if (commandBarVisible_) {
+      const float barWidth  = std::min(700.0F, width - 40.0F);
+      const float barHeight = 76.0F;
+      const float barX      = (width - barWidth) * 0.5F;
+      const float barY      = height - topBarBottom - barHeight - 20.0F;
 
-    // Input prompt line
-    const std::string prompt = "> " + commandBarText_ + "_";
-    const float inputY       = barY + 36.0F;
-    hudCanvas_->addText(ctx.state, barX + 16.0F, inputY, prompt, 0xFFFFFFFFU,
-                        0x00000000U);
+      // Background & borders
+      hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
+      hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0x38BDF8FFU);
+      hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
+                          barY + barHeight, 1.5F, 0x38BDF8FFU);
+      hudCanvas_->addLine(barX, barY, barX, barY + barHeight, 1.5F,
+                          0x38BDF8FFU);
+      hudCanvas_->addLine(barX + barWidth, barY, barX + barWidth,
+                          barY + barHeight, 1.5F, 0x38BDF8FFU);
 
-    // Feedback or helper line
-    const float helpY = barY + 14.0F;
-    if (!commandBarFeedback_.empty()) {
-      const std::uint32_t fbCol =
-          commandBarFeedbackIsError_ ? 0xEF4444FFU : 0x34D399FFU;
-      hudCanvas_->addText(ctx.state, barX + 16.0F, helpY, commandBarFeedback_,
-                          fbCol, 0x00000000U);
-    } else {
-      hudCanvas_->addText(
-          ctx.state, barX + 16.0F, helpY,
-          "Enter: Execute | /: Path Nav | weave {...}: Script | :macro <name> "
-          "<vql> [key] | Esc: Close",
-          0x64748BFFU, 0x00000000U);
+      // Mode badge
+      std::string badge;
+      std::uint32_t badgeColor = 0x38BDF8FFU; // Sky blue
+      if (commandBarText_.starts_with(":macro")) {
+        badge      = "[MACRO DEF]";
+        badgeColor = 0xF59E0BFFU; // Amber
+      } else if (commandBarText_.starts_with(":")) {
+        badge      = "[COMMAND]";
+        badgeColor = 0x818CF8FFU; // Indigo
+      } else if (commandBarText_.starts_with("/") ||
+                 commandBarText_.starts_with("##")) {
+        badge      = "[VQL NAV]";
+        badgeColor = 0x34D399FFU; // Emerald
+      } else if (commandBarText_.starts_with("weave") ||
+                 commandBarText_.starts_with("let") ||
+                 commandBarText_.starts_with("for")) {
+        badge      = "[VQL SCRIPT]";
+        badgeColor = 0xC084FCFFU; // Purple
+      } else {
+        badge      = "[VQL OMNIBAR]";
+        badgeColor = 0x38BDF8FFU; // Sky blue
+      }
+
+      const float badgeY = barY + barHeight - 16.0F;
+      hudText(ctx.state, barX + 16.0F, badgeY, badge, badgeColor, 0x0F172AF0U);
+
+      // Input prompt line
+      const std::string prompt = "> " + commandBarText_ + "_";
+      const float inputY       = barY + 36.0F;
+      hudText(ctx.state, barX + 16.0F, inputY, prompt, 0xFFFFFFFFU, 0x00000000U,
+              true);
+
+      // Feedback or helper line
+      const float helpY = barY + 14.0F;
+      if (!commandBarFeedback_.empty()) {
+        const std::uint32_t fbCol =
+            commandBarFeedbackIsError_ ? 0xEF4444FFU : 0x34D399FFU;
+        hudText(ctx.state, barX + 16.0F, helpY, commandBarFeedback_, fbCol,
+                0x00000000U);
+      } else {
+        hudText(ctx.state, barX + 16.0F, helpY,
+                "Enter: Execute | /: Path Nav | weave {...}: Script | :macro "
+                "<name> "
+                "<vql> [key] | Esc: Close",
+                0x64748BFFU, 0x00000000U);
+      }
     }
+
+    hudCanvas_->commit();
+    hudTopClaim_        = ctx.chrome.top - beforeChrome.top;
+    hudBottomClaim_     = ctx.chrome.bottom - beforeChrome.bottom;
+    hudRevision_        = revision_;
+    hudMetrics_         = uiMetrics_;
+    hudKeyboardMoves_   = keyboardMoves_.load();
+    hudEditText_        = cellEditText_;
+    hudCommandText_     = commandBarText_;
+    hudFeedback_        = commandBarFeedback_;
+    hudPaletteFilter_   = paletteFilter_;
+    hudPaletteSelected_ = paletteSelectedIndex_;
+    hudPaletteVisible_  = paletteVisible_;
+    hudCommandVisible_  = commandBarVisible_;
+    hudEditing_         = cellEditing_;
+  } else {
+    ctx.chrome.top += hudTopClaim_;
+    ctx.chrome.bottom += hudBottomClaim_;
   }
 
-  hudCanvas_->commit();
   // Correct left,right,bottom,top order for a screen-space projection.
   const glm::mat4 ortho =
       glm::ortho( // NOLINT(readability-suspicious-call-argument)
@@ -2188,7 +2410,21 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
                    ", Z=" + current_view_.z_dimension;
   rootChildren.push_back(into.id(2));
 
-  std::uint64_t nextNodeId = 10;
+  const auto document = documentId();
+  if (accessibilityDocument_ != document) {
+    accessibilityDocument_ = document;
+    accessibilityIds_.clear();
+    accessibilityTargets_.clear();
+  }
+  accessibilityTargets_.clear();
+  if (engine_) accessibilityVersion_ = engine_->head();
+  auto identity = [&](CellRef cell) {
+    auto [entry, made] =
+        accessibilityIds_.try_emplace(cell, nextAccessibilityId_);
+    if (made) ++nextAccessibilityId_;
+    accessibilityTargets_[entry->second] = cell;
+    return entry->second;
+  };
   if (engine_) {
     for (const auto &slot : engine_->manifold().cells()) {
       // An unlinked cell is not announced. Deleting a cell unlinks it and
@@ -2253,6 +2489,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       if (isFocus) {
         desc += " (Focused)";
       }
+      const auto nextNodeId = identity(slot.birthOp);
       auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
       cellNode.label   = std::move(desc);
       cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
@@ -2266,7 +2503,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
         into.takeFocus(into.id(nextNodeId));
       }
 
-      nextNodeId++;
+      describeCellBounds(cellNode, slot.birthOp);
     }
 
     if (isEphemeral(static_cast<CellRef>(accursed_cell_focus_))) {
@@ -2278,6 +2515,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       if (!cellInfo.role.empty()) {
         desc += " [" + cellInfo.role + "]";
       }
+      const auto nextNodeId = identity(focusRef);
       auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
       cellNode.label   = std::move(desc);
       cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
@@ -2286,7 +2524,7 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
       if (keyboardHere_.load()) {
         into.takeFocus(into.id(nextNodeId));
       }
-      nextNodeId++;
+      describeCellBounds(cellNode, focusRef);
     }
   }
 
@@ -2303,16 +2541,13 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
   if (action == gleditor::a11y::Action::Click ||
       action == gleditor::a11y::Action::Focus) {
     const auto localId = gleditor::a11y::Ids::localOf(nodeId);
-    if (localId >= 10 && engine_) {
-      const auto cellIndex = localId - 10;
-      if (cellIndex < engine_->manifold().cells().size()) {
-        navigateFocusTo(engine_->manifold().cells()[cellIndex].birthOp);
-        return true;
-      }
-      if (cellIndex == engine_->manifold().cells().size() &&
-          isEphemeral(static_cast<CellRef>(accursed_cell_focus_))) {
-        return true;
-      }
+    const auto target  = accessibilityTargets_.find(localId);
+    if (target != accessibilityTargets_.end() && engine_ &&
+        accessibilityDocument_ == documentId() &&
+        accessibilityVersion_ == engine_->head() &&
+        engine_->findCell(target->second)) {
+      navigateFocusTo(target->second);
+      return true;
     }
   }
   return false;

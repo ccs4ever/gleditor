@@ -25,14 +25,21 @@ void registerZigzagCommands(gleditor::CommandTable &table,
   const auto hooksPtr = std::make_shared<ZigzagCommandHooks>(std::move(hooks));
   // One action under both its names: the bare key while ZigZag has the
   // keyboard, the Alt twin from anywhere.
-  const auto both =
-      [&table](const std::string_view name, const std::string_view twin,
-               const std::string &help, const std::function<void()> &run) {
-        table.registerAction(std::string(name), help, run);
-        if (!twin.empty()) {
-          table.registerAction(std::string(twin), help, run);
-        }
-      };
+  const auto both = [&table, hooksPtr](const std::string_view name,
+                                       const std::string_view twin,
+                                       const std::string &help,
+                                       const std::function<void()> &run) {
+    const auto action = [hooksPtr, run] {
+      if (hooksPtr->dispatch)
+        hooksPtr->dispatch(run);
+      else
+        run();
+    };
+    table.registerAction(std::string(name), help, action);
+    if (!twin.empty()) {
+      table.registerAction(std::string(twin), help, action);
+    }
+  };
   const auto moving = [viz, hooksPtr](const std::string_view action) {
     return [viz, hooksPtr, action] {
       viz->dispatchAction(action);

@@ -26,9 +26,12 @@
 #include <glm/ext/vector_float2.hpp>
 #include <glm/ext/vector_float3.hpp>
 
+#include "common/xanadu/system_docs.hpp"
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/world_panel.hpp>
 
 #include <gleditor/cpp26.hpp>
 
@@ -45,6 +48,7 @@ struct SatelloidNeighbor {
   std::string text;
   glm::vec2 place{};
   std::uint32_t depth{};
+  bool operator==(const SatelloidNeighbor &) const = default;
 };
 
 struct SatelloidOccurrence {
@@ -68,6 +72,7 @@ satelloidLayer(const std::size_t index, const std::size_t selected,
  */
 struct CellSatelloid {
   zigzag::CellRef cellRef{zigzag::noCell};
+  std::uint32_t presentationId{};
   std::uint64_t linkId{};
   std::optional<SatelloidOccurrence> occurrence;
   std::vector<SatelloidNeighbor> neighborhood;
@@ -128,7 +133,8 @@ struct CellSatelloid {
  *        dimensional focus rings, and provenance badges.
  */
 class SatelloidOverlay : public gleditor::FrameContributor,
-                         public gleditor::PickObserver {
+                         public gleditor::PickObserver,
+                         public gleditor::a11y::Source {
 public:
   static constexpr std::uint32_t kTagSatelloidBase = 15000U;
 
@@ -142,8 +148,7 @@ public:
       std::function<std::optional<glm::vec3>(zigzag::CellRef)>;
   using SiteFilter = std::function<bool(const xanadu::CellSite &)>;
 
-  explicit SatelloidOverlay(RendererRef renderer,
-                            std::string fontName = "Sans 9");
+  explicit SatelloidOverlay(RendererRef renderer, std::string fontName = {});
   ~SatelloidOverlay() override;
 
   SatelloidOverlay(const SatelloidOverlay &)            = delete;
@@ -204,11 +209,19 @@ public:
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
 
+  void setConfig(const WorldCardConfig &);
+  void describe(gleditor::a11y::Builder &) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
+  [[nodiscard]] std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>>
+  snapshots() const;
+
 private:
+  struct Presentation;
+  std::unique_ptr<Presentation> presentation_;
   RendererRef renderer_;
-  std::string fontName_{"Sans 9"};
-  std::unique_ptr<gleditor::Canvas> canvas_;
-  std::vector<std::unique_ptr<gleditor::Canvas>> extraCanvases_;
+  std::string fontName_;
   render::RenderDevice *device_{};
   render::PipelineDesc pipeline_;
 

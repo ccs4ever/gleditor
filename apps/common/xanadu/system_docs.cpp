@@ -205,6 +205,13 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overview.viewportColour, overview.markColour: Its colours as RGBA "
            "integers; marks show the selected link's chosen places and the "
            "focused ZigZag card.\n"
+           "satelloidCard, tetherCard and hullCard: Preferred widthPx and "
+           "heightPx in logical pixels, defaults 200 by 180, 190 by 88 and "
+           "260 by 46. Positive finite lengths grow for typography within "
+           "maxWidthShare and maxHeightShare (0.1 to 1, default 0.9). "
+           "maxLines bounds preview lines (1 to 10, default 3). World labels "
+           "hide below the typography minimum projected font size; full "
+           "names and card selection remain available.\n"
            "quotationModal, telescopeModal and hypertimeModal: Preferred "
            "widthPx and heightPx in logical pixels, defaults 840 by 560, "
            "860 by 560 and 640 by 460. Positive finite values are required. "
@@ -729,6 +736,57 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                                       .defaultValues = {double{px}}}}};
     };
     specs = {
+        lengthSpec(settings::kSatelloidCardWidthPx,
+                   "SatelloidCard preferred width in logical pixels",
+                   modals.satelloidCard.widthPx),
+        lengthSpec(settings::kSatelloidCardHeightPx,
+                   "SatelloidCard preferred height in logical pixels",
+                   modals.satelloidCard.heightPx),
+        lengthSpec(settings::kSatelloidCardMaxWidthShare,
+                   "SatelloidCard maximum share of safe width, range 0.1 to 1",
+                   modals.satelloidCard.maxWidthShare),
+        lengthSpec(settings::kSatelloidCardMaxHeightShare,
+                   "SatelloidCard maximum share of safe height, range 0.1 to 1",
+                   modals.satelloidCard.maxHeightShare),
+        {.name    = std::string(settings::kSatelloidCardMaxLines),
+         .notes   = "SatelloidCard preview line limit, range 1 to 10",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          modals.satelloidCard.maxLines}}}}},
+        lengthSpec(settings::kTetherCardWidthPx,
+                   "TetherCard preferred width in logical pixels",
+                   modals.tetherCard.widthPx),
+        lengthSpec(settings::kTetherCardHeightPx,
+                   "TetherCard preferred height in logical pixels",
+                   modals.tetherCard.heightPx),
+        lengthSpec(settings::kTetherCardMaxWidthShare,
+                   "TetherCard maximum share of safe width, range 0.1 to 1",
+                   modals.tetherCard.maxWidthShare),
+        lengthSpec(settings::kTetherCardMaxHeightShare,
+                   "TetherCard maximum share of safe height, range 0.1 to 1",
+                   modals.tetherCard.maxHeightShare),
+        {.name    = std::string(settings::kTetherCardMaxLines),
+         .notes   = "TetherCard preview line limit, range 1 to 10",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          modals.tetherCard.maxLines}}}}},
+        lengthSpec(settings::kHullCardWidthPx,
+                   "HullCard preferred width in logical pixels",
+                   modals.hullCard.widthPx),
+        lengthSpec(settings::kHullCardHeightPx,
+                   "HullCard preferred height in logical pixels",
+                   modals.hullCard.heightPx),
+        lengthSpec(settings::kHullCardMaxWidthShare,
+                   "HullCard maximum share of safe width, range 0.1 to 1",
+                   modals.hullCard.maxWidthShare),
+        lengthSpec(settings::kHullCardMaxHeightShare,
+                   "HullCard maximum share of safe height, range 0.1 to 1",
+                   modals.hullCard.maxHeightShare),
+        {.name    = std::string(settings::kHullCardMaxLines),
+         .notes   = "HullCard preview line limit, range 1 to 10",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{
+                          modals.hullCard.maxLines}}}}},
         lengthSpec(settings::kQuotationModalWidthPx,
                    "Quotation modal preferred width in logical pixels",
                    modals.quotationModal.widthPx),
@@ -3052,6 +3110,41 @@ UIConfig UIConfig::fromStore(const Store &store) {
                                              cfg.storePanel.maxWidthShare);
   cfg.storePanel.maxHeightShare = panelShare(
       settings::kStorePanelMaxHeightShare, cfg.storePanel.maxHeightShare);
+
+  cfg.satelloidCard.widthPx =
+      panelLength(settings::kSatelloidCardWidthPx, cfg.satelloidCard.widthPx);
+  cfg.satelloidCard.heightPx =
+      panelLength(settings::kSatelloidCardHeightPx, cfg.satelloidCard.heightPx);
+  cfg.satelloidCard.maxWidthShare = panelShare(
+      settings::kSatelloidCardMaxWidthShare, cfg.satelloidCard.maxWidthShare);
+  cfg.satelloidCard.maxHeightShare = panelShare(
+      settings::kSatelloidCardMaxHeightShare, cfg.satelloidCard.maxHeightShare);
+  cfg.satelloidCard.maxLines = static_cast<std::uint16_t>(
+      std::clamp<std::int64_t>(model.getInt64(settings::kSatelloidCardMaxLines,
+                                              cfg.satelloidCard.maxLines),
+                               1, 10));
+  cfg.tetherCard.widthPx =
+      panelLength(settings::kTetherCardWidthPx, cfg.tetherCard.widthPx);
+  cfg.tetherCard.heightPx =
+      panelLength(settings::kTetherCardHeightPx, cfg.tetherCard.heightPx);
+  cfg.tetherCard.maxWidthShare  = panelShare(settings::kTetherCardMaxWidthShare,
+                                             cfg.tetherCard.maxWidthShare);
+  cfg.tetherCard.maxHeightShare = panelShare(
+      settings::kTetherCardMaxHeightShare, cfg.tetherCard.maxHeightShare);
+  cfg.tetherCard.maxLines = static_cast<std::uint16_t>(std::clamp<std::int64_t>(
+      model.getInt64(settings::kTetherCardMaxLines, cfg.tetherCard.maxLines), 1,
+      10));
+  cfg.hullCard.widthPx =
+      panelLength(settings::kHullCardWidthPx, cfg.hullCard.widthPx);
+  cfg.hullCard.heightPx =
+      panelLength(settings::kHullCardHeightPx, cfg.hullCard.heightPx);
+  cfg.hullCard.maxWidthShare =
+      panelShare(settings::kHullCardMaxWidthShare, cfg.hullCard.maxWidthShare);
+  cfg.hullCard.maxHeightShare = panelShare(settings::kHullCardMaxHeightShare,
+                                           cfg.hullCard.maxHeightShare);
+  cfg.hullCard.maxLines = static_cast<std::uint16_t>(std::clamp<std::int64_t>(
+      model.getInt64(settings::kHullCardMaxLines, cfg.hullCard.maxLines), 1,
+      10));
 
   cfg.quotationModal.widthPx =
       panelLength(settings::kQuotationModalWidthPx, cfg.quotationModal.widthPx);

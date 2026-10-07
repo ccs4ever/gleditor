@@ -65,3 +65,31 @@ TEST(PanelConfigTest, bigModalGeometryIsSeededAndValidatedInSystemUi) {
   EXPECT_FLOAT_EQ(config.hypertimeModal.maxWidthShare, 1.F);
   EXPECT_FLOAT_EQ(config.hypertimeModal.maxHeightShare, .1F);
 }
+
+TEST(PanelConfigTest, WorldCardsAreSeededAndLiveGeometryIsValidated) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  const xanadu::UIConfig defaults;
+  auto config = xanadu::UIConfig::fromStore(store);
+  EXPECT_EQ(config.satelloidCard, defaults.satelloidCard);
+  EXPECT_EQ(config.tetherCard, defaults.tetherCard);
+  EXPECT_EQ(config.hullCard, defaults.hullCard);
+  auto head = store.primaryCurrentVersion();
+  head      = xanadu::setSetting(store, head,
+                                 xanadu::settings::kSatelloidCardWidthPx, 400.);
+  head = xanadu::setSetting(store, head, xanadu::settings::kTetherCardHeightPx,
+                            -1.);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kHullCardMaxWidthShare, 4.);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kHullCardMaxHeightShare, .01);
+  head = xanadu::setSetting(
+      store, head, xanadu::settings::kSatelloidCardMaxLines, std::int64_t{25});
+  store.repointCurrentVersion(head);
+  config = xanadu::UIConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(config.satelloidCard.widthPx, 400.F);
+  EXPECT_EQ(config.satelloidCard.maxLines, 10);
+  EXPECT_FLOAT_EQ(config.tetherCard.heightPx, defaults.tetherCard.heightPx);
+  EXPECT_FLOAT_EQ(config.hullCard.maxWidthShare, 1.F);
+  EXPECT_FLOAT_EQ(config.hullCard.maxHeightShare, .1F);
+}

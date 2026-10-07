@@ -67,6 +67,7 @@
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
 #include "xudu/views.hpp"
+#include "xudu/wireframe_hull.hpp"
 #include "zigzag/zigzag_commands.hpp"
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/logging.hpp>
@@ -619,6 +620,9 @@ int XuzzApp::run(const int argc, char **argv) {
       [&views](const xudu::PouchItem &item) { views.swingBackToSpan(item); });
 
   xudu::KineticTetherEngine kineticTetherEngine;
+  xudu::KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine);
+  xudu::WireframeHullOverlay wireframeHullOverlay(renderer);
+  views.setWireframeOverlay(&wireframeHullOverlay);
   kineticTetherEngine.setVoidSpawnHandler(
       [&views](const xudu::TetherPayload &payload, const float sx,
                const float sy) {
@@ -833,9 +837,8 @@ int XuzzApp::run(const int argc, char **argv) {
   satelloidOverlay.setLinkContext(&linkContext);
 
   // 5. Zigzag presentation & BridgeCoordinator
-  auto zigzagPresentation =
-      std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
-  auto &bridgeStore = session->store(0);
+  auto zigzagPresentation = std::make_shared<zigzag::ZigzagVisualizer>("");
+  auto &bridgeStore       = session->store(0);
   zigzagPresentation->bindXuduStore(bridgeStore,
                                     bridgeStore.primaryCurrentVersion());
   const auto initialLayout = xudu::LayoutConfig::fromStore(
@@ -1118,6 +1121,8 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&tenuousTetherOverlay);
   renderer->addFrameContributor(&satelloidOverlay);
   renderer->addPickObserver(&satelloidOverlay);
+  renderer->addFrameContributor(&kineticTetherOverlay);
+  renderer->addFrameContributor(&wireframeHullOverlay);
   renderer->addFrameContributor(&images);
   renderer->addFrameContributor(&views);
   renderer->addFrameContributor(&linkPanel);
@@ -1134,6 +1139,9 @@ int XuzzApp::run(const int argc, char **argv) {
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
+  state->accessibility->addSource(&satelloidOverlay);
+  state->accessibility->addSource(&kineticTetherOverlay);
+  state->accessibility->addSource(&wireframeHullOverlay);
   state->accessibility->addSource(&linkPanel);
   state->accessibility->addSource(&overview);
   state->accessibility->addSource(&map);
@@ -1371,11 +1379,10 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto screenY = static_cast<float>(state->view.screenHeight - my);
     kineticTetherEngine.startDrag(
         xudu::TetherPayload{
-            .span = spans.front(),
-            .previewText =
-                selStart < text.size()
-                    ? text.substr(selStart, std::min(selEnd - selStart, 40U))
-                    : std::string{},
+            .span             = spans.front(),
+            .previewText      = selStart < text.size()
+                                    ? text.substr(selStart, selEnd - selStart)
+                                    : std::string{},
             .originVersion    = openView.version,
             .originDocIndex   = docIdx,
             .originCharStart  = selStart,
@@ -1553,7 +1560,7 @@ int XuzzApp::run(const int argc, char **argv) {
       const auto text = st.textOf(openView.version);
       std::string preview;
       if (selStart < text.size()) {
-        preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
+        preview = text.substr(selStart, selEnd - selStart);
       }
       pouchDrawer.handleGhostDrop(spans.front(), preview, openView.version,
                                   screenX, screenY, docIdx, selStart, selEnd);
@@ -2353,6 +2360,11 @@ int XuzzApp::run(const int argc, char **argv) {
            [&keyboardPane, &showZigzagFocus] {
              keyboardPane.enterZigzag();
              showZigzagFocus();
+           },
+       .dispatch =
+           [renderer](std::function<void()> action) {
+             renderer->runWithState(
+                 [action = std::move(action)](RenderState &) { action(); });
            }});
 
   const auto startSlice =
@@ -2688,7 +2700,8 @@ int XuzzApp::run(const int argc, char **argv) {
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
        &views, &overview, &storeObjectManager, &quotationOverlay,
-       &swarmTelescope, readablePx, &session, zigzagPresentation,
+       &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
+       &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
        &bridgeCoordinator, &showKeyHints,
        state](const xudu::SystemDocKind kind, const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
@@ -2739,6 +2752,9 @@ int XuzzApp::run(const int argc, char **argv) {
           overview.setConfig(uiCfg.overview);
           pouchDrawer.setConfig(uiCfg.pouchPanel);
           storeObjectManager.setConfig(uiCfg.storePanel);
+          satelloidOverlay.setConfig(uiCfg.satelloidCard);
+          kineticTetherOverlay.setConfig(uiCfg.tetherCard);
+          wireframeHullOverlay.setConfig(uiCfg.hullCard);
           quotationOverlay.setConfig(uiCfg.quotationModal);
           swarmTelescope.setConfig(uiCfg.telescopeModal);
           map.setConfig(uiCfg.hypertimeModal);
@@ -2777,6 +2793,9 @@ int XuzzApp::run(const int argc, char **argv) {
       overview.setConfig(uiCfg.overview);
       pouchDrawer.setConfig(uiCfg.pouchPanel);
       storeObjectManager.setConfig(uiCfg.storePanel);
+      satelloidOverlay.setConfig(uiCfg.satelloidCard);
+      kineticTetherOverlay.setConfig(uiCfg.tetherCard);
+      wireframeHullOverlay.setConfig(uiCfg.hullCard);
       quotationOverlay.setConfig(uiCfg.quotationModal);
       swarmTelescope.setConfig(uiCfg.telescopeModal);
       map.setConfig(uiCfg.hypertimeModal);

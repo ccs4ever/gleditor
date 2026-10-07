@@ -4,6 +4,7 @@
  * blueprint quad.
  */
 #include "kinetic_tether_overlay.hpp"
+#include "world_card_presentation.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -17,17 +18,34 @@
 #include <gleditor/spatial.hpp>
 
 namespace xudu {
+struct KineticTetherOverlay::Presentation {
+  world_cards::Card card;
+  WorldCardConfig config{190, 88};
+  glm::mat4 matrix{1};
+  gleditor::ui::Size viewport;
+  glm::vec2 origin{}, position{};
+  bool geometryReady{}, detached{}, visible{};
+  std::uint64_t revision{1};
+  const std::string attachedStatus =
+      "Snap-back zone (< " +
+      std::to_string(
+          static_cast<int>(KineticTetherEngine::kMinDetachmentDistance)) +
+      " px)";
+};
 
 KineticTetherOverlay::KineticTetherOverlay(KineticTetherEngine &engine,
                                            std::string fontName)
-    : engine_(engine), fontName_(std::move(fontName)) {}
+    : presentation_(std::make_unique<Presentation>()), engine_(engine),
+      fontName_(std::move(fontName)) {}
 
 KineticTetherOverlay::~KineticTetherOverlay() = default;
 
 void KineticTetherOverlay::deviceReady(render::RenderDevice &device,
                                        const render::PipelineDesc &pipeline) {
-  canvas_ = std::make_unique<gleditor::Canvas>(&device, fontName_);
+  canvas_ = std::make_unique<gleditor::Canvas>(
+      &device, fontName_.empty() ? "Sans 12" : fontName_);
   canvas_->createPipeline(pipeline, false);
+  presentation_->card.panel.deviceReady(device, pipeline, false);
 }
 
 bool KineticTetherOverlay::busy() const {
@@ -73,85 +91,77 @@ void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas,
   canvas.addRect(p1.x + kRing - kBar, p1.y - kRing, kBar, 2.0F * kRing, col);
 }
 
-void KineticTetherOverlay::drawBlueprintQuad(gleditor::Canvas &canvas,
-                                             RenderState &state,
-                                             const glm::vec2 &pos,
-                                             const bool detached) {
-  constexpr float quadW = 190.0F;
-  constexpr float quadH = 88.0F;
-  const float quadX     = pos.x - (quadW * 0.5F);
-  const float quadY     = pos.y + 16.0F; // Floats above cursor
-
-  canvas.setTag(render::tagKindOverlay, 0);
-
-  // 1. Translucent Blueprint Fill (Ethereal slate)
-  canvas.addRect(quadX, quadY, quadW, quadH, 0x0A101DDE);
-
-  // 2. Glowing Blueprint Border
-  const std::uint32_t borderCol = detached ? 0xFFD700EE : 0x06B6D4CC;
-  const float borderThick       = detached ? 2.0F : 1.5F;
-  canvas.addLine(quadX, quadY, quadX + quadW, quadY, borderThick, borderCol);
-  canvas.addLine(quadX + quadW, quadY, quadX + quadW, quadY + quadH,
-                 borderThick, borderCol);
-  canvas.addLine(quadX + quadW, quadY + quadH, quadX, quadY + quadH,
-                 borderThick, borderCol);
-  canvas.addLine(quadX, quadY + quadH, quadX, quadY, borderThick, borderCol);
-
-  // Corner Bracket Accents
-  constexpr float bracketLen = 8.0F;
-  canvas.addLine(quadX, quadY + quadH, quadX + bracketLen, quadY + quadH, 2.5F,
-                 0xFFFFFFFF);
-  canvas.addLine(quadX, quadY + quadH, quadX, quadY + quadH - bracketLen, 2.5F,
-                 0xFFFFFFFF);
-  canvas.addLine(quadX + quadW, quadY + quadH, quadX + quadW - bracketLen,
-                 quadY + quadH, 2.5F, 0xFFFFFFFF);
-  canvas.addLine(quadX + quadW, quadY + quadH, quadX + quadW,
-                 quadY + quadH - bracketLen, 2.5F, 0xFFFFFFFF);
-
-  // 3. Header
-  const std::string header =
-      detached ? "⟦ SPAWN XANADOC ⟧" : "⟦ BLUEPRINT CARD ⟧";
-  canvas.addText(state, quadX + 8.0F, quadY + quadH - 4.0F, header, borderCol,
-                 0);
-
-  // 4. Preview Text Snippet
-  std::string snippet = engine_.payload().previewText;
-  if (snippet.size() > 22) {
-    snippet = snippet.substr(0, 19) + "...";
-  }
-  canvas.addText(state, quadX + 8.0F, quadY + quadH - 24.0F, snippet,
-                 0xF8FAFCFF, 0);
-
-  // 5. Action Status Prompt
-  const std::string statusPrompt =
-      detached ? "[ RELEASE TO MATERIALIZE ]" : "[ SNAP-BACK ZONE (< 120px) ]";
-  const std::uint32_t statusCol = detached ? 0x10B981FF : 0xEF4444FF;
-  canvas.addText(state, quadX + 8.0F, quadY + 16.0F, statusPrompt, statusCol,
-                 0);
+void KineticTetherOverlay::setConfig(const WorldCardConfig &config) {
+  presentation_->config = config;
 }
-
+std::uint64_t KineticTetherOverlay::accessibilityRevision() const {
+  return presentation_->revision + presentation_->card.revision;
+}
+bool KineticTetherOverlay::performAction(std::uint64_t, gleditor::a11y::Action,
+                                         std::string_view) {
+  return false;
+}
+std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>>
+KineticTetherOverlay::snapshots() const {
+  return presentation_->visible
+             ? std::vector{presentation_->card.panel.snapshot()}
+             : std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>>{};
+}
+void KineticTetherOverlay::describe(gleditor::a11y::Builder &into) {
+  if (!presentation_->visible) return;
+  world_cards::describe(into, presentation_->card.panel, presentation_->matrix,
+                        presentation_->viewport, 1, "Blueprint card",
+                        engine_.payload().previewText);
+}
 void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  auto &p = *presentation_;
   if (!canvas_ || !engine_.busy()) {
+    if (p.visible) {
+      p.visible = false;
+      ++p.revision;
+    }
     return;
   }
-
   engine_.stepPhysics();
-
-  const auto width  = static_cast<float>(ctx.screenWidth);
-  const auto height = static_cast<float>(ctx.screenHeight);
-  // Correct left,right,bottom,top order for a screen-space projection.
-  const auto ortho = glm::ortho( // NOLINT(readability-suspicious-call-argument)
-      0.0F, width, 0.0F, height, -1.0F, 1.0F);
-
-  canvas_->clear();
-
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
+  p.card.configure(metrics, ctx.theme, p.config, fontName_);
   const bool detached = engine_.isDetached();
-  drawTether(*canvas_, ctx.state, engine_.originPos(), engine_.currentPos(),
-             detached);
-  drawBlueprintQuad(*canvas_, ctx.state, engine_.currentPos(), detached);
-
-  canvas_->commit();
-  canvas_->draw(ctx.state, ortho);
+  p.card.content(detached ? "Spawn xanadoc" : "Blueprint card",
+                 engine_.payload().previewText,
+                 detached ? "Release to materialize"
+                          : std::string_view(p.attachedStatus));
+  p.card.prepare();
+  const auto pos    = engine_.currentPos();
+  const auto bounds = world_cards::awayFromPointer(
+      p.card.presentation.size, pos, metrics,
+      std::max(p.card.presentation.gap, metrics.px(1)));
+  p.card.panel.setBounds({0, 0, bounds.width, bounds.height});
+  (void)p.card.panel.prepare(metrics, p.card.presentation.theme);
+  const auto matrix =
+      world_cards::screenMatrix(bounds, {static_cast<float>(ctx.screenWidth),
+                                         static_cast<float>(ctx.screenHeight)});
+  if (!p.visible || p.matrix != matrix || p.detached != detached ||
+      p.card.dirty)
+    ++p.revision;
+  p.visible  = true;
+  p.matrix   = matrix;
+  p.viewport = {static_cast<float>(ctx.screenWidth),
+                static_cast<float>(ctx.screenHeight)};
+  if (!p.geometryReady || p.origin != engine_.originPos() ||
+      p.position != pos || p.detached != detached) {
+    canvas_->clear();
+    drawTether(*canvas_, ctx.state, engine_.originPos(), pos, detached);
+    canvas_->commit();
+    p.geometryReady = true;
+    p.origin        = engine_.originPos();
+    p.position      = pos;
+    p.detached      = detached;
+  }
+  canvas_->draw(ctx.state, glm::ortho(0.F, p.viewport.width, 0.F,
+                                      p.viewport.height, -1.F, 1.F));
+  p.card.panel.draw(ctx.state, p.matrix, p.viewport);
 }
-
 } // namespace xudu

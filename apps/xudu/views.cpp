@@ -1132,40 +1132,64 @@ void Views::publicationDownloadStatus(const std::string &id) {
         note += " (" + std::to_string(downloaded.completedDependencies) + "/" +
                 std::to_string(downloaded.dependencyCount) + " dependencies)";
       if (!downloaded.error.empty()) note += ": " + downloaded.error;
-      form.open("Download publication", std::move(note), {std::move(action)},
-                [this, id](const std::vector<Field> &answers) {
-                  const auto action = answers[0].answer();
-                  if (action == "close") return;
-                  renderer->runWithState([this, id, action](RenderState &) {
-                    try {
-                      if (action == "open") {
-                        const auto [index, version] =
-                            session.openDownloadedPublication(id);
-                        showAlongside(version, 0.0F, index);
-                        activateNewest();
-                        return;
-                      }
-                      if (action == "retry")
-                        session.publicationInbox().retry(id);
-                      if (action == "cancel")
-                        session.publicationInbox().cancel(id);
-                      publicationDownloadStatus(id);
-                    } catch (const std::exception &error) {
-                      // Keep failures in the drawn, accessible form; native
-                      // message boxes are suppressed during headless runs and
-                      // hide retry controls.
-                      Field back;
-                      back.label         = "Action";
-                      back.kind          = gleditor::Form::Kind::Choice;
-                      back.options       = {"Back to download"};
-                      back.submitOnEnter = true;
-                      form.open("Could not open publication", error.what(),
-                                {std::move(back)}, [this, id](const auto &) {
-                                  publicationDownloadStatus(id);
-                                });
-                    }
-                  });
-                });
+      if (wireframeOverlay_) {
+        const auto fraction =
+            downloaded.dependencyCount
+                ? std::optional<float>{static_cast<float>(
+                                           downloaded.completedDependencies) /
+                                       static_cast<float>(
+                                           downloaded.dependencyCount)}
+                : std::nullopt;
+        wireframeOverlay_->setTelemetry(id,
+                                        downloaded.title.empty()
+                                            ? "Publication download"
+                                            : downloaded.title,
+                                        note, fraction);
+      }
+      form.open(
+          "Download publication", std::move(note), {std::move(action)},
+          [this, id](const std::vector<Field> &answers) {
+            const auto action = answers[0].answer();
+            if (action == "close") {
+              renderer->runWithState([this, id](RenderState &) {
+                if (wireframeOverlay_) wireframeOverlay_->clearTelemetry(id);
+              });
+              return;
+            }
+            renderer->runWithState([this, id, action](RenderState &) {
+              try {
+                if (action == "open") {
+                  const auto [index, version] =
+                      session.openDownloadedPublication(id);
+                  if (wireframeOverlay_) wireframeOverlay_->clearTelemetry(id);
+                  showAlongside(version, 0.0F, index);
+                  activateNewest();
+                  return;
+                }
+                if (action == "retry") session.publicationInbox().retry(id);
+                if (action == "cancel") session.publicationInbox().cancel(id);
+                publicationDownloadStatus(id);
+              } catch (const std::exception &error) {
+                // Keep failures in the drawn, accessible form; native
+                // message boxes are suppressed during headless runs and
+                // hide retry controls.
+                Field back;
+                back.label         = "Action";
+                back.kind          = gleditor::Form::Kind::Choice;
+                back.options       = {"Back to download"};
+                back.submitOnEnter = true;
+                form.open("Could not open publication", error.what(),
+                          {std::move(back)}, [this, id](const auto &) {
+                            publicationDownloadStatus(id);
+                          });
+              }
+            });
+          },
+          [this, id] {
+            renderer->runWithState([this, id](RenderState &) {
+              if (wireframeOverlay_) wireframeOverlay_->clearTelemetry(id);
+            });
+          });
     } catch (const std::exception &error) {
       using Field = gleditor::Form::Field;
       Field back;

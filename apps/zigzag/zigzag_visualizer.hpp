@@ -42,6 +42,8 @@
 #include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/world_panel.hpp>
 
 namespace zigzag {
 
@@ -88,6 +90,7 @@ struct CellLayoutMetrics {
   float horizontalPadding{};
   std::string idText;
   std::string badgeText;
+  gleditor::text::FittedText value, title, badge;
 };
 
 struct DimensionVisual {
@@ -142,7 +145,7 @@ public:
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
     // Both only grow, so the sum moves whenever either does.
-    return revision_ + keyboardMoves_.load();
+    return revision_ + projectionRevision_ + keyboardMoves_.load();
   }
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
@@ -577,6 +580,19 @@ private:
     }
   }
 
+  void refreshTypography(const gleditor::FrameContext &);
+  void describeCellBounds(gleditor::a11y::Node &, CellRef) const;
+  [[nodiscard]] bool labelVisible(CellRef cell) const;
+
+public:
+  [[nodiscard]] gleditor::text::ShapingCache::Stats worldShapingStats() const {
+    return shaping_.stats();
+  }
+  [[nodiscard]] std::optional<gleditor::ui::ProjectedPlane>
+  projectedCell(CellRef cell) const;
+  [[nodiscard]] std::size_t visibleWorldLabelCount() const;
+
+private:
   void refreshCellLayouts();
   /// Point the view at the dimensions the home cell links along when it
   /// links along neither of the current two; see bindXuduStore().
@@ -626,6 +642,31 @@ private:
   std::unordered_map<CellID, RenderStateCell> visible_cells_;
   mutable std::unordered_map<CellID, CellLayoutMetrics> cell_layouts_;
   bool cell_layouts_dirty_{true};
+  mutable gleditor::text::ShapingCache shaping_;
+  gleditor::text::FontFacePtr valueFont_, captionFont_, hudFont_;
+  gleditor::ui::UiMetrics uiMetrics_;
+  gleditor::ui::Theme uiTheme_;
+  bool typographyReady_{};
+  std::string valueFontName_, captionFontName_, hudFontName_;
+  std::uint64_t drawnModelRevision_{}, projectionRevision_{}, hudRevision_{};
+  glm::mat4 projectedMatrix_{1};
+  gleditor::ui::Size projectedViewport_;
+  std::unordered_map<CellRef, gleditor::ui::ProjectedPlane> projectedCells_;
+  std::unordered_map<CellRef, unsigned> labelMasks_;
+  std::unordered_map<CellRef, std::uint64_t> accessibilityIds_;
+  std::unordered_map<std::uint64_t, CellRef> accessibilityTargets_;
+  std::string accessibilityDocument_;
+  xanadu::MicroversionId accessibilityVersion_;
+  bool worldMoving_{};
+  std::uint32_t worldPickScope_{};
+  std::uint64_t nextAccessibilityId_{10};
+  std::optional<gleditor::InputArea> hudInputArea_;
+  gleditor::ui::UiMetrics hudMetrics_;
+  std::string hudEditText_, hudCommandText_, hudFeedback_, hudPaletteFilter_;
+  std::size_t hudPaletteSelected_{};
+  std::uint64_t hudKeyboardMoves_{};
+  bool hudPaletteVisible_{}, hudCommandVisible_{}, hudEditing_{};
+  float hudTopClaim_{}, hudBottomClaim_{};
 
   std::chrono::steady_clock::time_point last_frame_time_;
 

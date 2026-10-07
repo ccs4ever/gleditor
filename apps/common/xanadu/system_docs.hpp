@@ -251,6 +251,30 @@ inline constexpr std::string_view kOverviewPageColour = "overview.pageColour";
 inline constexpr std::string_view kOverviewViewportColour =
     "overview.viewportColour";
 inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
+inline constexpr std::string_view kSatelloidCardWidthPx =
+    "satelloidCard.widthPx";
+inline constexpr std::string_view kSatelloidCardHeightPx =
+    "satelloidCard.heightPx";
+inline constexpr std::string_view kSatelloidCardMaxWidthShare =
+    "satelloidCard.maxWidthShare";
+inline constexpr std::string_view kSatelloidCardMaxHeightShare =
+    "satelloidCard.maxHeightShare";
+inline constexpr std::string_view kSatelloidCardMaxLines =
+    "satelloidCard.maxLines";
+inline constexpr std::string_view kTetherCardWidthPx  = "tetherCard.widthPx";
+inline constexpr std::string_view kTetherCardHeightPx = "tetherCard.heightPx";
+inline constexpr std::string_view kTetherCardMaxWidthShare =
+    "tetherCard.maxWidthShare";
+inline constexpr std::string_view kTetherCardMaxHeightShare =
+    "tetherCard.maxHeightShare";
+inline constexpr std::string_view kTetherCardMaxLines = "tetherCard.maxLines";
+inline constexpr std::string_view kHullCardWidthPx    = "hullCard.widthPx";
+inline constexpr std::string_view kHullCardHeightPx   = "hullCard.heightPx";
+inline constexpr std::string_view kHullCardMaxWidthShare =
+    "hullCard.maxWidthShare";
+inline constexpr std::string_view kHullCardMaxHeightShare =
+    "hullCard.maxHeightShare";
+inline constexpr std::string_view kHullCardMaxLines = "hullCard.maxLines";
 inline constexpr std::string_view kQuotationModalWidthPx =
     "quotationModal.widthPx";
 inline constexpr std::string_view kQuotationModalHeightPx =
@@ -1114,6 +1138,16 @@ struct ModalPresentationConfig {
   bool operator==(const ModalPresentationConfig &) const = default;
 };
 
+/// Floating card presentation; font metrics can grow the preferred height.
+struct WorldCardConfig {
+  float widthPx{200.0F};
+  float heightPx{180.0F};
+  float maxWidthShare{0.9F};
+  float maxHeightShare{0.9F};
+  std::uint16_t maxLines{3};
+  bool operator==(const WorldCardConfig &) const = default;
+};
+
 struct UIConfig {
   bool tabBarVisible{true};
   bool statusBarVisible{true};
@@ -1125,6 +1159,9 @@ struct UIConfig {
   OverviewConfig overview;
   PouchPanelConfig pouchPanel;
   StorePanelConfig storePanel;
+  WorldCardConfig satelloidCard;
+  WorldCardConfig tetherCard{190.0F, 88.0F};
+  WorldCardConfig hullCard{260.0F, 46.0F};
   ModalPresentationConfig quotationModal;
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
   ModalPresentationConfig hypertimeModal{640.0F, 460.0F};

@@ -243,7 +243,21 @@ std::optional<std::array<int, 4>> selectionBounds(const fs::path &path) {
     for (int x = 0; x < width; ++x) {
       const auto at = (static_cast<std::size_t>(y) * width + x) * 3;
       const int r = rgb[at], g = rgb[at + 1], b = rgb[at + 2];
-      if (r > 100 && g > 100 && b - r > 40 && b - g > 30) {
+      // Blue HUD labels are legitimate UI. A text selection sits on paper,
+      // so require white paper in the same column beside its line band.
+      const auto onPaper = [&] {
+        constexpr int lineNeighbourhoodPx = 24;
+        for (int offset = 1; offset <= lineNeighbourhoodPx; ++offset)
+          for (const int row : {y - offset, y + offset}) {
+            if (row < 0 || row >= height) continue;
+            const auto pixel = (static_cast<std::size_t>(row) * width + x) * 3;
+            if (rgb[pixel] > 235 && rgb[pixel + 1] > 235 &&
+                rgb[pixel + 2] > 235)
+              return true;
+          }
+        return false;
+      };
+      if (r > 100 && g > 100 && b - r > 40 && b - g > 30 && onPaper()) {
         bounds[0] = std::min(bounds[0], x);
         bounds[1] = std::min(bounds[1], y);
         bounds[2] = std::max(bounds[2], x);
