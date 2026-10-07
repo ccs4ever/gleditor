@@ -171,7 +171,7 @@ struct RenderRegion {
 using RegionId = std::uint16_t;
 
 struct GlyphBatch {
-    // ...
+  // ...
   std::optional<RegionId> region; // none: the whole target at full depth
 };
 ```
@@ -281,29 +281,29 @@ using PlaneId = std::uint32_t;
 struct PlaneState {
   glm::mat4 toWorld{1.0F};
   float opacity{1.0F};
-    bool faceCamera{}; // turn the plane to the viewer; position and scale kept
+  bool faceCamera{}; // turn the plane to the viewer; position and scale kept
   bool visible{true};
   /// When set, toWorld is relative to that plane, which carries this one.
-    std::optional<PlaneId> parent;
+  std::optional<PlaneId> parent;
 };
 
 /// Many retained planes in shared buffers, each drawn with its own state.
 class PlaneSet {
 public:
   PlaneId add(Size size);
-    PlaneSet *remove(PlaneId plane);
+  PlaneSet *remove(PlaneId plane);
 
   /// Rebuild one plane's content. Only that plane's range is uploaded.
-    class Painter; // addRect, addLine, addImage, addText(box, FittedText),
+  class Painter; // addRect, addLine, addImage, addText(box, FittedText),
                  // addBand: a rectangle whose alpha falls off to one edge
   Painter paint(PlaneId plane);
 
   /// Uniforms only: moving, fading and turning a plane uploads nothing.
-    PlaneSet *setState(PlaneId plane, const PlaneState &state);
-    PlaneSet *setPick(PlaneId plane, render::PickingTag tag,
+  PlaneSet *setState(PlaneId plane, const PlaneState &state);
+  PlaneSet *setPick(PlaneId plane, render::PickingTag tag,
                std::shared_ptr<const render::PickSemanticTarget> target);
 
-    void draw(RenderState &state, const glm::mat4 &worldToClip,
+  void draw(RenderState &state, const glm::mat4 &worldToClip,
             const spatial::Viewport &viewport,
             std::optional<render::RegionId> region,
             const LabelLodPolicy &lod);
@@ -362,7 +362,7 @@ struct PageBand {
 };
 struct PagePose {
   glm::mat4 toDocument{1.0F}; // the page's plane, relative to its document
-    float opacity{1.0F};
+  float opacity{1.0F};
   bool visible{true};
   /// Draw only this band of the page, measured from its top: the lines in
   /// it, on a strip of paper. None: the whole page.
@@ -427,10 +427,10 @@ class PaneTree {
 public:
   PaneId root() const noexcept;
   PaneId split(PaneId pane, Axis axis, float firstShare = 0.5F); // returns the new pane
-    PaneTree *close(PaneId pane);
+  PaneTree *close(PaneId pane);
   PaneTree *resize(PaneId pane, float share);
   /// Leaf rectangles for the given bounds, edge-rounded so neighbours meet.
-    void rects(Rect bounds,
+  void rects(Rect bounds,
              gleditor::cpp26::function_ref<void(PaneId, Rect)> visit) const;
   std::span<const PaneId> order() const noexcept; // focus order
 };

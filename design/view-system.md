@@ -542,7 +542,7 @@ ViewManifold *ViewManifold::toss() noexcept {
   derived_.release(empty_); // truncate to the mark taken on the empty arena
   empty_ = derived_.mark();
   ++epoch_;
-    dims_ = {}; // forget the view-owned dimension cells of the old generation
+  dims_ = {}; // forget the view-owned dimension cells of the old generation
   return this;
 }
 ```
@@ -981,7 +981,7 @@ class ViewRegistry {
 public:
   /// Refuses a second descriptor of the same kind (DuplicateViewKind) and a
   /// default chord that is already taken (ChordCollision).
-    std::expected<ViewRegistry *, ViewError> add(ViewDescriptor descriptor);
+  std::expected<ViewRegistry *, ViewError> add(ViewDescriptor descriptor);
   [[nodiscard]] std::span<const ViewDescriptor> views() const noexcept;
   [[nodiscard]] gleditor::cpp26::optional<const ViewDescriptor &>
   find(std::string_view kind) const noexcept;
@@ -1038,7 +1038,7 @@ public:
   [[nodiscard]] std::expected<ViewCellRef, ViewError>
   mintOccurrence(Layer layer, zigzag::CellRef target);
   /// §6.6. Refuses rather than displaces.
-    [[nodiscard]] ViewResult link(Layer layer, ViewCellRef from, ViewDim dim,
+  [[nodiscard]] ViewResult link(Layer layer, ViewCellRef from, ViewDim dim,
                                 zigzag::DimVector dir, ViewCellRef to) noexcept;
   [[nodiscard]] ViewResult
   unlink(Layer layer, ViewCellRef from, ViewDim dim,
@@ -1059,7 +1059,7 @@ public:
   [[nodiscard]] ViewDim packingDim(); // d.packing: the constituents, in lane order
   [[nodiscard]] ViewDim axisStepDim(ViewAxisId axis); // packs along one axis
   [[nodiscard]] std::size_t derivedCellCount() const noexcept;
-    ViewManifold *toss() noexcept; // §6.5
+  ViewManifold *toss() noexcept; // §6.5
 
 private:
   const zigzag::Manifold &base_;
@@ -1221,7 +1221,7 @@ struct PlacedItem {
   Facing facing{Facing::Plane};
   ContentMode content{ContentMode::Full};
   std::uint32_t flags{};
-    std::optional<std::uint32_t> frame; // the PlacedFrame this item sits in
+  std::optional<std::uint32_t> frame; // the PlacedFrame this item sits in
   std::optional<Band> window; // draw only this band of the item (§10.3.2)
 };
 
@@ -1237,11 +1237,11 @@ struct PlacedEdge {
   glm::vec3 a{}, b{};
   EdgeKind kind{};
   std::uint64_t relation{}; // DimRef, or the link's cell
-    float opacity{1.0F};
-    std::optional<std::uint32_t> label; // the PlacedItem that names this edge
+  float opacity{1.0F};
+  std::optional<std::uint32_t> label; // the PlacedItem that names this edge
   /// Strands of one bundle share an id and pass through the same two points
   /// between their ends, where the bundle is gathered.
-    std::optional<std::uint32_t> bundle;
+  std::optional<std::uint32_t> bundle;
   std::array<glm::vec3, 2> gather{};
 };
 
@@ -1252,7 +1252,7 @@ struct PlacedFrame {
   glm::vec3 centre{};
   glm::quat orientation{1.0F, 0.0F, 0.0F, 0.0F};
   float width{}, height{};
-    std::optional<std::uint32_t> parent;
+  std::optional<std::uint32_t> parent;
   std::uint32_t count{}; // what it stands for, when collapsed to a badge
   bool collapsed{};
 };
@@ -1278,10 +1278,10 @@ class LayoutSink {
 public:
   std::uint32_t push(const PlacedItem &item);
   std::uint32_t push(const PlacedFrame &frame);
-    LayoutSink *push(const PlacedEdge &edge);
-    LayoutSink *push(const DropTarget &target);
-    LayoutSink *push(const MotionHint &hint);
-    LayoutSink *clear() noexcept;
+  LayoutSink *push(const PlacedEdge &edge);
+  LayoutSink *push(const DropTarget &target);
+  LayoutSink *push(const MotionHint &hint);
+  LayoutSink *clear() noexcept;
   [[nodiscard]] std::span<const PlacedItem> items() const noexcept;
   [[nodiscard]] std::span<const PlacedFrame> frames() const noexcept;
   [[nodiscard]] std::span<const PlacedEdge> edges() const noexcept;
@@ -1302,7 +1302,7 @@ any other, so they are placed, faded and culled by the same rules.
 
 /// I6: real cells and numbers only. step == 0 is the origin itself.
 struct SliceCursor {
-    zigzag::CellRef origin;          // always a real cell
+  zigzag::CellRef origin;          // always a real cell
   std::optional<ViewAxisId> axis;  // the group axis the cursor has stepped along
   std::int32_t step{};             // signed packs from the origin on that axis
   std::vector<std::uint32_t> lanes; // into nested packs; empty: the pack as a whole
@@ -1317,14 +1317,14 @@ struct SliceCursor {
 cellAt(const ViewManifold &space, const SliceCursor &cursor) noexcept;
 
 struct BindingPreview { // "as if this axis showed that": for a drag in flight
-    ViewAxisId axis{};
+  ViewAxisId axis{};
   BindTarget target;
 };
 
 struct SliceLayoutInput {
   const ViewManifold &space;
   const SliceCursor &cursor;
-    PaneFrame frame;
+  PaneFrame frame;
   Measure measure;
   std::optional<BindingPreview> preview;
   std::uint32_t subview{};        // index into the descriptor's subviews
@@ -1343,7 +1343,7 @@ enum class MoveKind : std::uint8_t {
   Retrieve, // the cell under the cursor becomes the origin
 };
 struct MoveRequest {
-    MoveKind kind{MoveKind::AlongAxis};
+  MoveKind kind{MoveKind::AlongAxis};
   std::optional<ViewAxisId> axis; // for AlongAxis
   zigzag::DimVector direction{zigzag::DimVector::POS};
 };
@@ -1362,7 +1362,7 @@ public:
 
   /// The only phase that may mint, extend the ring order or fill caches.
   /// Runs when the cursor, the epoch, the store or the frame changed.
-    virtual std::expected<SliceView *, ViewError>
+  virtual std::expected<SliceView *, ViewError>
   prepare(ViewManifold &space, const SliceCursor &cursor,
           const PaneFrame &frame, Measure measure) {
     return this;
@@ -1448,7 +1448,7 @@ struct PageCursor {
 
 struct PageLayoutInput {
   const PageCatalog &catalog;
-    PageCursor cursor;
+  PageCursor cursor;
   std::optional<ActiveLink> active;
   PaneFrame frame;
   std::uint32_t subview{};
@@ -1459,7 +1459,7 @@ class PageView : public View {
 public:
   /// Fill caches (the stagger search of §10.4). Mints nothing: a page view
   /// has no view space.
-    virtual PageView *prepare(const PageLayoutInput &in) { return this; }
+  virtual PageView *prepare(const PageLayoutInput &in) { return this; }
   virtual void layout(const PageLayoutInput &in,
                       LayoutSink &out) const noexcept = 0;
   /// How to travel from one cursor to another: MotionHints into @p out.
