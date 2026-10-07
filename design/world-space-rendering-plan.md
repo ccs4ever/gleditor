@@ -20,7 +20,9 @@ planes, and a matrix of its own for every page.
 
 ## 1. Conventions that exist and must not change
 
-Code is cited at commit `af5f1d5`.
+Code is cited at commit `af5f1d5`. The API here follows the conventions of `view-system.md` §8: no
+sentinel values, `function_ref` for callbacks that are not kept, and setters that return their
+object.
 
 | Fact                          | Where                                                                                                                                                                                                                                                                                                  |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -166,11 +168,11 @@ struct RenderRegion {
   /// The slice of the depth range this region's draws occupy. 0 is nearest.
   float nearDepth{0.0F}, farDepth{1.0F};
 };
-using RegionId = std::uint16_t; // 0 is the whole target at full depth
+using RegionId = std::uint16_t;
 
 struct GlyphBatch {
-  // ...
-  RegionId region{0};
+    // ...
+  std::optional<RegionId> region; // none: the whole target at full depth
 };
 ```
 
@@ -178,8 +180,9 @@ struct GlyphBatch {
 // include/gleditor/render/device.hpp
 /// Valid until endFrame(). The table is small and rebuilt each frame.
 virtual RegionId defineRegion(const RenderRegion &region) = 0;
-/// For draws issued immediately rather than recorded as batches.
-virtual void setRegion(RegionId region) = 0;
+/// For draws issued immediately rather than recorded as batches. None is
+/// the whole target. Returns the device, as every setter here does.
+virtual RenderDevice *setRegion(std::optional<RegionId> region) = 0;
 ```
 
 `DeviceCapabilities` gains `regions`. The view and clip rectangles are separate because an embedded
@@ -193,7 +196,7 @@ then. A batch that names its region is right whenever it is replayed.
 ### 3.2 Device scissor
 
 - **OpenGL and GLES.** When the region changes: `glViewport(view…)`, `glEnable(GL_SCISSOR_TEST)`,
-  `glScissor(clip…)`. Both take bottom-up pixels, which is what a region holds. Region 0 disables
+  `glScissor(clip…)`. Both take bottom-up pixels, which is what a region holds. No region disables
   the scissor test and restores the full viewport. `src/render/gl/gl_api.cpp` gains the entry
   points. The state is reset in `beginFrame()`.
 - **Vulkan.** Viewport and scissor are already dynamic state, and each secondary command buffer
@@ -231,7 +234,7 @@ promise. Depth slices need no ordering.
 
 ### 3.4 Tests
 
-`tests/lib/render_region_test.cpp`, against the mocks in `tests/lib/mocks/`: region 0 is the whole
+`tests/lib/render_region_test.cpp`, against the mocks in `tests/lib/mocks/`: no region is the whole
 target; a region is valid for one frame; a batch's region survives recording; clip rectangles are
 clamped. `tests/lib/device_capabilities.cpp` gains the capability.
 
@@ -273,7 +276,7 @@ only for pages.
 namespace gleditor::ui {
 
 using PlaneId = std::uint32_t;
-inline constexpr PlaneId noPlane = ~PlaneId{0};
+
 
 struct PlaneState {
   glm::mat4 toWorld{1.0F};
@@ -281,14 +284,14 @@ struct PlaneState {
     bool faceCamera{}; // turn the plane to the viewer; position and scale kept
   bool visible{true};
   /// When set, toWorld is relative to that plane, which carries this one.
-  PlaneId parent{noPlane};
+    std::optional<PlaneId> parent;
 };
 
 /// Many retained planes in shared buffers, each drawn with its own state.
 class PlaneSet {
 public:
   PlaneId add(Size size);
-  void remove(PlaneId plane);
+    PlaneSet *remove(PlaneId plane);
 
   /// Rebuild one plane's content. Only that plane's range is uploaded.
     class Painter; // addRect, addLine, addImage, addText(box, FittedText),
@@ -296,12 +299,13 @@ public:
   Painter paint(PlaneId plane);
 
   /// Uniforms only: moving, fading and turning a plane uploads nothing.
-  void setState(PlaneId plane, const PlaneState &state);
-  void setPick(PlaneId plane, render::PickingTag tag,
+    PlaneSet *setState(PlaneId plane, const PlaneState &state);
+    PlaneSet *setPick(PlaneId plane, render::PickingTag tag,
                std::shared_ptr<const render::PickSemanticTarget> target);
 
-  void draw(RenderState &state, const glm::mat4 &worldToClip,
-            const spatial::Viewport &viewport, render::RegionId region,
+    void draw(RenderState &state, const glm::mat4 &worldToClip,
+            const spatial::Viewport &viewport,
+            std::optional<render::RegionId> region,
             const LabelLodPolicy &lod);
 
   /// The plane's projected box, for a caller's accessibility bounds.
@@ -353,29 +357,35 @@ A page owns its placement, as a document owns its own:
 
 ```cpp
 // include/gleditor/doc.hpp, on Page
+struct PageBand {
+  float topPx{}, bottomPx{};
+};
 struct PagePose {
   glm::mat4 toDocument{1.0F}; // the page's plane, relative to its document
-  float opacity{1.0F};
+    float opacity{1.0F};
   bool visible{true};
+  /// Draw only this band of the page, measured from its top: the lines in
+  /// it, on a strip of paper. None: the whole page.
+  std::optional<PageBand> band;
 };
 
 /// Where the document's own flow would put this page. Always available.
 [[nodiscard]] PagePose flowPose() const;
 /// Where the page is. The flow pose until someone says otherwise.
 [[nodiscard]] const PagePose &pose() const noexcept;
-void setPose(const PagePose &pose);
+Page *setPose(const PagePose &pose);
 /// Tween from the current pose; the same timeline documents move on.
-void animatePoseTo(ch::Timeline &timeline, const PagePose &target,
-                   double seconds, double delay = 0.0);
+Page *animatePoseTo(ch::Timeline &timeline, const PagePose &target,
+                    double seconds, double delay = 0.0);
 /// Back to the flow.
-void clearPose();
+Page *clearPose();
 ```
 
 ```cpp
 // on Doc
 /// Pages to build first, nearest need first. The default is the pages near
 /// the viewport in the flow; a caller that has moved pages knows better.
-void setBuildPriority(std::span<const std::size_t> pages);
+Doc *setBuildPriority(std::span<const std::size_t> pages);
 ```
 
 - A page with no pose set behaves exactly as today, and so does a document none of whose pages has
@@ -384,6 +394,9 @@ void setBuildPriority(std::span<const std::size_t> pages);
   (`doc.hpp:948-956`), the caret, selection, hit testing. They compose
   `modelMatrix() * page->getModel()` today, so they keep doing so and the page's matrix is what
   changed. A caret is therefore where its page is.
+- A band draws a sub-range of the page's glyph instances — a batch already names an offset and a
+  count (`GlyphBatch`) — and a strip of paper behind them. The page's text, caret and picking are
+  unchanged; it is the same page, seen through a slot.
 - Opacity is the per-draw uniform a page batch already has (`DrawUniforms::opacity`), multiplied by
   the document's.
 - The renderer sorts *documents* back to front today (`src/renderer.cpp`, before `doc->collect`).
@@ -400,7 +413,8 @@ frame of reference.
 so `doc_gap_test.cpp` and `onion_skin_test.cpp` hold unchanged; a page given a pose is drawn,
 picked, and has its caret, where the pose puts it; moving the document moves a posed page with it
 and leaves its pose unchanged; `clearPose()` returns it to the flow; an invisible page produces no
-batch; `setBuildPriority` changes build order; translucent pages are drawn back to front.
+batch; a banded page draws only the lines inside its band and is picked only there;
+`setBuildPriority` changes build order; translucent pages are drawn back to front.
 
 ## 7. Pane tree (addition)
 
@@ -413,10 +427,11 @@ class PaneTree {
 public:
   PaneId root() const noexcept;
   PaneId split(PaneId pane, Axis axis, float firstShare = 0.5F); // returns the new pane
-  void close(PaneId pane);
-  void resize(PaneId pane, float share);
+    PaneTree *close(PaneId pane);
+  PaneTree *resize(PaneId pane, float share);
   /// Leaf rectangles for the given bounds, edge-rounded so neighbours meet.
-  void rects(Rect bounds, std::vector<std::pair<PaneId, Rect>> &out) const;
+    void rects(Rect bounds,
+             gleditor::cpp26::function_ref<void(PaneId, Rect)> visit) const;
   std::span<const PaneId> order() const noexcept; // focus order
 };
 } // namespace gleditor::ui
@@ -464,3 +479,5 @@ about what a region means. Every step passes `make test`, `make lint`, and
 - 2026-10-07 — Initial plan.
 - 2026-10-07 — Pages get their own poses in place of an arrangement object (§6); `PlaneSet` gains
   parent planes and soft bands (§5).
+- 2026-10-07 — No sentinels, chaining setters and `function_ref` visitors throughout; a page pose
+  can carry a band, so a page can be shown as a window round a passage.

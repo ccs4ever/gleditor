@@ -249,7 +249,8 @@ Each is one testable sentence. IDs are stable; §20 uses them.
 - **V-R31.** A page view MUST place each page individually: position, orientation, size, opacity.
 - **V-R32.** The base view MUST flow a document's pages vertically and documents horizontally when
   no link is active, and MUST bring the pages that hold an active link's ends together, aligned at
-  the linked passages, without overlap.
+  the linked passages. Pages MAY overlap, and a page MAY be shown only round its passage, when the
+  ends cannot otherwise be seen in one pane; a linked passage MUST never be covered.
 - **V-R33.** A page that flies MUST leave a marker in its home place and a tether to it.
 - **V-R34.** The stacked vanishing view MUST stagger a document's pages along a line receding in
   depth, at the direction that maximises the legible text of the current page and its neighbours.
@@ -297,7 +298,8 @@ Each is one testable sentence. IDs are stable; §20 uses them.
 - **V-R52.** The selector MUST open round the accursed cell in three tiers reached with the z
   movement keys — groups with their members, dimensions at hand (most used, most likely, pouch), and
   every dimension — and an item activated there MUST be bound by pressing a binding point's name.
-- **V-R53.** "Most used" and "most likely" MUST be pure functions of recorded activity.
+- **V-R53.** "Most used" and "most likely" MUST be pure functions of recorded activity, and movement
+  MUST be recorded as condensed runs, never as a record per step.
 - **V-R54.** The compass MUST show every binding point and what it shows, and MUST be a drop target.
 - **V-R55.** A pack MUST be drawn as one glued thing with its parts demarcated, and MUST move as
   one.
@@ -536,11 +538,12 @@ tossing at every cursor position of the worked examples and re-deriving the same
 ### 6.5 The toss
 
 ```cpp
-void ViewManifold::toss() noexcept {
+ViewManifold *ViewManifold::toss() noexcept {
   derived_.release(empty_); // truncate to the mark taken on the empty arena
   empty_ = derived_.mark();
   ++epoch_;
-  dims_ = {}; // forget the view-owned dimension cells of the old generation
+    dims_ = {}; // forget the view-owned dimension cells of the old generation
+  return this;
 }
 ```
 
@@ -580,7 +583,7 @@ a `const` accessor for a count it already keeps for `Mark`.
 
 ```cpp
 // apps/common/xanadu/view/view_manifold.hpp
-[[nodiscard]] std::expected<void, ViewError>
+[[nodiscard]] ViewResult // std::expected<ViewManifold *, ViewError>
 ViewManifold::link(Layer layer, ViewCellRef from, ViewDim dim, zigzag::DimVector dir,
                    ViewCellRef to) noexcept;
 ```
@@ -592,11 +595,11 @@ is not a view cell of that layer's arena (`RealCellInViewLink`); `from` already 
 view, where two claimants for one slot is a bug in the derivation. Unlinking is the same call with
 no `to`. Strategies and views are handed a `ViewManifold &` and have no other way to write.
 
-`verifyViewSpace(const ViewManifold &)` returns every violation it finds of: I3; links that are not
-two-sided; a link whose key or far end is not a view cell of the same arena; an occurrence whose
-handle is not a real cell of the base or a live group; a group reachable from itself; a `d.binds`,
-`d.dim-group`, `d.pack` or `d.packing` rank of the wrong shape. Every test that mutates a view space
-calls it before asserting anything else.
+`verifyViewSpace(const ViewManifold &, report)` reports every violation it finds of: I3; links that
+are not two-sided; a link whose key or far end is not a view cell of the same arena; an occurrence
+whose handle is not a real cell of the base or a live group; a group reachable from itself; a
+`d.binds`, `d.dim-group`, `d.pack` or `d.packing` rank of the wrong shape. Every test that mutates a
+view space calls it before asserting anything else.
 
 ### 6.7 Derivation is windowed
 
@@ -696,18 +699,21 @@ registered as a view is, and a binding point names one.
 **Spatial.** A view gives each spatial point a direction (`axisDirection`, §8.5). Stretch vanishing
 and the pack view put `x` and `y` in the plane and `z` in depth; all-dim walk makes them spokes.
 
-**Subspace.** The space a `u` neighbour opens is an embedded placement (§11.5) of the same view,
-rooted at that neighbour and drawn in the cell's plane as an inset. Stepping posward on `u` moves
-the cursor into it and the camera with it; stepping negward comes back out. A cell can so be the
-door to a cluster that would not fit, or would not make sense, in the space the cell itself is in.
+**Subspace.** A cell with a neighbour on the dimension bound to `u` shows that neighbour's cluster
+as an inset 3-D space inside itself: an embedded placement (§11.5) of the same view, rooted at the
+neighbour. A step posward zooms into the inset until it is the scene; a step negward zooms back out
+of the containing cell. The zoom is the transition: nothing is cut to, so the reader sees which cell
+the new space is inside. While inside, a band round the periphery of the pane shows the next space
+along `u` — what one more step posward would enter — and the rim of the containing cell stays at the
+pane's edge as the way back (`subspace.rimBand`). A cell can so be the door to a cluster that would
+not fit, or would not make sense, in the space the cell itself is in.
 
-**Hypertime.** A step on `t` moves the cursor through time. If a history rank such as `d.version` is
-bound there, it is walked like any dimension. If nothing is bound, a step goes to the previous or
-next version of the slice in which the accursed cell changed (`Manifold::historyOf`,
-`manifold.hpp:497`), and the placement shows the slice as it was then. A ref is an operation index
-and means the same cell in every version, so the cursor and the bindings carry across: the host
-builds the view space over that version's manifold and replays the bindings by ref. What it costs to
-have a manifold for another version at hand is VU12.
+**Hypertime.** A step on `t` moves through time. If a history rank such as `d.version` is bound
+there, it is walked like any dimension. With nothing bound the meaning is still open (VU12). The
+leading candidate is the slice as a whole at the previous hypertime operation, and at the next for a
+step posward: the placement shows the state of every cell as it was then. A ref is an operation
+index and means the same cell in every version, so the cursor and the bindings would carry across;
+the host would build the view space over that state's manifold and replay the bindings by ref.
 
 A point whose role a view does not present is still bound, still on the compass and still moves the
 cursor; all-dim walk shows its neighbours on the rings, badged with the point's name.
@@ -793,41 +799,108 @@ point's name — `x`, `y`, `z`, `u`, `t` — binds it there and closes the selec
 item can instead be dragged to the compass. `Escape` closes without binding.
 
 The selector is laid out in the engine as a pure function of the binding arena, the ranking and its
-own cursor (`selector.hpp`), emits the same records as a view, and is drawn by the same presenter in
-the world round the cell. It needs no chrome of its own.
+own cursor, emits the same records as a view, and is drawn by the same presenter in the world round
+the cell. It needs no chrome of its own.
+
+```cpp
+// selector.hpp
+enum class SelectorTier : std::uint8_t { Groups, AtHand, Everything };
+struct SelectorCursor {
+  SelectorTier tier{SelectorTier::AtHand};
+  std::uint32_t ring{}, index{};
+  std::optional<SubjectId> armed; // activated, waiting for a point's name
+};
+struct SelectorInput {
+  const ViewManifold &space;
+  zigzag::CellRef accursed;
+  SelectorCursor cursor;
+  PaneFrame frame;
+  Measure measure;
+  std::span<const RankedDimension> ranking; // §7.8
+};
+struct SelectorLayout {
+  /// What the keys 0 to 9 activate. Ten is the number of digit keys, so the
+  /// bound is a fact and inplace_vector is the right container.
+  gleditor::cpp26::inplace_vector<SubjectId, 10> quick;
+};
+[[nodiscard]] SelectorLayout layoutSelector(const SelectorInput &in,
+                                            LayoutSink &out) noexcept;
+[[nodiscard]] SelectorCursor moveSelector(const SelectorInput &in,
+                                          MoveRequest request) noexcept;
+```
 
 ### 7.8 Most used and most likely
 
-Both orders are computed from what the reader has done, by a pure function:
+Both orders are computed from what the reader has done. What is recorded, and how much, matters more
+than the arithmetic.
+
+**Movement is condensed before it is recorded.** A reader crosses cells many times a second. One
+activity record per step would bury the activity store in noise and make every later reading of it
+slower. So steps are not recorded. A placement accumulates the run in progress in memory, and when
+the run *settles* it appends one record — a **walk summary**:
+
+- where the run began and where it ended, as real cells;
+- for each dimension moved along, how many steps;
+- for each ordered pair of dimensions, how many times the second followed the first.
+
+A run settles when the reader pauses for `activity.settleMs`, or does anything that is not a step:
+edits, binds, follows a link, opens the selector, changes view or pane. A step that is undone within
+`activity.bounceMs` — out and straight back — is dropped from the run as a slip, not counted twice.
+The number of records is then the number of times the reader *stopped somewhere*, not the number of
+cells passed, and the pairs are exactly what the model below needs, already counted. A walk summary
+is also the unit a visit already is: one completed transition, to the place the reader settled.
 
 ```cpp
 // dimension_ranking.hpp
-/// A completed step along a dimension, or a binding of it.
-struct DimensionEvent {
-  zigzag::DimRef dimension{zigzag::noCell};
-  std::uint64_t ordinal{}; // position in the reader's activity, oldest first
+struct DimensionSteps {
+  zigzag::DimRef dimension;
+  std::uint32_t steps{};
 };
+struct DimensionChange {
+  zigzag::DimRef from, to;
+  std::uint32_t times{};
+};
+/// One settled run of movement, condensed.
+struct WalkSummary {
+  std::uint64_t ordinal{}; // position among the reader's runs, oldest first
+  zigzag::CellRef began, ended;
+  std::span<const DimensionSteps> steps;
+  std::span<const DimensionChange> changes;
+};
+
+/// Accumulates the run in progress. Pure state: time comes in as an argument.
+class WalkRecorder {
+public:
+  WalkRecorder *step(zigzag::CellRef from, zigzag::CellRef to,
+                     zigzag::DimRef dimension, std::uint64_t atMs);
+  /// The run so far, if it has any steps left after slips are dropped.
+  [[nodiscard]] std::optional<WalkSummary> settle();
+};
+
 struct RankedDimension {
-  zigzag::DimRef dimension{zigzag::noCell};
+  zigzag::DimRef dimension;
   float used{};   // how much, lately
   float likely{}; // how probably next, here
 };
-/// Pure. @p present is the dimensions the accursed cell is linked on.
-void rankDimensions(std::span<const DimensionEvent> history,
-                    std::span<const zigzag::DimRef> present,
-                    std::vector<RankedDimension> &out);
+/// Pure. @p last is the dimension most recently moved along, if any;
+/// @p present is the dimensions the accursed cell is linked on.
+void rankDimensions(
+    std::span<const WalkSummary> history, std::optional<zigzag::DimRef> last,
+    std::span<const zigzag::DimRef> present,
+    gleditor::cpp26::function_ref<void(const RankedDimension &)> out);
 ```
 
-- **Used.** Each event of a dimension counts, and a count halves every `rank.halfLife` events of
-  age, so "most used" means lately without forgetting the past.
+- **Used.** A dimension's steps count, and a count halves every `rank.halfLife` runs of age, so
+  "most used" means lately without forgetting the past.
 - **Likely.** A first-order Markov model: for the dimension the reader used last, how often each
-  dimension came next, with the same decay, smoothed towards "used" by `rank.smoothing` so an unseen
-  pair is unlikely and not impossible. A dimension the accursed cell is actually linked on is
+  dimension followed it, with the same decay, smoothed towards "used" by `rank.smoothing` so an
+  unseen pair is unlikely and not impossible. A dimension the accursed cell is actually linked on is
   weighted up by `rank.presentBoost`, because the likeliest next move is one that is possible.
 
-The model is a product of the activity log and is rebuilt from it; nothing else is stored. That
-needs the log to say which dimension a step followed, which a `Visit` does not record today. Until
-it does, the events of the current session are used (VU5).
+The model is a product of the walk summaries and is rebuilt from them; nothing else is stored. Two
+things are still open. The store grows by a record per settled run, which is slow but unbounded, so
+old summaries may need folding into one aggregate per slice (VU13). And the summaries need a home in
+the activity store's own structure, which is that store's design to make (VU5).
 
 ### 7.9 The compass
 
@@ -858,6 +931,18 @@ ______________________________________________________________________
 
 Declarations are normative in shape and naming; bodies are not shown. Everything in §8.1 to §8.7 is
 in `apps/common/xanadu/view/`, namespace `xanadu::view`.
+
+Three conventions hold throughout, here and in the rendering plan:
+
+- **No sentinels.** "No cell", "no axis", "no frame" are `std::optional`, never a reserved value.
+  `zigzag::noCell` belongs to the wire and the disk and does not appear in this API. A field that
+  must always have a value has no default and is given one where the object is made.
+- **The C++26 facilities, from `<gleditor/cpp26*.hpp>`.** A callback that is called and not kept is
+  a `function_ref`, so reporting, visiting and measuring allocate nothing. A container whose bound
+  is a fact of the design is an `inplace_vector` — ten quick keys, eight corners of a frustum. A
+  bound that is the reader's — lanes, binding points, group depth, pages — is never one.
+- **Setters chain.** A function that changes an object and has nothing else to return gives back the
+  object, as `ArenaManifold` does; one that can refuse gives back `std::expected` of the object.
 
 ### 8.1 Views and the registry
 
@@ -896,7 +981,7 @@ class ViewRegistry {
 public:
   /// Refuses a second descriptor of the same kind (DuplicateViewKind) and a
   /// default chord that is already taken (ChordCollision).
-  std::expected<void, ViewError> add(ViewDescriptor descriptor);
+    std::expected<ViewRegistry *, ViewError> add(ViewDescriptor descriptor);
   [[nodiscard]] std::span<const ViewDescriptor> views() const noexcept;
   [[nodiscard]] gleditor::cpp26::optional<const ViewDescriptor &>
   find(std::string_view kind) const noexcept;
@@ -928,12 +1013,13 @@ enum class Layer : std::uint8_t { Binding, Derived };
 /// A view cell and the generation it belongs to. Binding cells are epoch 0
 /// for the placement's life; a derived cell is valid only in its own epoch.
 struct ViewCellRef {
-  zigzag::CellRef ref{zigzag::noCell};
+  zigzag::CellRef ref; // always a cell; "no cell" is an empty optional
   ViewEpoch epoch{};
   Layer layer{Layer::Derived};
   bool operator==(const ViewCellRef &) const = default;
 };
 using ViewDim = ViewCellRef; // a view-owned dimension is a view cell
+using ViewResult = std::expected<class ViewManifold *, ViewError>;
 
 class ViewManifold {
 public:
@@ -952,10 +1038,9 @@ public:
   [[nodiscard]] std::expected<ViewCellRef, ViewError>
   mintOccurrence(Layer layer, zigzag::CellRef target);
   /// §6.6. Refuses rather than displaces.
-  [[nodiscard]] std::expected<void, ViewError>
-  link(Layer layer, ViewCellRef from, ViewDim dim, zigzag::DimVector dir,
-       ViewCellRef to) noexcept;
-  [[nodiscard]] std::expected<void, ViewError>
+    [[nodiscard]] ViewResult link(Layer layer, ViewCellRef from, ViewDim dim,
+                                zigzag::DimVector dir, ViewCellRef to) noexcept;
+  [[nodiscard]] ViewResult
   unlink(Layer layer, ViewCellRef from, ViewDim dim,
          zigzag::DimVector dir) noexcept;
 
@@ -974,7 +1059,7 @@ public:
   [[nodiscard]] ViewDim packingDim(); // d.packing: the constituents, in lane order
   [[nodiscard]] ViewDim axisStepDim(ViewAxisId axis); // packs along one axis
   [[nodiscard]] std::size_t derivedCellCount() const noexcept;
-  void toss() noexcept; // §6.5
+    ViewManifold *toss() noexcept; // §6.5
 
 private:
   const zigzag::Manifold &base_;
@@ -989,8 +1074,10 @@ struct ViewSpaceViolation {
   ViewCellRef cell;
   std::string_view rule; // "I3", "two-sided", "rank-shape", ...
 };
-[[nodiscard]] std::vector<ViewSpaceViolation>
-verifyViewSpace(const ViewManifold &space);
+/// Calls @p report for each violation and answers how many there were.
+std::size_t verifyViewSpace(
+    const ViewManifold &space,
+    gleditor::cpp26::function_ref<void(const ViewSpaceViolation &)> report);
 ```
 
 A view reads real structure from `base()` with the existing `CellGraph` tools and view structure
@@ -1002,36 +1089,37 @@ joins a real cell to a view cell (§6.2).
 ```cpp
 // view_binding.hpp
 using ViewAxisId = std::uint32_t; // position on the d.axes rank
-inline constexpr ViewAxisId noAxis = ~ViewAxisId{0};
+
 /// A real dimension cell, or a group cell of this placement's binding arena.
 using BindTarget = zigzag::CellRef;
+using AxisResult = std::expected<class ViewAxisSet *, ViewError>;
 
 class ViewAxisSet {
 public:
   // -- axes ----------------------------------------------------------------
   [[nodiscard]] std::size_t axisCount() const noexcept; // not a cap
   ViewAxisId addAxis();
-  std::expected<void, ViewError> removeAxis(ViewAxisId axis);
+  AxisResult removeAxis(ViewAxisId axis);
   /// Replace what the axis shows. The target's other axes are left alone.
-  std::expected<void, ViewError> bind(ViewAxisId axis, BindTarget target);
-  std::expected<void, ViewError> unbind(ViewAxisId axis);
-  std::expected<void, ViewError> swap(ViewAxisId first, ViewAxisId second);
+  AxisResult bind(ViewAxisId axis, BindTarget target);
+  AxisResult unbind(ViewAxisId axis);
+  AxisResult swap(ViewAxisId first, ViewAxisId second);
   [[nodiscard]] std::optional<BindTarget> shown(ViewAxisId axis) const noexcept;
   [[nodiscard]] bool isGroup(BindTarget target) const noexcept;
 
   // -- groups --------------------------------------------------------------
   std::expected<BindTarget, ViewError>
   createGroup(std::string_view name, std::span<const BindTarget> members);
-  std::expected<void, ViewError> renameGroup(BindTarget group,
+  AxisResult renameGroup(BindTarget group,
                                              std::string_view name);
-  std::expected<void, ViewError> insertMember(BindTarget group,
+  AxisResult insertMember(BindTarget group,
                                               std::size_t position,
                                               BindTarget member);
-  std::expected<void, ViewError> removeMember(BindTarget group,
+  AxisResult removeMember(BindTarget group,
                                               std::size_t position);
-  std::expected<void, ViewError> moveMember(BindTarget group, std::size_t from,
+  AxisResult moveMember(BindTarget group, std::size_t from,
                                             std::size_t to);
-  std::expected<void, ViewError> deleteGroup(BindTarget group);
+  AxisResult deleteGroup(BindTarget group);
   [[nodiscard]] std::size_t memberCount(BindTarget group) const noexcept;
   [[nodiscard]] std::optional<BindTarget>
   member(BindTarget group, std::size_t position) const noexcept;
@@ -1041,7 +1129,7 @@ public:
   std::size_t ringPlace(zigzag::DimRef dimension);
   [[nodiscard]] std::optional<std::size_t>
   ringPlaceIfKnown(zigzag::DimRef dimension) const noexcept;
-  std::expected<void, ViewError> moveInRing(zigzag::DimRef dimension,
+  AxisResult moveInRing(zigzag::DimRef dimension,
                                             std::size_t place);
 
   // -- who uses what: scans of a handful of cells --------------------------
@@ -1115,7 +1203,12 @@ enum ItemFlags : std::uint32_t {
   itemGlow     = 1U << 4, // a soft band whose opacity is an intensity
   itemTinted   = 1U << 5, // face tinted by the strand that joins it
 };
-inline constexpr std::uint32_t noIndex = ~std::uint32_t{0};
+
+
+/// A band of an item's own height, measured from its top.
+struct Band {
+  float top{}, bottom{};
+};
 
 /// An item or frame that names a frame is placed relative to it, and moves
 /// with it: a pack carries its parts, a document carries its pages.
@@ -1128,7 +1221,8 @@ struct PlacedItem {
   Facing facing{Facing::Plane};
   ContentMode content{ContentMode::Full};
   std::uint32_t flags{};
-  std::uint32_t frame{noIndex}; // the PlacedFrame this item sits in
+    std::optional<std::uint32_t> frame; // the PlacedFrame this item sits in
+  std::optional<Band> window; // draw only this band of the item (§10.3.2)
 };
 
 enum class EdgeKind : std::uint8_t {
@@ -1144,11 +1238,11 @@ struct PlacedEdge {
   EdgeKind kind{};
   std::uint64_t relation{}; // DimRef, or the link's cell
     float opacity{1.0F};
-  std::uint32_t label{noIndex}; // the PlacedItem that names this edge
+    std::optional<std::uint32_t> label; // the PlacedItem that names this edge
   /// Strands of one bundle share an id and pass through the same two points
   /// between their ends, where the bundle is gathered.
-  std::uint32_t bundle{noIndex};
-  glm::vec3 gatherA{}, gatherB{};
+    std::optional<std::uint32_t> bundle;
+  std::array<glm::vec3, 2> gather{};
 };
 
 /// A container drawn round other items: a pack, a document, a deck. Its own
@@ -1158,14 +1252,14 @@ struct PlacedFrame {
   glm::vec3 centre{};
   glm::quat orientation{1.0F, 0.0F, 0.0F, 0.0F};
   float width{}, height{};
-  std::uint32_t parent{noIndex};
+    std::optional<std::uint32_t> parent;
   std::uint32_t count{}; // what it stands for, when collapsed to a badge
   bool collapsed{};
 };
 
 /// Where a dragged edge may be dropped: an axis, as a segment with a radius.
 struct DropTarget {
-  ViewAxisId axis{noAxis};
+  ViewAxisId axis{};
   glm::vec3 a{}, b{};
   float radius{};
 };
@@ -1184,10 +1278,10 @@ class LayoutSink {
 public:
   std::uint32_t push(const PlacedItem &item);
   std::uint32_t push(const PlacedFrame &frame);
-  void push(const PlacedEdge &edge);
-  void push(const DropTarget &target);
-  void push(const MotionHint &hint);
-  void clear() noexcept;
+    LayoutSink *push(const PlacedEdge &edge);
+    LayoutSink *push(const DropTarget &target);
+    LayoutSink *push(const MotionHint &hint);
+    LayoutSink *clear() noexcept;
   [[nodiscard]] std::span<const PlacedItem> items() const noexcept;
   [[nodiscard]] std::span<const PlacedFrame> frames() const noexcept;
   [[nodiscard]] std::span<const PlacedEdge> edges() const noexcept;
@@ -1208,8 +1302,8 @@ any other, so they are placed, faded and culled by the same rules.
 
 /// I6: real cells and numbers only. step == 0 is the origin itself.
 struct SliceCursor {
-  zigzag::CellRef origin{zigzag::noCell};
-  ViewAxisId axis{noAxis};         // the group axis the cursor has stepped along
+    zigzag::CellRef origin;          // always a real cell
+  std::optional<ViewAxisId> axis;  // the group axis the cursor has stepped along
   std::int32_t step{};             // signed packs from the origin on that axis
   std::vector<std::uint32_t> lanes; // into nested packs; empty: the pack as a whole
   /// All-dim walk: the selected spoke, a dimension and a direction (§9.2.6).
@@ -1223,8 +1317,8 @@ struct SliceCursor {
 cellAt(const ViewManifold &space, const SliceCursor &cursor) noexcept;
 
 struct BindingPreview { // "as if this axis showed that": for a drag in flight
-  ViewAxisId axis{noAxis};
-  BindTarget target{zigzag::noCell};
+    ViewAxisId axis{};
+  BindTarget target;
 };
 
 struct SliceLayoutInput {
@@ -1249,8 +1343,8 @@ enum class MoveKind : std::uint8_t {
   Retrieve, // the cell under the cursor becomes the origin
 };
 struct MoveRequest {
-  MoveKind kind{MoveKind::AlongAxis};
-  ViewAxisId axis{noAxis};
+    MoveKind kind{MoveKind::AlongAxis};
+  std::optional<ViewAxisId> axis; // for AlongAxis
   zigzag::DimVector direction{zigzag::DimVector::POS};
 };
 struct MoveOutcome {
@@ -1268,10 +1362,10 @@ public:
 
   /// The only phase that may mint, extend the ring order or fill caches.
   /// Runs when the cursor, the epoch, the store or the frame changed.
-  virtual std::expected<void, ViewError>
+    virtual std::expected<SliceView *, ViewError>
   prepare(ViewManifold &space, const SliceCursor &cursor,
           const PaneFrame &frame, Measure measure) {
-    return {};
+    return this;
   }
 
   /// Pure (V-R2).
@@ -1293,7 +1387,7 @@ real cell, and hands it to the existing edit path. Keeping a pack is explicit an
 ```cpp
 /// Mints the pack as real structure by zigzag::promote(), which refuses
 /// above its budget. Never called by a view, a move or a layout.
-[[nodiscard]] std::expected<void, ViewError>
+[[nodiscard]] std::expected<xanadu::Store *, ViewError>
 promotePack(const ViewManifold &space, ViewCellRef container,
             xanadu::Store &store, xanadu::MicroversionId parent);
 ```
@@ -1365,7 +1459,7 @@ class PageView : public View {
 public:
   /// Fill caches (the stagger search of §10.4). Mints nothing: a page view
   /// has no view space.
-  virtual void prepare(const PageLayoutInput &in) {}
+    virtual PageView *prepare(const PageLayoutInput &in) { return this; }
   virtual void layout(const PageLayoutInput &in,
                       LayoutSink &out) const noexcept = 0;
   /// How to travel from one cursor to another: MotionHints into @p out.
@@ -1990,7 +2084,7 @@ read from a distance. Where a strand joins a constituent, that constituent's fac
 the strand's colour (`itemTinted`); when the join lies in front of the face from where the camera
 is, the tint goes to the border instead, so the text is not washed. Each strand is a `PlacedEdge` of
 kind `Strand` whose `relation` is its dimension; the strands of one bundle share a `bundle` id and
-the two points `gatherA` and `gatherB` where they run together.
+the two `gather` points where they run together.
 
 **The spread.** A glued pack hides which part is which. The spread shows it: the lanes move apart by
 `pack.spreadGap`, the strands run separately instead of gathering, and in the room that opens each
@@ -2115,12 +2209,24 @@ When a link or a transclusion is active, the pages that hold its ends come toget
   and a `CoalesceStrategy` finds positions that best satisfy the ties.
 - **What "best fit" means.** Over the participants' positions, minimise the sum over ties of the
   squared height difference between the two passages' centres and the squared difference between the
-  pages' horizontal gap and `page.base.coalesceGap`, with no two participants overlapping. Level
-  passages a small gap apart is what lets both ends be read in one glance.
+  pages' horizontal gap and `page.base.coalesceGap`, with no participant covering another's passage.
+  Level passages a small gap apart is what lets both ends be read in one glance.
 - **In front of the row.** Participants are lifted towards the viewer by `page.base.liftDepth`, so
   they pass in front of the columns they leave and cannot collide with pages that stayed. A page
   that flies moves by its own matrix; its document's frame does not move, and the rest of the
   document stays where it was.
+- **When they do not all fit.** If the participants fit side by side at a readable size, they are
+  placed whole and do not overlap. A link with many ends, or ends on pages too large to show
+  together, cannot be shown that way in one pane. Then overlap is allowed, and used: the
+  participants nearest the anchor in tie order stay whole for as long as they fit, and each of the
+  rest is shown as a **window** — only the band of the page round its passage,
+  `page.base.bandContext` lines either side — stacked in tie order beside the anchor's passage. A
+  windowed page is still its own page, with its own text and caret, drawn through
+  `PlacedItem::window`; it is the page-sized form of what a satelloid does today, gliding a proxy
+  into reading alignment beside a line (`apps/xudu/satelloid.hpp`). Participants, whole or windowed,
+  stand in front of the row and may cover pages that are not taking part, and the paper of one may
+  cover the paper of another. A linked passage is never covered. If even the windows outrun the
+  pane, the stack carries a count and scrolls.
 - **What stays behind.** Each page that flew leaves a ghost marker in its home place (`itemGhost`)
   and a `Tether` edge from the ghost to the page (V-R33). Pages that do not take part stay at home
   at `page.base.contextOpacity`.
@@ -2172,9 +2278,10 @@ expressed as `MotionHint`s.
 
 With no active link, page positions equal the row-and-column formula for any catalog. With one, the
 anchor page's position is unchanged; every tie's passages are level within
-`page.base.levelTolerance`; no two participants overlap; every moved page has exactly one ghost and
-one tether; non-participants are at home. Two layouts of the same input are identical. A
-many-to-many link with three ends on a side brings all six pages.
+`page.base.levelTolerance`; no participant covers another's passage, and when all fit whole no two
+overlap; with more ends than fit, the rest are windows containing their passages; every moved page
+has exactly one ghost and one tether; non-participants are at home. Two layouts of the same input
+are identical. A many-to-many link with three ends on a side brings all six pages.
 
 ### 10.4 The stacked vanishing view
 
@@ -2539,56 +2646,59 @@ Existing settings are used, not copied: the `ui.*` scale, font-role and touch-si
 `zigzag.cellHorizontalPaddingPx`, `cellVerticalPaddingPx`, `contentMaxWidthPx` (the width limit
 given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBeamWidthPx`.
 
-| Setting                                                | Default      | Meaning                                                                     |
-| ------------------------------------------------------ | ------------ | --------------------------------------------------------------------------- |
-| `view.arena.windowCells`                               | 4096         | derived cells before a placement tosses and re-derives (§6.7)               |
-| `view.camera.restYaw`, `restPitch`                     | 12, 8        | the rest camera's turn, so depth is visible                                 |
-| `view.motion.reduced`                                  | false        | every tween and transition becomes a cut                                    |
-| `view.viewOnlyOpacity`                                 | 0.7          | chrome of view-only items                                                   |
-| `stretch.gap`                                          | 4            | space between neighbouring boxes                                            |
-| `stretch.minContact`                                   | 12           | least overlap with the cell a box was reached from                          |
-| `stretch.overfill`                                     | 1.3          | viewport multiple the walk fills                                            |
-| `stretch.layerDepth`                                   | 120          | distance between depth planes                                               |
-| `stretch.fadeBand`, `fadeFloor`                        | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                          |
-| `stretch.clipMargin`                                   | 6            | margin before a hidden cell is shown again                                  |
-| `stretch.ghostOpacity`                                 | 0.25         | outline of a cell the pane would cut                                        |
-| `stretch.heatSectors`, `stretch.heatFull`              | 16, 24       | directions the edge heat is summed in; count at full glow                   |
-| `stretch.breadcrumbs`                                  | 6            | cells in the breadcrumb strip                                               |
-| `ring.radius`, `ring.radiusStep`                       | 220, 90      | ring 0's least radius; growth per ring                                      |
-| `ring.tiltStep`                                        | 28           | lean added per pair of rings                                                |
-| `ring.slotWidth`, `ring.slotHeight`                    | 140, 44      | a ring cell's box                                                           |
-| `ring.hubMaxShare`                                     | 0.4          | most of the pane the hub's content may take                                 |
-| `ring.labelAt`                                         | 0.55         | where on an edge its label sits                                             |
-| `ring.stubs`                                           | true         | draw second-hop stubs                                                       |
-| `ring.maxDepth`, `ring.childScale`                     | 2, 0.5       | how far out neighbours show wheels; a child wheel's size                    |
-| `ring.childGap`, `ring.childBend`                      | 50, 0.6      | arc left open towards the parent; how far a child wheel curls back          |
-| `ring.flexStep`, `ring.flexTries`                      | 24, 6        | how a slot is moved clear of a real cell, and how often                     |
-| `ring.nameMinChars`                                    | 6            | shortest a condensed dimension name gets before it is hidden                |
-| `ring.dragThreshold`, `ring.dropRadius`                | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`)         |
-| `pack.laneMaxLines`, `pack.chipMaxWidth`               | 3, 220       | limits on a constituent's box                                               |
-| `pack.nestDepth`                                       | 3            | nested packs drawn before collapsing to a badge                             |
-| `pack.seam`, `pack.spreadGap`                          | 1, 28        | line between glued lanes; room between them when spread                     |
-| `pack.strandWidth`                                     | 2            | a strand's thickness                                                        |
-| `rank.halfLife`, `rank.smoothing`, `rank.presentBoost` | 200, 4, 2    | ranking: decay in events; pull towards "used"; weight of present dimensions |
-| `pack.aheadSteps`                                      | 2            | packs derived beyond the pane                                               |
-| `page.backgroundDepth`, `page.backgroundOpacity`       | 720, 0.42    | where and how dim a context document is                                     |
-| `page.base.documentGap`, `page.base.pageGap`           | 432, 32      | between documents; between pages                                            |
-| `page.base.coalesceGap`, `liftDepth`                   | 432, 90      | gap between coalesced pages; how far they come forward                      |
-| `page.base.coalesceSteps`                              | 25           | fixed solver steps                                                          |
-| `page.base.contextOpacity`                             | 0.42         | pages not taking part while a link is active                                |
-| `page.base.levelTolerance`                             | 2            | how level tied passages must end up                                         |
-| `page.base.subjectMs`, `rowMs`, `rowDelayMs`           | 620, 450, 90 | motion of the page brought over and of those making room                    |
-| `stack.spacing`, `stack.gutter`, `stack.deckGap`       | 60, 48, 240  | along the line; between the two tops; between decks                         |
-| `stack.tuckStrip`                                      | 40           | strip of the passed stack shown in a narrow pane                            |
-| `stack.nearPages`, `stack.nearFalloff`                 | 6, 0.7       | pages scored behind each top; weight per place                              |
-| `stack.lineStartWeight`, `lineEndWeight`               | 0.5, 0.2     | value of a partly visible line                                              |
-| `stack.search.azimuthStep`, `recessionStep`            | 15, 5        | candidate grid                                                              |
-| `stack.search.minRecession`, `maxRecession`            | 10, 60       | range of the line's angle from the view axis                                |
-| `stack.search.hysteresis`                              | 0.05         | how much better a new direction must score                                  |
-| `stack.fadePages`, `stack.fadeFloor`                   | 12, 0.08     | fade rate along the line; least opacity                                     |
-| `stack.minPagePx`                                      | 8            | height below which unmarked pages stop                                      |
-| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`         | 60, 120, 420 | riffle timings, and the bound that decides riffle or split                  |
-| `stack.splitMs`, `stack.splitLeadMs`                   | 320, 80      | block motion; delay before the target flies in                              |
+| Setting                                                | Default      | Meaning                                                                   |
+| ------------------------------------------------------ | ------------ | ------------------------------------------------------------------------- |
+| `view.arena.windowCells`                               | 4096         | derived cells before a placement tosses and re-derives (§6.7)             |
+| `view.camera.restYaw`, `restPitch`                     | 12, 8        | the rest camera's turn, so depth is visible                               |
+| `activity.settleMs`, `activity.bounceMs`               | 1200, 300    | pause that ends a run of movement; a step undone this soon is a slip      |
+| `subspace.rimBand`                                     | 48           | band at the pane's edge showing the next space along `u`                  |
+| `view.motion.reduced`                                  | false        | every tween and transition becomes a cut                                  |
+| `view.viewOnlyOpacity`                                 | 0.7          | chrome of view-only items                                                 |
+| `stretch.gap`                                          | 4            | space between neighbouring boxes                                          |
+| `stretch.minContact`                                   | 12           | least overlap with the cell a box was reached from                        |
+| `stretch.overfill`                                     | 1.3          | viewport multiple the walk fills                                          |
+| `stretch.layerDepth`                                   | 120          | distance between depth planes                                             |
+| `stretch.fadeBand`, `fadeFloor`                        | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                        |
+| `stretch.clipMargin`                                   | 6            | margin before a hidden cell is shown again                                |
+| `stretch.ghostOpacity`                                 | 0.25         | outline of a cell the pane would cut                                      |
+| `stretch.heatSectors`, `stretch.heatFull`              | 16, 24       | directions the edge heat is summed in; count at full glow                 |
+| `stretch.breadcrumbs`                                  | 6            | cells in the breadcrumb strip                                             |
+| `ring.radius`, `ring.radiusStep`                       | 220, 90      | ring 0's least radius; growth per ring                                    |
+| `ring.tiltStep`                                        | 28           | lean added per pair of rings                                              |
+| `ring.slotWidth`, `ring.slotHeight`                    | 140, 44      | a ring cell's box                                                         |
+| `ring.hubMaxShare`                                     | 0.4          | most of the pane the hub's content may take                               |
+| `ring.labelAt`                                         | 0.55         | where on an edge its label sits                                           |
+| `ring.stubs`                                           | true         | draw second-hop stubs                                                     |
+| `ring.maxDepth`, `ring.childScale`                     | 2, 0.5       | how far out neighbours show wheels; a child wheel's size                  |
+| `ring.childGap`, `ring.childBend`                      | 50, 0.6      | arc left open towards the parent; how far a child wheel curls back        |
+| `ring.flexStep`, `ring.flexTries`                      | 24, 6        | how a slot is moved clear of a real cell, and how often                   |
+| `ring.nameMinChars`                                    | 6            | shortest a condensed dimension name gets before it is hidden              |
+| `ring.dragThreshold`, `ring.dropRadius`                | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`)       |
+| `pack.laneMaxLines`, `pack.chipMaxWidth`               | 3, 220       | limits on a constituent's box                                             |
+| `pack.nestDepth`                                       | 3            | nested packs drawn before collapsing to a badge                           |
+| `pack.seam`, `pack.spreadGap`                          | 1, 28        | line between glued lanes; room between them when spread                   |
+| `pack.strandWidth`                                     | 2            | a strand's thickness                                                      |
+| `rank.halfLife`, `rank.smoothing`, `rank.presentBoost` | 200, 4, 2    | ranking: decay in runs; pull towards "used"; weight of present dimensions |
+| `pack.aheadSteps`                                      | 2            | packs derived beyond the pane                                             |
+| `page.backgroundDepth`, `page.backgroundOpacity`       | 720, 0.42    | where and how dim a context document is                                   |
+| `page.base.documentGap`, `page.base.pageGap`           | 432, 32      | between documents; between pages                                          |
+| `page.base.coalesceGap`, `liftDepth`                   | 432, 90      | gap between coalesced pages; how far they come forward                    |
+| `page.base.coalesceSteps`                              | 25           | fixed solver steps                                                        |
+| `page.base.bandContext`                                | 2            | lines shown either side of a passage in a windowed page                   |
+| `page.base.contextOpacity`                             | 0.42         | pages not taking part while a link is active                              |
+| `page.base.levelTolerance`                             | 2            | how level tied passages must end up                                       |
+| `page.base.subjectMs`, `rowMs`, `rowDelayMs`           | 620, 450, 90 | motion of the page brought over and of those making room                  |
+| `stack.spacing`, `stack.gutter`, `stack.deckGap`       | 60, 48, 240  | along the line; between the two tops; between decks                       |
+| `stack.tuckStrip`                                      | 40           | strip of the passed stack shown in a narrow pane                          |
+| `stack.nearPages`, `stack.nearFalloff`                 | 6, 0.7       | pages scored behind each top; weight per place                            |
+| `stack.lineStartWeight`, `lineEndWeight`               | 0.5, 0.2     | value of a partly visible line                                            |
+| `stack.search.azimuthStep`, `recessionStep`            | 15, 5        | candidate grid                                                            |
+| `stack.search.minRecession`, `maxRecession`            | 10, 60       | range of the line's angle from the view axis                              |
+| `stack.search.hysteresis`                              | 0.05         | how much better a new direction must score                                |
+| `stack.fadePages`, `stack.fadeFloor`                   | 12, 0.08     | fade rate along the line; least opacity                                   |
+| `stack.minPagePx`                                      | 8            | height below which unmarked pages stop                                    |
+| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`         | 60, 120, 420 | riffle timings, and the bound that decides riffle or split                |
+| `stack.splitMs`, `stack.splitLeadMs`                   | 320, 80      | block motion; delay before the target flies in                            |
 
 The defaults that restate today's constants are converted from them at `Doc::pixelsToWorld` (1/18):
 24 world units of document gap, the same again between coalesced pages, and 40 of background depth.
@@ -2998,11 +3108,14 @@ keystrokes. Price: a modal scope and a second way to lay out dimension cells. Re
 — it hides the cell and has no place for groups and their members together; chrome only — dimensions
 are cells and are better shown as cells.
 
-**V29. "Most used" and "most likely" are computed from the activity log by a first-order Markov
-model with decay.** Why: they are facts about what the reader did, so they are replay products, not
-settings; first order is what a session's worth of events can support. Price: a `Visit` must come to
-record the dimension followed (VU5); until then the model knows only the current session. Refused:
-counters stored as configuration; a higher-order model.
+**V29. "Most used" and "most likely" are computed from condensed walk summaries by a first-order
+Markov model with decay.** Why: they are facts about what the reader did, so they are replay
+products, not settings; first order is what the data can support; and a record per settled run,
+carrying its own counts, keeps the activity store to the times the reader stopped somewhere. Price:
+the order of steps inside a run is gone, so nothing finer than "this followed that, this often" can
+ever be asked of the past; and the summaries need a place in the activity store (VU5). Refused: a
+record per step — it buries the store in noise; counters stored as configuration; a higher-order
+model.
 
 **V30. A thing in a frame is placed relative to the frame; a page has its own matrix relative to its
 document.** Why: a pack must move as one glued thing and a document must carry its pages, and a part
@@ -3028,6 +3141,28 @@ least needed thing on a wheel when its colours and the side list still say which
 Price: a wheel that cannot be cleared loses detail where relaxation might have found room. Refused:
 spring relaxation; a cap on depth or valence.
 
+**V34. The API has no sentinels, uses the C++26 facilities, and its setters chain.** Why: a reserved
+value is a second meaning hidden in a type, and it is the caller who forgets to check;
+`std::optional` makes the absence part of the type. A `function_ref` callback allocates nothing, and
+an `inplace_vector` says a bound is real. Returning the object lets a caller write a sequence of
+changes as one expression, as `ArenaManifold` already allows. Price: an optional index is eight
+bytes where a sentinel was four; `inplace_vector` may be used only where the bound is a fact, never
+to cap what is the reader's. Refused: `noCell`, `noAxis` and `noIndex` in the API — the earlier
+text; `void` setters.
+
+**V35. Movement is recorded as one condensed walk summary per settled run.** Why: a reader passes
+cells many times a second, and a record per step would be noise that every later reader of the store
+pays for. A run's counts per dimension, and per pair of dimensions, are all the ranking needs.
+Price: the order of steps inside a run is not kept. Refused: a visit per step; sampling steps — it
+keeps the noise and loses the counts.
+
+**V36. In the base view pages may overlap, and a page may be shown as a window round its passage.**
+Why: a link with many ends, or ends on large pages, cannot otherwise be seen in one pane, and seeing
+both ends is the point. Price: a windowed page shows little of its context, and a participant may
+cover pages that are not taking part. Refused: forbidding overlap, as first written — the reader
+would be zoomed out past reading; flying only as many pages as fit and leaving the rest at home —
+ends would be out of sight.
+
 ______________________________________________________________________
 
 ## 19. Open questions
@@ -3044,10 +3179,11 @@ is the first member now. Settled by: use.
 **VU4.** When a pack is kept, should its `d.pack` and `d.packing` be the slice's own named
 dimensions, shared by every kept pack? Settled by: the first design of kept packs as content.
 
-**VU5.** What more should a `Visit` record? The dimension a step followed is needed by the ranking
-(§7.8) and is the first thing to add. Whether it should also record the view and the bindings, so
-going back restores how the reader was looking, is settled by journeys that go back across a view
-switch. Either way the answer is more cells in the activity store, not a wider struct.
+**VU5.** What should the activity store hold for a slice? Walk summaries (§7.8) are the first thing:
+a record per settled run, with its counts. Their shape there — and whether a visit should also
+record the view and the bindings, so going back restores how the reader was looking — is that
+store's design to make. Either way the answer is more cells on its own dimensions, not a wider
+struct.
 
 **VU6.** With `apps/xudu/` and `apps/zigzag/` gone, should `tests/xudu/`, `tests/zigzag/` and their
 binaries be renamed for what they link? Settled by: the owner; nothing here depends on it.
@@ -3062,20 +3198,24 @@ two panes.
 **VU9.** Is depth as stacked planes the right reading of a third axis in stretch vanishing? Settled
 by: use on slices with a meaningful third dimension.
 
-**VU10.** Should the base view fly a passage smaller than a page, as the satelloid cards do today?
-Settled by: whether page-level coalescing leaves too much unrelated text in view.
+**VU10.** Is a windowed page (§10.3.2) enough when a link has very many ends, or is a smaller unit
+still needed — the passage alone, as a card? Settled by: links with dozens of ends.
 
-**VU11.** How should a subspace be shown — as an inset in the cell's plane, a pane of its own, or a
-place the camera travels to — and how deep may subspaces nest before the reader is lost? Settled by:
+**VU11.** How deep may subspaces nest before the reader is lost, and is the band of the next space
+at the periphery enough to say where one is? The inset and the zoom are decided (§7.3). Settled by:
 use on a slice with real sub-clusters.
 
-**VU12.** What does the hypertime role cost? It needs a manifold for another version at hand.
-Settled by: measuring `rebuildManifold` for a version against keeping a few recent ones, and
-deciding which versions count as "the accursed cell changed".
+**VU12.** What does a step on `t` mean with nothing bound? The leading candidate is the whole slice
+at the previous hypertime operation. The alternative is the previous version in which the accursed
+cell itself changed (`Manifold::historyOf`), which skips operations that did not touch it. Both need
+a manifold for another state at hand: `advance()` steps forwards only, so going back means a rebuild
+or keeping recent states. Settled by: trying both on a slice with real history, and measuring the
+rebuild.
 
-**VU13.** Is the ranking per slice or across slices, do steps and bindings weigh the same, and what
-does the selector show before there is any history? Settled by: use; the defaults are per slice,
-equal weight, and ring order.
+**VU13.** Is the ranking per slice or across slices; do steps and bindings weigh the same; what does
+the selector show before there is any history; and when should old walk summaries be folded into one
+aggregate per slice so the store stops growing? Settled by: use; the defaults are per slice, equal
+weight, ring order, and no folding.
 
 **VU14.** Which keys do `u` and `t` take, and how many binding points can the keymap carry before
 they stop being memorable? Settled by: the keymap's conflict report and use.
@@ -3165,6 +3305,13 @@ ______________________________________________________________________
 | "tier 3 is a stretch vanishing view of dimension cells"                                    | V-R52; §7.7                                    |
 | "quick launch keys like 0-9 or traversal … then pick the binding axis by name"             | V-R52; §7.7; §12.1                             |
 | "click and dragged to a rose compass in the top left corner"                               | V-R54; §7.9                                    |
+| "there can be overlap … to highlight the linked passages in a many endset"                 | V-R32; §10.3.2; V36                            |
+| "sentinels are to be eliminated outside of the wire/on-disk"                               | §8, conventions; V34                           |
+| "use the c++26 features … in particular function_ref and inplace vector"                   | §8, conventions; §7.7, §7.8, §8.2; V34         |
+| "void returns on setters should return the object pointer"                                 | §8, conventions; V34                           |
+| "condensed into a smaller number of 'zigzag activity' records"                             | V-R53; §7.8; V35                               |
+| "U … zooming into an inset 3d space … a band of the next U on the periphery"               | §7.3; VU11                                     |
+| "T … the state of the slice as a whole at the previous hypertime op"                       | §7.3; VU12                                     |
 
 ______________________________________________________________________
 
@@ -3199,3 +3346,8 @@ ______________________________________________________________________
   for subspaces and `t` for hypertime (V27, §7.3); a three-tier dimension selector, a ranking from
   activity and a compass (V28, V29, §7.6 to §7.9); cut cells are ghosts with edge heat (V32);
   neighbours show their own wheels, which bend, flex and simplify names first (V33, §9.2.8, §9.2.9).
+- 2026-10-07 — Second batch of notes: base-view pages may overlap and be windowed round their
+  passages (V36); no sentinels, C++26 facilities and chaining setters throughout the API (V34);
+  movement recorded as condensed walk summaries (V35, §7.8); `u` zooms into an inset space with the
+  next one at the periphery, and `t` with nothing bound leans to the whole slice at the previous
+  operation (§7.3, VU12).
