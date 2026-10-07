@@ -12,7 +12,7 @@
 
 #include "common/xanadu/zigzag/manifold.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -278,4 +278,4 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
       site);
 }
 
-} // namespace xudu
+} // namespace xanadu

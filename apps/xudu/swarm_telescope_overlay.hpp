@@ -27,9 +27,7 @@
 #include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/system_docs.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class SwarmTelescopeOverlay
  * @brief 3-column discovery deck and search engine for swarm publications.
@@ -97,6 +95,7 @@ public:
   void selectItem(std::size_t index);
 
   void setOnSummon(SummonHandler handler);
+  void setOnDiscover(std::function<void(const std::string &)> handler);
   void setSampleForceVisible(bool force);
 
   void setConfig(const ModalPresentationConfig &);
@@ -134,6 +133,8 @@ private:
   std::string fontName_;
   gleditor::ui::ScreenOverlay overlay_;
   SummonHandler onSummon_;
+  std::function<void(const std::string &)> onDiscover_;
+
   mutable std::recursive_mutex guard_;
   std::uint64_t revision_{1}, generation_{1};
   bool visible_{false}, sampleForceVisible_{false}, dirty_{true};
@@ -163,6 +164,6 @@ private:
   std::vector<Pending> pending_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_SWARM_TELESCOPE_OVERLAY_HPP

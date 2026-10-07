@@ -93,8 +93,8 @@ TEST(PouchDrawerInkTest,
   IsolatedPouchConfig isolatedConfig;
   PouchInkDevice device;
   RenderState state{&device};
-  xudu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
-  xudu::PouchDrawer drawer{session, {}};
+  xanadu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
+  xanadu::PouchDrawer drawer{session, {}};
   std::uint64_t itemId = 0x1'0000'0012ULL;
   for (const auto &zone : drawer.zones())
     zone->addItem({.itemId      = itemId++,

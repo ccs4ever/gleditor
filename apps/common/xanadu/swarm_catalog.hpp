@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "author_catalog.hpp"
 #include "publication_ledger.hpp"
 #include "swarm_catalog_index.hpp"
 
@@ -74,6 +75,8 @@ public:
   /// Add a publication entry to the catalog.
   void addPublication(PublicationEntry entry, int seeders = 10, int peers = 2,
                       bool verified = true);
+  void ingestAuthorCatalog(const SignedAuthorCatalog &catalog);
+  void followAuthor(const PublicKey &key);
 
   /// Access underlying search index.
   [[nodiscard]] SwarmCatalogIndex &index();

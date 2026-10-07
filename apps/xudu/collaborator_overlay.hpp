@@ -20,7 +20,7 @@
 #include <gleditor/text/shaping_cache.hpp>
 #include <gleditor/ui/metrics.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 class Session;
 
@@ -92,6 +92,6 @@ private:
   bool lastCaretActive_{false};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_COLLABORATOR_OVERLAY_HPP

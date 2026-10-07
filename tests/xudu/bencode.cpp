@@ -15,6 +15,11 @@ namespace {
 using xanadu::bencode::decode;
 using xanadu::bencode::Value;
 
+TEST(BencodeTest, excessiveNestingIsRefusedBeforeStackGrowth) {
+  EXPECT_THROW((void)decode(std::string(1000, 'l') + std::string(1000, 'e')),
+               std::runtime_error);
+}
+
 TEST(BencodeTest, integers) {
   EXPECT_EQ(decode("i3e").asInteger(), 3);
   EXPECT_EQ(decode("i-3e").asInteger(), -3);

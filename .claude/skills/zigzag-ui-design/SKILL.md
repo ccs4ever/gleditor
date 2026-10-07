@@ -1,20 +1,26 @@
 ---
 name: zigzag-ui-design
 description: >-
-  Expert workflow and runbook for comprehensive UI design in the zigzag multidimensional Xanadu visualizer.
+  Expert workflow and runbook for UI design of ZigZag slice views in xuzz (zigzag is no longer a separate application).
   Use when designing or implementing multi-view layouts, Cell Content View vs Topology View projection modes, dimension cycling, rank transitions, and preflet integration.
 ---
 
-# `zigzag` Multidimensional UI Design Workflow
+# ZigZag Slice View UI Design Workflow
 
 This skill defines the technical procedures, projection mathematics, view-switching modes, and
-interaction models for the `zigzag` multidimensional Xanadu visualizer application.
+interaction models for ZigZag slice views in `xuzz`. `zigzag` is retired as a separate application:
+`build/zigzag` is a symlink to `xuzz`, and `apps/zigzag/` holds components that `xuzz` links.
+
+New slice views are specified in [`design/view-system.md`](../../../design/view-system.md): a view
+is a registered `View` over a `ViewManifold`, with pure layout in `apps/common/xanadu/view/` and
+renderer wiring in `apps/xuzz/`. Sections 2 and 3 below describe the two presentations
+`ZigzagVisualizer` implements today; the Matrix View in §3 was never built.
 
 ## 1. Core Architectural Concept
 
-Zigzag visualizes hyperdimensional zzstructures (where each cell can have $+1$ and $-1$ links across
-an arbitrary number of dimensions $d.1, d.2, d.3 \dots$). To resolve the intrinsic tension between
-detail and structural topology, Zigzag employs a **Multi-View Architecture**:
+A slice view visualizes hyperdimensional zzstructures (where each cell can have $+1$ and $-1$ links
+across an arbitrary number of dimensions $d.1, d.2, d.3 \dots$). To resolve the intrinsic tension
+between detail and structural topology, `xuzz` employs a **Multi-View Architecture**:
 
 ______________________________________________________________________
 
@@ -84,11 +90,16 @@ ______________________________________________________________________
 
 ## 4. Implementation Checklist for New Features
 
-1. **View Mode State**: Add `enum class ViewMode { CellContent, Topology, Matrix }` in
-   `apps/zigzag/zigzag_visualizer.hpp`.
-1. **Dynamic Geometry Generator**: Implement cell size calculation based on `viewMode` in
-   `zigzag_visualizer.cpp`.
+1. **Register a view, do not add an enum case**: a new presentation is a `ViewDescriptor` in
+   `ViewRegistry` (`design/view-system.md` §8.1), not another `ZigzagVisualizer::ViewMode` value.
+   Add no files under `apps/zigzag/`.
+1. **Pure layout in the engine**: implement `layout(const LayoutInput &, LayoutSink &)` under
+   `apps/common/xanadu/view/`, with content sizes from the input's measurer, and test it from
+   `xuzz_test` with no graphics device.
+1. **One link choke point**: any cell the view mints goes through `ViewManifold`, which keeps at
+   most one neighbour per direction per dimension and tosses view cells on rebind.
 1. **Lattice & Dimension Shaders**: Ensure fixed-size tiles use instanced quad batching with
-   dimension color coding.
-1. **Picking & Accessibility**: Expose both Content and Topology cell nodes to `a11y::Builder` with
-   current coordinate values.
+   dimension color coding; draw calls live in `apps/xuzz/`.
+1. **Keymap, Picking & Accessibility**: every action ships with a default chord in
+   `system://keymap`; expose cell nodes to `a11y::Builder` with current coordinate values, and give
+   view-only cells a role other than `cell`.

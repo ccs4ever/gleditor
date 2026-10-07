@@ -138,10 +138,13 @@ public:
      * address, and of anything behind a single outward address.
      */
     bool allowManyConnectionsPerAddress{false};
+    /// Per-IP DHT allowance; closed test swarms share a few namespace IPs.
+    int dhtPacketsPerSecond{5};
     /// How long a read waits before giving up on the pieces it needs.
     std::chrono::milliseconds readTimeout{std::chrono::seconds{30}};
     /// How long to wait for a magnet's metadata.
     std::chrono::milliseconds metadataTimeout{std::chrono::seconds{60}};
+    std::size_t maximumPublicationTopics{128};
   };
 
   /// @throws std::runtime_error when the build has no libtorrent.
@@ -184,6 +187,19 @@ public:
   /// Streaming downloads can discard copied piece bytes after verification.
   /// Later reads still obtain the piece from libtorrent's retained disk cache.
   void discardCachedPieces(const InfoHash &hash);
+  /// Wait for verified transfer bytes to reach retained files before review.
+  [[nodiscard]] bool flushDownload(const InfoHash &hash,
+                                   std::chrono::milliseconds timeout);
+
+  /// Metadata rendezvous uses the same BitTorrent socket, with no payload
+  /// torrent or auxiliary listener. Catalog signatures are checked by the host.
+  void joinPublicationTopic(std::string_view topic, const std::string &dataRoot,
+                            const std::string &catalog = {});
+  void joinLinkPackageScroll(const std::string &scrollKey,
+                             const std::string &dataRoot,
+                             const std::string &catalog = {});
+  [[nodiscard]] std::vector<std::pair<InfoHash, std::string>>
+  takePublicationCatalogs();
 
   /**
    * @brief Tell a swarm about a peer directly.
@@ -393,6 +409,8 @@ public:
 private:
   friend class XuduTorrentPlugin;
   friend class XuduPeerPlugin;
+  void joinCatalogRendezvous(const InfoHash &hash, const std::string &dataRoot,
+                             const std::string &catalog);
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

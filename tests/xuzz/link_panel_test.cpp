@@ -184,7 +184,7 @@ TEST(LinkPanelTest, FitLimitsComeFromLiveUiSettingsAndRemainBounded) {
   EXPECT_EQ(panel.maxLines, 6);
   EXPECT_FLOAT_EQ(panel.maxWidthShare, .75F);
   EXPECT_FLOAT_EQ(panel.maxHeightShare, .8F);
-  EXPECT_TRUE(panel.font.empty());
+  EXPECT_EQ(panel.font, "label");
   head = xanadu::setSetting(store, head, xanadu::settings::kLinkPanelMaxLines,
                             std::int64_t{500});
   head = xanadu::setSetting(store, head,

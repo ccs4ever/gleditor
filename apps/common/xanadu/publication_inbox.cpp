@@ -48,6 +48,9 @@ public:
     const auto deadline = std::chrono::steady_clock::now() + timeout_;
     do {
       checkCancelled(stop);
+      // Pinned snapshots and packages reach fetch without resolving a name.
+      // Introduce bootstrap nodes after asynchronous DHT startup here too.
+      for (const auto &[host, port] : nodes_) source_.addDhtNode(host, port);
       for (const auto &[host, port] : peers_)
         source_.connectPeer(hash, host, port);
       if (source_.waitForMetadata(hash, 250ms)) break;
@@ -107,6 +110,12 @@ public:
                                    hash.hex());
       } while (true);
     }
+    const auto flushDeadline = std::chrono::steady_clock::now() + timeout_;
+    while (!source_.flushDownload(hash, 250ms)) {
+      checkCancelled(stop);
+      if (std::chrono::steady_clock::now() >= flushDeadline)
+        throw std::runtime_error("Publication files did not finish flushing");
+    }
     checkCancelled(stop);
     std::ofstream retained(directory / "metainfo.torrent", std::ios::binary);
     retained << *encoded;
@@ -145,6 +154,8 @@ std::string_view publicationDownloadPhaseName(PublicationDownloadPhase phase) {
 struct PublicationInbox::Impl {
   struct Job {
     MutableLink link;
+    std::optional<MutablePointer> minimum;
+    std::optional<PublicationPin> pin;
     PublicationDownloadStatus status;
     std::stop_source cancel;
   };
@@ -191,14 +202,15 @@ struct PublicationInbox::Impl {
       job.status.phase     = PublicationDownloadPhase::Ready;
       job.status.storePath = entry.path() / "store";
       job.status.version   = pub->version;
+      job.status.sequence  = pub->sequence;
       jobs.emplace(id, std::move(job));
     }
     worker = std::jthread([this](std::stop_token stop) { run(stop); });
   }
   ~Impl() {
-    worker.request_stop();
     {
       const std::scoped_lock lock(guard);
+      worker.request_stop();
       for (auto &[id, job] : jobs) job.cancel.request_stop();
     }
     changed.notify_all();
@@ -224,8 +236,15 @@ struct PublicationInbox::Impl {
       auto transport = options.makeTransport();
       if (!transport)
         throw std::runtime_error("Publication transport unavailable");
-      const auto pointer = transport->resolve(job.link, stop);
-      const auto cache   = root / "cache";
+      const auto pointer =
+          job.pin ? MutablePointer{job.pin->hash, job.pin->sequence}
+                  : transport->resolve(job.link, stop);
+      if (job.minimum && (pointer.sequence < job.minimum->sequence ||
+                          (pointer.sequence == job.minimum->sequence &&
+                           pointer.hash != job.minimum->hash)))
+        throw std::runtime_error("Publication pointer rolls back or conflicts "
+                                 "with the subscription's observed sequence");
+      const auto cache = root / "cache";
       transport->fetch(pointer.hash, cache / pointer.hash.hex(),
                        options.maximumManifestBytes, stop);
       const auto seed =
@@ -241,6 +260,10 @@ struct PublicationInbox::Impl {
           pub->salt != job.link.salt || pub->sequence != pointer.sequence)
         throw std::runtime_error("Publication signature, name or sequence does "
                                  "not match the signed DHT pointer");
+      if (job.pin &&
+          (pub->version != job.pin->version || pub->title != job.pin->title))
+        throw std::runtime_error(
+            "Publication version or title differs from the pinned citation");
       std::set<InfoHash> dependencies;
       for (const auto &[name, scroll] : pub->scrolls) {
         (void)name;
@@ -288,9 +311,11 @@ struct PublicationInbox::Impl {
         checkCancelled(stop);
         std::filesystem::rename(root / "publication.xanadoc.partial",
                                 root / "publication.xanadoc");
-        status.phase     = PublicationDownloadPhase::Ready;
-        status.version   = pub->version;
-        status.storePath = root / "store";
+        status.phase        = PublicationDownloadPhase::Ready;
+        status.version      = pub->version;
+        status.sequence     = pub->sequence;
+        status.manifestHash = pointer.hash;
+        status.storePath    = root / "store";
       });
     } catch (const std::exception &error) {
       std::error_code ignored;
@@ -329,10 +354,13 @@ struct PublicationInbox::Impl {
 PublicationInbox::PublicationInbox(Options options)
     : impl_(std::make_unique<Impl>(std::move(options))) {}
 PublicationInbox::~PublicationInbox() = default;
-std::string PublicationInbox::submit(const MutableLink &link) {
+std::string PublicationInbox::submit(const MutableLink &link,
+                                     std::optional<MutablePointer> minimum) {
   if (link.key.isZero() || link.salt.empty() || link.salt.size() > 64)
     throw std::invalid_argument(
         "A publication needs a nonzero author key and document salt");
+  if (minimum && (minimum->sequence < 0 || minimum->hash.isZero()))
+    throw std::invalid_argument("Invalid subscription pointer lower bound");
   const std::scoped_lock lock(impl_->guard);
   std::string id;
   do {
@@ -341,8 +369,30 @@ std::string PublicationInbox::submit(const MutableLink &link) {
            std::filesystem::exists(impl_->options.directory / id));
   Impl::Job job;
   job.link       = link;
+  job.minimum    = minimum;
   job.status.id  = id;
   job.status.uri = link.uri();
+  impl_->jobs.emplace(id, std::move(job));
+  impl_->changed.notify_all();
+  return id;
+}
+std::string PublicationInbox::submitPinned(const PublicationPin &pin) {
+  if (pin.publisher.isZero() || pin.salt.empty() || pin.salt.size() > 64 ||
+      pin.hash.isZero() || pin.sequence < 0)
+    throw std::invalid_argument("Invalid pinned publication");
+  const std::scoped_lock lock(impl_->guard);
+  std::string id;
+  do {
+    id = createMutableKeys().publicKey.hex();
+  } while (impl_->jobs.contains(id) ||
+           std::filesystem::exists(impl_->options.directory / id));
+  Impl::Job job;
+  job.link.key                = pin.publisher;
+  job.link.salt               = pin.salt;
+  job.link.currentWhenWritten = pin.hash;
+  job.pin                     = pin;
+  job.status.id               = id;
+  job.status.uri              = job.link.uri();
   impl_->jobs.emplace(id, std::move(job));
   impl_->changed.notify_all();
   return id;

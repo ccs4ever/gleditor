@@ -14,7 +14,7 @@
 
 #include <gleditor/render/types.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 LinkForgeWidget::LinkForgeWidget()
     : presentation_({.id = 0x10000000U, .model = gleditor::ui::Panel{}}) {
@@ -475,4 +475,4 @@ void LinkForgeWidget::drawAnimation(gleditor::Canvas &canvas) {
                  colour);
 }
 
-} // namespace xudu
+} // namespace xanadu

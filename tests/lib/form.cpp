@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/a11y/publisher.hpp>
 #include <gleditor/form.hpp>
 
 namespace {
@@ -471,4 +472,32 @@ TEST(FormScopeTest, directRegistrationRestoresEarlierModalAndDeniesCommands) {
   EXPECT_FALSE(manager.modalActive());
   EXPECT_FALSE(manager.dispatchText("unregistered"));
   EXPECT_EQ(first.current()[0].value, "restored");
+}
+
+TEST(ChoiceDetailsTest,
+     CompactOptionsRetainCompleteIdentityInAccessibilityAndAnswers) {
+  Form form{"Sans 11"};
+  Form::Field field;
+  field.label              = "Identity";
+  field.kind               = Form::Kind::Choice;
+  field.options            = {"First key", "Second key"};
+  field.optionValues       = {"first-value", "second-value"};
+  field.optionDescriptions = {std::string(64, 'a'), std::string(64, 'b')};
+  form.open("Review", "", {field}, [](const auto &) {});
+  gleditor::a11y::Publisher publisher("test", "gleditor", "0");
+  publisher.addSource(&form);
+  const auto verify = [&](const std::string &key) {
+    publisher.rebuild(800, 600);
+    const auto tree = publisher.snapshot();
+    const auto combo =
+        std::ranges::find(tree.nodes, gleditor::a11y::Role::ComboBox,
+                          &gleditor::a11y::Node::role);
+    ASSERT_NE(combo, tree.nodes.end());
+    EXPECT_EQ(combo->description, key);
+    EXPECT_EQ(tree.find(combo->children[1])->description, std::string(64, 'b'));
+  };
+  verify(std::string(64, 'a'));
+  form.keyPressed(Key::Right, KeyMods::None);
+  verify(std::string(64, 'b'));
+  EXPECT_EQ(form.current().front().answer(), "second-value");
 }

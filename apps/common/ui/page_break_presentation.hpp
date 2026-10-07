@@ -5,7 +5,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace xudu {
+namespace xanadu {
 /// Presentation only: a new target gets a new identity, so delayed picks cannot
 /// split the paragraph currently under the pointer instead of the clicked one.
 class PageBreakPresentation : public gleditor::ui::ScreenOverlay {
@@ -101,4 +101,4 @@ private:
   gleditor::ui::Theme effective_;
   std::optional<gleditor::ui::Rect> bounds_;
 };
-} // namespace xudu
+} // namespace xanadu

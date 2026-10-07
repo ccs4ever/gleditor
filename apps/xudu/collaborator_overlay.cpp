@@ -18,7 +18,7 @@
 
 #include "session.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 const CollaboratorNameplatePresentation &CollaboratorNameplate::prepare(
     std::string_view name, std::string_view identity, glm::vec2 anchor,
@@ -282,4 +282,4 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
   }
 }
 
-} // namespace xudu
+} // namespace xanadu

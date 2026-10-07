@@ -39,7 +39,7 @@
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/provenance.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -304,6 +304,9 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
 // the same unavoidable risk any other noexcept-adjacent code accepts.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
+  publicationSubscriptions_.reset();
+  linkPackageExchange_.reset();
+  publicationDiscovery_.reset();
   publicationInbox_.reset();
   try {
     flushUncommitted();
@@ -586,7 +589,8 @@ const MutableKeys &Session::identity() {
 void Session::configureTestPublicationSwarm(
     const std::string &listen,
     std::vector<std::pair<std::string, std::uint16_t>> nodes) {
-  if (publicationOutbox_ || publicationInbox_)
+  if (publicationOutbox_ || publicationInbox_ || publicationDiscovery_ ||
+      publicationSubscriptions_ || linkPackageExchange_)
     throw std::logic_error("publication outbox is already running");
   testPublicationSwarm_ = true;
   publicationListen_    = listen;
@@ -608,8 +612,11 @@ PublicationOutbox &Session::publicationOutbox() {
       swarm.listenInterfaces               = publicationListen_;
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
-      options.makeTransport =
-          publicationSwarmTransport(keys, swarm, publicationNodes_);
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationSwarmTransport(
+          keys, swarm, publicationNodes_,
+          xanadocsDirectory().parent_path() / "author-catalog" /
+              keys.publicKey.hex());
     }
     publicationOutbox_ =
         std::make_unique<PublicationOutbox>(std::move(options));
@@ -627,12 +634,163 @@ PublicationInbox &Session::publicationInbox() {
       swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
       swarm.restrictDhtToDistinctNetworks  = false;
       swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
       options.makeTransport =
           publicationDownloadSwarmTransport(swarm, publicationNodes_);
     }
     publicationInbox_ = std::make_unique<PublicationInbox>(std::move(options));
   }
   return *publicationInbox_;
+}
+
+LinkPackageExchange &Session::linkPackageExchange() {
+  if (!linkPackageExchange_) {
+    LinkPackageExchange::Options options;
+    options.directory = xanadocsDirectory().parent_path() / "link-packages";
+    if (testPublicationSwarm_) {
+      const auto mine        = identity();
+      options.verifyIdentity = [key = mine.publicKey](const LinkPackage &pkg) {
+        return pkg.curator == key ? PublicationIdentity::MockVerified
+                                  : PublicationIdentity::Unknown;
+      };
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makePublisher                = publicationSwarmTransport(
+          mine, swarm, publicationNodes_,
+          xanadocsDirectory().parent_path() / "author-catalog" /
+              mine.publicKey.hex());
+      options.makeDownloader =
+          publicationDownloadSwarmTransport(swarm, publicationNodes_);
+    }
+    linkPackageExchange_ =
+        std::make_unique<LinkPackageExchange>(std::move(options));
+  }
+  return *linkPackageExchange_;
+}
+PublicationPin Session::pinPublication(const Publication &pub) const {
+  const std::vector<TorrentContent> files{
+      {.path = "publication.xanadoc", .data = encodePublication(pub)}};
+  return {.publisher = pub.publisher,
+          .salt      = pub.salt,
+          .hash      = makeTorrent(files, "publication").hash,
+          .sequence  = pub.sequence,
+          .version   = pub.version,
+          .title     = pub.title};
+}
+std::vector<Publication> Session::packagePublicationSources() {
+  std::vector<std::filesystem::path> files;
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    const auto root = publishedDir(i);
+    if (!std::filesystem::is_directory(root)) continue;
+    for (const auto &entry : std::filesystem::directory_iterator(root))
+      if (entry.is_regular_file() && entry.path().extension() == ".xanadoc")
+        files.push_back(entry.path());
+  }
+  for (const auto &status : publicationInbox().statuses())
+    if (status.phase == PublicationDownloadPhase::Ready)
+      files.push_back(status.storePath.parent_path() / "publication.xanadoc");
+  std::vector<Publication> result;
+  std::set<std::string> hashes;
+  for (const auto &file : files) {
+    if (result.size() >= 128) break;
+    if (!std::filesystem::is_regular_file(file) ||
+        std::filesystem::file_size(file) > 16 * 1024 * 1024)
+      continue;
+    std::ifstream input(file, std::ios::binary);
+    const std::string bytes{std::istreambuf_iterator<char>(input),
+                            std::istreambuf_iterator<char>()};
+    const auto pub = decodePublication(bytes);
+    if (pub && verifyPublication(*pub) &&
+        hashes.insert(pinPublication(*pub).hash.hex()).second)
+      result.push_back(*pub);
+  }
+  std::ranges::sort(result, {}, [](const auto &pub) {
+    return pub.title + pub.publisher.hex() + std::to_string(pub.sequence);
+  });
+  return result;
+}
+std::string Session::prepareLinkPackage(const Publication &source,
+                                        const std::string &salt,
+                                        const std::string &title,
+                                        bool announce) {
+  if (!verifyPublication(source))
+    throw std::invalid_argument("Source publication signature failed");
+  const auto mine    = identity();
+  std::int64_t floor = 0;
+  for (const auto &status : linkPackageExchange().statuses())
+    if (status.package.curator == mine.publicKey && status.package.salt == salt)
+      floor = std::max(floor, status.package.sequence);
+  const auto sequence = reservePublicationSequence(
+      std::filesystem::path(path(0)) / "publication-sequences", mine.publicKey,
+      salt, floor);
+  std::map<std::string, Scroll> scrolls;
+  for (const auto &link : source.links)
+    for (const auto *ends : {&link.left, &link.right})
+      for (const auto &span : *ends)
+        scrolls.emplace(span.scroll, source.scrolls.at(span.scroll));
+  const auto now = static_cast<std::uint64_t>(
+      std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()));
+  const auto pkg =
+      publishLinkPackage(mine, salt, title, sequence, now, source.links,
+                         std::move(scrolls), {pinPublication(source)});
+  return linkPackageExchange().submit(pkg, announce);
+}
+
+PublicationDiscovery &Session::publicationDiscovery() {
+  if (!publicationDiscovery_) {
+    PublicationDiscovery::Options options;
+    options.directory =
+        xanadocsDirectory().parent_path() / "publication-discovery";
+    if (testPublicationSwarm_) {
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationDiscoverySwarmTransport(
+          swarm, publicationNodes_, options.directory / "scratch");
+    }
+    publicationDiscovery_ =
+        std::make_unique<PublicationDiscovery>(std::move(options));
+  }
+  return *publicationDiscovery_;
+}
+
+PublicationSubscriptions &Session::publicationSubscriptions() {
+  if (!publicationSubscriptions_) {
+    PublicationSubscriptions::Options options;
+    options.directory =
+        xanadocsDirectory().parent_path() / "publication-subscriptions";
+    options.inbox = &publicationInbox();
+    const auto model =
+        SystemStoreModel::fromStore(systemStore(SystemDocKind::Settings));
+    const auto seconds =
+        model.getInt64(xanadu::settings::kPublicationPollSeconds, 30);
+    if (seconds < 1 ||
+        seconds > std::chrono::milliseconds::max().count() / 1000)
+      throw std::invalid_argument(
+          "publicationPollSeconds must be positive and fit the polling clock");
+    options.pollInterval = std::chrono::seconds{seconds};
+    if (testPublicationSwarm_) {
+      SwarmContentSource::Options swarm;
+      const auto colon       = publicationListen_.rfind(':');
+      swarm.listenInterfaces = publicationListen_.substr(0, colon + 1) + "0";
+      swarm.restrictDhtToDistinctNetworks  = false;
+      swarm.allowManyConnectionsPerAddress = true;
+      swarm.dhtPacketsPerSecond            = 100;
+      options.makeTransport                = publicationDownloadSwarmTransport(
+          swarm, publicationNodes_, {}, std::chrono::seconds{30});
+      options.pollInterval = std::chrono::seconds{2};
+    }
+    publicationSubscriptions_ =
+        std::make_unique<PublicationSubscriptions>(std::move(options));
+  }
+  return *publicationSubscriptions_;
 }
 
 std::pair<std::size_t, MicroversionId>
@@ -2323,7 +2481,7 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     if (!gleditor::hasDecoration(mask, decoration)) {
       continue;
     }
-    const auto attribute = xudu::formatAttributeFromDecoration(decoration);
+    const auto attribute = xanadu::formatAttributeFromDecoration(decoration);
     if (!attribute) {
       continue;
     }
@@ -2331,10 +2489,10 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     link.type  = LinkType::Format;
     link.owner = "--type";
     link.left  = content;
-    link.right.push_back(xudu::vocabularySpanFor(*attribute));
+    link.right.push_back(xanadu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
     GLEDITOR_LOG_DEBUG("xudu.edit", "{} format {} [{}, {})", version.str(),
-                       xudu::formatAttributeName(*attribute), start,
+                       xanadu::formatAttributeName(*attribute), start,
                        start + effLen);
   }
   save(sIdx);
@@ -2381,7 +2539,7 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   if (content.empty()) {
     return;
   }
-  const auto attribute = xudu::formatAttributeFromTextAlign(align);
+  const auto attribute = xanadu::formatAttributeFromTextAlign(align);
   if (!attribute) {
     return;
   }
@@ -2389,10 +2547,10 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   link.type  = LinkType::Format;
   link.owner = "--type";
   link.left  = content;
-  link.right.push_back(xudu::vocabularySpanFor(*attribute));
+  link.right.push_back(xanadu::vocabularySpanFor(*attribute));
   auto version = st.addLink(open[docIndex].version, link);
   GLEDITOR_LOG_DEBUG("xudu.edit", "{} align {} [{}, {})", version.str(),
-                     xudu::formatAttributeName(*attribute), start,
+                     xanadu::formatAttributeName(*attribute), start,
                      start + effLen);
   save(sIdx);
   refresh(docIndex, version);
@@ -2627,11 +2785,11 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       continue;
     }
     for (const auto &[id, link] : entry.store->links()) {
-      if (xudu::LinkType::Format == link.type) {
+      if (xanadu::LinkType::Format == link.type) {
         continue;
       }
       const auto colour =
-          xudu::linkColourWithInstanceShift(id, link.type, link.tier);
+          xanadu::linkColourWithInstanceShift(id, link.type, link.tier);
       for (const auto *const ends : {&link.left, &link.right}) {
         for (const auto &span : *ends) {
           for (const auto &extent : mine.occurrencesOf(span)) {
@@ -2654,7 +2812,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
         continue;
       }
       const auto res = st.resolve(piece);
-      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+      if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
         const auto colour = res.holeRecord
                                 ? colourForHole(res.holeRecord->reason)
                                 : Session::redactionColour;
@@ -2662,7 +2820,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
           found.push_back(gleditor::SpanStyle{
               .start = extent.start, .end = extent.end, .colour = colour});
         }
-      } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+      } else if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
         for (const auto &extent : mine.occurrencesOf(piece)) {
           found.push_back(gleditor::SpanStyle{
               .start  = extent.start,
@@ -2800,4 +2958,4 @@ ImageOverlay::rectFor(const Doc &doc, const std::uint32_t docOffset) const {
   return std::nullopt;
 }
 
-} // namespace xudu
+} // namespace xanadu

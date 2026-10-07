@@ -34,7 +34,7 @@
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -2213,4 +2213,4 @@ bool LinkBeams::performAction(const std::uint64_t nodeId,
   return true;
 }
 
-} // namespace xudu
+} // namespace xanadu

@@ -20,9 +20,7 @@
 
 #include "common/xanadu/kinetic_tether.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class KineticTetherOverlay
  * @brief Renders the luminous Hookean spring curve, floating blueprint quad,
@@ -61,6 +59,6 @@ private:
   std::unique_ptr<gleditor::Canvas> canvas_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_KINETIC_TETHER_OVERLAY_HPP

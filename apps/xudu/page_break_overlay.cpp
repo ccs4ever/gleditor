@@ -18,7 +18,7 @@
 
 #include "session.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 PageBreakOverlay::PageBreakOverlay(Session &session, RendererRef renderer,
                                    std::string fontName)
@@ -245,4 +245,4 @@ void PageBreakOverlay::drainActions() {
   if (onSplit_) onSplit_(next->document, next->offset);
 }
 
-} // namespace xudu
+} // namespace xanadu

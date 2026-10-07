@@ -25,7 +25,7 @@
 
 #include "common/xanadu/transcopyright_logic.hpp"
 
-namespace xudu {
+namespace xanadu {
 class Session;
 
 class TranscopyrightOverlay : public gleditor::FrameContributor,
@@ -143,5 +143,5 @@ private:
   mutable std::mutex actionMutex_;
   std::vector<PendingAction> pendingActions_;
 };
-} // namespace xudu
+} // namespace xanadu
 #endif

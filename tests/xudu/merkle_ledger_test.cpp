@@ -9,9 +9,7 @@
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/torrent.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -280,4 +278,4 @@ TEST(MerkleLedgerTest, LeafAndInteriorHashingAreDomainSeparated) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

@@ -18,7 +18,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -314,4 +314,4 @@ bool OverviewOverlay::performAction(std::uint64_t id,
   return true;
 }
 
-} // namespace xudu
+} // namespace xanadu

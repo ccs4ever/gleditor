@@ -41,8 +41,8 @@ struct PouchFixture {
   RenderState state{&device};
   std::shared_ptr<xanadu::UserPermascroll> scroll =
       std::make_shared<xanadu::UserPermascroll>();
-  xudu::Session session{"", scroll};
-  xudu::PouchDrawer drawer{session, {}};
+  xanadu::Session session{"", scroll};
+  xanadu::PouchDrawer drawer{session, {}};
   ch::Timeline timeline;
   glm::mat4 projection{1};
   PouchFixture() {
@@ -192,8 +192,8 @@ TEST(PouchDrawerOverlayTest, dropUsesVisiblePartitionAndClosedDrawerRefuses) {
   EXPECT_FALSE(fixture.drawer.handleGhostDrop({}, "Refused", {}, x, y));
 }
 TEST(PouchDrawerOverlayTest, horizontalResizeBothDocksPersistsOnlyOnRelease) {
-  for (const auto side : {xudu::PouchDrawer::DockSide::Left,
-                          xudu::PouchDrawer::DockSide::Right}) {
+  for (const auto side : {xanadu::PouchDrawer::DockSide::Left,
+                          xanadu::PouchDrawer::DockSide::Right}) {
     PouchFixture fixture;
     fixture.drawer.setDockSide(side);
     FocusManager focus;
@@ -218,7 +218,7 @@ TEST(PouchDrawerOverlayTest, horizontalResizeBothDocksPersistsOnlyOnRelease) {
                                        .y         = y,
                                        .pointerId = 7}));
     const float moved =
-        x + (side == xudu::PouchDrawer::DockSide::Left ? 100 : -100);
+        x + (side == xanadu::PouchDrawer::DockSide::Left ? 100 : -100);
     EXPECT_TRUE(focus.dispatchPointer({.phase     = PointerPhase::Move,
                                        .button    = 1,
                                        .x         = moved,

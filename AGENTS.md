@@ -15,8 +15,8 @@ pipeline.
 | `build/xudu-swarm-peer`   | the peer the network-namespace swarm tests drive                                                                                                                                  |
 
 The README is the source of truth for anything not covered here (rendering architecture,
-accessibility, xudu's data model, zigzag's space, SDL2/SDL3 differences); read the relevant section
-before a non-trivial change in that area.
+accessibility, the store's data model, the ZigZag space, SDL2/SDL3 differences); read the relevant
+section before a non-trivial change in that area.
 
 ## Xuzz navigation workflow
 
@@ -249,13 +249,17 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   (Spanfilade, Chronofilade + `EdlTransform`, Holefilade, Arrayfilade — all ephemeral replay
   products that mint no operations), `identity/` (BEP 10 plugins, Hashcash PoW, network controller),
   `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`, `zigzag/`.
-- `apps/xudu/` — xanadoc UI components: `beams.cpp`, `framing.cpp`, `session.cpp`,
-  `hypertime_graph.cpp`, `bridge_coordinator.cpp`, `views.cpp`, overlays. Emits no Structure
+- `apps/xudu/` — xuzz's xanadoc UI components, in namespace `xanadu`: `beams.cpp`, `session.cpp`,
+  `bridge_coordinator.cpp`, `views.cpp`, overlays. Not a program: `xudu` is retired as an
+  application and these objects link into `xuzz`. Add no new files here. Emits no Structure
   operations directly (only `batch_orchestrator.cpp` does); the editor is text-ops only.
-- `apps/zigzag/` — ZigZag visualizer components: `zigzag_visualizer.cpp`,
-  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`.
-- `apps/xuzz/` — sovereign unified application entry point (`main.cpp`, `xuzz_app.cpp`,
-  `cli_parser.cpp`, `view_coordinator.cpp`).
+- `apps/zigzag/` — xuzz's ZigZag visualizer components: `zigzag_visualizer.cpp`,
+  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`. Not a program either, and likewise
+  closed to new files; `design/view-system.md` plans its removal.
+- `apps/common/ui/` — overlays shared by both: `hypertime_graph.cpp`,
+  `quotation_builder_overlay.cpp`, `store_object_manager.cpp`.
+- `apps/xuzz/` — sovereign unified application entry point (`main.cpp`, `xuzz_app.cpp`, `cli.cpp`,
+  `view_coordinator.cpp`).
 - `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
 - `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
   any more: the YAML slice format is deleted and every slice is a store.
@@ -393,6 +397,10 @@ Rules:
   `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (view movement does not mutate a visited
   store; a proposed separate activity store records completed reader visits), R11 and R12 are the
   ones most often needed.
+- [`view-system.md`](design/view-system.md) — proposal, unbuilt: xuzz's pluggable View system over
+  the store (`ViewManifold`, cell-based axis bindings and dimension groups, the O(1) toss of
+  view-minted cells) and the stretch vanishing, all-dim walk and dimensional pack views. Read before
+  adding a zigzag view or touching `ViewAxisBinding`.
 - [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
   carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),

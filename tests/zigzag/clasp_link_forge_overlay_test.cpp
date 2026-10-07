@@ -28,7 +28,7 @@ xanadu::PouchItem cellCard() {
 
 TEST(ClaspLinkForgeTest,
      constrainedLabelsDropTargetsAndAccessibilityShareLayout) {
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   forge.dropLeft(cellCard());
   forge.dropRight({.span = {.length = 12345678}});
   forge.setLinkType(xanadu::LinkType::Disagreement);
@@ -109,7 +109,7 @@ TEST(ClaspLinkForgeTest,
 }
 
 TEST(ClaspLinkForgeTest, compactBenchKeepsFullSourceMetadataAndVisibleGlyphs) {
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   forge.dropLeft(cellCard());
   forge.dropRight({.span = {.length = 12345678}});
   const UiMetrics metrics{
@@ -135,7 +135,7 @@ TEST(ClaspLinkForgeTest, compactBenchKeepsFullSourceMetadataAndVisibleGlyphs) {
 }
 
 TEST(ClaspLinkForgeTest, unchangedBenchRetainsGeometryAndRejectsOldActions) {
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   const Theme theme;
   const Rect bounds{100, 100, 700, 500};
@@ -169,7 +169,7 @@ TEST(ClaspLinkForgeTest, unchangedBenchRetainsGeometryAndRejectsOldActions) {
 }
 
 TEST(ClaspLinkForgeTest, repeatedKeyboardCyclingKeepsSelectorFocus) {
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   const Theme theme;
   const Rect bounds{100, 100, 700, 500};
@@ -201,7 +201,7 @@ TEST(ClaspLinkForgeTest, repeatedKeyboardCyclingKeepsSelectorFocus) {
 }
 
 TEST(ClaspLinkForgeTest, movementAndFontChangesPreserveActionIdentity) {
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   Theme theme;
   const auto initial = forge.prepareBench(metrics, theme, {100, 100, 700, 500});
@@ -215,13 +215,13 @@ TEST(ClaspLinkForgeTest, movementAndFontChangesPreserveActionIdentity) {
 }
 
 TEST(ClaspLinkForgeTest, forgePreservesEveryEndsetSpanTypeAndTier) {
-  xudu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
+  xanadu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
   auto &store        = session.store();
   const auto version = store.insert({}, 0, "Left middle right");
   session.views().push_back(
       {.version = version, .pieces = store.rebuild(version)});
   const auto text = store.rebuild(version);
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   EXPECT_FALSE(forge.forge(session, 0));
   for (const auto &span : text.spansFor(0, 4)) forge.dropLeft({.span = span});
   for (const auto &span : text.spansFor(5, 6)) forge.dropLeft({.span = span});
@@ -253,7 +253,7 @@ TEST(ClaspLinkForgeTest, stableDrawDoesNotUploadOrShape) {
   ON_CALL(device, createPipeline)
       .WillByDefault(testing::Return(render::PipelineHandle{1}));
   RenderState state{&device};
-  xudu::LinkForgeWidget forge;
+  xanadu::LinkForgeWidget forge;
   forge.dropLeft(cellCard());
   forge.dropRight(cellCard());
   ch::Timeline timeline;

@@ -17,7 +17,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
 
-namespace xudu {
+namespace xanadu {
 struct WireframeHullOverlay::Presentation {
   struct Entry {
     std::string key, title, status;
@@ -304,4 +304,4 @@ void WireframeHullOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, glm::ortho(0.F, p.viewport.width, 0.F,
                                       p.viewport.height, -1.F, 1.F));
 }
-} // namespace xudu
+} // namespace xanadu

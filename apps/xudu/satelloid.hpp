@@ -38,9 +38,7 @@
 #include "common/xanadu/link_occurrences.hpp"
 #include "common/xanadu/universal_link_endpoint.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 class LinkContext;
 
 struct SatelloidNeighbor {
@@ -242,6 +240,6 @@ private:
   bool visible_{true};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_SATELLOID_HPP

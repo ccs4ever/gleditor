@@ -6,9 +6,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/uncommitted_op_log.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 TEST(UncommittedOpLogTest, EmptyLogReturnsEmptyCompactedList) {
@@ -301,4 +299,4 @@ TEST(UncommittedOpLogTest, PreservesHistoryOnCharacterBoundaryBackspace) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

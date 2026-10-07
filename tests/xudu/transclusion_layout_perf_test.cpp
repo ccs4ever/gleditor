@@ -13,9 +13,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {
@@ -92,4 +90,4 @@ TEST(TransclusionLayoutPerfTest, MultiDocumentWorkspaceScalesSubMillisecond) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

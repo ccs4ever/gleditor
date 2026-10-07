@@ -47,7 +47,7 @@ TEST(WorldPresentationTest,
         for (const xanadu::WorldCardConfig config :
              {xanadu::WorldCardConfig{}, xanadu::WorldCardConfig{190, 88},
               xanadu::WorldCardConfig{260, 46}}) {
-          xudu::world_cards::Card card;
+          xanadu::world_cards::Card card;
           card.configure(metrics, theme, config, {});
           card.content(full, full, full);
           card.prepare();
@@ -56,7 +56,7 @@ TEST(WorldPresentationTest,
           for (const auto pointer :
                {glm::vec2(1, 1), glm::vec2(size.width - 1, size.height - 1),
                 glm::vec2(size.width * .5F, size.height * .5F)}) {
-            const auto box = xudu::world_cards::awayFromPointer(
+            const auto box = xanadu::world_cards::awayFromPointer(
                 card.presentation.size, pointer, metrics, 8);
             contained(box, safe);
             EXPECT_FALSE((pointer.x >= box.left &&
@@ -80,7 +80,7 @@ TEST(WorldPresentationTest, TelemetryAndBlueprintRetainGeometryAndFullNames) {
       .screenHeight   = 480,
       .timeline       = timeline,
       .metrics        = {.screenWidth = 640, .screenHeight = 480}};
-  xudu::WireframeHullOverlay hull({});
+  xanadu::WireframeHullOverlay hull({});
   hull.deviceReady(device, {});
   hull.setTelemetry("download", full, "Downloading (3/12 dependencies)", .25F);
   hull.drawFrame(ctx);
@@ -102,7 +102,7 @@ TEST(WorldPresentationTest, TelemetryAndBlueprintRetainGeometryAndFullNames) {
   hull.drawFrame(ctx);
   EXPECT_TRUE(hull.snapshots().empty());
   xanadu::KineticTetherEngine engine;
-  xudu::KineticTetherOverlay tether(engine);
+  xanadu::KineticTetherOverlay tether(engine);
   tether.deviceReady(device, {});
   engine.startDrag({.previewText = full}, 320, 240);
   tether.drawFrame(ctx);
@@ -217,9 +217,9 @@ TEST(WorldPresentationTest,
       .screenHeight   = 480,
       .timeline       = timeline,
       .metrics        = {.screenWidth = 640, .screenHeight = 480}};
-  xudu::SatelloidOverlay sat({});
+  xanadu::SatelloidOverlay sat({});
   sat.deviceReady(device, {});
-  xudu::CellSatelloid card;
+  xanadu::CellSatelloid card;
   card.cellRef      = 42;
   card.text         = full;
   card.dimName      = "d.long_dimension_with_identifying_suffix";

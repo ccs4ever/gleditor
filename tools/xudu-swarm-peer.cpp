@@ -55,6 +55,7 @@ int restoreRemote(const int argc, char **argv) {
   options.enableTrackers                 = false;
   options.enableLocalDiscovery           = false;
   options.allowManyConnectionsPerAddress = true;
+  options.dhtPacketsPerSecond            = 100;
   xanadu::SwarmContentSource source(options);
   const auto port = std::stoul(argv[4]);
   if (port == 0 || port > UINT16_MAX)
@@ -108,9 +109,10 @@ int restoreRemote(const int argc, char **argv) {
 }
 
 int downloadRemote(const int argc, char **argv) {
-  if (argc != 6)
+  if (argc != 6 && argc != 7)
     throw std::invalid_argument(
-        "usage: xudu-swarm-peer --download-publication URI HOST PORT CACHE");
+        "usage: xudu-swarm-peer --download-publication URI HOST PORT CACHE "
+        "[LISTEN_ADDRESS]");
   const auto port = std::stoul(argv[4]);
   if (!port || port > UINT16_MAX)
     throw std::invalid_argument("invalid peer port");
@@ -119,6 +121,8 @@ int downloadRemote(const int argc, char **argv) {
   network.enableTrackers                 = false;
   network.restrictDhtToDistinctNetworks  = false;
   network.allowManyConnectionsPerAddress = true;
+  network.dhtPacketsPerSecond            = 100;
+  if (argc == 7) network.listenInterfaces = std::string(argv[6]) + ":0";
   const std::vector<std::pair<std::string, std::uint16_t>> peers{
       {argv[3], static_cast<std::uint16_t>(port)}};
   xanadu::PublicationInbox inbox(
@@ -223,6 +227,7 @@ int main(const int argc, char **argv) {
     // address, and refusing the newcomer while the previous connection is
     // still being torn down leaves it waiting for content nobody will send.
     options.allowManyConnectionsPerAddress = true;
+    options.dhtPacketsPerSecond            = 100;
     // Local discovery is off for the same reason, unless asked for: a peer
     // that announces itself on the network is a peer the test did not
     // introduce. It is available because some clients -- btfs, for one -- have

@@ -153,7 +153,7 @@ balancing three essential forces:
                                    │   ▼
        +-------------------------------------------------------------+
        |                   Codebase Expert                           |
-       |  - `xudu::Store` (Primedia Spool + 64B CompactOpNode DAG)   |
+       |  - `xanadu::Store` (Primedia Spool + 64B CompactOpNode DAG)   |
        |  - `LinkBeams` & `Framing` (3D Beams & Volumetric Prisms)   |
        |  - `ClickableRegistry` (Multi-Kind Picking: Glyphs/Pages)   |
        |  - `ManagedTorrent`, `UserPermascroll` & `MerkleLedger`     |
@@ -172,7 +172,7 @@ balancing three essential forces:
 - **Realist Constraint**: Modern users reject high cognitive setup friction. If initiating a blank
   page requires entering cryptographic identities, selecting torrent swarms, or navigating
   multi-step wizard modals, adoption fails immediately.
-- **Codebase Synthesis**: `xudu::Store` automatically anchors slot 0 to the local author's
+- **Codebase Synthesis**: `xanadu::Store` automatically anchors slot 0 to the local author's
   `UserPermascroll`. Pressing `Ctrl+N` or clicking the ambient `+ New Xanadoc` genesis chip
   instantly summons a floating page quad at $Z = 0$ in under 16ms without disk dialogs. Typing
   immediately streams 64-byte `CompactOpNode` records into the author's local 64 KiB page-aligned

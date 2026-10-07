@@ -14,9 +14,7 @@
 #include "common/xanadu/tension_layout.hpp"
 #include "xudu/tenuous_tether.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -248,4 +246,4 @@ TEST(TensionLayoutTest, TenuousTetherBezierProperties) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

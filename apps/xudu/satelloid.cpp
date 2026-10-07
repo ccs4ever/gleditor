@@ -19,7 +19,7 @@
 
 #include "xudu/link_context.hpp"
 
-namespace xudu {
+namespace xanadu {
 struct SatelloidOverlay::Presentation {
   struct Slot {
     gleditor::ui::WorldPanel panel;
@@ -618,4 +618,4 @@ bool SatelloidOverlay::performAction(std::uint64_t id,
   presentation_->pending.push_back(static_cast<std::uint32_t>(id));
   return true;
 }
-} // namespace xudu
+} // namespace xanadu

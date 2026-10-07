@@ -220,7 +220,7 @@ ______________________________________________________________________
 
 ### 3.2 Hypertime Scrubbing of Settings
 
-Because a System Xanadoc is an instance of `xudu::Store`:
+Because a System Xanadoc is an instance of `xanadu::Store`:
 
 ```cpp
 // Scrub the keymap back 3 revisions to undo an erroneous binding:
@@ -243,7 +243,7 @@ To reflect authentic Xanadulogical reality:
 
 1. **Author-Selectable Set of Current Versions (`currentVersions`)**:
 
-   - Every `xudu::Store` maintains an explicit, author-designated set of microversions considered
+   - Every `xanadu::Store` maintains an explicit, author-designated set of microversions considered
      active or current:
 
      $$

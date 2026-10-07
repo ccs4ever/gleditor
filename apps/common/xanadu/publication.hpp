@@ -130,6 +130,18 @@ publicationTopics(std::string_view commaSeparated);
  * the name can find the newest publication under it without asking anyone in
  * particular, and can tell that what they found is the publisher's.
  */
+/// Exact signed publication advertised by a response or curation package.
+/// The immutable root preserves the curator's citation across later editions.
+struct PublicationPin {
+  PublicKey publisher;
+  std::string salt;
+  InfoHash hash;
+  std::int64_t sequence{};
+  MicroversionId version;
+  std::string title;
+  bool operator==(const PublicationPin &) const = default;
+};
+
 struct PublishedStructureView {
   MicroversionId head;
   std::string name;

@@ -22,7 +22,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 class Session;
 
@@ -116,6 +116,6 @@ private:
   void drainActions();
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_PAGE_BREAK_OVERLAY_HPP

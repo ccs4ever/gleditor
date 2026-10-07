@@ -1,18 +1,21 @@
 ---
 name: xudu-ui-design
 description: >-
-  Expert workflow and runbook for comprehensive UI design in the xudu xanadoc editor.
+  Expert workflow and runbook for UI design of xanadoc pages in xuzz (xudu is no longer a separate application).
   Use when designing or implementing wall-less intertwingled layouts, 3-way tension spring layout physics, tenuous link tethers, flying linked pages, transclusion rendering, and provenance tracking.
 ---
 
-# `xudu` Intertwingled UI Design Workflow
+# Xanadoc Intertwingled UI Design Workflow
 
 This skill defines the technical procedures, physical force models, transclusion rendering
-conventions, and layout algorithms for the `xudu` xanadoc and xanalogical editor.
+conventions, and layout algorithms for xanadoc pages in `xuzz`. `xudu` is retired as a separate
+application: `build/xudu` is a symlink to `xuzz`, and `apps/xudu/` holds the xanadoc components that
+`xuzz` links. Page views will plug into the `PageView` seam of
+[`design/view-system.md`](../../../design/view-system.md).
 
 ## 1. Core Architectural Concept
 
-`xudu` does not place artificial walls between xanadocs, primedia sources, and link packages. All
+`xuzz` does not place artificial walls between xanadocs, primedia sources, and link packages. All
 information entities intertwingle in a shared 3D cosmos:
 
 - **Reference-Driven Emergence**: Documents, source spans, and link targets materialize in 3D space
@@ -97,11 +100,11 @@ ______________________________________________________________________
 
 ## 4. Implementation Checklist for New Features
 
-1. **Tension Solver Module**: Implement in `apps/xudu/core/tension_layout.cpp` integrating
+1. **Tension Solver Module**: Implement in `apps/common/xanadu/tension_layout.cpp` integrating
    Runge-Kutta 4th-order (RK4) spring simulation.
 1. **Link Beams Integration**: Extend `apps/xudu/beams.cpp` with tether curve generation and active
    link pulsating shaders.
 1. **Session Observation**: Update `apps/xudu/session.cpp` to monitor caret position, link hovering,
    and dynamic document spawning.
-1. **Accessibility Mapping**: Update `xudu::LinkBeams::describe` in `apps/xudu/beams.cpp` to expose
-   link relations and provenance metadata.
+1. **Accessibility Mapping**: Update `xanadu::LinkBeams::describe` in `apps/xudu/beams.cpp` to
+   expose link relations and provenance metadata.

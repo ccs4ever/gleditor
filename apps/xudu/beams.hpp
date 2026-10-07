@@ -50,9 +50,7 @@
 #include "common/xanadu/tension_layout.hpp"
 #include "xudu/session.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 class LinkContext;
 
 class TenuousTetherOverlay;
@@ -401,7 +399,7 @@ private:
   [[nodiscard]] static float drawnHalfExtent(const Edge &edge,
                                              float stubMinOfLine = 0.9F);
   /// The vertical reach @ref drawnHalfExtent gives, as an extent to hand to
-  /// xudu::assignAnchorLanes().
+  /// xanadu::assignAnchorLanes().
   [[nodiscard]] static AnchorExtent drawnExtent(const Edge &edge,
                                                 float stubMinOfLine = 0.9F);
 
@@ -424,7 +422,7 @@ private:
    * out as a bow tie with a twist in it rather than as a connection.
    *
    * A band instead: strands spread evenly across each end, spaced at
-   * xudu::bandStrandCount()'s pitch across the taller of the two so that they
+   * xanadu::bandStrandCount()'s pitch across the taller of the two so that they
    * stay clear of each other there, and converging on the shorter one. Equal
    * ends give parallel strands; unequal ones give a spread that gathers into
    * the end attached to less text.
@@ -446,7 +444,7 @@ private:
    * otherwise only implied by where a beam happens to meet the document, which
    * at any distance is a guess. The mark is a bar filling this anchor's slice
    * of the margin -- @p laneIndex of @p laneCount, worked out by
-   * xudu::assignAnchorLanes() -- over the anchor's whole height. One lane
+   * xanadu::assignAnchorLanes() -- over the anchor's whole height. One lane
    * fills the margin outright, which is the ordinary case and the one this
    * reduces to.
    */
@@ -523,7 +521,7 @@ private:
   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>>
       accessibleNodes;
   LinkContext *linkContext_{nullptr};
-  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  float readableTextPx_{xanadu::LayoutConfig{}.readableTextPx};
   /// What the last settle diagnostic reported, so it is logged on change.
   std::array<std::size_t, 4> lastSettleReport{};
   /// Bumped whenever the strands change, so the description is rebuilt then
@@ -593,6 +591,6 @@ private:
   std::vector<MarginAnchor> allAnchors_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_BEAMS_H

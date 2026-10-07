@@ -287,6 +287,110 @@ publication namespace/UI integration also passed after that fix. The final Docke
 smoke tests with networking disabled. Repository formatting and lint gates passed. Final build, test
 and image identity logs are retained under `build/publication-download/`.
 
+## Signed author catalogs and topic discovery (2026-10-06)
+
+A publication sent to the test swarm now also updates the author's signed catalog at
+`bep46:<key>/catalog`. The catalog has its own durable sequence, independent of each document's
+publication sequence. Its versioned canonical bencode lists document salts, immutable roots, titles,
+topics and the author's selected microversions. Publishing a different microversion does not infer
+an edition change. Completion waits for remote DHT acknowledgement of both the document pointer and
+the catalog pointer; immutable catalog seeds remain available after restart.
+
+`Ctrl+Shift+D` opens discovery by topic or publishing key. Telescope accepts Return on a simple
+keyword such as `Ideas`, `#Ideas`, or `author:<64-hex-key>`. Author discovery resolves the signed
+catalog pointer and fetches its torrent. Topic discovery joins the deterministic
+`SHA1("xudu:topic:" + canonical-topic)` rendezvous and exchanges signed catalogs through the
+`xudu_publications` BitTorrent extension. No separate service, direct reader peer address or
+preloaded search record is needed. Discovery and download sessions stay on their workers.
+
+Readers verify catalog signatures, requested publisher/topic, canonical encoding and observed
+sequence high-water marks before ingestion. Forged metadata, conflicting equal-sequence snapshots
+and document rollback are refused. Verified snapshots and explicitly followed keys persist privately
+across restart. Catalog records are search metadata, not proof of Oracle enrollment, availability or
+complete content; these distinctions are visible in the interface. Choosing a result starts the
+existing signed-name download and complete-store verification path.
+
+The new wire/catalog format is version 1. Native store format 4 and publication format 2 are
+unchanged. The default Docker smoke filters include the catalog and worker regression suites.
+
+Validation and remaining limitations are recorded in
+[the discovery report](ux_publication_discovery_validation_2026-10-06.md). This adds author-key and
+keyword discovery prerequisites for P2/P3; subscriptions, commentary discovery and link packages
+still require their own interface journeys.
+
+The final focused run passed 53 cases; the final namespace run passed 12 transport/mutable-name
+cases and both publication integrations. The local publication UI runner passed with evidence in
+`build/publication-local/run-9e43ava2/`. The rebuilt Docker image `gleditor-swarm-test:local`
+(`cae7ecc8eda4`) passed 104 smoke tests with networking disabled, and its publication sources match
+the host tree. Repository format-check and lint passed; clang-format 19 comparison found no new
+deviations, while unchanged regions retain the baseline differences described in the report.
+
+## Verified update subscriptions (2026-10-06)
+
+Completed downloads now offer Notify me of updates. `Ctrl+Shift+U` opens a keyboard-accessible
+review palette with verified sequence changes, the author's selected old/new microversions,
+comparison opening, acknowledgement, immediate checking, pause and resume. Updates open as separate
+retained reader stores. Polling never changes an edition, chooses a version from hypertime order, or
+replaces the earlier snapshot.
+
+A worker resolves the pinned publishing key and salt, then passes the observed signed sequence and
+hash as a minimum to the inbox. Notices require a completely downloaded and verified native store.
+Rollback, conflicting equal-sequence pointers, wrong authorship and failed dependencies cannot
+advance the accepted sequence or generate a notice. A private LMDB subscription record (`XPS1`)
+persists accepted sequences, pending transfers and delivered/reviewed notices. Pause cancels work;
+restart and resume recover missed updates. Unsupported private versions are refused numerically.
+Native store format 4 and publication format 2 are unchanged.
+
+Notifications enter the existing shared toast/accessibility path one at a time. Unreviewed updates
+remain in the palette after a toast expires or the application restarts. `publicationPollSeconds` in
+`system://settings` defaults to 30 seconds and is read at startup; the explicit mock swarm uses two
+seconds. Opening comparisons waits for the shared-content layout to settle and then fits both page
+widths. A narrow viewport gives an overview; normal reading still requires zooming or focusing a
+passage.
+
+Validation and remaining limitations are recorded in
+[the update report](ux_publication_updates_validation_2026-10-06.md). The real namespace fixture
+proves Bob's live notification, Carl's missed-update recovery, independent old/new snapshots, review
+and restart without duplicate notices. Alice's revised store is fixture-provided. This completes the
+update prerequisite for P5, not the commentary-discovery or full P1–P7 acceptance journeys.
+
+The full headless run passed 539 library, 1,269 engine, 57 Xuzz and 119 ZigZag tests, 12 namespace
+transport/mutable-name cases and all three publication integrations. After the final title-boundary
+fix, 60 focused cases and 1,270 engine cases passed. The local publication runner passed with
+evidence in `build/publication-local/run-2gytb_n4/`. Docker image `gleditor-swarm-test:local`
+(`331764ac1df1`) passed 115 smoke tests with networking disabled; its fourteen changed/new C++
+sources match the host and no private identity directories were found in its source or work tree.
+Format-check and lint passed; the separate clang-format 19 comparison found no new deviations.
+
+## Independent packages and scroll response discovery (2026-10-06)
+
+`Ctrl+Alt+Shift+P` prepares an independent package from a deliberately chosen signed publication's
+links. The curator reviews both endsets before publishing the retained signed bytes to the explicit
+mock swarm. `Ctrl+Alt+Shift+L` queries the registered global scroll rendezvous, fetches packages
+from signed catalog advertisements, and opens exact cited snapshots through the download controls.
+No curator key is needed for discovery. Fetch/review does not adopt links or append source
+operations.
+
+`LinkPackageExchange` retains bounded immutable requests and verified package caches. Workers own
+publishing/download sessions. Publishing requires package and catalog acknowledgements; reader
+acceptance requires piece, signature, identity, sequence and endpoint-declaration checks. Explicit
+cancellation survives restart. Retry preserves signed bytes and sequence. Later packages supersede
+older own announcement jobs while retaining their metadata. Exact citations fetch their signed
+publication root directly, preserving the author's chosen version even if the mutable head changes.
+
+Catalog format 2 carries typed package entries and their referenced scroll keys. Package format 1
+carries exact publication citations. The retired catalog/package shapes are refused without a shim;
+regenerate development catalogs. Store format 4, publication format 2 and native fixtures remain
+unchanged. The package cache's atomic rename checks cover process restart, not power loss.
+
+See [the package report](ux_publication_links_validation_2026-10-06.md) for fixture boundaries,
+interface evidence and limitations. This is a publication/discovery/review prerequisite batch;
+visibility layers and full commentary authorship are not yet certified. The final native suites
+passed 540 library, 1,284 engine, 57 Xuzz and 119 ZigZag cases, plus 12 namespace transport cases
+and four publication integrations across the recorded runs. Docker image `485bcd8f427d` passed 129
+network-disabled smoke tests; all 32 changed/new C++ hashes match the host. The review now shows
+compact identities and readable ranges, with full key inspection and accessibility descriptions.
+
 ## Remaining work
 
 Investigate the
@@ -296,16 +400,10 @@ completion race remains unconfirmed.
 
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
-   explicit mock verification boundary are now implemented in the outbox.
-1. Add signed author catalog publication/ingestion and topic rendezvous exchange for author-key
-   following and keyword search. Feed verified results into the asynchronous download/opening path.
-   Known publication magnets now resolve/download on a worker, and completed snapshots reopen
-   offline; the complete P2 catalog/follow and P3 search journeys remain pending. An empty catalog
-   stays empty until data is learned.
-1. Add persisted update subscriptions, sequence polling, dependency verification, retry and
-   acknowledgement, including missed updates after reconnect.
-1. Add commentary/backlink and independent link-package creation, review, announcement and
-   discovery. Package visibility must be a private reader preference that filters contributions
-   without appending operations to visited stores.
-1. Rerun P1–P7 and their rejection/offline/retry cases through the UI. The first batch's unit, form
-   and transport passes do not substitute for that acceptance run.
+   explicit mock verification boundary are implemented in the outbox.
+1. Add private package visibility preferences and reader contribution rendering/navigation without
+   appending operations to visited stores. Filter discovered packages by the publication's exact
+   spans, and support individual link selection/editing during package preparation.
+1. Validate commentary document creation, publication and Alice's reply citing both commentaries.
+   Rerun P1–P7 and rejection/offline/retry cases through the UI. Fixture, unit and transport passes
+   do not substitute for that acceptance run.

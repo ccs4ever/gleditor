@@ -11,9 +11,7 @@
 #include "common/xanadu/managed_torrent.hpp"
 #include "common/xanadu/merkle_ledger.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 namespace fs = std::filesystem;
@@ -159,4 +157,4 @@ TEST_F(ManagedTorrentTest, PauseResumeAndRemove) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

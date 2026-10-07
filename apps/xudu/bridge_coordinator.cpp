@@ -6,7 +6,7 @@
 
 #include <utility>
 
-namespace xudu {
+namespace xanadu {
 
 BridgeCoordinator::BridgeCoordinator(
     LinkBeams &links, RendererRef renderer,
@@ -145,4 +145,4 @@ void BridgeCoordinator::applyConfig(xanadu::BridgeRuntimeConfig config) {
   dirty_ = true;
 }
 
-} // namespace xudu
+} // namespace xanadu

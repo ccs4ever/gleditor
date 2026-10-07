@@ -17,7 +17,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/spatial.hpp>
 
-namespace xudu {
+namespace xanadu {
 struct KineticTetherOverlay::Presentation {
   world_cards::Card card;
   WorldCardConfig config{190, 88};
@@ -166,4 +166,4 @@ void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
                                       p.viewport.height, -1.F, 1.F));
   p.card.panel.draw(ctx.state, p.matrix, p.viewport);
 }
-} // namespace xudu
+} // namespace xanadu

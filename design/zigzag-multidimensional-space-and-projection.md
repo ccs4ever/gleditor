@@ -97,8 +97,8 @@ string views:
 ```cpp
 struct CompactZZCell {
   CellID id{0};                  ///< Unique 64-bit cell identifier
-  std::uint32_t spoolOpIndex{0}; ///< Offset in xudu::SegmentedOpsSpool
-  xudu::PrimediaSpan span{};     ///< Canonical address in primedia spool
+  std::uint32_t spoolOpIndex{0}; ///< Offset in xanadu::SegmentedOpsSpool
+  xanadu::PrimediaSpan span{};     ///< Canonical address in primedia spool
 
   /// Fast inline fixed-size link table for standard dimensions (12 standard dims)
   std::array<LinkPairs, StandardDimensionCount> standardDimensions{};
@@ -109,13 +109,13 @@ struct CompactZZCell {
   std::optional<Preflet> preflet{};
   std::string type{"cell"};
   std::string ephemeralText{};
-  xudu::ResolutionStatus resolutionStatus{xudu::ResolutionStatus::VerifiedBytes};
-  std::optional<xudu::TranscopyrightDescriptor> transcopyrightInfo{};
-  std::optional<xudu::PublishedHoleRecord> holeRecord{};
+  xanadu::ResolutionStatus resolutionStatus{xanadu::ResolutionStatus::VerifiedBytes};
+  std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
+  std::optional<xanadu::PublishedHoleRecord> holeRecord{};
 
   /// Zero-copy text resolution into memory-mapped primedia spool
   [[nodiscard]] std::string_view resolveLocalView(
-      const xudu::SegmentedPrimediaSpool &spool) const noexcept;
+      const xanadu::SegmentedPrimediaSpool &spool) const noexcept;
 };
 ```
 

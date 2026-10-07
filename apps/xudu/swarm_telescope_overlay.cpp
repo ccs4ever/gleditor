@@ -14,7 +14,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/font.hpp>
 
-namespace xudu {
+namespace xanadu {
 namespace ui = gleditor::ui;
 namespace {
 std::string formatBytes(const std::uint64_t bytes) {
@@ -314,7 +314,10 @@ SwarmTelescopeOverlay::prepare(const ui::UiMetrics &metrics,
          channels_[i], "channel"});
   for (const auto &result : currentResults_) {
     std::string label = result.entry.title + " — " + result.entry.authorName +
-                        " | " + std::to_string(result.seederCount) + " seeders";
+                        " | " +
+                        (result.seederCount == 0 && result.peerCount == 0
+                             ? "availability unchecked"
+                             : std::to_string(result.seederCount) + " seeders");
     if (result.isVerified) label += " | Merkle verified";
     lists[1].rows.push_back({rowId("publication:" + result.entry.infoHash),
                              std::move(label), "select"});
@@ -326,10 +329,14 @@ SwarmTelescopeOverlay::prepare(const ui::UiMetrics &metrics,
         entry.title,
         "Author: " + entry.authorName,
         "Key: " + entry.authorFingerprint,
-        "Size: " + formatBytes(entry.totalBytes) + " | " +
-            std::to_string(entry.microversions) + " microversions",
-        "Health: " + std::to_string(result.seederCount) + " seeders | " +
-            std::to_string(result.peerCount) + " peers",
+        entry.microversions == 0
+            ? "Size/history checked on download"
+            : "Size: " + formatBytes(entry.totalBytes) + " | " +
+                  std::to_string(entry.microversions) + " microversions",
+        result.seederCount == 0 && result.peerCount == 0
+            ? "Availability: check on download"
+            : "Health: " + std::to_string(result.seederCount) + " seeders | " +
+                  std::to_string(result.peerCount) + " peers",
         "Abstract: " + entry.abstractText,
         "URI: " + entry.bep46Uri,
         result.isVerified ? "Merkle verified"
@@ -487,6 +494,11 @@ void SwarmTelescopeOverlay::setOnSummon(SummonHandler handler) {
   const std::scoped_lock lock(guard_);
   onSummon_ = std::move(handler);
 }
+void SwarmTelescopeOverlay::setOnDiscover(
+    std::function<void(const std::string &)> handler) {
+  const std::scoped_lock lock(guard_);
+  onDiscover_ = std::move(handler);
+}
 void SwarmTelescopeOverlay::setSampleForceVisible(const bool force) {
   const std::scoped_lock lock(guard_);
   sampleForceVisible_ = force;
@@ -509,6 +521,13 @@ bool SwarmTelescopeOverlay::keyPressed(const gleditor::Key key,
     refreshSearch();
     page_ = 1;
     changed();
+    if (onDiscover_ && !searchQuery_.empty() &&
+        (searchQuery_.starts_with("author:") ||
+         searchQuery_.find_first_of(" :\t\n()\"") == std::string::npos)) {
+      setVisible(false);
+      onDiscover_(searchQuery_.starts_with('#') ? searchQuery_.substr(1)
+                                                : searchQuery_);
+    }
     return true;
   }
   if (key == gleditor::Key::Return && !dirty_) {
@@ -653,4 +672,4 @@ bool SwarmTelescopeOverlay::pointerEvent(const ui::PointerEvent &event) {
   }
   return !dirty_ && overlay_.pointerEvent(event);
 }
-} // namespace xudu
+} // namespace xanadu

@@ -13,6 +13,7 @@
 #include "publication.hpp"
 
 namespace xanadu {
+struct LinkPackage;
 
 struct PublicationSeed {
   InfoHash hash;
@@ -82,7 +83,21 @@ public:
                         const InfoHash &hash)                   = 0;
   [[nodiscard]] virtual bool acknowledged(const Publication &publication,
                                           const InfoHash &hash) = 0;
+  virtual void announcePackage(const LinkPackage &, const InfoHash &) {
+    throw std::runtime_error("Link package publishing unavailable");
+  }
+  virtual bool packageAcknowledged(const LinkPackage &, const InfoHash &) {
+    return false;
+  }
+  virtual bool advertisePackage(const LinkPackage &, const InfoHash &) {
+    return false;
+  }
   virtual void poll() {}
+  /// Called only after the document pointer is acknowledged. A transport
+  /// offering discovery waits for its author catalog acknowledgement as well.
+  [[nodiscard]] virtual bool advertise(const Publication &, const InfoHash &) {
+    return true;
+  }
   [[nodiscard]] virtual std::uint16_t listenPort() const { return 0; }
 };
 
@@ -128,7 +143,8 @@ public:
 [[nodiscard]] std::function<std::unique_ptr<PublicationTransport>()>
 publicationSwarmTransport(
     MutableKeys keys, SwarmContentSource::Options options,
-    std::vector<std::pair<std::string, std::uint16_t>> nodes);
+    std::vector<std::pair<std::string, std::uint16_t>> nodes,
+    std::filesystem::path catalogDirectory);
 
 } // namespace xanadu
 #endif

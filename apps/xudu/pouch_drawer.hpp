@@ -30,9 +30,7 @@
 #include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class PouchDrawer
  * @brief High-performance overlay drawer containing partitioned drop zones and
@@ -257,6 +255,6 @@ private:
   float drawerH_{0.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_POUCH_DRAWER_HPP

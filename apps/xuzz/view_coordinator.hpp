@@ -21,9 +21,9 @@ namespace xuzz {
 
 class ViewCoordinator {
 public:
-  ViewCoordinator(xudu::Views &views,
+  ViewCoordinator(xanadu::Views &views,
                   std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
-                  xudu::BridgeCoordinator &bridgeCoordinator,
+                  xanadu::BridgeCoordinator &bridgeCoordinator,
                   RendererRef renderer, AppStateRef state);
 
   void setViewMode(ViewMode mode);
@@ -33,9 +33,9 @@ public:
   void apply();
 
 private:
-  xudu::Views &views_;
+  xanadu::Views &views_;
   std::shared_ptr<zigzag::ZigzagVisualizer> visualizer_;
-  xudu::BridgeCoordinator &bridgeCoordinator_;
+  xanadu::BridgeCoordinator &bridgeCoordinator_;
   RendererRef renderer_;
   AppStateRef state_;
   ViewMode mode_{ViewMode::Unified};

@@ -229,6 +229,17 @@ TEST(XuzzSovereignKeymapTest, SovereignKeymapGovernance) {
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapRadialMenu));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapSworph));
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapPublish));
+  for (const auto action : {xanadu::settings::kKeymapLinkPackagePublish,
+                            xanadu::settings::kKeymapLinksResponses}) {
+    const auto binding = std::ranges::find_if(
+        kmCfg.bindings, [&](const auto &pair) { return pair.first == action; });
+    ASSERT_NE(binding, kmCfg.bindings.end());
+    EXPECT_EQ(std::ranges::count_if(kmCfg.bindings,
+                                    [&](const auto &pair) {
+                                      return pair.second == binding->second;
+                                    }),
+              1);
+  }
 
   // Zigzag & Vortex actions
   EXPECT_TRUE(hasBinding(xanadu::settings::kKeymapZigzagTogglePalette));

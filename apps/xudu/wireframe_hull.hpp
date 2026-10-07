@@ -20,9 +20,7 @@
 
 #include "common/xanadu/transcopyright_logic.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class WireframeHullOverlay
  * @brief FrameContributor that renders an ethereal pulsing wireframe hull and
@@ -89,6 +87,6 @@ private:
   std::vector<DissolvingHull> dissolvingHulls_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_WIREFRAME_HULL_HPP

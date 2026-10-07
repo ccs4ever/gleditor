@@ -10,7 +10,7 @@
 
 #include "common/xanadu/system_docs.hpp"
 
-namespace xudu::world_cards {
+namespace xanadu::world_cards {
 namespace ui = gleditor::ui;
 struct Style {
   ui::UiMetrics metrics;
@@ -153,5 +153,5 @@ inline ui::Rect awayFromPointer(ui::Size size, glm::vec2 pointer,
        size.width, size.height},
       safe);
 }
-} // namespace xudu::world_cards
+} // namespace xanadu::world_cards
 #endif

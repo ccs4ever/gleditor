@@ -19,7 +19,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 LinkPanelOverlay::LinkPanelOverlay(LinkContext &aContext, Session &aSession)
     : context(aContext), session(aSession),
@@ -302,4 +302,4 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
   panel.drawFrame(child);
 }
 
-} // namespace xudu
+} // namespace xanadu

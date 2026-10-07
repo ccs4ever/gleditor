@@ -25,7 +25,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   } catch (...) {
   }
 
-  std::ignore = xanadu::decodeLinkPackage(sv);
+  try {
+    std::ignore = xanadu::decodeLinkPackage(sv);
+  } catch (const xanadu::LinkPackageUnreadable &) {
+  }
   std::ignore = xanadu::decodeBlessing(sv);
   std::ignore = xanadu::decodePublication(sv);
   std::ignore = xanadu::decodeMutablePointer(sv);

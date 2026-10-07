@@ -66,7 +66,7 @@ struct TranscopyrightOverlayTest : testing::Test {
   std::vector<xanadu::HoleSpanInfo> holes;
   std::map<std::uint64_t, gleditor::ui::Rect> anchors;
   std::vector<std::pair<std::size_t, xanadu::PrimediaSpan>> unlocked;
-  xudu::TranscopyrightOverlay overlay{
+  xanadu::TranscopyrightOverlay overlay{
       [this](const RenderState &) {
         ++sourceCalls;
         return holes;

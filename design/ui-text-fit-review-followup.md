@@ -45,3 +45,13 @@ left unchanged with a settings warning. The upgrade does not mint replacement di
 a mismatched scroll. A regression checks both the original stored text and operation count. The
 pouch divider journey now focuses the handle and uses its Right key to resize: a stationary
 press/release starts and ends a drag without changing the width.
+
+Integration with origin/main retains the unified xanadu namespace, publication discovery and
+subscription actions, unknown-availability labels, and complete option identity descriptions.
+Independent-link review labels now retain complete identifiers for the shared Form fitting path. A
+fresh three-backend comparison passed picking, overlay, atlas-growth, culling, coarse-text and
+small-zoom checks. Formatting and lint gates passed on the integrated tree.
+
+The integrated build passes all four test binaries: 748 library tests, 1,294 Xanadu tests, 61 Xuzz
+tests and 190 ZigZag tests. The disabled/skipped media and network cases retain their existing
+status; network cases are exercised separately by the rootless swarm target.

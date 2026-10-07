@@ -63,7 +63,7 @@ TEST(SystemUiConfigTest,
   const auto originalCount = existing.opCount();
   std::size_t upgradedCount{};
   {
-    xudu::Session session{"", scroll};
+    xanadu::Session session{"", scroll};
     auto &store = session.systemStore(xanadu::SystemDocKind::UI);
     EXPECT_EQ(store.textOf(store.primaryCurrentVersion()), notes);
     EXPECT_EQ(xanadu::UIConfig::fromStore(store).linkPanel.font, "Serif 17");
@@ -79,7 +79,7 @@ TEST(SystemUiConfigTest,
               upgradedCount);
   }
   {
-    xudu::Session reopened{"", scroll};
+    xanadu::Session reopened{"", scroll};
     auto &store = reopened.systemStore(xanadu::SystemDocKind::UI);
     EXPECT_EQ(store.opCount(), upgradedCount);
     EXPECT_EQ(store.textOf(store.primaryCurrentVersion()), notes);
@@ -98,7 +98,7 @@ TEST(SystemUiConfigTest, UnresolvedPermascrollLeavesExistingStoreUntouched) {
   const auto head  = existing.primaryCurrentVersion();
   const auto other = std::make_shared<xanadu::UserPermascroll>();
   {
-    xudu::Session session{"", other};
+    xanadu::Session session{"", other};
     auto &loaded = session.systemStore(xanadu::SystemDocKind::UI);
     EXPECT_EQ(loaded.opCount(), count);
     EXPECT_EQ(other->bytes().size(), 0U);

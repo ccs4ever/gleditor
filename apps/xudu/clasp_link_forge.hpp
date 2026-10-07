@@ -21,9 +21,7 @@
 
 struct RenderState;
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class LinkForgeWidget
  * @brief Tripartite link creation control: Homestead (Left), Relation Nexus,
@@ -208,6 +206,6 @@ private:
   float burstTimer_{0.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_CLASP_LINK_FORGE_HPP

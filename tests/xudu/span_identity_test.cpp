@@ -27,9 +27,7 @@
 
 namespace fs = std::filesystem;
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 // The regression guard. If automatic deduplication is ever reintroduced, this
@@ -109,4 +107,4 @@ TEST(SpanIdentityTest, InsertSpanQuotesAnExistingSpanOnPurpose) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

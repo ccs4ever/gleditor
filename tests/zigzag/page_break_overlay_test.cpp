@@ -22,7 +22,7 @@ void contained(Rect child, Rect parent) {
 }
 
 TEST(PageBreakPresentationTest, constrainedLabelsAndAccessibilityShareBounds) {
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   overlay.select(1);
   for (const auto size : {Size{640, 480}, Size{1280, 800}, Size{2560, 1440}}) {
     for (const auto scale : {0.8F, 1.0F, 1.5F, 2.0F}) {
@@ -68,7 +68,7 @@ TEST(PageBreakPresentationTest, constrainedLabelsAndAccessibilityShareBounds) {
 }
 
 TEST(PageBreakPresentationTest, intrinsicButtonShowsItsCompleteLabel) {
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   overlay.select(1);
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   const auto scene = overlay.prepareGap({0, 400, 1280, 0}, metrics, Theme{});
@@ -79,7 +79,7 @@ TEST(PageBreakPresentationTest, intrinsicButtonShowsItsCompleteLabel) {
 }
 
 TEST(PageBreakPresentationTest, unchangedPlacementDoesNoShaping) {
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   overlay.select(1);
   const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   const Theme theme;
@@ -95,7 +95,7 @@ TEST(PageBreakPresentationTest, unchangedPlacementDoesNoShaping) {
 }
 
 TEST(PageBreakPresentationTest, oldTargetIdentityCannotSplitCurrentParagraph) {
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   const Theme theme;
   std::vector<WidgetId> activated;
@@ -146,7 +146,7 @@ TEST(PageBreakPresentationTest, warmDrawingAndCapturedPicksUseRetainedScene) {
                              .timeline       = timeline,
                              .metrics        = metrics,
                              .theme          = theme};
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   overlay.select(1);
   overlay.deviceReady(device, {});
   std::ignore = overlay.prepareGap({100, 200, 400, 0}, metrics, theme);
@@ -196,7 +196,7 @@ TEST(PageBreakOverlayTest, scaledButtonKeepsTheOriginalTargetUnderItsPointer) {
   RenderState state(&device);
   const auto app = std::make_shared<AppState>();
   auto renderer  = Renderer::create(app, render::Backend::OpenGL);
-  xudu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
+  xanadu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
   const std::string text = "First paragraph.\nSecond paragraph.";
   auto &store            = session.store();
   const auto head        = store.insert({}, 0, text);
@@ -216,7 +216,7 @@ TEST(PageBreakOverlayTest, scaledButtonKeepsTheOriginalTargetUnderItsPointer) {
                                .screenHeight   = 480,
                                .timeline       = timeline,
                                .metrics        = metrics};
-  xudu::PageBreakOverlay overlay(session, renderer);
+  xanadu::PageBreakOverlay overlay(session, renderer);
   overlay.deviceReady(device, {});
   overlay.setSampleForceVisible(true);
   overlay.drawFrame(frame);
@@ -246,7 +246,7 @@ TEST(PageBreakOverlayTest, scaledButtonKeepsTheOriginalTargetUnderItsPointer) {
 }
 
 TEST(PageBreakPresentationTest, explicitLegacyFontScalesWithMetrics) {
-  xudu::PageBreakPresentation overlay;
+  xanadu::PageBreakPresentation overlay;
   overlay.select(1);
   UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   Theme theme;

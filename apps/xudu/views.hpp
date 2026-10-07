@@ -39,7 +39,7 @@
 #include "xudu/session.hpp"
 #include "xudu/wireframe_hull.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 using HypertimeMap = xanadu::ui::HypertimeGraph;
 
@@ -73,6 +73,10 @@ public:
     pendingCamera_ = std::move(place);
   }
   void keepInView(const Doc &doc, std::uint32_t offset);
+  void setComparisonCameraReady(std::function<bool()> ready) {
+    comparisonCameraReady_ = std::move(ready);
+  }
+  void frameNewestComparison();
 
   [[nodiscard]] std::optional<Doc::Anchor>
   widgetRectFor(const Doc &doc, std::uint32_t docOffset) const;
@@ -172,6 +176,19 @@ public:
                                 float screenX = 0.0F, float screenY = 0.0F);
   void summonPublication(const PublicationEntry &entry);
   void publicationDownloadStatus(const std::string &id);
+  void publishIndependentLinks();
+  void linksAndResponses(const std::string &query = {});
+  void linkPackageStatus(const std::string &id);
+  void inspectIndependentLinkKeys(const std::string &id, std::size_t link,
+                                  std::size_t left, std::size_t right);
+  void reviewIndependentLinks(const std::string &id, std::size_t selected = 0);
+  void publicationUpdates(const std::string &subscription = {},
+                          std::int64_t sequence           = -1);
+  void discoverPublications(const std::string &query = {});
+  void publicationDiscoveryStatus(const std::string &id);
+  void setPublicationCatalog(SwarmCatalog *catalog) {
+    publicationCatalog_ = catalog;
+  }
 
   void insertPageBreak(std::uint32_t docIndex, std::uint32_t charOffset);
   void insertPageBreakAtCaret();
@@ -207,11 +224,13 @@ private:
     std::uint32_t doc{};
     std::uint32_t start{};
     std::uint32_t end{};
-    std::vector<xudu::PrimediaSpan> spans;
-    std::vector<xudu::PrimediaSpan> right;
+    std::vector<xanadu::PrimediaSpan> spans;
+    std::vector<xanadu::PrimediaSpan> right;
     std::size_t rightCells{};
   };
 
+  std::chrono::steady_clock::time_point nextPublicationNotice_{};
+  bool publicationNoticeError_{};
   Session &session;
   RendererRef renderer;
   HypertimeMap &map;
@@ -220,11 +239,13 @@ private:
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
-  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  float readableTextPx_{xanadu::LayoutConfig{}.readableTextPx};
+  float chromeTopPx_{};
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
   std::weak_ptr<Doc> presentationAnchor_;
   std::function<bool()> pendingCamera_;
+  std::function<bool()> comparisonCameraReady_;
   std::optional<xanadu::ReadingPlace> finalPlace_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
@@ -234,8 +255,9 @@ private:
   render::RenderDevice *device_{nullptr};
   render::PipelineDesc documentDesc_;
   WireframeHullOverlay *wireframeOverlay_{nullptr};
+  SwarmCatalog *publicationCatalog_{};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_VIEWS_HPP

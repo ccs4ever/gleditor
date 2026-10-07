@@ -210,15 +210,15 @@ class LinkPanelOverlayTest : public testing::Test {
 protected:
   LinkPanelDevice device;
   RenderState state{&device};
-  xudu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
-  xudu::LinkContext navigation{session};
-  xudu::LinkPanelOverlay overlay{navigation, session};
+  xanadu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
+  xanadu::LinkContext navigation{session};
+  xanadu::LinkPanelOverlay overlay{navigation, session};
   ch::Timeline timeline;
   glm::mat4 projection{1};
   ui::UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   ui::Theme theme;
   std::array<zigzag::CellRef, 2> links{};
-  xudu::LinkPanelOverlay::AnchorPair anchors{{{-.5F, .3F, 0}, {.2F, .3F, 0}}};
+  xanadu::LinkPanelOverlay::AnchorPair anchors{{{-.5F, .3F, 0}, {.2F, .3F, 0}}};
 
   void SetUp() override {
     auto &store     = session.store();

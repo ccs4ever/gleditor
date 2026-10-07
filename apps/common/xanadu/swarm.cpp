@@ -20,6 +20,8 @@
 #include <tuple>
 #include <vector>
 
+#include "author_catalog.hpp"
+#include "link_package.hpp"
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/bdecode.hpp>
 #include <libtorrent/bencode.hpp>
@@ -48,6 +50,9 @@ InfoHash fromLt(const lt::sha1_hash &hash) {
   InfoHash out;
   std::copy(hash.data(), hash.data() + out.bytes.size(), out.bytes.begin());
   return out;
+}
+lt::sha1_hash toLt(const InfoHash &hash) {
+  return lt::sha1_hash(reinterpret_cast<const char *>(hash.bytes.data()));
 }
 
 /// libtorrent keeps its keys as arrays of char; these carry no meaning beyond
@@ -151,6 +156,11 @@ struct Swarm {
    * so re-asking costs nothing once the request has taken.
    */
   std::set<int> pendingPieces;
+  std::chrono::steady_clock::time_point created{
+      std::chrono::steady_clock::now()};
+  std::chrono::steady_clock::time_point lastDhtQuery{};
+  bool flushing{};
+  bool filesFlushed{};
 };
 
 /// A name that has been asked about and not yet answered.
@@ -198,6 +208,12 @@ struct SwarmContentSource::Impl {
   std::map<InfoHash, std::shared_ptr<XuduTorrentPlugin>> torrentPlugins;
   /// Mutex protecting torrentPlugins.
   std::mutex pluginsMutex;
+  std::set<InfoHash> publicationTopics;
+  InfoHash lastRendezvousHash;
+  std::chrono::steady_clock::time_point lastRendezvous{};
+  std::mutex catalogMutex;
+  std::map<InfoHash, std::shared_ptr<const std::string>> topicCatalogs;
+  std::vector<std::pair<InfoHash, std::string>> incomingCatalogs;
   // The session owns callback threads capturing this Impl. Join it before
   // destroying their queues, plugin registry and mutexes.
   lt::session session;
@@ -236,7 +252,13 @@ struct SwarmContentSource::Impl {
     // pumping it would be most of the cost of a read.
     pack.set_int(lt::settings_pack::alert_mask,
                  lt::alert_category::status | lt::alert_category::storage |
-                     lt::alert_category::error | lt::alert_category::dht);
+                     lt::alert_category::error | lt::alert_category::dht |
+                     lt::alert_category::dht_operation);
+    if (options.dhtPacketsPerSecond < 1)
+      throw std::invalid_argument("DHT packet allowance must be positive");
+    pack.set_int(lt::settings_pack::dht_block_ratelimit,
+                 options.dhtPacketsPerSecond);
+    pack.set_int(lt::settings_pack::connections_limit, 128);
     pack.set_str(lt::settings_pack::user_agent, "xudu/0.1");
     return pack;
   }
@@ -313,7 +335,7 @@ struct SwarmContentSource::Impl {
       return;
     }
     const auto now = std::chrono::steady_clock::now();
-    if (now - lastNameQuery < std::chrono::milliseconds{500}) {
+    if (now - lastNameQuery < std::chrono::seconds{2}) {
       return;
     }
     lastNameQuery = now;
@@ -339,6 +361,9 @@ struct SwarmContentSource::Impl {
     answered.salt = alert.salt;
 
     const auto found = names.find(answered.target());
+    GLEDITOR_LOG_DEBUG(
+        "xudu.swarm", "DHT name reply: tracked {}, sequence {}, value type {}",
+        found != names.end(), alert.seq, static_cast<int>(alert.item.type()));
     if (found == names.end()) {
       return;
     }
@@ -365,6 +390,8 @@ struct SwarmContentSource::Impl {
     if (!found->second.best.has_value() ||
         alert.seq > found->second.best->sequence) {
       found->second.best = MutablePointer{.hash = *hash, .sequence = alert.seq};
+      GLEDITOR_LOG_DEBUG("xudu.swarm", "Accepted signed DHT name sequence {}",
+                         alert.seq);
     }
   }
 
@@ -397,6 +424,27 @@ struct SwarmContentSource::Impl {
     tryConnectPeers();
     requestPendingPieces();
     askAgainForNames();
+    const auto now = std::chrono::steady_clock::now();
+    // A torrent can be added before DHT startup completes. Retry its early
+    // rendezvous instead of waiting for libtorrent's long announce interval.
+    if (options.enableDht && !swarms.empty() &&
+        now - lastRendezvous >= std::chrono::seconds{1}) {
+      auto current = swarms.upper_bound(lastRendezvousHash);
+      for (std::size_t remaining = swarms.size(); remaining; --remaining) {
+        if (current == swarms.end()) current = swarms.begin();
+        auto &[hash, swarm] = *current++;
+        const auto interval = now - swarm.created < std::chrono::seconds{30}
+                                  ? std::chrono::seconds{2}
+                                  : std::chrono::seconds{60};
+        if (now - swarm.lastDhtQuery < interval) continue;
+        session.dht_announce(toLt(hash), session.listen_port());
+        session.dht_get_peers(toLt(hash));
+        swarm.lastDhtQuery = now;
+        lastRendezvousHash = hash;
+        break;
+      }
+      lastRendezvous = now;
+    }
     std::vector<lt::alert *> alerts;
     session.pop_alerts(&alerts);
     for (const auto *alert : alerts) {
@@ -414,6 +462,35 @@ struct SwarmContentSource::Impl {
               std::string(got->buffer.get(),
                           static_cast<std::size_t>(got->size)));
         }
+      } else if (const auto *flushed =
+                     lt::alert_cast<lt::cache_flushed_alert>(alert)) {
+        const auto found =
+            swarms.find(fromLt(flushed->handle.info_hashes().v1));
+        if (found != swarms.end() && found->second.flushing)
+          found->second.filesFlushed = true;
+      } else if (const auto *listening =
+                     lt::alert_cast<lt::listen_succeeded_alert>(alert)) {
+        GLEDITOR_LOG_DEBUG("xudu.swarm", "Listen socket type {} on port {}",
+                           static_cast<int>(listening->socket_type),
+                           listening->port);
+      } else if (lt::alert_cast<lt::dht_bootstrap_alert>(alert)) {
+        GLEDITOR_LOG_DEBUG("xudu.swarm", "DHT bootstrap completed");
+      } else if (const auto *peers =
+                     lt::alert_cast<lt::dht_get_peers_reply_alert>(alert);
+                 peers) {
+        GLEDITOR_LOG_DEBUG("xudu.swarm", "DHT peer lookup returned {} peers",
+                           peers->peers().size());
+        const auto found = swarms.find(fromLt(peers->info_hash));
+        if (found != swarms.end())
+          for (const auto &peer : peers->peers())
+            if (found->second.wantedPeers.size() < 128 &&
+                std::ranges::find(found->second.wantedPeers, peer) ==
+                    found->second.wantedPeers.end())
+              found->second.wantedPeers.push_back(peer);
+      } else if (const auto *error =
+                     lt::alert_cast<lt::peer_error_alert>(alert)) {
+        GLEDITOR_LOG_DEBUG("xudu.swarm", "Peer protocol error: {}",
+                           error->error.message());
       } else if (const auto *meta =
                      lt::alert_cast<lt::metadata_received_alert>(alert);
                  nullptr != meta) {
@@ -497,10 +574,14 @@ struct SwarmContentSource::Impl {
 // protocols (e.g. "xudu_live_op", and upcoming merkle ledger sync /
 // decentralized oracle consensus).
 
-static constexpr const char *kExtLiveOpName       = "xudu_live_op";
-static constexpr int kExtLiveOpMsgId              = 1;
+static constexpr const char *kExtLiveOpName = "xudu_live_op";
+// Keep local IDs clear of libtorrent's built-in extensions; outgoing packets
+// always use the IDs negotiated by the receiving peer.
+static constexpr int kExtLiveOpMsgId              = 21;
 static constexpr const char *kExtScrollSealedName = "xudu_scroll_sealed";
-static constexpr int kExtScrollSealedMsgId        = 2;
+static constexpr int kExtScrollSealedMsgId        = 22;
+static constexpr const char *kExtPublicationName  = "xudu_publications";
+static constexpr int kExtPublicationMsgId         = 23;
 
 class XuduPeerPlugin : public lt::peer_plugin,
                        public std::enable_shared_from_this<XuduPeerPlugin> {
@@ -523,6 +604,7 @@ public:
     }
     m[kExtLiveOpName]       = kExtLiveOpMsgId;
     m[kExtScrollSealedName] = kExtScrollSealedMsgId;
+    m[kExtPublicationName]  = kExtPublicationMsgId;
   }
 
   bool on_extension_handshake(lt::bdecode_node const &node) override {
@@ -539,11 +621,55 @@ public:
       if (sealedNode) {
         remoteScrollSealedId_ = static_cast<int>(sealedNode.int_value());
       }
+      const auto publicationNode = m.dict_find_int(kExtPublicationName);
+      if (publicationNode && publicationNode.int_value() > 0 &&
+          publicationNode.int_value() <= 255)
+        remotePublicationId_ = static_cast<int>(publicationNode.int_value());
     }
+    sendCatalog();
     return true;
   }
 
+  void tick() override { sendCatalog(); }
+
+  void sendCatalog() {
+    if (!impl_ || remotePublicationId_ == 0) return;
+    std::shared_ptr<const std::string> catalog;
+    {
+      const std::scoped_lock lock(impl_->catalogMutex);
+      const auto found = impl_->topicCatalogs.find(swarmHash_);
+      if (found == impl_->topicCatalogs.end()) return;
+      catalog = found->second;
+    }
+    if (!catalog || catalog == lastCatalog_) return;
+    const auto size = static_cast<std::uint32_t>(catalog->size() + 2);
+    std::string packet(4 + size, '\0');
+    packet[0] = static_cast<char>(size >> 24);
+    packet[1] = static_cast<char>(size >> 16);
+    packet[2] = static_cast<char>(size >> 8);
+    packet[3] = static_cast<char>(size);
+    packet[4] = static_cast<char>(kBtMsgExtended);
+    packet[5] = static_cast<char>(remotePublicationId_);
+    std::copy(catalog->begin(), catalog->end(), packet.begin() + 6);
+    pc_.send_buffer(packet.data(), static_cast<int>(packet.size()));
+    lastCatalog_ = std::move(catalog);
+  }
+
   bool on_extended(int length, int msg, lt::span<char const> body) override {
+    if (msg == kExtPublicationMsgId) {
+      if (length < 0 ||
+          static_cast<std::size_t>(length) > maximumAuthorCatalogBytes)
+        return true;
+      if (static_cast<int>(body.size()) != length) return false;
+      if (impl_) {
+        const std::scoped_lock lock(impl_->catalogMutex);
+        if (impl_->topicCatalogs.contains(swarmHash_) &&
+            impl_->incomingCatalogs.size() < 8)
+          impl_->incomingCatalogs.emplace_back(
+              swarmHash_, std::string(body.data(), body.size()));
+      }
+      return true;
+    }
     if (msg == kExtLiveOpMsgId && static_cast<int>(body.size()) == length) {
       const std::string_view payload(body.data(), body.size());
       if (auto broadcast = SwarmContentSource::decodeLiveOp(payload)) {
@@ -626,6 +752,8 @@ private:
   SwarmContentSource::Impl *impl_{nullptr};
   int remoteLiveOpId_{0};
   int remoteScrollSealedId_{0};
+  int remotePublicationId_{};
+  std::shared_ptr<const std::string> lastCatalog_;
 };
 
 class XuduTorrentPlugin : public lt::torrent_plugin {
@@ -770,6 +898,10 @@ InfoHash SwarmContentSource::addTorrent(const std::string_view torrentFile,
     // The files are already complete, so there is nothing to fetch; this skips
     // re-hashing them on the way in.
     params.flags |= lt::torrent_flags::seed_mode;
+    // Publications seed several carriers at once. The automatic seed limit
+    // must not queue a required carrier or its author catalog indefinitely.
+    params.flags &=
+        ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
   }
   if (!impl->options.enableTrackers) {
     params.trackers.clear();
@@ -833,6 +965,58 @@ void SwarmContentSource::discardCachedPieces(const InfoHash &hash) {
   }
 }
 
+bool SwarmContentSource::flushDownload(const InfoHash &hash,
+                                       std::chrono::milliseconds timeout) {
+  auto found = impl->swarms.find(hash);
+  if (found == impl->swarms.end() || !found->second.meta)
+    throw std::invalid_argument("Cannot flush a torrent without metadata");
+  if (!found->second.flushing) {
+    found->second.flushing = true;
+    found->second.handle.flush_cache();
+  }
+  return impl->waitUntil([&] { return found->second.filesFlushed; }, timeout);
+}
+
+void SwarmContentSource::joinPublicationTopic(std::string_view topic,
+                                              const std::string &dataRoot,
+                                              const std::string &catalog) {
+  joinCatalogRendezvous(publicationTopicTarget(topic), dataRoot, catalog);
+}
+void SwarmContentSource::joinLinkPackageScroll(const std::string &key,
+                                               const std::string &dataRoot,
+                                               const std::string &catalog) {
+  if (key.empty() || key.size() > 256)
+    throw std::invalid_argument("Invalid scroll rendezvous key");
+  joinCatalogRendezvous(InfoHash{linkPackageRendezvousTarget(key).bytes},
+                        dataRoot, catalog);
+}
+void SwarmContentSource::joinCatalogRendezvous(const InfoHash &hash,
+                                               const std::string &dataRoot,
+                                               const std::string &catalog) {
+  if (catalog.size() > maximumAuthorCatalogBytes)
+    throw std::invalid_argument("Publication catalog exceeds wire byte limit");
+  if (!impl->publicationTopics.contains(hash) &&
+      impl->publicationTopics.size() >= impl->options.maximumPublicationTopics)
+    throw std::runtime_error("Publication topic connection limit reached");
+  {
+    const std::scoped_lock lock(impl->catalogMutex);
+    auto &payload = impl->topicCatalogs[hash];
+    if (!catalog.empty() && (!payload || *payload != catalog))
+      payload = std::make_shared<const std::string>(catalog);
+  }
+  if (impl->publicationTopics.insert(hash).second) {
+    (void)addMagnet("magnet:?xt=urn:btih:" + hash.hex(), dataRoot, true);
+    impl->swarms.at(hash).handle.set_max_connections(16);
+  }
+}
+std::vector<std::pair<InfoHash, std::string>>
+SwarmContentSource::takePublicationCatalogs() {
+  const std::scoped_lock lock(impl->catalogMutex);
+  std::vector<std::pair<InfoHash, std::string>> result;
+  result.swap(impl->incomingCatalogs);
+  return result;
+}
+
 void SwarmContentSource::connectPeer(const InfoHash &hash,
                                      const std::string &host,
                                      const std::uint16_t port) {
@@ -869,12 +1053,13 @@ void SwarmContentSource::addDhtNode(const std::string &host,
 std::optional<MutablePointer>
 SwarmContentSource::resolveMutable(const MutableLink &link,
                                    const std::chrono::milliseconds timeout) {
-  const auto target = link.target();
-  impl->names.insert_or_assign(target,
-                               PendingName{.link = link, .best = std::nullopt});
+  const auto target              = link.target();
+  const auto [pending, inserted] = impl->names.try_emplace(
+      target, PendingName{.link = link, .best = std::nullopt});
+  (void)pending;
   // Asked immediately as well as on every pump, so a name that the DHT can
   // already answer costs one round trip rather than one polling interval.
-  impl->lastNameQuery = {};
+  if (inserted) impl->lastNameQuery = {};
 
   const auto answered = [this, &target] {
     const auto found = impl->names.find(target);
@@ -887,7 +1072,7 @@ SwarmContentSource::resolveMutable(const MutableLink &link,
     result = found->second.best;
     // Stop asking. A caller wanting a fresher answer asks again, which is what
     // the specification says freshness means for a mutable item.
-    impl->names.erase(found);
+    if (result) impl->names.erase(found);
   }
   return result;
 }

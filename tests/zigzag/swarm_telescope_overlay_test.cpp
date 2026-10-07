@@ -57,7 +57,7 @@ TEST(SwarmTelescopeOverlayTest,
   for (int i = 0; i < 20; ++i) catalog.addPublication(entry(i));
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   telescope.setVisible(true);
   ch::Timeline timeline;
@@ -144,7 +144,7 @@ TEST(SwarmTelescopeOverlayTest,
   catalog.addPublication(entry(2));
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   std::vector<std::string> opened;
   telescope.setOnSummon(
@@ -199,7 +199,7 @@ TEST(SwarmTelescopeOverlayTest,
   for (int i = 0; i < 30; ++i) catalog.addPublication(entry(i));
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   telescope.setVisible(true);
   ch::Timeline timeline;
@@ -255,7 +255,7 @@ TEST(SwarmTelescopeOverlayTest,
   for (int i = 0; i < 30; ++i) catalog.addPublication(entry(i));
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   telescope.setVisible(true);
   ch::Timeline timeline;
@@ -293,7 +293,7 @@ TEST(SwarmTelescopeOverlayTest,
   catalog.addPublication(publication);
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   telescope.setVisible(true);
   ch::Timeline timeline;
@@ -341,7 +341,7 @@ TEST(SwarmTelescopeOverlayTest,
   catalog.addPublication(entry(1));
   TelescopeDevice device;
   RenderState state(&device);
-  xudu::SwarmTelescopeOverlay telescope(catalog, {});
+  xanadu::SwarmTelescopeOverlay telescope(catalog, {});
   telescope.deviceReady(device, {});
   telescope.setVisible(true);
   std::optional<xanadu::PublicationEntry> opened;

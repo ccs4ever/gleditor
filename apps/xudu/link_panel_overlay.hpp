@@ -39,7 +39,7 @@
 #include "xudu/link_context.hpp"
 #include "xudu/session.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 class LinkPanelOverlay : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
@@ -151,6 +151,6 @@ private:
   std::vector<xanadu::PanelButton> buttons;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_LINK_PANEL_OVERLAY_HPP

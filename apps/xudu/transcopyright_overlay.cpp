@@ -19,7 +19,7 @@
 
 #include "session.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 bool sameBox(const std::optional<gleditor::ui::Rect> &a,
              const std::optional<gleditor::ui::Rect> &b) {
@@ -422,4 +422,4 @@ bool TranscopyrightOverlay::performAction(std::uint64_t node,
   pendingActions_.push_back({found->id, found->target});
   return true;
 }
-} // namespace xudu
+} // namespace xanadu

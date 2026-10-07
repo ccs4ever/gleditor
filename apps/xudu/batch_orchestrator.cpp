@@ -22,7 +22,7 @@
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 LinkType BatchOrchestrator::parseLinkType(const std::string_view str) {
   if (str == "comment" || str == "Comment") {
@@ -427,8 +427,8 @@ BatchOrchestrator::execute(Session &session,
         } else {
           std::string typeName;
           words >> typeName;
-          xudu::Link link;
-          link.type  = xudu::linkTypeFromName(typeName);
+          xanadu::Link link;
+          link.type  = xanadu::linkTypeFromName(typeName);
           link.owner = "structure-script";
           auto *side = &link.left;
           std::string word;
@@ -831,4 +831,4 @@ BatchOrchestrator::execute(Session &session,
           .extraImports = std::move(extraImports)};
 }
 
-} // namespace xudu
+} // namespace xanadu

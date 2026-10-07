@@ -17,7 +17,7 @@
 
 #include "common/xanadu/system_docs.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 PouchDrawer::PouchDrawer(Session &session, RendererRef renderer,
                          std::string fontName, const DockSide side)
@@ -951,4 +951,4 @@ bool PouchDrawer::keyPressed(gleditor::Key key, gleditor::KeyMods mods) {
     if (entry.overlay->keyPressed(event)) return true;
   return forgeWidget_.presentation().keyPressed(event);
 }
-} // namespace xudu
+} // namespace xanadu

@@ -29,7 +29,7 @@ TEST(CollaboratorNameplateTest, UnicodeNamesFitLiveTypographyAndSafeViewport) {
           Theme theme;
           theme.fonts[static_cast<std::size_t>(FontRole::Caption)].family =
               family;
-          xudu::CollaboratorNameplate plate;
+          xanadu::CollaboratorNameplate plate;
           const auto &fit =
               plate.prepare(name, identity, {size.width - 1, size.height - 1},
                             metrics, theme);
@@ -46,7 +46,7 @@ TEST(CollaboratorNameplateTest, UnicodeNamesFitLiveTypographyAndSafeViewport) {
 }
 TEST(CollaboratorNameplateTest,
      MovingAnchorsReuseShapingAndLiveFontsInvalidate) {
-  xudu::CollaboratorNameplate plate;
+  xanadu::CollaboratorNameplate plate;
   UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   Theme theme;
   const auto firstHeight =
@@ -66,7 +66,7 @@ TEST(CollaboratorNameplateTest,
   EXPECT_LE(large.fitted.heightPx, large.content.height + .01F);
 }
 TEST(CollaboratorNameplateTest, InvalidAnchorsAndTinyViewportsStayBounded) {
-  xudu::CollaboratorNameplate plate;
+  xanadu::CollaboratorNameplate plate;
   UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   const Theme theme;
   const auto &invalid =

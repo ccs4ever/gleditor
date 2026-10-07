@@ -23,7 +23,7 @@ TEST(OverviewOverlayTest, ScalesAndClampsConfiguredPanelToSafeArea) {
                                       .screenHeight = size.second,
                                       .chrome = {.top = 80, .bottom = 60}};
       const auto safe = metrics.pixelSafeArea();
-      const auto box  = xudu::OverviewOverlay::panelBounds(config, metrics);
+      const auto box  = xanadu::OverviewOverlay::panelBounds(config, metrics);
       EXPECT_GE(box.left, safe.left);
       EXPECT_GE(box.bottom, safe.bottom);
       EXPECT_LE(box.left + box.width, safe.left + safe.width);
@@ -59,7 +59,7 @@ TEST(OverviewOverlayTest, RetainsGeometryAndRejectsStaleAndHiddenPicks) {
   ch::Timeline timeline;
   const glm::mat4 projection{1};
   gleditor::FrameContext context{state, projection, 640, 480, timeline};
-  xudu::OverviewOverlay overlay(app);
+  xanadu::OverviewOverlay overlay(app);
   overlay.deviceReady(device, {});
   state.beginPickScene();
   overlay.drawFrame(context);
@@ -73,13 +73,14 @@ TEST(OverviewOverlayTest, RetainsGeometryAndRejectsStaleAndHiddenPicks) {
   gleditor::a11y::Tree tree;
   gleditor::a11y::Builder builder(tree, 3);
   overlay.describe(builder);
-  const auto node = tree.find(builder.id(xudu::OverviewOverlay::kTagOverview));
+  const auto node =
+      tree.find(builder.id(xanadu::OverviewOverlay::kTagOverview));
   ASSERT_TRUE(node);
   ASSERT_TRUE(node->bounds);
   auto metrics         = context.metrics;
   metrics.screenWidth  = 640;
   metrics.screenHeight = 480;
-  const auto bounds    = xudu::OverviewOverlay::panelBounds({}, metrics);
+  const auto bounds    = xanadu::OverviewOverlay::panelBounds({}, metrics);
   EXPECT_DOUBLE_EQ(node->bounds->left, bounds.left);
   EXPECT_DOUBLE_EQ(node->bounds->top, 480 - bounds.bottom - bounds.height);
   EXPECT_CALL(device, updateBuffer).Times(0);
@@ -107,7 +108,7 @@ TEST(OverviewOverlayTest, RetainsGeometryAndRejectsStaleAndHiddenPicks) {
   overlay.toggle();
   EXPECT_FALSE(overlay.picked(pick, state));
   EXPECT_FALSE(
-      overlay.performAction(builder.id(xudu::OverviewOverlay::kTagOverview),
+      overlay.performAction(builder.id(xanadu::OverviewOverlay::kTagOverview),
                             gleditor::a11y::Action::Click, {}));
 }
 } // namespace

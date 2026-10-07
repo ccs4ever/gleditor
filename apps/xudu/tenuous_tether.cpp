@@ -16,7 +16,7 @@
 
 #include <gleditor/cpp26_inplace_vector.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 TenuousTetherOverlay::TenuousTetherOverlay(RendererRef renderer,
                                            render::RenderDevice *device)
@@ -124,4 +124,4 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   beams_->draw(ctx.state, ctx.viewProjection, 1.0F, 0);
 }
 
-} // namespace xudu
+} // namespace xanadu
