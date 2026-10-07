@@ -1286,7 +1286,6 @@ int Application::run() {
   }
 
   commandTable.setCommandGate([this](std::string_view name) {
-    state->syncFocus();
     return state->focusManager.permitsCommand(name);
   });
 
@@ -1439,7 +1438,6 @@ int Application::run() {
           (held(modalMods(mods), KeyMods::Shift) ? U'A' : U'a') +
           (scancode - SDL_SCANCODE_A));
     }
-    state->syncFocus();
     const bool wasModal = state->focusManager.modalActive();
     const bool consumed = state->focusManager.dispatchKey(
         {modalKey(scancode).value_or(Key::Unknown), modalMods(mods),
@@ -1455,7 +1453,6 @@ int Application::run() {
     // convention is the GL backend's business, not the application's.
     state->mouseX = x;
     state->mouseY = y;
-    state->syncFocus();
     if (state->focusManager.dispatchPointer({.phase = ui::PointerPhase::Move,
                                              .x     = static_cast<float>(x),
                                              .y     = static_cast<float>(y)})) {
@@ -1481,13 +1478,11 @@ int Application::run() {
     state->mouseY = y;
     // Held while a modal is up, along with the drag above: the caret is not
     // what is being moved when there is a question on screen.
-    state->syncFocus();
     if (state->focusManager.dispatchPointer({.phase  = ui::PointerPhase::Press,
                                              .button = button,
                                              .x      = static_cast<float>(x),
                                              .y = static_cast<float>(y)})) {
-      if (state->focusManager.modalActive() &&
-          dynamic_cast<ModalInput *>(state->focusManager.focusedScope())) {
+      if (state->focusManager.modalActive()) {
         state->clickX       = x;
         state->clickY       = y;
         state->clickButton  = button;
@@ -1508,7 +1503,6 @@ int Application::run() {
   };
   const auto onButtonUp = [&](const int x, const int y,
                               const std::uint8_t button) {
-    state->syncFocus();
     if (state->focusManager.dispatchPointer({.phase = ui::PointerPhase::Release,
                                              .button = button,
                                              .x      = static_cast<float>(x),
@@ -1521,7 +1515,6 @@ int Application::run() {
   };
   const auto onWheel = [&](const float wx, const float wy,
                            const std::uint16_t sdlMods) {
-    state->syncFocus();
     if (state->focusManager.dispatchPointer(
             {.phase  = ui::PointerPhase::Wheel,
              .x      = static_cast<float>(state->mouseX.load()),
@@ -1560,7 +1553,6 @@ int Application::run() {
       x = event.tfinger.x * static_cast<float>(state->view.screenWidth);
       y = event.tfinger.y * static_cast<float>(state->view.screenHeight);
     }
-    state->syncFocus();
     return state->focusManager.dispatchPointer(
         {.phase     = phase,
          .button    = 1,
@@ -1569,7 +1561,6 @@ int Application::run() {
          .pointerId = static_cast<std::uint32_t>(sdl::fingerId(event))});
   };
   const auto onText = [&](std::string_view text) {
-    state->syncFocus();
     if (state->focusManager.dispatchText(text)) return;
     if (textInput &&
         (!state->documentTakesText || state->documentTakesText())) {
@@ -1578,7 +1569,6 @@ int Application::run() {
     }
   };
   const auto onFocusLost = [&] {
-    state->syncFocus();
     state->focusManager.focusLost();
     state->focusLossEpoch.fetch_add(1);
     SDL_SetModState(SDL_KMOD_NONE);
@@ -1602,8 +1592,7 @@ int Application::run() {
       std::ignore = publisher->pumpActions();
     }
 
-    state->contentScale = sdl::windowContentScale(window.window);
-    state->syncFocus();
+    state->contentScale  = sdl::windowContentScale(window.window);
     const bool grabbing  = state->focusManager.modalActive();
     const auto area      = state->focusManager.textArea();
     const bool wantsText = grabbing ? area.has_value() : textInput;

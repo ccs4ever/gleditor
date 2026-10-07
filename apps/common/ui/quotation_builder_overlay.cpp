@@ -33,7 +33,7 @@ QuotationBuilderOverlay::QuotationBuilderOverlay(
   refreshSources();
 }
 
-QuotationBuilderOverlay::~QuotationBuilderOverlay() { releaseFocus(); }
+QuotationBuilderOverlay::~QuotationBuilderOverlay() = default;
 
 void QuotationBuilderOverlay::deviceReady(
     render::RenderDevice &device, const render::PipelineDesc &pipeline) {
@@ -865,7 +865,7 @@ bool QuotationBuilderOverlay::keyPressed(gleditor::Key key,
   }
   return false;
 }
-void QuotationBuilderOverlay::textTyped(const std::string &utf8) {
+void QuotationBuilderOverlay::textTyped(std::string_view utf8) {
   const std::scoped_lock lock(guard_);
   if (visible_ && !dirty_) {
     overlay_.textTyped(utf8);

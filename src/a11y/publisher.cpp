@@ -64,13 +64,7 @@ void describeNode(std::ostringstream &out, const Node &node,
     out << " \"" << node.label << "\"";
   }
   if (!node.value.empty()) {
-    // Truncated: a document's value is the whole document, and this is meant
-    // to be read.
-    constexpr std::size_t most = 60;
-    out << " = \""
-        << (node.value.size() > most ? node.value.substr(0, most) + "..."
-                                     : node.value)
-        << "\"";
+    out << " = \"" << node.value << "\"";
   }
   if (!node.placeholder.empty()) {
     out << " (" << node.placeholder << ")";

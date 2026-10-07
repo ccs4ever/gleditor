@@ -25,7 +25,7 @@ public:
   using OnGrounded = std::function<void(SubspanMatch)>;
   using OnReject   = std::function<void(std::string reason)>;
 
-  explicit GroundingModal(std::string fontName = "Sans 12");
+  explicit GroundingModal(std::string fontName = {});
   ~GroundingModal() = default;
 
   [[nodiscard]] Form &form() { return form_; }

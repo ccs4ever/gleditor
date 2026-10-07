@@ -19,9 +19,9 @@
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/overlay.hpp>
 
 #include "common/xanadu/swarm_catalog.hpp"
@@ -36,9 +36,17 @@ using namespace ::xanadu;
  */
 class SwarmTelescopeOverlay : public gleditor::FrameContributor,
                               public gleditor::PickObserver,
-                              public gleditor::ModalInput,
+                              public gleditor::ui::FocusScope,
                               public gleditor::a11y::Source {
 public:
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);
@@ -69,9 +77,9 @@ public:
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
 
-  [[nodiscard]] bool grabbing() const override;
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
-  void textTyped(const std::string &utf8) override;
+  [[nodiscard]] bool active() const override;
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods);
+  void textTyped(std::string_view utf8) override;
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;

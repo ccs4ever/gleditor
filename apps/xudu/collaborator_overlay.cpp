@@ -40,6 +40,8 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
   if (!enabled_ || !canvas_) {
     return;
   }
+  canvas_->setFontDescription(gleditor::ui::scaledFontDescription(
+      fontName_, gleditor::ui::FontRole::Caption, ctx.metrics, ctx.theme));
   canvas_->clear();
 
   // 1. Drain pending live operations arriving over BEP 10 swarm wire

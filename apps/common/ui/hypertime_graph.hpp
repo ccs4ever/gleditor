@@ -31,9 +31,9 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
@@ -49,11 +49,19 @@ namespace xanadu::ui {
  */
 class HypertimeGraph : public gleditor::FrameContributor,
                        public gleditor::PickObserver,
-                       public gleditor::ModalInput,
+                       public gleditor::ui::FocusScope,
                        public gleditor::a11y::Source {
 public:
-  [[nodiscard]] bool grabbing() const override { return visible_.load(); }
-  bool keyPressed(gleditor::Key, gleditor::KeyMods) override;
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+
+  [[nodiscard]] bool active() const override { return visible_.load(); }
+  bool keyPressed(gleditor::Key, gleditor::KeyMods);
   std::shared_ptr<const gleditor::ui::LayoutResult>
   focusLayout() const override;
   void focusedNodeChanged(std::uint32_t) override;
@@ -61,7 +69,7 @@ public:
   void focusChanged(bool) override;
   bool pointerEvent(const gleditor::ui::PointerEvent &) override;
   std::optional<gleditor::InputArea> pointerArea() const override;
-  void textTyped(const std::string &) override {}
+  void textTyped(std::string_view) override {}
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);

@@ -193,6 +193,11 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "visible. Default is true.\n"
            "hypertimeMapVisible: Flag indicating whether hypertime graph "
            "overlay is open. Default is false.\n"
+           "Input and text presentation: FocusManager owns scope registration, "
+           "activation order and modal isolation. Each modal blocks background "
+           "input and permits only configured global commands. Labels use "
+           "typed typography roles and TextFit boxes; full accessible names "
+           "remain available when visual labels are ellipsized or hidden.\n"
            "radialMenu: Nested configuration dictionary defining action items, "
            "icons, and radial radius.\n"
            "overview.visible, overview.widthPx, overview.heightPx, "
@@ -281,6 +286,13 @@ std::string defaultSystemDocNotes(const SystemDocKind kind) {
   case SystemDocKind::UI:
     return "Notes\n\n"
            "User Annotations and Customization Record:\n"
+           "Labels grow with UI and font scales. Increase pouchPanel.widthPx "
+           "or "
+           "drag the pouch drawer edge to give labels more room. World cards "
+           "retain full accessible names when their projected labels hide. "
+           "Tab follows layout order inside the active scope; Escape closes "
+           "it. Modal global commands remain subject to the keymap allow "
+           "list.\n\n"
            "This page is reserved for author notes, workflow preferences, and "
            "custom radial action mappings.\n";
   case SystemDocKind::Pouches:

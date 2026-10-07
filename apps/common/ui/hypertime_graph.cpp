@@ -70,7 +70,7 @@ HypertimeGraph::HypertimeGraph(
   overlay_.setActionHandler([this](const auto &action) { queue(action); });
 }
 
-HypertimeGraph::~HypertimeGraph() { releaseFocus(); }
+HypertimeGraph::~HypertimeGraph() = default;
 
 void HypertimeGraph::scroll(const float horizontal, const float vertical,
                             const bool zoom, const bool shift,
@@ -101,7 +101,9 @@ void HypertimeGraph::deviceReady(render::RenderDevice &device,
   const std::scoped_lock lock(guard_);
   overlay_.deviceReady(device, documentPipeline);
   canvas_ = std::make_unique<gleditor::Canvas>(
-      &device, fontName_.empty() ? "Sans 12" : fontName_);
+      &device, gleditor::ui::scaledFontDescription(
+                   fontName_, gleditor::ui::FontRole::Body, {},
+                   gleditor::ui::defaultTheme()));
   canvas_->createPipeline(documentPipeline, false);
 }
 

@@ -13,7 +13,7 @@
  * fields, type into one, enter to accept, escape to abandon. Pointer actions
  * use the same retained field and option boxes as drawing and accessibility.
  *
- * A form takes the keyboard while it is up -- see ModalInput -- so the text
+ * A form takes the keyboard while it is up -- see ui::FocusScope -- so the text
  * being typed into it cannot land in the document behind it.
  */
 #ifndef GLEDITOR_FORM_H
@@ -29,8 +29,8 @@
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/metrics.hpp>
 
 namespace gleditor {
@@ -47,8 +47,14 @@ class Canvas;
  * event thread -- so everything it holds is behind one mutex, held briefly and
  * never across a call back into the program.
  */
-class Form : public FrameContributor, public ModalInput, public a11y::Source {
+class Form : public FrameContributor,
+             public ui::FocusScope,
+             public a11y::Source {
 public:
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
   /// What kind of thing is being asked for.
   enum class Kind : std::uint8_t {
     /// Text, typed in.
@@ -131,12 +137,13 @@ public:
   bool performAction(std::uint64_t nodeId, a11y::Action action,
                      std::string_view value) override;
 
-  // -- gleditor::ModalInput ---------------------------------------------------
-  [[nodiscard]] bool grabbing() const override;
-  bool keyPressed(Key key, KeyMods mods) override;
+  // -- gleditor::ui::FocusScope
+  // ---------------------------------------------------
+  [[nodiscard]] bool active() const override;
+  bool keyPressed(Key key, KeyMods mods);
   bool keyPressed(const ui::KeyEvent &) override;
   void beforeFocusTraversal() override;
-  void textTyped(const std::string &utf8) override;
+  void textTyped(std::string_view utf8) override;
   [[nodiscard]] std::optional<InputArea> textArea() const override;
   [[nodiscard]] std::shared_ptr<const ui::LayoutResult>
   focusLayout() const override;
@@ -162,7 +169,7 @@ public:
   /// Take it down without accepting it.
   void close();
 
-  [[nodiscard]] bool isOpen() const { return grabbing(); }
+  [[nodiscard]] bool isOpen() const { return active(); }
 
   /// What the fields hold now, for a caller that wants to look without
   /// waiting to be called back. Mostly for tests.

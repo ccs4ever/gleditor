@@ -39,10 +39,10 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/image_cache.hpp>
 #include <gleditor/layout_box.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/world_panel.hpp>
 
 namespace zigzag {
@@ -113,9 +113,17 @@ struct SceneVisual {
 class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
                          public gleditor::a11y::Source,
-                         public gleditor::ModalInput,
+                         public gleditor::ui::FocusScope,
                          public xanadu::ZigzagPresentationSurface {
 public:
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);
@@ -150,10 +158,11 @@ public:
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
 
-  // -- gleditor::ModalInput -------------------------------------------------
-  [[nodiscard]] bool grabbing() const override;
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
-  void textTyped(const std::string &utf8) override;
+  // -- gleditor::ui::FocusScope
+  // -------------------------------------------------
+  [[nodiscard]] bool active() const override;
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods);
+  void textTyped(std::string_view utf8) override;
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
 
   // -- ZigZag Actions -------------------------------------------------------
@@ -305,7 +314,7 @@ public:
   /**
    * @brief Start editing the focused cell's text in place.
    *
-   * Takes the keyboard (grabbing()) until Return commits the text through
+   * Takes the keyboard (active()) until Return commits the text through
    * updateFocusCellText() or Escape drops it. The home cell and d.dims keep
    * their names, as updateFocusCellText() already insists.
    */

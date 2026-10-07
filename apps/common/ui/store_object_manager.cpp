@@ -31,7 +31,7 @@ StoreObjectManager::StoreObjectManager(Store &store, std::string fontName,
   refresh();
 }
 
-StoreObjectManager::~StoreObjectManager() { releaseFocus(); }
+StoreObjectManager::~StoreObjectManager() = default;
 
 void StoreObjectManager::deviceReady(
     render::RenderDevice &device,

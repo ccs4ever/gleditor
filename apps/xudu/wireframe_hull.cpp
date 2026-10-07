@@ -52,7 +52,9 @@ WireframeHullOverlay::~WireframeHullOverlay() = default;
 void WireframeHullOverlay::deviceReady(render::RenderDevice &device,
                                        const render::PipelineDesc &pipeline) {
   canvas_ = std::make_unique<gleditor::Canvas>(
-      &device, fontName_.empty() ? "Sans 12" : fontName_);
+      &device, gleditor::ui::scaledFontDescription(
+                   fontName_, gleditor::ui::FontRole::Body, {},
+                   gleditor::ui::defaultTheme()));
   canvas_->createPipeline(pipeline, false);
   presentation_->device        = &device;
   presentation_->pipeline      = pipeline;

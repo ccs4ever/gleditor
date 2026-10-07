@@ -308,6 +308,11 @@ updates position input-method candidate windows beside the focused field.
 same node identities and bounds. Tab follows layout order and wraps; arrows move within a focus
 group after the control has handled editing. The accessibility publisher follows the manager's
 active scope, reports one modal root and blocks background actions while that scope is modal.
+Applications hold `FocusManager::ScopeHandle` registrations for their `FocusScope` objects and
+release the handles before destroying those objects. Composed text uses `std::string_view`;
+render-thread GPU picks are delivered to the same focused scope. Boxed `Canvas::addText` uses
+`TextFit` constraints rather than a mutable canvas-wide width limit. `make lint` rejects byte-based
+ellipsis truncation and fixed Sans size literals in UI components.
 
 ## Tests and diagnostics
 

@@ -69,7 +69,7 @@ void Form::deviceReady(render::RenderDevice &device,
   builtFor = 0;
 }
 
-bool Form::grabbing() const {
+bool Form::active() const {
   const std::scoped_lock locker(guard);
   return open_;
 }
@@ -729,7 +729,7 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
   return true;
 }
 
-void Form::textTyped(const std::string &utf8) {
+void Form::textTyped(std::string_view utf8) {
   const std::scoped_lock locker(guard);
   if (!open_ || fields.empty()) {
     return;

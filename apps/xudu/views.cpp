@@ -199,7 +199,7 @@ void Views::syncMediaWidgets(RenderState &rState) {
                      gleditor::MimeType(mSpan.mime));
         continue;
       }
-      auto widget = std::make_shared<gleditor::MediaWidget>("Sans 11");
+      auto widget = std::make_shared<gleditor::MediaWidget>();
       if (nullptr != device_) {
         widget->deviceReady(*device_, documentDesc_);
       }

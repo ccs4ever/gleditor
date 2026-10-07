@@ -186,7 +186,7 @@ TEST(StoreObjectManagerOverlayTest, ScrollAndModalFocusReachRemainingObjects) {
   ASSERT_TRUE(first);
   const auto firstOrder = first->layout.focusOrder;
   ui::FocusManager focus;
-  manager.syncFocus(focus);
+  auto registration = focus.registerScope(manager);
   EXPECT_TRUE(focus.modalActive());
   EXPECT_EQ(focus.focusedScope(), &manager);
   EXPECT_FALSE(focus.permitsCommand("document-edit"));

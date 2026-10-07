@@ -571,6 +571,12 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
     const std::string fullText = store.textOf(store.latest());
     EXPECT_NE(fullText.find("Schema and Purpose"), std::string::npos);
     EXPECT_NE(fullText.find("Notes"), std::string::npos);
+    if (kind == SystemDocKind::UI) {
+      EXPECT_NE(fullText.find("FocusManager"), std::string::npos);
+      EXPECT_NE(fullText.find("TextFit boxes"), std::string::npos);
+      EXPECT_NE(fullText.find("drag the pouch drawer edge"), std::string::npos);
+      EXPECT_NE(fullText.find("keymap allow list"), std::string::npos);
+    }
   }
 }
 

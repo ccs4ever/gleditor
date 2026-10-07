@@ -9,6 +9,11 @@
 #include <string_view>
 #include <vector>
 
+namespace render {
+struct PickingResult;
+}
+struct RenderState;
+
 namespace gleditor::ui {
 enum class OutsidePointer : std::uint8_t {
   Block,
@@ -38,6 +43,10 @@ public:
   [[nodiscard]] std::uint64_t openedSequence() const;
   virtual bool keyPressed(const KeyEvent &) { return false; }
   virtual void textTyped(std::string_view) {}
+  /// GPU picks arrive on the render thread, separately from pointer capture.
+  virtual bool pointerPick(const render::PickingResult &, RenderState &) {
+    return false;
+  }
   virtual bool pointerEvent(const PointerEvent &) { return false; }
   virtual void cancel() { deactivate(); }
   virtual void focusChanged(bool) {}

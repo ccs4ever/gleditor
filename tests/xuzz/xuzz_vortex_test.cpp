@@ -1,6 +1,6 @@
 /**
  * @file xuzz_vortex_test.cpp
- * @brief Unit tests for Xuzz CompositeModalInput, Vortex std:bridge, and
+ * @brief Unit tests for Xuzz FocusManager, Vortex std:bridge, and
  * Sovereign Keymap Governance.
  */
 #include <gtest/gtest.h>
@@ -17,30 +17,26 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include <gleditor/modal_input.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 
 namespace {
 
-class MockModal : public gleditor::ModalInput {
+class MockModal : public gleditor::ui::FocusScope {
 public:
-  bool grabbing_{false};
   std::string receivedText;
   std::vector<gleditor::Key> receivedKeys;
   gleditor::InputArea area_{10, 20, 100, 50};
 
-  [[nodiscard]] bool grabbing() const override { return grabbing_; }
-
-  bool keyPressed(const gleditor::Key key,
-                  [[maybe_unused]] const gleditor::KeyMods mods) override {
-    if (grabbing_) {
-      receivedKeys.push_back(key);
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    if (active()) {
+      receivedKeys.push_back(event.key);
       return true;
     }
     return false;
   }
 
-  void textTyped(const std::string &text) override {
-    if (grabbing_) {
+  void textTyped(std::string_view text) override {
+    if (active()) {
       receivedText.append(text);
     }
   }
@@ -130,50 +126,51 @@ public:
 
 } // namespace
 
-TEST(XuzzCompositeModalInputTest, ReverseOrderDispatchAndGrabbing) {
+TEST(XuzzFocusManagerTest, ReverseOrderDispatchAndGrabbing) {
   MockModal primary;
   MockModal secondary;
 
-  std::vector<gleditor::ModalInput *> modals{&primary, &secondary};
-  gleditor::CompositeModalInput composite(modals);
+  gleditor::ui::FocusManager composite;
+  auto primaryScope   = composite.registerScope(primary);
+  auto secondaryScope = composite.registerScope(secondary);
 
   // When neither is grabbing
-  EXPECT_FALSE(composite.grabbing());
+  EXPECT_FALSE(composite.modalActive());
 
   // Secondary grabs
-  secondary.grabbing_ = true;
-  EXPECT_TRUE(composite.grabbing());
+  secondary.activate();
+  EXPECT_TRUE(composite.modalActive());
   ASSERT_TRUE(composite.textArea().has_value());
   EXPECT_EQ(composite.textArea()->x, secondary.area_.x);
 
-  composite.textTyped("hello");
+  composite.dispatchText("hello");
   EXPECT_EQ(secondary.receivedText, "hello");
   EXPECT_TRUE(primary.receivedText.empty());
 
   EXPECT_TRUE(
-      composite.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+      composite.dispatchKey({gleditor::Key::Return, gleditor::KeyMods::None}));
   ASSERT_EQ(secondary.receivedKeys.size(), 1U);
   EXPECT_EQ(secondary.receivedKeys[0], gleditor::Key::Return);
   EXPECT_TRUE(primary.receivedKeys.empty());
 
   // Secondary stops grabbing, primary grabs
-  secondary.grabbing_ = false;
-  primary.grabbing_   = true;
-  EXPECT_TRUE(composite.grabbing());
+  secondary.deactivate();
+  primary.activate();
+  EXPECT_TRUE(composite.modalActive());
   ASSERT_TRUE(composite.textArea().has_value());
   EXPECT_EQ(composite.textArea()->x, primary.area_.x);
 
-  composite.textTyped("world");
+  composite.dispatchText("world");
   EXPECT_EQ(primary.receivedText, "world");
 
-  EXPECT_TRUE(
-      composite.keyPressed(gleditor::Key::Backspace, gleditor::KeyMods::None));
+  EXPECT_TRUE(composite.dispatchKey(
+      {gleditor::Key::Backspace, gleditor::KeyMods::None}));
   ASSERT_EQ(primary.receivedKeys.size(), 1U);
   EXPECT_EQ(primary.receivedKeys[0], gleditor::Key::Backspace);
 
   // When both grab, secondary (last in list) takes precedence
-  secondary.grabbing_ = true;
-  composite.textTyped("!");
+  secondary.activate();
+  composite.dispatchText("!");
   EXPECT_EQ(secondary.receivedText, "hello!");
   EXPECT_EQ(primary.receivedText, "world");
 }

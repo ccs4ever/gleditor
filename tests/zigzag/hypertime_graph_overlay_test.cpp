@@ -216,7 +216,7 @@ TEST(HypertimeGraphOverlayTest,
   ASSERT_NE(currentNode, scene->visuals.end());
   const auto preservedId = currentNode->id;
   ui::FocusManager focus;
-  graph.syncFocus(focus);
+  auto registration = focus.registerScope(graph);
   ASSERT_TRUE(focus.focusNode(preservedId));
   graph.setConfig({600, 460, .95F, .95F});
   EXPECT_EQ(focus.focusedNode(), preservedId);
@@ -261,7 +261,7 @@ TEST(HypertimeGraphOverlayTest,
   gleditor::FrameContext frame{state, projection, 1280, 800, timeline};
   graph.drawFrame(frame);
   ui::FocusManager focus;
-  graph.syncFocus(focus);
+  auto registration = focus.registerScope(graph);
   auto scene        = graph.prepare({.screenWidth = 1280, .screenHeight = 800},
                                     ui::defaultTheme());
   const auto slider = std::ranges::find(scene->visuals, std::string{"time"},

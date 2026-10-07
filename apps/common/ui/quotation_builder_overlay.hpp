@@ -26,9 +26,9 @@
 #include "common/xanadu/system_docs.hpp"
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/overlay.hpp>
 
 #include "common/xanadu/quotation_builder.hpp"
@@ -43,10 +43,18 @@ namespace xanadu {
  * quotations across Xudu, Xuzz, and Zigzag.
  */
 class QuotationBuilderOverlay : public gleditor::FrameContributor,
-                                public gleditor::ModalInput,
+                                public gleditor::ui::FocusScope,
                                 public gleditor::PickObserver,
                                 public gleditor::a11y::Source {
 public:
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);
@@ -89,10 +97,10 @@ public:
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool busy() const override;
 
-  // ModalInput
-  [[nodiscard]] bool grabbing() const override { return visible_.load(); }
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
-  void textTyped(const std::string &utf8) override;
+  // FocusScope
+  [[nodiscard]] bool active() const override { return visible_.load(); }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods);
+  void textTyped(std::string_view utf8) override;
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
 
   // PickObserver

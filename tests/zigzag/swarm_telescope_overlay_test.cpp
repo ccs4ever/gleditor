@@ -207,7 +207,7 @@ TEST(SwarmTelescopeOverlayTest,
   gleditor::FrameContext context{state, projection, 640, 480, timeline};
   telescope.drawFrame(context);
   ui::FocusManager focus;
-  telescope.syncFocus(focus);
+  auto registration = focus.registerScope(telescope);
   EXPECT_TRUE(focus.modalActive());
   EXPECT_FALSE(focus.permitsCommand("document-edit"));
   auto scene        = telescope.snapshot();
@@ -351,7 +351,7 @@ TEST(SwarmTelescopeOverlayTest,
   gleditor::FrameContext context{state, projection, 640, 480, timeline};
   telescope.drawFrame(context);
   ui::FocusManager focus;
-  telescope.syncFocus(focus);
+  auto registration = focus.registerScope(telescope);
   auto scene        = telescope.snapshot();
   const auto result = std::ranges::find(scene->visuals, std::string{"select"},
                                         &ui::WidgetVisual::action);

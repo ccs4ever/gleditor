@@ -378,14 +378,16 @@ TEST_F(CanvasImageTest, ClipModeKeepsAndCropsAPartialCluster) {
   EXPECT_FLOAT_EQ(row.pos[0], 2.0F);
 }
 
-TEST_F(CanvasImageTest, CompatibilityWidthLimitDrawsOneBoundedLine) {
+TEST_F(CanvasImageTest, ExplicitBoxDrawsOneBoundedLine) {
   RenderState state(device.get());
-  canvas->setTextWidthLimit(80);
-  const auto metrics = canvas->addText(
-      state, 10, 100,
+  const auto result = canvas->addText(
+      state, {10, 100 - 40, 80, 40},
       "A very long label\nwith an explicit newline and more text", 0xFFFFFFFFU,
       0);
   const auto font = gleditor::text::FontManager::instance().getFont("Sans 12");
+  const gleditor::TextMetrics metrics{
+      static_cast<float>(result.fitted.shaping.textWidthPx),
+      static_cast<float>(result.fitted.shaping.textHeightPx)};
   EXPECT_LE(metrics.width, 80.0F);
   EXPECT_EQ(metrics.height, std::ceil(font->metrics().lineHeight));
   canvas->commit();

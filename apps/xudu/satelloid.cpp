@@ -521,7 +521,9 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
     if (s.pulseAlpha > .01F) {
       if (!slot.pulse) {
         slot.pulse = std::make_unique<gleditor::Canvas>(
-            device_, fontName_.empty() ? "Sans 12" : fontName_);
+            device_, gleditor::ui::scaledFontDescription(
+                         fontName_, gleditor::ui::FontRole::Body, {},
+                         gleditor::ui::defaultTheme()));
         slot.pulse->createPipeline(pipeline_, true);
       }
       slot.pulse->clear();

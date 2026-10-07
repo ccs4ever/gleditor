@@ -29,7 +29,7 @@ PouchDrawer::PouchDrawer(Session &session, RendererRef renderer,
       [this](std::uint32_t tag) { enqueue({.tag = tag}); });
 }
 
-PouchDrawer::~PouchDrawer() { releaseFocus(); }
+PouchDrawer::~PouchDrawer() = default;
 
 void PouchDrawer::deviceReady(render::RenderDevice &device,
                               const render::PipelineDesc &pipeline) {

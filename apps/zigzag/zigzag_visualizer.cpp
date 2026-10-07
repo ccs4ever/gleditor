@@ -2553,7 +2553,7 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
   return false;
 }
 
-bool ZigzagVisualizer::grabbing() const {
+bool ZigzagVisualizer::active() const {
   return presentation_visible_ &&
          (commandBarVisible_ || paletteVisible_ || cellEditing_);
 }
@@ -2638,7 +2638,7 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
   return false;
 }
 
-void ZigzagVisualizer::textTyped(const std::string &utf8) {
+void ZigzagVisualizer::textTyped(std::string_view utf8) {
   if (!presentation_visible_) return;
   if (cellEditing_) {
     if (cellEditWhole_) {

@@ -198,11 +198,6 @@ public:
   /// Size @p utf8 would take, without drawing it or touching the glyph cache.
   [[nodiscard]] TextMetrics measureText(std::string_view utf8) const;
 
-  /// @deprecated Prefer boxed addText for new code. Longest a single
-  /// line may get before it is ellipsised. Zero, the
-  /// default, does not wrap or ellipsise at all.
-  void setTextWidthLimit(int pixels) { textWidthLimit = pixels; }
-
   /// Changes the font used by later text additions and measurements without
   /// creating a new pipeline. Callers must rebuild existing text geometry.
   void setFontDescription(std::string description) {
@@ -253,7 +248,6 @@ private:
   render::PipelineHandle pipeline{};
   BufferPool::Allocation backing{};
   std::uint32_t committedInstances{};
-  int textWidthLimit{};
   std::optional<ui::TextBounds> textBounds;
   std::vector<ui::Rect> clips;
   std::uint32_t tagKind{render::tagKindOverlay};

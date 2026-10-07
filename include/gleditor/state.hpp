@@ -17,8 +17,8 @@
 
 #include <gleditor/a11y/publisher.hpp>
 #include <gleditor/glyphcache/types.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/metrics.hpp>
 
 struct RenderItem;
@@ -221,21 +221,8 @@ struct AppState {
   std::mutex typedMutex;
   std::string typedText;
 
-  /**
-   * @brief Whatever currently has the keyboard instead of the document.
-   *
-   * Null almost always. Set before the event loop starts and left alone: what
-   * changes is whether it says it is grabbing, which is the modal's business
-   * and is asked before every key. See gleditor/modal_input.hpp.
-   */
-  gleditor::ModalInput *modal{};
   gleditor::ui::FocusManager focusManager;
   std::atomic<std::uint64_t> focusLossEpoch{0};
-  void syncFocus() {
-    if (modal) {
-      modal->syncFocus(focusManager);
-    }
-  }
 
   /**
    * @brief What reports this program's user interface to the platform.

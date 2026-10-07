@@ -15,10 +15,10 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 #include <gleditor/ui/layout.hpp>
 
 struct RenderState;
@@ -65,16 +65,24 @@ struct RadialConfig {
  */
 class RadialMenu : public FrameContributor,
                    public PickObserver,
-                   public ModalInput,
+                   public ui::FocusScope,
                    public a11y::Source {
 public:
-  [[nodiscard]] bool grabbing() const override { return isOpen(); }
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override;
+  void cancel() override {
+    keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
+  }
+
+  bool keyPressed(const gleditor::ui::KeyEvent &event) override {
+    return keyPressed(event.key, event.mods);
+  }
+
+  [[nodiscard]] bool active() const override { return isOpen(); }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods);
   [[nodiscard]] std::shared_ptr<const ui::LayoutResult>
   focusLayout() const override;
   void focusedNodeChanged(std::uint32_t) override;
   bool activateNode(std::uint32_t) override;
-  void textTyped(const std::string &) override {}
+  void textTyped(std::string_view) override {}
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);

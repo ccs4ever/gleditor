@@ -229,7 +229,7 @@ TEST(QuotationBuilderOverlayTest,
   overlay.setVisible(true)->setMode(xanadu::Selector::Kind::Rank);
   overlay.deviceReady(device, {});
   ui::FocusManager focus;
-  overlay.syncFocus(focus);
+  auto registration = focus.registerScope(overlay);
   ch::Timeline timeline;
   glm::mat4 projection{1};
   gleditor::FrameContext ctx{state, projection, 1280, 800, timeline};
@@ -374,7 +374,7 @@ TEST(QuotationBuilderOverlayTest,
   overlay.setVisible(true)->setMode(xanadu::Selector::Kind::Closure);
   overlay.deviceReady(device, {});
   ui::FocusManager focus;
-  overlay.syncFocus(focus);
+  auto registration = focus.registerScope(overlay);
   ch::Timeline timeline;
   glm::mat4 projection{1};
   gleditor::FrameContext ctx{state, projection, 640, 480, timeline};

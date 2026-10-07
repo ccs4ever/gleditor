@@ -718,14 +718,10 @@ void Renderer::reportBenchmark() const {
 
 void Renderer::placeCaretFromPick(RenderState &state,
                                   const render::PickingResult &pick) {
-  if (this->state->modal) {
-    this->state->modal->syncFocus(this->state->focusManager);
-  }
   if (this->state->focusManager.modalActive()) {
     draggingSelection = false;
     if (!awaitingDrag) {
-      if (auto *scope = dynamic_cast<gleditor::ModalInput *>(
-              this->state->focusManager.focusedScope())) {
+      if (auto *scope = this->state->focusManager.focusedScope()) {
         std::ignore = scope->pointerPick(pick, state);
       }
     }
@@ -992,16 +988,10 @@ void Renderer::advanceScript(RenderState &state) {
     finishStepWhenSettled();
     return;
   case Kind::Press:
-    if (this->state->modal) {
-      this->state->modal->syncFocus(this->state->focusManager);
-    }
     std::ignore = this->state->focusManager.dispatchKey({step.key, step.mods});
     finishStepWhenSettled();
     return;
   case Kind::Type:
-    if (this->state->modal) {
-      this->state->modal->syncFocus(this->state->focusManager);
-    }
     if (this->state->focusManager.dispatchText(step.text)) {
       finishStepWhenSettled();
       return;

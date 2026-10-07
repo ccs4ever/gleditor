@@ -175,7 +175,7 @@ TEST(PouchDrawerOverlayTest, fullItemIdsDispatchAndRetiredActionsDoNotMutate) {
       fixture.drawer.performAction(oldId, gleditor::a11y::Action::Click, {}));
   fixture.drawer.setOpen(false, false);
   EXPECT_TRUE(fixture.tree().nodes.empty());
-  EXPECT_FALSE(fixture.drawer.grabbing());
+  EXPECT_FALSE(fixture.drawer.active());
 }
 
 TEST(PouchDrawerOverlayTest, dropUsesVisiblePartitionAndClosedDrawerRefuses) {
@@ -197,7 +197,7 @@ TEST(PouchDrawerOverlayTest, horizontalResizeBothDocksPersistsOnlyOnRelease) {
     PouchFixture fixture;
     fixture.drawer.setDockSide(side);
     FocusManager focus;
-    fixture.drawer.syncFocus(focus);
+    auto registration = focus.registerScope(fixture.drawer);
     const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
     fixture.frame(metrics);
     auto &settings    = fixture.session.systemStore(xanadu::SystemDocKind::UI);
@@ -248,7 +248,7 @@ TEST(PouchDrawerOverlayTest, completedResizePersistsWhenClosedBeforeNextFrame) {
   const auto document    = fixture.session.createNewStore();
   const auto documentOps = fixture.session.store(document).opCount();
   FocusManager focus;
-  fixture.drawer.syncFocus(focus);
+  auto registration = focus.registerScope(fixture.drawer);
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   fixture.frame(metrics);
   auto &settings    = fixture.session.systemStore(xanadu::SystemDocKind::UI);
@@ -285,7 +285,7 @@ TEST(PouchDrawerOverlayTest, completedResizePersistsWhenClosedBeforeNextFrame) {
 TEST(PouchDrawerOverlayTest, cancelledAndStationaryResizeDoNotWriteSettings) {
   PouchFixture fixture;
   FocusManager focus;
-  fixture.drawer.syncFocus(focus);
+  auto registration = focus.registerScope(fixture.drawer);
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   fixture.frame(metrics);
   auto &settings    = fixture.session.systemStore(xanadu::SystemDocKind::UI);
@@ -386,8 +386,8 @@ TEST(PouchDrawerOverlayTest, registeredModalForwardsSpaceToCardsAndSelectors) {
   const UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
   fixture.frame(metrics);
   FocusManager focus;
-  fixture.drawer.syncFocus(focus);
-  auto tree = fixture.tree();
+  auto registration = focus.registerScope(fixture.drawer);
+  auto tree         = fixture.tree();
   auto row =
       std::ranges::find(tree.nodes, std::string("Space activates origin"),
                         &gleditor::a11y::Node::label);

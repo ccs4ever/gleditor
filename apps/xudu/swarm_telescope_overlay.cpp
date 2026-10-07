@@ -41,7 +41,7 @@ SwarmTelescopeOverlay::SwarmTelescopeOverlay(SwarmCatalog &catalog,
   overlay_.setActionHandler([this](const auto &action) { queue(action); });
   refreshSearch();
 }
-SwarmTelescopeOverlay::~SwarmTelescopeOverlay() { releaseFocus(); }
+SwarmTelescopeOverlay::~SwarmTelescopeOverlay() = default;
 void SwarmTelescopeOverlay::deviceReady(render::RenderDevice &device,
                                         const render::PipelineDesc &pipeline) {
   overlay_.deviceReady(device, pipeline);
@@ -88,7 +88,7 @@ bool SwarmTelescopeOverlay::isVisible() const noexcept {
   const std::scoped_lock lock(guard_);
   return visible_;
 }
-bool SwarmTelescopeOverlay::grabbing() const { return isVisible(); }
+bool SwarmTelescopeOverlay::active() const { return isVisible(); }
 void SwarmTelescopeOverlay::setSearchQuery(const std::string_view query) {
   const std::scoped_lock lock(guard_);
   searchQuery_ = query;
@@ -530,7 +530,7 @@ bool SwarmTelescopeOverlay::keyPressed(const gleditor::Key key,
     return activateNode(focusedId_);
   return false;
 }
-void SwarmTelescopeOverlay::textTyped(const std::string &utf8) {
+void SwarmTelescopeOverlay::textTyped(std::string_view utf8) {
   const std::scoped_lock lock(guard_);
   if (visible_) overlay_.textTyped(utf8);
 }

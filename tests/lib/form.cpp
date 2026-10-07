@@ -50,7 +50,7 @@ struct FormTest : testing::Test {
 } // namespace
 
 TEST_F(FormTest, aClosedFormTakesNoKeys) {
-  EXPECT_FALSE(form.grabbing());
+  EXPECT_FALSE(form.active());
   // False rather than swallowed: a form that is not up must not eat the keys
   // that would otherwise reach the document.
   EXPECT_FALSE(form.keyPressed(Key::Return, KeyMods::None));
@@ -60,7 +60,7 @@ TEST_F(FormTest, aClosedFormTakesNoKeys) {
 
 TEST_F(FormTest, typingGoesIntoTheFocusedField) {
   openIt();
-  EXPECT_TRUE(form.grabbing());
+  EXPECT_TRUE(form.active());
   EXPECT_EQ(form.focused(), 0U);
 
   // The caret starts at the end of the filled-in value, which is where
@@ -132,7 +132,7 @@ TEST_F(FormTest, acceptingHandsBackTheAnswersAndClosesTheForm) {
   form.keyPressed(Key::Return, KeyMods::None);
 
   EXPECT_EQ(accepted, 1);
-  EXPECT_FALSE(form.grabbing()) << "the panel comes down when it is answered";
+  EXPECT_FALSE(form.active()) << "the panel comes down when it is answered";
   ASSERT_EQ(answered.size(), 3U);
   EXPECT_EQ(answered[0].value, "document");
   EXPECT_EQ(answered[1].value, "Ada Lovelace");
@@ -146,7 +146,7 @@ TEST_F(FormTest, aRequiredFieldStopsItAndSaysWhichOne) {
   form.keyPressed(Key::Return, KeyMods::None);
 
   EXPECT_EQ(accepted, 0);
-  EXPECT_TRUE(form.grabbing()) << "the panel stays up to be finished";
+  EXPECT_TRUE(form.active()) << "the panel stays up to be finished";
   EXPECT_TRUE(form.complaint().contains("Author")) << form.complaint();
 
   // And the complaint clears as soon as somebody does something about it,
@@ -164,7 +164,7 @@ TEST_F(FormTest, escapeAbandonsItWithoutAnswering) {
   form.keyPressed(Key::Escape, KeyMods::None);
 
   EXPECT_EQ(accepted, 0) << "nothing was published";
-  EXPECT_FALSE(form.grabbing());
+  EXPECT_FALSE(form.active());
   // And a second escape is not a second answer: there is nothing up to press.
   EXPECT_FALSE(form.keyPressed(Key::Escape, KeyMods::None));
   EXPECT_EQ(accepted, 0);
@@ -173,7 +173,7 @@ TEST_F(FormTest, escapeAbandonsItWithoutAnswering) {
 TEST_F(FormTest, closingItFromOutsideDoesNotAnswerEither) {
   openIt();
   form.close();
-  EXPECT_FALSE(form.grabbing());
+  EXPECT_FALSE(form.active());
   EXPECT_EQ(accepted, 0);
 }
 
@@ -268,7 +268,7 @@ TEST(FormChoiceTest, SingleChoiceFieldCanSubmitSelectedBranchWithEnter) {
   form.keyPressed(Key::Right, KeyMods::None);
   form.keyPressed(Key::Return, KeyMods::None);
   EXPECT_EQ(chosen, "3");
-  EXPECT_FALSE(form.grabbing());
+  EXPECT_FALSE(form.active());
 }
 
 TEST_F(ChoiceFormTest, theListOpensMovesAndSettles) {
@@ -298,12 +298,12 @@ TEST_F(ChoiceFormTest, escapeClosesTheListBeforeItClosesTheForm) {
 
   form.keyPressed(Key::Escape, KeyMods::None);
   EXPECT_FALSE(form.listOpen());
-  EXPECT_TRUE(form.grabbing()) << "the form is still up";
+  EXPECT_TRUE(form.active()) << "the form is still up";
   EXPECT_EQ(form.current()[1].chosen, 0U) << "and nothing was picked";
 
   // The second escape is the one that abandons it.
   form.keyPressed(Key::Escape, KeyMods::None);
-  EXPECT_FALSE(form.grabbing());
+  EXPECT_FALSE(form.active());
   EXPECT_EQ(accepted, 0);
 }
 
@@ -382,7 +382,7 @@ TEST_F(ChoiceFormTest, anEmptyChoiceAnswersWithNothing) {
   form.open("Publish", "note", {keys}, [](const std::vector<Form::Field> &) {});
   EXPECT_EQ(form.current()[0].answer(), "");
   form.keyPressed(Key::Return, KeyMods::None);
-  EXPECT_TRUE(form.grabbing());
+  EXPECT_TRUE(form.active());
   EXPECT_TRUE(form.complaint().contains("Signing key"));
 }
 
@@ -447,4 +447,28 @@ TEST_F(FormTest, longChoiceListsDoNotAliasTheNextField) {
   EXPECT_TRUE(
       form.performAction(80, gleditor::a11y::Action::SetValue, "Grace"));
   EXPECT_EQ(form.current()[1].value, "Grace");
+}
+
+TEST(FormScopeTest, directRegistrationRestoresEarlierModalAndDeniesCommands) {
+  Form first, second;
+  gleditor::ui::FocusManager manager;
+  auto earlier = manager.registerScope(first, {.allowedCommands = {"quit"}});
+  auto later   = manager.registerScope(second, {.allowedCommands = {"quit"}});
+  manager.setGlobalCommandAllowList({"quit", "edit"});
+  first.open("First", "", {{.label = "Name"}}, [](const auto &) {});
+  second.open("Second", "", {{.label = "Name"}}, [](const auto &) {});
+  EXPECT_EQ(manager.focusedScope(), &second);
+  EXPECT_TRUE(manager.permitsCommand("quit"));
+  EXPECT_FALSE(manager.permitsCommand("edit"));
+  EXPECT_TRUE(manager.dispatchText("e\u0301👩‍👩‍👧‍👦"));
+  EXPECT_EQ(second.current()[0].value, "e\u0301👩‍👩‍👧‍👦");
+  EXPECT_TRUE(first.current()[0].value.empty());
+  second.cancel();
+  EXPECT_EQ(manager.focusedScope(), &first);
+  EXPECT_TRUE(manager.dispatchText("restored"));
+  EXPECT_EQ(first.current()[0].value, "restored");
+  earlier.reset();
+  EXPECT_FALSE(manager.modalActive());
+  EXPECT_FALSE(manager.dispatchText("unregistered"));
+  EXPECT_EQ(first.current()[0].value, "restored");
 }

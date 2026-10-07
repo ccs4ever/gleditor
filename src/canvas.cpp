@@ -368,11 +368,10 @@ void Canvas::addImage(const float left, const float bottom, const float width,
 TextMetrics Canvas::measureText(const std::string_view utf8) const {
   auto font = text::FontManager::instance().getFont(fontName);
   text::LayoutOptions opts{
-      .maxWidthPx =
-          textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
+      .maxWidthPx      = 0.0F,
       .maxHeightPx     = 0.0F,
       .singleParagraph = true,
-      .ellipsize       = textWidthLimit > 0,
+      .ellipsize       = false,
   };
   auto shaping = text::TextLayout::layoutSingleLine(utf8, font, opts);
   return {.width  = static_cast<float>(shaping.textWidthPx),
@@ -390,11 +389,10 @@ Canvas::addText(RenderState &state, const float left, const float top,
   }
 
   text::LayoutOptions opts{
-      .maxWidthPx =
-          textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
+      .maxWidthPx      = 0.0F,
       .maxHeightPx     = 0.0F,
       .singleParagraph = true,
-      .ellipsize       = textWidthLimit > 0,
+      .ellipsize       = false,
       .decoratedRanges = std::vector<DecoratedRange>(decoratedRanges.begin(),
                                                      decoratedRanges.end()),
   };
@@ -413,12 +411,6 @@ Canvas::addText(RenderState &state, const float left, const float top,
         *textBounds, tagKind, tagIndex);
   }
 
-  std::optional<ScopedClip> clip;
-  if (textWidthLimit > 0) {
-    clip.emplace(*this, ui::Rect{left, top - shaping.textHeightPx,
-                                 static_cast<float>(textWidthLimit),
-                                 static_cast<float>(shaping.textHeightPx)});
-  }
   drawText(state, left, top, shaping, colour, background);
 
   return {.width  = static_cast<float>(shaping.textWidthPx),

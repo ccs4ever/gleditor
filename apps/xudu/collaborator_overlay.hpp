@@ -30,7 +30,7 @@ class Session;
 class CollaboratorCaretOverlay : public gleditor::FrameContributor {
 public:
   explicit CollaboratorCaretOverlay(Session &session, RendererRef renderer,
-                                    std::string fontName = "Sans 9");
+                                    std::string fontName = {});
   ~CollaboratorCaretOverlay() override;
 
   // FrameContributor interface

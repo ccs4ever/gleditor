@@ -424,7 +424,9 @@ LinkForgeWidget::prepareBench(const gleditor::ui::UiMetrics &metrics,
 void LinkForgeWidget::deviceReady(render::RenderDevice &device,
                                   const render::PipelineDesc &pipeline) {
   presentation_.deviceReady(device, pipeline);
-  animation_ = std::make_unique<gleditor::Canvas>(&device, "Sans 12");
+  animation_ = std::make_unique<gleditor::Canvas>(
+      &device, gleditor::ui::UiMetrics{}.fontDescription(
+                   gleditor::ui::FontRole::Body, gleditor::ui::defaultTheme()));
   animation_->createPipeline(pipeline);
 }
 

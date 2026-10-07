@@ -1017,16 +1017,16 @@ TEST(ZigzagVisualizerTest, BridgeCommandOmnibarCommands) {
   EXPECT_FALSE(viz.commandBarFeedback().empty());
 }
 
-TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
+TEST(ZigzagVisualizerTest, FocusScopeInterceptionAndTextEntry) {
   ZigzagVisualizer viz("Sans 12");
 
   // When neither is active, grabbing is false and textArea has no value
-  EXPECT_FALSE(viz.grabbing());
+  EXPECT_FALSE(viz.active());
   EXPECT_FALSE(viz.textArea().has_value());
 
   // Command bar activation
   viz.setCommandBarVisible(true);
-  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.active());
   EXPECT_TRUE(viz.textArea().has_value());
 
   // Text entry via modal input
@@ -1051,15 +1051,15 @@ TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
 
   // Escape closes command bar
   viz.setCommandBarVisible(true);
-  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.active());
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None));
   EXPECT_FALSE(viz.isCommandBarVisible());
-  EXPECT_FALSE(viz.grabbing());
+  EXPECT_FALSE(viz.active());
 
   // Palette activation
   viz.togglePalette();
   EXPECT_TRUE(viz.isPaletteVisible());
-  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.active());
   EXPECT_TRUE(viz.textArea().has_value());
 
   // Typing into palette filters
@@ -1074,7 +1074,7 @@ TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
   // Escape closes palette
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None));
   EXPECT_FALSE(viz.isPaletteVisible());
-  EXPECT_FALSE(viz.grabbing());
+  EXPECT_FALSE(viz.active());
 }
 
 TEST(ZigzagVisualizerTest, CellActivationCallbackAndReturnKeyDispatch) {
@@ -1095,14 +1095,14 @@ TEST(ZigzagVisualizerTest, CellActivationCallbackAndReturnKeyDispatch) {
 
   // 3. Key::Return when no modal is grabbing
   const auto focusId = viz.focusCellId();
-  EXPECT_FALSE(viz.grabbing());
+  EXPECT_FALSE(viz.active());
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
   EXPECT_EQ(activatedCell, focusId);
 
   // 4. When command bar is visible, Return executes command bar and does NOT
   // trigger cell activation
   viz.setCommandBarVisible(true);
-  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.active());
   activatedCell = 0;
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
   EXPECT_EQ(activatedCell, 0U);

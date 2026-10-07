@@ -27,12 +27,12 @@
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
 #include <gleditor/media_widget.hpp>
-#include <gleditor/modal_input.hpp>
 #include <gleditor/radial_menu.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
+#include <gleditor/ui/focus_manager.hpp>
 
 #include "cli.hpp"
 #include "view_coordinator.hpp"
@@ -492,9 +492,9 @@ int XuzzApp::run(const int argc, char **argv) {
     }
   }
 
-  xudu::ImageOverlay images("Sans 11");
-  auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
-  gleditor::Form publishForm("Sans 11");
+  xudu::ImageOverlay images{std::string{}};
+  auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>();
+  gleditor::Form publishForm;
 
   xudu::Views views(*session, renderer, map, images, publishForm, state,
                     docSwitcher);
@@ -629,7 +629,7 @@ int XuzzApp::run(const int argc, char **argv) {
         views.spawnTranscludedDocument(payload, sx, sy);
       });
 
-  auto radialMenu = std::make_shared<gleditor::RadialMenu>("Sans 11");
+  auto radialMenu = std::make_shared<gleditor::RadialMenu>();
   radialMenu->setActionHandler(
       [&session, &views, &quotationOverlay](
           const std::string &id, [[maybe_unused]] const std::string &action,
@@ -1341,12 +1341,16 @@ int XuzzApp::run(const int argc, char **argv) {
         });
   });
 
-  gleditor::CompositeModalInput compositeModal(
-      {zigzagPresentation.get(), &swarmTelescope, &publishForm,
-       &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
-       radialMenu.get()});
-  compositeModal.syncFocus(state->focusManager);
-  state->modal = &compositeModal;
+  // Handles are destroyed before the scopes they register.
+  std::vector<gleditor::ui::FocusManager::ScopeHandle> modalScopes;
+  for (gleditor::ui::FocusScope *scope :
+       std::initializer_list<gleditor::ui::FocusScope *>{
+           zigzagPresentation.get(), &swarmTelescope, &publishForm,
+           &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
+           radialMenu.get()}) {
+    modalScopes.push_back(state->focusManager.registerScope(
+        *scope, {.allowedCommands = {"quit", "std:xudu/quit"}}));
+  }
 
   renderer->addPickObserver(docSwitcher.get());
   renderer->addPickObserver(&links);
@@ -1704,7 +1708,7 @@ int XuzzApp::run(const int argc, char **argv) {
     }
   };
   for (const auto &mrl : opts.audioMrls) {
-    auto w = std::make_shared<gleditor::MediaWidget>("Sans 11");
+    auto w = std::make_shared<gleditor::MediaWidget>();
     if (mrl == "white-noise" || mrl == "test") {
       std::vector<std::byte> dummy(1024, std::byte{0x55});
       auto stream =
@@ -1726,7 +1730,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   std::vector<std::shared_ptr<gleditor::MediaWidget>> videoWidgets;
   for (const auto &mrl : opts.videoMrls) {
-    auto w = std::make_shared<gleditor::MediaWidget>("Sans 11");
+    auto w = std::make_shared<gleditor::MediaWidget>();
     if (mrl == "test" || mrl == "pattern") {
       std::vector<std::byte> dummy(2048, std::byte{0xAA});
       auto stream =

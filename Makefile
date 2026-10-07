@@ -1350,6 +1350,8 @@ endif
 # CLAUDE.md.
 lint:
 	./tools/check-config-harmony.sh
+	python3 tools/check-ui-text-policy.py
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/tools -p test_ui_text_policy.py
 ifdef SHELLCHECK
 	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs $(SHELLCHECK)
 else
