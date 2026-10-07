@@ -39,6 +39,10 @@ what is still open; do not block on it.
 Code is cited by path, and by line where the line was checked against the tree at `af5f1d5`. Paths
 under `apps/xudu/` and `apps/zigzag/` are where the code sits today; §17 step 1 moves it.
 
+[`view-system-implementation-plan.md`](view-system-implementation-plan.md) orders the work. Its §2
+lists corrections and gaps found when this document was checked against the code; where it and this
+document disagree, it is the later word until the package it names amends this one.
+
 ______________________________________________________________________
 
 ## 1. Motivation
@@ -2877,16 +2881,18 @@ of steps 3 to 5 and can run beside them.
 Moves only: no behaviour changes. Include spellings, the Makefile's source lists and
 `packaging/wasm/build.sh` follow the files.
 
-- **To `apps/common/xanadu/`** — no graphics header is included: `apps/xudu/link_context.*`; and,
-  under `zigzag/`, `apps/zigzag/unified_transclusion_engine.*`.
-- **To `apps/common/ui/xanadoc/`** — they draw or take input through the library: from `apps/xudu/`,
-  `session`, `views`, `views_publication_links`, `beams`, `bridge_coordinator`,
-  `batch_orchestrator`, `satelloid`, `tenuous_tether`, `kinetic_tether_overlay`, `wireframe_hull`,
+- **To `apps/common/ui/xanadoc/`** — everything in `apps/xudu/`: `session`, `views`,
+  `views_publication_links`, `beams`, `bridge_coordinator`, `batch_orchestrator`, `link_context`,
+  `satelloid`, `tenuous_tether`, `kinetic_tether_overlay`, `wireframe_hull`,
   `world_card_presentation`, and the overlays `clasp_link_forge`, `collaborator_overlay`,
   `link_panel_overlay`, `overview_overlay`, `page_break_overlay`, `pouch_drawer`,
   `swarm_telescope_overlay` and `transcopyright_overlay`.
-- **To `apps/common/ui/slice/`** — the same reason: `apps/zigzag/zigzag_visualizer.*` and
-  `zigzag_commands.*`. Step 8 deletes both.
+- **To `apps/common/ui/slice/`** — everything in `apps/zigzag/`: `zigzag_visualizer`,
+  `zigzag_commands` and `unified_transclusion_engine`.
+- **Nothing goes to `apps/common/xanadu/`.** An earlier version of this list sent `link_context` and
+  `unified_transclusion_engine` there. Both need the library — the first through `Session`, the
+  second because it stages GPU buffers — and the engine is linked by ten targets that do not link
+  it.
 - **Staying for now**: `apps/xuzz/view_coordinator.*`, until step 6 replaces it.
 
 `XUDU_SRCS` and `ZIGZAG_SRCS` fold into the `apps/common` source lists. One consequence needs care:
@@ -3351,3 +3357,5 @@ ______________________________________________________________________
   movement recorded as condensed walk summaries (V35, §7.8); `u` zooms into an inset space with the
   next one at the periphery, and `t` with nothing bound leans to the whole slice at the previous
   operation (§7.3, VU12).
+- 2026-10-07 — Step 1's destinations corrected: nothing from `apps/xudu/` or `apps/zigzag/` can go
+  to the engine. An implementation plan now orders the work and lists the amendments still to make.

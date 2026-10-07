@@ -18,6 +18,25 @@ Three workstreams were asked for by name: **unprojection that matches the projec
 marked as additions: an "entirely inside" frustum test, depth test without depth write, placed
 planes, and a matrix of its own for every page.
 
+## Amendments pending
+
+[`view-system-implementation-plan.md`](view-system-implementation-plan.md) §2 checked this plan
+against the code. Until the packages it names amend the sections below, these hold over them:
+
+- A page's matrix is rewritten, and read back, by reflow (`src/doc.cpp`). §6 must first split a
+  page's flow matrix from its pose and close `Page::setModel`.
+- A beam along world Z has no width (`assets/shaders/beam.vert.glsl`). The beam shader needs a fix,
+  so "no shader change" is not quite true.
+- A soft band is a quad textured from a gradient baked into the glyph atlas, since the solid-fill
+  path has one alpha per quad.
+- `PlaneSet::draw` also takes the camera's view matrix; `faceCamera` cannot be had from the combined
+  matrix.
+- One draw per plane may cost too much on OpenGL, which re-issues every attribute pointer per draw
+  and does not record on worker threads. A spike decides how planes are batched before §5 is built.
+- A `PlaneSet` uses one persistent picking scope; scopes are a shared budget of about 8,000.
+- The OpenGL loader has none of `Scissor`, `DepthMask` or `DepthRangef` yet.
+- Translucent pages, planes and beams must be ordered in one list where they overlap.
+
 ## 1. Conventions that exist and must not change
 
 Code is cited at commit `af5f1d5`. The API here follows the conventions of `view-system.md` §8: no
