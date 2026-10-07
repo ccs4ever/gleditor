@@ -205,6 +205,14 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overview.viewportColour, overview.markColour: Its colours as RGBA "
            "integers; marks show the selected link's chosen places and the "
            "focused ZigZag card.\n"
+           "pouchPanel.widthPx and storePanel.widthPx: Preferred panel widths "
+           "in logical pixels, defaults 320 and 340. Positive finite values "
+           "are required. The panels grow for readable controls within their "
+           "safe-area limits.\n"
+           "pouchPanel.maxWidthShare, pouchPanel.maxHeightShare, "
+           "storePanel.maxWidthShare and storePanel.maxHeightShare: Maximum "
+           "shares of safe width and height, range 0.1 to 1. Width defaults "
+           "are 0.9 and height defaults are 1.\n"
            "linkPanel.font: Font override of the selected-link panel. An empty "
            "default follows the label typography role. Explicit fonts follow "
            "display and font scales.\n"
@@ -697,6 +705,8 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
   case SystemDocKind::UI: {
     const LinkPanelConfig panel;
     const OverviewConfig overview;
+    const PouchPanelConfig pouchPanel;
+    const StorePanelConfig storePanel;
     const auto colourSpec = [](std::string_view name, const char *notes,
                                const std::uint32_t colour) {
       return SettingSpec{
@@ -713,6 +723,26 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                                       .defaultValues = {double{px}}}}};
     };
     specs = {
+        lengthSpec(settings::kPouchPanelWidthPx,
+                   "Pouch dock preferred width in logical pixels",
+                   pouchPanel.widthPx),
+        lengthSpec(settings::kPouchPanelMaxWidthShare,
+                   "Pouch dock maximum share of safe width, range 0.1 to 1",
+                   pouchPanel.maxWidthShare),
+        lengthSpec(settings::kPouchPanelMaxHeightShare,
+                   "Pouch dock maximum share of safe height, range 0.1 to 1",
+                   pouchPanel.maxHeightShare),
+        lengthSpec(settings::kStorePanelWidthPx,
+                   "Store object panel preferred width in logical pixels",
+                   storePanel.widthPx),
+        lengthSpec(
+            settings::kStorePanelMaxWidthShare,
+            "Store object panel maximum share of safe width, range 0.1 to 1",
+            storePanel.maxWidthShare),
+        lengthSpec(
+            settings::kStorePanelMaxHeightShare,
+            "Store object panel maximum share of safe height, range 0.1 to 1",
+            storePanel.maxHeightShare),
         {.name    = std::string(settings::kOverviewVisible),
          .notes   = "Whether the overview panel is shown",
          .schemas = {{.expectedTypes = {"bool"},
@@ -2952,6 +2982,28 @@ UIConfig UIConfig::fromStore(const Store &store) {
   cfg.radialMenu.innerRadius = static_cast<float>(
       model.getDouble(settings::kRadialMenuInnerRadius,
                       static_cast<double>(cfg.radialMenu.innerRadius)));
+
+  const auto panelLength = [&model](std::string_view name, float fallback) {
+    const auto value =
+        static_cast<float>(model.getDouble(name, double{fallback}));
+    return std::isfinite(value) && value > 0.0F ? value : fallback;
+  };
+  const auto panelShare = [&panelLength](std::string_view name,
+                                         float fallback) {
+    return std::clamp(panelLength(name, fallback), 0.1F, 1.0F);
+  };
+  cfg.pouchPanel.widthPx =
+      panelLength(settings::kPouchPanelWidthPx, cfg.pouchPanel.widthPx);
+  cfg.pouchPanel.maxWidthShare  = panelShare(settings::kPouchPanelMaxWidthShare,
+                                             cfg.pouchPanel.maxWidthShare);
+  cfg.pouchPanel.maxHeightShare = panelShare(
+      settings::kPouchPanelMaxHeightShare, cfg.pouchPanel.maxHeightShare);
+  cfg.storePanel.widthPx =
+      panelLength(settings::kStorePanelWidthPx, cfg.storePanel.widthPx);
+  cfg.storePanel.maxWidthShare  = panelShare(settings::kStorePanelMaxWidthShare,
+                                             cfg.storePanel.maxWidthShare);
+  cfg.storePanel.maxHeightShare = panelShare(
+      settings::kStorePanelMaxHeightShare, cfg.storePanel.maxHeightShare);
 
   auto &overview = cfg.overview;
   overview.visible =

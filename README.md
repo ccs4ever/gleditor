@@ -234,6 +234,11 @@ defaults, rather than hardcoded application keymaps. ZigZag uses sovereign-store
 slices. `gleditor` remains separate and uses its own TSV configuration. See the
 [system xanadocs design](design/system-xanadocs-customization-and-metasystem.md).
 
+The pouch drawer can be widened by dragging its inner divider. Focus the divider and use Left or
+Right to resize with the keyboard, or activate it to widen by one step. A completed resize saves
+`pouchPanel.widthPx` in `system://ui`; cancelling a drag restores the previous width. The drawer
+clamps its width to the available safe area.
+
 The plain editor's chrome typography is independent of its document font. Its configuration accepts
 `ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minTouchPx`, `ui.minFontPx`, and
 `ui.font.<caption|label|body|title|mono>.<family|points>`. UI and font scales multiply the display
@@ -274,6 +279,9 @@ internal tree and uses a no-op platform adapter. `GLEDITOR_ENABLE_A11Y=1` requir
 `ACCESSKIT_DIR` can point to a local accesskit-c installation. `--dump-a11y` prints the settled tree
 for headless inspection, at its place among the other automation options. `--wait-ms` pauses the
 automation script for up to 60 seconds while rendering, input and background work continue.
+`--click-label "Full control label"` resolves a unique visible actionable accessibility label and
+clicks the centre of its drawn bounds through normal asynchronous picking. Missing or ambiguous
+labels fail the run; responsive panel tests use this instead of fixed coordinates.
 
 The Makefile selects SDL3 when pkg-config finds it, otherwise SDL2; use `GLEDITOR_SDL=2|3` to pin a
 major. `include/gleditor/sdl_compat.hpp` normalizes their input, window, and text-input APIs. SDL2

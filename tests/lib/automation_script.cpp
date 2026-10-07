@@ -56,6 +56,19 @@ TEST(AutomationScript, keepsTheOrderTheOptionsWereWrittenIn) {
 
 // The same options in the other order are a different script, which is the
 // point: reading them by category would make these two the same run.
+TEST(AutomationScript, namedClicksPreserveFullLabelsAndScriptOrder) {
+  const auto script =
+      scriptOf({"--do", "store-manager-toggle", "--click-label", "+ Xanadoc",
+                "--dump-a11y", "--click-label=Close Drawer"});
+  ASSERT_EQ(script.size(), 4U);
+  EXPECT_EQ(script[0].kind, Kind::Command);
+  EXPECT_EQ(script[1].kind, Kind::ClickLabel);
+  EXPECT_EQ(script[1].text, "+ Xanadoc");
+  EXPECT_EQ(script[2].kind, Kind::DumpAccessibility);
+  EXPECT_EQ(script[3].kind, Kind::ClickLabel);
+  EXPECT_EQ(script[3].text, "Close Drawer");
+}
+
 TEST(AutomationScript, theSameOptionsInAnotherOrderAreAnotherScript) {
   const auto typed = scriptOf({"--click", "1,2", "--type", "a"});
   const auto other = scriptOf({"--type", "a", "--click", "1,2"});

@@ -5,21 +5,25 @@
 #ifndef COMMON_UI_STORE_OBJECT_MANAGER_HPP
 #define COMMON_UI_STORE_OBJECT_MANAGER_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gleditor/a11y/tree.hpp>
-#include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/ui/overlay.hpp>
 
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 
 namespace xanadu {
 
@@ -33,17 +37,20 @@ class StoreObjectManager : public gleditor::FrameContributor,
                            public gleditor::ModalInput,
                            public gleditor::a11y::Source {
 public:
-  [[nodiscard]] bool grabbing() const override { return visible_; }
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
-    if (key != gleditor::Key::Escape || !grabbing()) return false;
-    setVisible(false);
-    return true;
-  }
+  [[nodiscard]] bool grabbing() const override { return visible_.load(); }
+  bool keyPressed(gleditor::Key, gleditor::KeyMods) override;
   void textTyped(const std::string &) override {}
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);
   }
+  std::shared_ptr<const gleditor::ui::LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
+  bool pointerEvent(const gleditor::ui::PointerEvent &) override;
+  void focusChanged(bool) override;
+  std::optional<gleditor::InputArea> pointerArea() const override;
 
   static constexpr std::uint32_t kTagCloseDrawer      = 26001U;
   static constexpr std::uint32_t kTagNewSlice         = 26002U;
@@ -66,7 +73,7 @@ public:
   using CloseCallback   = std::function<void(std::uint32_t birthOp)>;
   using IsOpenPredicate = std::function<bool(std::uint32_t birthOp)>;
 
-  StoreObjectManager(Store &store, std::string fontName = "Sans 10",
+  StoreObjectManager(Store &store, std::string fontName = {},
                      ToggleCallback onToggle = nullptr,
                      CreateCallback onCreate = nullptr,
                      CloseCallback onClose   = nullptr,
@@ -82,7 +89,7 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
-  [[nodiscard]] bool busy() const override { return false; }
+  [[nodiscard]] bool busy() const override;
 
   // PickObserver
   [[nodiscard]] bool picked(const render::PickingResult &pick,
@@ -91,12 +98,20 @@ public:
   // a11y::Source
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return a11yRevision_;
+    return a11yRevision_.load() + overlay_.accessibilityRevision();
   }
 
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
+  StoreObjectManager *setConfig(const StorePanelConfig &);
+  [[nodiscard]] std::shared_ptr<const gleditor::ui::WidgetScene>
+  prepare(const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &);
+  [[nodiscard]] gleditor::text::ShapingCache::Stats shapingStats() const {
+    return overlay_.shapingStats();
+  }
   StoreObjectManager *setVisible(bool visible);
   StoreObjectManager *toggle();
-  [[nodiscard]] bool isVisible() const noexcept { return visible_; }
+  [[nodiscard]] bool isVisible() const noexcept { return visible_.load(); }
 
   StoreObjectManager *refresh();
   [[nodiscard]] const std::vector<ObjectItem> &items() const noexcept {
@@ -104,18 +119,22 @@ public:
   }
 
   StoreObjectManager *setOnToggle(ToggleCallback cb) {
+    const std::scoped_lock lock(guard_);
     onToggle_ = std::move(cb);
     return this;
   }
   StoreObjectManager *setOnCreate(CreateCallback cb) {
+    const std::scoped_lock lock(guard_);
     onCreate_ = std::move(cb);
     return this;
   }
   StoreObjectManager *setOnClose(CloseCallback cb) {
+    const std::scoped_lock lock(guard_);
     onClose_ = std::move(cb);
     return this;
   }
   StoreObjectManager *setIsOpenPredicate(IsOpenPredicate pred) {
+    const std::scoped_lock lock(guard_);
     isOpen_ = std::move(pred);
     return this;
   }
@@ -128,9 +147,43 @@ public:
 private:
   Store &store_;
   std::string fontName_;
-  std::unique_ptr<gleditor::Canvas> canvas_;
-  bool visible_{false};
-  std::uint64_t a11yRevision_{1};
+  gleditor::ui::ScreenOverlay overlay_;
+  mutable std::recursive_mutex guard_;
+  std::atomic<bool> visible_{false};
+  std::atomic<std::uint64_t> a11yRevision_{1};
+  StorePanelConfig config_;
+  gleditor::ui::UiMetrics metrics_;
+  gleditor::ui::Theme theme_, sourceTheme_;
+  gleditor::text::ShapingCache measurements_;
+  std::size_t observedOps_{};
+  bool dirty_{true};
+  float scrollPx_{}, rowHeight_{}, viewportHeight_{};
+  std::uint64_t generation_{1};
+  enum class ActionKind {
+    CloseDrawer,
+    CreateSlice,
+    CreateXanadoc,
+    Toggle,
+    Close
+  };
+  struct Action {
+    ActionKind kind;
+    std::uint32_t birth{};
+    bool open{};
+    std::uint64_t generation{};
+  };
+  struct Identity {
+    gleditor::ui::WidgetId toggle{}, close{};
+    bool open{};
+  };
+  gleditor::ui::WidgetId nextId_{1024}, closeId_{}, sliceId_{}, docId_{};
+  std::unordered_map<std::uint32_t, Identity> identities_;
+  std::unordered_map<gleditor::ui::WidgetId, Action> actions_;
+  std::vector<Action> pending_, toggleActions_, closeActions_;
+  void queue(const gleditor::ui::WidgetAction &);
+  void drain();
+  void scroll(float);
+  void changed();
 
   ToggleCallback onToggle_;
   CreateCallback onCreate_;

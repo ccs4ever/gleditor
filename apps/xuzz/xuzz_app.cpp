@@ -448,7 +448,7 @@ int XuzzApp::run(const int argc, char **argv) {
       [&session] { return session->generation(); });
   map.setVisible(opts.mapVisible);
 
-  xudu::PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
+  xudu::PouchDrawer pouchDrawer(*session, renderer);
   pouchDrawer.setOpen(opts.pouchOpen, false);
 
   if (!opts.aliases.empty()) {
@@ -529,7 +529,7 @@ int XuzzApp::run(const int argc, char **argv) {
       });
 
   xanadu::StoreObjectManager storeObjectManager(
-      session->store(), "Sans 10",
+      session->store(), "",
       [&views, &session](const std::uint32_t birthOp,
                          const xanadu::StructureKind /*kind*/,
                          const bool shouldBeOpen) {
@@ -2687,8 +2687,8 @@ int XuzzApp::run(const int argc, char **argv) {
   // 8. System Store Change Watcher Callback
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
-       &views, &overview, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints,
+       &views, &overview, &storeObjectManager, readablePx, &session,
+       zigzagPresentation, &bridgeCoordinator, &showKeyHints,
        state](const xudu::SystemDocKind kind, const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
                   << ")\n";
@@ -2736,6 +2736,8 @@ int XuzzApp::run(const int argc, char **argv) {
           radialMenu->setConfig(uiCfg.radialMenu);
           linkPanel.setConfig(uiCfg.linkPanel);
           overview.setConfig(uiCfg.overview);
+          pouchDrawer.setConfig(uiCfg.pouchPanel);
+          storeObjectManager.setConfig(uiCfg.storePanel);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
           map.setVisible(uiCfg.hypertimeMapVisible);
           break;
@@ -2769,6 +2771,8 @@ int XuzzApp::run(const int argc, char **argv) {
       radialMenu->setConfig(uiCfg.radialMenu);
       linkPanel.setConfig(uiCfg.linkPanel);
       overview.setConfig(uiCfg.overview);
+      pouchDrawer.setConfig(uiCfg.pouchPanel);
+      storeObjectManager.setConfig(uiCfg.storePanel);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
       map.setVisible(uiCfg.hypertimeMapVisible);
     }

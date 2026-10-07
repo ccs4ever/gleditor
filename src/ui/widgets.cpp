@@ -613,6 +613,12 @@ private:
             std::min(row.bottom + row.height,
                      geometry.contentRect.bottom + geometry.contentRect.height);
         if (top <= bottom) continue;
+        // Hide unreadable edge rows when the viewport can fit a text line.
+        // Tiny viewports retain row bounds for visible selection feedback.
+        const auto textHeight = font(w.fontRole)->metrics().lineHeight + p;
+        if (top - bottom < textHeight &&
+            geometry.contentRect.height >= textHeight)
+          continue;
         row.bottom       = bottom;
         row.height       = top - bottom;
         const auto entry = box(list->rows[i].id, w.id, row, p * .5F, true,

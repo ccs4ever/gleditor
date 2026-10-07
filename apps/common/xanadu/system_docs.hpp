@@ -251,6 +251,16 @@ inline constexpr std::string_view kOverviewPageColour = "overview.pageColour";
 inline constexpr std::string_view kOverviewViewportColour =
     "overview.viewportColour";
 inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
+inline constexpr std::string_view kPouchPanelWidthPx  = "pouchPanel.widthPx";
+inline constexpr std::string_view kPouchPanelMaxWidthShare =
+    "pouchPanel.maxWidthShare";
+inline constexpr std::string_view kPouchPanelMaxHeightShare =
+    "pouchPanel.maxHeightShare";
+inline constexpr std::string_view kStorePanelWidthPx = "storePanel.widthPx";
+inline constexpr std::string_view kStorePanelMaxWidthShare =
+    "storePanel.maxWidthShare";
+inline constexpr std::string_view kStorePanelMaxHeightShare =
+    "storePanel.maxHeightShare";
 // The selected-link panel. Colours are RGBA8, most significant byte red.
 inline constexpr std::string_view kLinkPanelFont     = "linkPanel.font";
 inline constexpr std::string_view kLinkPanelMaxLines = "linkPanel.maxLines";
@@ -1056,6 +1066,21 @@ struct LinkPanelConfig {
   bool operator==(const LinkPanelConfig &) const = default;
 };
 
+/// Logical widths preserve the original dock sizes; safe-area shares bound
+/// growth when typography needs more room.
+struct PouchPanelConfig {
+  float widthPx{320.0F};
+  float maxWidthShare{0.9F};
+  float maxHeightShare{1.0F};
+  bool operator==(const PouchPanelConfig &) const = default;
+};
+struct StorePanelConfig {
+  float widthPx{340.0F};
+  float maxWidthShare{0.9F};
+  float maxHeightShare{1.0F};
+  bool operator==(const StorePanelConfig &) const = default;
+};
+
 struct UIConfig {
   bool tabBarVisible{true};
   bool statusBarVisible{true};
@@ -1065,6 +1090,8 @@ struct UIConfig {
   gleditor::RadialConfig radialMenu;
   LinkPanelConfig linkPanel;
   OverviewConfig overview;
+  PouchPanelConfig pouchPanel;
+  StorePanelConfig storePanel;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

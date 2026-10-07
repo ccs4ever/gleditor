@@ -102,8 +102,9 @@ struct AppState {
 
   struct AutomationStep {
     enum class Kind : std::uint8_t {
-      Pick,    ///< Report what is at a pixel.
-      Click,   ///< Place the caret at a pixel.
+      Pick,       ///< Report what is at a pixel.
+      Click,      ///< Place the caret at a pixel.
+      ClickLabel, ///< Click the unique actionable accessibility label.
       Type,    ///< Insert text at the caret, or into whatever has the keyboard.
       Select,  ///< Select a byte range of the document the caret is in.
       Command, ///< Run a bound command by name.

@@ -330,7 +330,7 @@ constexpr std::array scriptedOptions = {
     "--select",      "--do",         "--key",        "--chord",
     "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
     "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel",
-    "--wait-ms"};
+    "--wait-ms",     "--click-label"};
 
 } // namespace
 
@@ -467,6 +467,8 @@ readAutomationScript(const int argc, const char *const *const argv) {
       step.x = x;
       step.y = y;
       script.push_back(std::move(step));
+    } else if ("--click-label" == option) {
+      script.push_back(Step{.kind = Step::Kind::ClickLabel, .text = value});
     } else if ("--capture" == option) {
       Step step{.kind = Step::Kind::Capture};
       step.text = value;
@@ -992,6 +994,12 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
       "Report the picking tag at pixel X,Y once the document has "
       "settled. Repeatable. The read is asynchronous, so a run waits for "
       "every query to come back before it exits.");
+  automation(parser.add_argument("--click-label").append(),
+             "click a visible control by its full accessibility label",
+             "Resolve one visible actionable accessibility label to its drawn "
+             "bounds and click their centre through the ordinary picking "
+             "path. Missing or ambiguous labels fail the run. Repeatable and "
+             "ordered with other automation options.");
   automation(parser.add_argument("--click").append(),
              "click at X,Y once settled, placing the caret; repeatable",
              "Click at pixel X,Y once the document has settled, placing the "

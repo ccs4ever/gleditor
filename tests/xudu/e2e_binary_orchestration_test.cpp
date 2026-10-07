@@ -1041,6 +1041,96 @@ TEST(E2EBinaryOrchestrationTest,
 }
 
 TEST(E2EBinaryOrchestrationTest,
+     storePanelCreatesObjectsThroughNamedDrawnControls) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_panel_objects";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll      = root / "permascroll";
+  const auto path        = root / "store";
+  const std::string text = "A document behind the store object panel.";
+  Store original(permascrollAt(scroll));
+  const auto birth = original.makeXanadoc({}, "Original document");
+  const auto birthIndex =
+      original.discoverStructureBirths(birth).front().opIndex;
+  std::ignore = original.insert(birth, 0, text);
+  original.save(path.string());
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(scroll) + " --backend " +
+      activeBackend() + " --profile --do store-manager-toggle --dump-a11y" +
+      " --click-label \"New Xanadoc\" --dump-a11y" +
+      " --click-label \"New Slice\" --dump-a11y" +
+      " --click-label \"Close Drawer\" --do save-document " + path.string());
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("click-label \"New Xanadoc\""));
+  EXPECT_THAT(result.output, testing::HasSubstr("click-label \"New Slice\""));
+  Store after(permascrollAt(scroll));
+  after.load(path.string());
+  const auto births = after.discoverStructureBirths(after.latest());
+  EXPECT_EQ(std::ranges::count(births, xanadu::StructureKind::Xanadoc,
+                               [](const auto &birth) { return birth.kind; }),
+            2);
+  EXPECT_EQ(std::ranges::count(births, xanadu::StructureKind::Slice,
+                               [](const auto &birth) { return birth.kind; }),
+            1);
+  EXPECT_EQ(after.textOf(after.headOfStructure(birthIndex), birthIndex), text);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     pouchDividerResizesAndKeepsTheDocumentUntouched) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build" / "integration_workspace_panel_resize";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto scroll      = root / "permascroll";
+  const auto path        = root / "store";
+  const std::string text = "A document behind the resizable pouch.";
+  Store original(permascrollAt(scroll));
+  std::ignore           = original.insert(MicroversionId{}, 0, text);
+  const auto operations = original.opCount();
+  original.save(path.string());
+  const auto result = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() + " XDG_DATA_HOME=" +
+      (root / "data").string() + " timeout 120 " + binary.string() +
+      permascrollFlag(scroll) + " --backend " + activeBackend() +
+      " --profile --do pouch-toggle --click-label \"Resize pouch drawer\"" +
+      " --dump-a11y --key escape --do save-document " + path.string());
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output,
+              testing::HasSubstr("click-label \"Resize pouch drawer\""));
+  EXPECT_THAT(result.output,
+              testing::HasSubstr("Resize pouch drawer\" = \"364\""));
+  Store after(permascrollAt(scroll));
+  after.load(path.string());
+  EXPECT_EQ(after.opCount(), operations);
+  EXPECT_EQ(after.textOf(after.latest()), text);
+  const auto reopened = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "config").string() + " XDG_DATA_HOME=" +
+      (root / "data").string() + " timeout 120 " + binary.string() +
+      permascrollFlag(scroll) + " --backend " + activeBackend() +
+      " --profile --do pouch-toggle --dump-a11y " + path.string());
+  ASSERT_EQ(reopened.exitCode, 0) << reopened.output;
+  EXPECT_THAT(reopened.output,
+              testing::HasSubstr("Resize pouch drawer\" = \"364\""));
+}
+
+TEST(E2EBinaryOrchestrationTest, namedClicksRefuseMissingControls) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto result = executeProcess(
+      "timeout 120 " + binary.string() + " --backend " + activeBackend() +
+      " --profile --click-label \"absent panel control\"");
+  EXPECT_NE(result.exitCode, 0);
+  EXPECT_THAT(result.output, testing::HasSubstr("found 0"));
+}
+
+TEST(E2EBinaryOrchestrationTest,
      cellEditingBlocksBackgroundCommandsAndRestoresTheZigzagPane) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));
@@ -1941,16 +2031,16 @@ TEST(E2EBinaryOrchestrationTest,
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  // Use user-model scripted commands: --select, --do std:xudu/pouch_drop_left,
-  // --select,
-  // --do std:xudu/pouch_drop_right, --do std:xudu/forge_clasp, --do
-  // save-document
+  // Fill both benches from selections, then activate the drawn forge button.
   std::string cmd =
+      "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
+      " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
       xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
       " --backend " + activeBackend() + " --profile --version-id " + v0.str() +
       " --select 0,18 --do std:xudu/pouch_drop_left" +
       " --select 36,54 --do std:xudu/pouch_drop_right" +
-      " --do std:xudu/forge_clasp --do save-document " + storePath.string();
+      " --do pouch-toggle --dump-a11y --click-label \"Forge Clasp\"" +
+      " --key escape --do save-document " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "scripted clasp test failed: " << res.output;

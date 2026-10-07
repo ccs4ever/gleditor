@@ -140,6 +140,33 @@ TEST(UiWidgetTest, virtualListsNeverShapeThousandsOfOffscreenRows) {
   EXPECT_LT(capture.stats().harfbuzzCalls, 64U);
 }
 
+TEST(UiWidgetTest, clippedListEdgesDoNotExposeUndrawnActions) {
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  Theme theme;
+  theme.paddingEm = 0;
+  const auto font = gleditor::text::FontManager::instance().getFont(
+      metrics.fontDescription(FontRole::Label, theme));
+  const auto line = font->metrics().lineHeight;
+  List list{.rows        = {{10, "First row", "open", true},
+                            {11, "Second row", "open", true},
+                            {12, "Third row", "open", true}},
+            .rowHeightPx = line * 2};
+  Widget widget{.id = 1, .model = list};
+  gleditor::text::ShapingCache cache;
+  const Rect bounds{20, 20, 240, line * 2.5F};
+  auto scene = layoutWidgets(widget, bounds, metrics, theme, cache);
+  ASSERT_NE(scene.find(10), nullptr);
+  EXPECT_EQ(scene.find(11), nullptr);
+  EXPECT_EQ(scene.layout.find(11), nullptr);
+  list.scrollPx = line * 1.5F;
+  widget.model  = list;
+  scene         = layoutWidgets(widget, bounds, metrics, theme, cache);
+  EXPECT_EQ(scene.find(10), nullptr);
+  const auto *row = scene.find(11);
+  ASSERT_NE(row, nullptr);
+  EXPECT_FALSE(row->fitted.shaping.glyphs.empty());
+}
+
 TEST(UiWidgetTest,
      disabledTabsCannotActivateAndSelectionReportsTheOwningWidget) {
   Tabs tabs{.tabs = {{10, "First tab", "first", true},

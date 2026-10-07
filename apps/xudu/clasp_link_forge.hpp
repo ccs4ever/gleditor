@@ -6,12 +6,14 @@
 #ifndef XUDU_CLASP_LINK_FORGE_HPP
 #define XUDU_CLASP_LINK_FORGE_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include <gleditor/canvas.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/ui/overlay.hpp>
 
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/pouch_zone.hpp"
@@ -40,7 +42,47 @@ public:
   LinkForgeWidget();
 
   void setGeometry(float x, float y, float width, float height) noexcept;
-  void draw(gleditor::Canvas &canvas, RenderState &state);
+  [[nodiscard]] std::shared_ptr<const gleditor::ui::WidgetScene>
+  prepareBench(const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &,
+               gleditor::ui::Rect bounds, bool compact = false);
+  void deviceReady(render::RenderDevice &, const render::PipelineDesc &);
+  void drawPrepared(gleditor::FrameContext &);
+  void setActionHandler(std::function<void(std::uint32_t)>);
+  [[nodiscard]] auto snapshot() const { return presentation_.snapshot(); }
+  [[nodiscard]] auto focusLayout() const { return presentation_.focusLayout(); }
+  [[nodiscard]] auto &presentation() noexcept { return presentation_; }
+  void describe(gleditor::a11y::Builder &builder) {
+    presentation_.describe(builder);
+  }
+  bool performAction(std::uint64_t id, gleditor::a11y::Action action,
+                     std::string_view value) {
+    if (modelDirty_) return false;
+    return presentation_.performAction(id, action, value);
+  }
+  bool picked(const render::PickingResult &pick, RenderState &state) {
+    if ((modelDirty_ || !presentation_.visible()) &&
+        pick.tag.kind == render::tagKindOverlay && pick.overlayWidgetId) {
+      const auto scene = snapshot();
+      if (scene && scene->find(*pick.overlayWidgetId)) return true;
+    }
+    return presentation_.picked(pick, state);
+  }
+  [[nodiscard]] std::uint64_t accessibilityRevision() const {
+    return presentation_.accessibilityRevision();
+  }
+  void setVisible(bool visible) {
+    if (presentation_.visible() != visible) {
+      changed();
+      freshSelectors_ = true;
+    }
+    presentation_.setVisible(visible);
+  }
+  [[nodiscard]] std::uint64_t semanticRevision() const noexcept {
+    return semanticRevision_.load();
+  }
+  [[nodiscard]] float preferredHeight(const gleditor::ui::UiMetrics &,
+                                      const gleditor::ui::Theme &,
+                                      bool compact = false) const;
   bool picked(std::uint32_t tag, Session &session,
               std::uint32_t activeDocIndex);
 
@@ -52,11 +94,19 @@ public:
   void cycleType() noexcept;
   void cycleTier() noexcept;
 
-  void setLinkType(const LinkType type) noexcept { selectedType_ = type; }
+  void setLinkType(const LinkType type) noexcept {
+    if (selectedType_ != type) {
+      selectedType_ = type;
+      changed();
+    }
+  }
   [[nodiscard]] LinkType linkType() const noexcept { return selectedType_; }
 
   void setProminenceTier(const ProminenceTier tier) noexcept {
-    selectedTier_ = tier;
+    if (selectedTier_ != tier) {
+      selectedTier_ = tier;
+      changed();
+    }
   }
   [[nodiscard]] ProminenceTier prominenceTier() const noexcept {
     return selectedTier_;
@@ -103,6 +153,32 @@ public:
   }
 
 private:
+  void changed() noexcept {
+    modelDirty_ = true;
+    ++semanticRevision_;
+  }
+  void rebuildModel(const gleditor::ui::UiMetrics &,
+                    const gleditor::ui::Theme &, gleditor::ui::Rect);
+  void drawAnimation(gleditor::Canvas &);
+  gleditor::ui::ScreenOverlay presentation_;
+  bool modelDirty_{true};
+  std::atomic<std::uint64_t> semanticRevision_{1};
+  gleditor::ui::WidgetId nextIdentity_{0x10000000U};
+  gleditor::ui::WidgetId leftIdentity_{}, rightIdentity_{};
+  gleditor::ui::WidgetId typeIdentity_{}, tierIdentity_{};
+  bool freshSelectors_{true};
+  bool compactMode_{};
+  std::optional<bool> preparedCompact_;
+  std::optional<gleditor::ui::UiMetrics> preparedMetrics_;
+  std::optional<gleditor::ui::Theme> preparedTheme_;
+  gleditor::ui::Theme effectiveTheme_;
+  std::optional<gleditor::ui::Rect> preparedBounds_;
+  mutable std::optional<gleditor::ui::UiMetrics> heightMetrics_;
+  mutable std::optional<gleditor::ui::Theme> heightTheme_;
+  mutable float preferredHeight_{};
+  mutable bool heightCompact_{};
+  std::unique_ptr<gleditor::Canvas> animation_;
+  std::function<void(std::uint32_t)> actionHandler_;
   float x_{0.0F};
   float y_{0.0F};
   float width_{0.0F};

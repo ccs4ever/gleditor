@@ -943,6 +943,40 @@ void Renderer::advanceScript(RenderState &state) {
     awaitingStep = true;
     requestPick(state, step.x, step.y);
     return;
+  case Kind::ClickLabel: {
+    const auto publisher = this->state->accessibility;
+    const auto tree =
+        publisher ? publisher->snapshot() : gleditor::a11y::Tree{};
+    const gleditor::a11y::Node *target = nullptr;
+    std::size_t matches                = 0;
+    for (const auto &node : tree.nodes) {
+      if (node.label == step.text && node.bounds &&
+          (node.actions & gleditor::a11y::bit(gleditor::a11y::Action::Click)) &&
+          node.bounds->right > node.bounds->left &&
+          node.bounds->bottom > node.bounds->top) {
+        target = &node;
+        ++matches;
+      }
+    }
+    if (matches != 1) {
+      std::cerr << std::format("--click-label: expected one visible actionable "
+                               "control called \"{}\", found {}\n",
+                               step.text, matches);
+      this->state->renderFailed = true;
+      this->state->alive        = false;
+      return;
+    }
+    const auto &box = *target->bounds;
+    const int x     = static_cast<int>((box.left + box.right) / 2);
+    const int y     = static_cast<int>((box.top + box.bottom) / 2);
+    std::cout << std::format("click-label \"{}\": {},{}\n", step.text, x, y);
+    awaitingClickButton = 1;
+    awaitingClick       = std::pair{x, y};
+    awaitingDrag        = false;
+    awaitingStep        = true;
+    requestPick(state, x, y);
+    return;
+  }
   case Kind::Click:
     awaitingClick = std::pair{step.x, step.y};
     awaitingDrag  = false;
