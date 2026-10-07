@@ -289,6 +289,11 @@ and image identity logs are retained under `build/publication-download/`.
 
 ## Remaining work
 
+Investigate the
+[intermittent seed review failure](publication-intermittent-seed-review-2026-10-07.md) observed in
+the namespace publication/UI test during batch 6. Its isolated retry passed; the possible disk-write
+completion race remains unconfirmed.
+
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are now implemented in the outbox.
