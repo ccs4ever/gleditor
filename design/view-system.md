@@ -41,7 +41,7 @@ ______________________________________________________________________
 
 `ZigzagVisualizer` (`apps/zigzag/zigzag_visualizer.hpp:110-114`) multiply inherits
 `gleditor::FrameContributor`, `gleditor::PickObserver`, `gleditor::a11y::Source`,
-`gleditor::ModalInput`, and `xanadu::ZigzagPresentationSurface`. There is no `View`/`Layout`
+`gleditor::ui::FocusScope`, and `xanadu::ZigzagPresentationSurface`. There is no `View`/`Layout`
 interface and no registry: one instance owns the manifold engine, the focus cell, the dimension
 bindings, render-state caching, the palette, the command bar, cell editing, and drawing. Two view
 modes exist — `enum class ViewMode { CellContent, Topology }`
@@ -137,6 +137,32 @@ include `apps/`.
   new tunable this document introduces.
 - `d.clone`'s single-dimension, dual-direction idiom (`Manifold::cloneMaster`,
   `manifold.hpp:446-458`) is the structural precedent `d.pack` follows (§9.3.2).
+
+### 1.5 The fitted UI layer
+
+The UI text-fit overhaul (`design/ui-text-fit-baseline.md` through `ui-text-fit-batch9.md` and the
+review follow-up) landed after this document's first draft. It gives the library a shared answer to
+several things this document had specified for itself, and the document now builds on it:
+
+| Need                                    | Fitted UI facility                                                                                              | Used here for                                        |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Text that fits a box without byte cuts  | `text::fit()` and `TextFit` (`Clip`, `Ellipsis`, `Wrap`, grapheme- and cluster-safe), `<gleditor/text/fit.hpp>` | cell content, edge labels, chips, badges             |
+| Shape once, reuse                       | `text::ShapingCache`, `<gleditor/text/shaping_cache.hpp>`                                                       | the content measurer; retained draws                 |
+| Boxed text and clipping on a `Canvas`   | `Canvas::addText(box, ...)`, `Canvas::addText(box, FittedText)`, `pushClip`/`popClip`                           | every text draw the adapter makes                    |
+| Typography and scale                    | `ui::Theme` font roles (`Caption`, `Label`, `Body`, `Title`, `Mono`), `ui::UiMetrics`, the `ui.*` settings      | all view text; no view-owned font or point size      |
+| Projected legibility                    | `ui::projectPlane()`, `ui::labelLOD()`, `<gleditor/ui/world_panel.hpp>`                                         | hiding labels too small to read, keeping their names |
+| Widget scenes on a world plane          | `ui::WorldPanel`                                                                                                | pack frames with their chips                         |
+| Keyboard, pointer, modality, pane focus | `ui::FocusScope`, `ui::FocusManager` (`addPane`, `cyclePane`, `push`, GPU pick targets)                         | pane focus, view chrome, drag gestures               |
+| Flow, stack, grid and split layout      | `<gleditor/ui/layout.hpp>`, `<gleditor/ui/widgets.hpp>`, `ui::ScreenOverlay`                                    | the binding HUD, view palette, group editor          |
+| Proof that a warm frame shapes nothing  | `text::ShapingStatsScope`, `ShapingCache::Stats`, `tools/ui-text-baseline.cpp`                                  | V-R37's test                                         |
+| A lint gate on text policy              | `tools/check-ui-text-policy.py`, run by `make lint`                                                             | the adapter and view chrome sources                  |
+
+All of it lives in `libgleditor`, which `xuzz_test` does not link. That fixes the division of labour
+in §5: the engine-side `layout()` asks for sizes through the measurer in `LayoutInput` and never
+names a font, and everything in the table is called from `apps/xuzz/`. The visualizer already works
+this way after batch 8 — fitted labels and retained shaping are separate from cell and dimension
+identity, and visual fitting never changes canonical cell text — so the views inherit a working
+pattern, not a plan.
 
 ______________________________________________________________________
 
@@ -262,6 +288,16 @@ the traceability table's (§18) left-hand keys.
 - **V-R32.** Every view-minted cell and every synthetic geometry record MUST have an accessibility
   role distinct from `cell` (`pack`, `label`, `group`, etc.) and MUST never be announced as though
   it were stored data.
+- **V-R36.** View text MUST be fitted, never cut by bytes: cell content, labels, chips and badges go
+  through `text::fit()` with a `TextFit`; fonts come from `ui::Theme` roles scaled by
+  `ui::UiMetrics`, never a literal family and size; and a label that is shortened or hidden for
+  legibility MUST keep its full text as its accessible name. View presentation sources MUST pass
+  `tools/check-ui-text-policy.py`.
+- **V-R37.** A settled frame — no focus move, rebind, store change, resize, theme change or running
+  animation — MUST perform zero text layout calls, zero HarfBuzz calls and zero buffer uploads.
+- **V-R38.** Views MUST take input only through `ui::FocusManager` (each pane a registered scope,
+  view chrome as modal scopes), and every view command MUST run on the thread that owns the pane's
+  `ViewManifold`.
 - **V-R33.** Every behaviour this document specifies MUST be exercisable and testable headless (no
   window, no real display, no audio device), per `.claude/rules/headless_tests.md`.
 - **V-R34.** Movement within a view (stepping, entering/leaving a pack, following a ring spoke) MUST
@@ -353,8 +389,9 @@ apps/xuzz/                               (the application)
   view_host_app.{hpp,cpp}     (REPLACES view_coordinator.{hpp,cpp}) owns the ViewHost, routes
                               input and focus, calls reclaim()/layout()/advance()/draw per pane
   view_draw_adapter.{hpp,cpp} (NEW) layout records -> Canvas/Beams, scissor/depth range, picking,
-                              AccessKit nodes, the TextLayout-backed content measurer
+                              AccessKit nodes, the text::fit-backed content measurer
   view_commands.{hpp,cpp}     (NEW; absorbs apps/zigzag/zigzag_commands.cpp) view actions
+  view_chrome.{hpp,cpp}       (NEW) binding HUD, view palette, group editor as ui::Widget scenes
 
 apps/zigzag/zigzag_visualizer.*          (RETIRED by §15; no new code)
 apps/xudu/views.*                        (wrapped as the one legacy page view until the follow-up)
@@ -1021,10 +1058,15 @@ struct LayoutInput {
   const ViewManifold &view;
   zigzag::CellRef focus;
   ViewportDesc viewport;
-  /// Content-fit size of a real cell at a width limit. The application
-  /// passes a cached TextLayout-backed measurer; a test passes a fixed one.
-  /// This is what keeps layout() free of fonts and of any graphics device.
+  /// Content-fit size of a real cell at a width limit, in Canvas pixels. The
+  /// application passes a measurer over text::fit() and a ShapingCache with
+  /// the Body role's font; a test passes a fixed one. This is what keeps
+  /// layout() free of fonts, themes and any graphics device.
   gleditor::cpp26::function_ref<ContentExtent(zigzag::CellRef, float)> measure;
+  /// Smallest line height the adapter will draw as text (from
+  /// zigzag.minReadableTextPx and ui.minFontPx). Layout uses it to choose
+  /// ContentMode; it never names a font.
+  float minReadableLinePx{};
   std::uint64_t frameId; // deterministic tie-break
 };
 
@@ -1042,6 +1084,9 @@ struct PlacedItem {
   ViewAxisId axis{noAxis};
   enum class Visibility : std::uint8_t { Visible, ClippedHidden, Lod } visibility{};
   std::uint16_t depthLayer{};
+  /// Full: wrapped, unbounded lines. Abbreviated: one ellipsized line via
+  /// TextFit, never a byte prefix. Badge: a count. The accessible name is
+  /// the full text in every mode.
   enum class ContentMode : std::uint8_t { Full, Abbreviated, Badge } contentMode{};
   std::uint32_t packId{}; // 0 = not inside a pack
 };
@@ -1091,6 +1136,16 @@ different candidate bindings and discarding one — the drag-rebind preview need
 nothing and corrupts nothing, because it is `const` on the view and writes only into caller-owned
 `LayoutSink` storage.
 
+**Layout is retained, not per-frame.** `layout()` is pure, so its output is valid until an input
+changes. The host keeps each pane's `LayoutSink` and a stamp of what produced it — focus, view
+epoch, the store's advance counter, viewport, `UiMetrics`, theme revision, and the measurer cache's
+revision — and calls `layout()` again only when the stamp differs. The draw adapter keeps its
+canvases against the same stamp: fitted text is stored as `FittedText` and redrawn with
+`Canvas::addText(box, FittedText)`, which shapes nothing. During an animation the adapter re-places
+retained quads; it does not refit text. A settled frame therefore costs no layout call, no HarfBuzz
+call and no buffer upload (V-R37), which is the result batch 8 measured for the visualizer's own
+labels (`design/ui-text-fit-batch8.md`).
+
 ```cpp
 // apps/common/xanadu/view/view_animation.hpp
 struct AnimId {
@@ -1116,7 +1171,7 @@ loop:
 ```text
 attach()                          -- once, on pane open; replays system://layout bindings
 onBindingChanged()/onCursorMoved()/onStoreAdvanced()  -- as triggered, never per-frame
-layout(input, sink)                -- pure, every frame, into reused sink storage
+layout(input, sink)                -- pure; re-run only when an input changed (below)
 AnimationState::advance(sink,dt,epoch)  -- epoch-guarded tween, Choreograph-backed (§12)
 apps/xuzz view_draw_adapter draw(ctx, animated)  -- Canvas/Beams, picking, a11y
 detach()                           -- once, on pane close; writes bindings back to system://layout
@@ -1371,8 +1426,9 @@ once the screen is full, never a hard "top 50 neighbours only" cutoff.
 
 Movement is the ordinary step action on each bound axis — stretch vanishing changes layout, not the
 movement vocabulary. Pointer click focuses a visible cell through the library's `PickObserver` path;
-hover previews a faded cell's full content in a tooltip without moving focus. There is no
-pointer-only affordance, so no further keyboard twin is needed.
+hover previews a faded cell's full content in a `ui::Tooltip` placed by `ui::placeNear` inside the
+safe area, without moving focus. There is no pointer-only affordance, so no further keyboard twin is
+needed.
 
 Because alignment is given up past radius 1, three cues keep the reader oriented: the accursed cell
 carries the focus emphasis and is never faded; each radius-1 neighbour carries a tick naming the
@@ -1508,6 +1564,17 @@ a `d.ring-dim` link to the real dimension cell, giving the renderer a stable scr
 from the dimension cell's own text. This ring-slot cell is view-minted (ephemeral, tossed on rebind
 per I3, recoverable per I4).
 
+**Ruling (V15): edge labels are screen-space fitted text at projected anchors, not billboards in the
+world.** `PlacedEdge::labelAnchor` is a world position; the adapter projects it, asks
+`ui::projectPlane()`/`ui::labelLOD()` whether a label of the `Label` role's line height is legible
+there, and draws the dimension name with `Canvas::addText(box, ...)` under
+`TextFit{Overflow::Ellipsis, EllipsisAt::Middle}` in a box clamped to the pane. Middle ellipsis
+keeps both ends of names such as `d.contact.phone.mobile`. Depth is cued by opacity
+(`ring.depthCueExponent`), and a label that fails the legibility test is not drawn while its edge
+and its accessible name remain. Labels that would overlap are resolved in screen space: the nearer
+ring's label keeps its place and the farther one moves along its edge toward the neighbour, up to
+`label.maxNudgePx`, then yields to an ellipsized box.
+
 #### 9.2.5 Movement into an unbound ring neighbour
 
 **Ruling: a temporary bind, scoped to the current view epoch, not a persistent rebind and not a
@@ -1529,11 +1596,14 @@ move.
 State machine:
 `Idle → Picking(edge) → Dragging(edge, candidateAxis?) → {Committed | Cancelled} → Idle`.
 `Idle → Picking`: a CPU-side ray-vs-capsule hit test (via a new `unprojectScreenToRay`,
-`spatial.hpp` extension) against each visible edge, confirmed against the next frame's GPU pick
-result before committing to a drag (CPU prediction and GPU ground truth must agree; a mismatch means
-no drag starts, never a wrong one). `Picking → Dragging`: past a small pixel threshold, re-test
-every frame against the bound-axis `AxisGizmo`s; the nearest one within a screen-space snap radius
-becomes `candidateAxis`. While dragging, a speculative `layout()` call previews where the dragged
+`spatial.hpp` extension) against each visible edge, confirmed against the GPU pick delivered to the
+pane's scope through `FocusScope::pointerPick` before committing to a drag (CPU prediction and GPU
+ground truth must agree; a mismatch means no drag starts, never a wrong one). The
+`PointerPickTarget` identity `FocusManager` attaches to the request already discards a pick that
+outlived its scope or focus revision; the gesture adds the view epoch, so a pick that outlived a
+toss is discarded the same way. `Picking → Dragging`: past a small pixel threshold, re-test every
+frame against the bound-axis `AxisGizmo`s; the nearest one within a screen-space snap radius becomes
+`candidateAxis`. While dragging, a speculative `layout()` call previews where the dragged
 dimension's neighbours would relocate, discarded if not committed (safe and cheap because `layout()`
 is pure, §8.4). `Dragging → Committed`: pointer-up with a `candidateAxis` set calls
 `ViewAxisSet::bind(candidateAxis, draggedDimension)`. `Dragging → Cancelled`: pointer-up with no
@@ -1773,6 +1843,15 @@ to prevent.
 
 #### 9.3.9 Pack frame rendering
 
+A pack frame is a widget scene on a world plane: one `ui::WorldPanel` per visible frame, its model a
+`PositionedPanel` whose children are the constituent chips, drawn through the frame's transform.
+`WorldPanel` supplies what a pack needs and this document would otherwise have to specify: fitted
+chip text, full accessible names that survive label LOD, the same projected boxes for drawing and
+for accessibility, and backgrounds that stay pickable when their labels are too small to read. Chip
+size follows the card pattern the fitted UI established (`pack.chip.widthPx`, `heightPx`,
+`maxWidthShare`, `maxLines`): font metrics grow a chip within the frame's safe share, and a chip
+never truncates by bytes. The fan below decides only where each chip's box goes.
+
 **Fan, chosen over stacked-deck or grid.** Stacked-deck reads well for ordered small decks but hides
 member count at a glance and implies an ordering the group's members do not necessarily have (they
 arrive from different dimensions, not one sequence). A rigid grid wastes space for members with very
@@ -1856,14 +1935,31 @@ either kind of content. A `ViewHost` is the direct generalisation of
 `apps/xuzz/view_coordinator.{hpp,cpp}`'s single `Unified`/`XanadocOnly`/`ZigzagOnly` toggle to an
 actual tree; §15 gives the migration path from one to the other.
 
+Focus is not the host's to reinvent. Each pane is a `ui::FocusScope` registered with
+`FocusManager::addPane()`; `pane.focus.next` is `FocusManager::cyclePane()`; a slice pane's scope
+returns `usesGpuPointerPicking() == true` and receives cell picks through `pointerPick`; and view
+chrome that must hold the keyboard — the dimension picker, the group editor, the view palette — is a
+modal scope opened with `FocusManager::push()`, which already restores the pane's focus when it
+closes and limits which commands run meanwhile. Pane rectangles come from `ui::split()` over the
+window's `UiMetrics::pixelSafeArea()`, so a pane never extends under screen chrome and adjacent
+panes share an edge exactly.
+
+Because accessibility reads view state on the render thread, a view command must not mutate a
+`ViewManifold` from the input thread. The host marshals every view action to the pane's owning
+thread before it runs, as `ZigzagCommandHooks::dispatch` does for the visualizer today
+(`apps/zigzag/zigzag_commands.hpp`); xuzz uses the render queue (V-R38).
+
 ### 10.2 Compositing
 
 Each pane's `ViewportDesc{x, y, width, height}` plus an optional owned `viewProjection` describes a
-screen rectangle. Scissor is required (`RenderDevice::setScissorRect`, new, thin per backend) so one
-pane's draws never bleed into a sibling's rectangle. Depth is partitioned two ways: depth-clear
-between panes for non-overlapping splits (the common case — simpler, each pane owns the full `[0,1]`
-range), or depth-range partitioning (`setDepthRange(min,max)`, new) for true embedding (a slice view
-drawn inside a xanadoc cell's rectangle), extending the transform-resolver pattern
+screen rectangle. Two mechanisms keep one pane's draws out of a sibling's rectangle. Screen-space
+content — labels, chrome, tooltips — is clipped on the CPU with `Canvas::pushClip(paneRect)`, which
+exists. World-space content drawn through a camera still needs a device scissor
+(`RenderDevice::setScissorRect`, new, thin per backend), because a `Canvas` clip stack cannot clip
+another contributor's geometry. Depth is partitioned two ways: depth-clear between panes for
+non-overlapping splits (the common case — simpler, each pane owns the full `[0,1]` range), or
+depth-range partitioning (`setDepthRange(min,max)`, new) for true embedding (a slice view drawn
+inside a xanadoc cell's rectangle), extending the transform-resolver pattern
 `ZigzagVisualizer::setPresentationOrigin`/`setPresentationTransformResolver` already use. Render
 order is back-to-front for overlapping translucent panes (reusing `src/renderer.cpp:388-391`'s
 existing document sort, generalised from documents to panes); a nested sub-viewport draws after its
@@ -1904,6 +2000,17 @@ focus without touching another pane's camera or caret; if no pane currently show
 of content, a new pane opens with an origin marker connecting back, never a silent replace of the
 pane the user was reading. Activity back/forward restores which pane layout was active at a visit's
 save point, since a visit's saved view already covers camera and companion state.
+
+### 10.5 View chrome
+
+The binding HUD (which dimension or group each axis shows), the view palette and the group editor
+are `ui::Widget` scenes in `ui::ScreenOverlay`s, laid out with `ui::stack`/`ui::flow`/`ui::grid` and
+drawn by the shared widget painter — `List` rows for dimensions, `Tabs` for views, `TextField` for a
+group's name, `Badge` for valence counts. Nothing in them is drawn by hand. They inherit, without
+further specification here: fitted labels with full accessible names, focus order from
+`LayoutResult::focusOrder`, minimum touch size (`ui.minTouchPx`), safe-area clamping, and live
+response to `ui.scale`, `ui.fontScale` and the font roles. Axis drop targets in all-dim walk are
+world geometry, but their snap region is never smaller on screen than `ui.minTouchPx`.
 
 ______________________________________________________________________
 
@@ -1962,82 +2069,100 @@ Rendering/physics tunables live in `system://settings` (beside existing `Zigzag*
 chord-adjacent UI behaviour in `system://ui`; per-slice layout/binding state in `system://layout` —
 the split `.claude/rules/architectural_governance.md` §2 already requires.
 
-| Setting                                   | Lives in | Type/unit         | Default                     | Rationale                                                   |
-| ----------------------------------------- | -------- | ----------------- | --------------------------- | ----------------------------------------------------------- |
-| `view.arena.reclaimThresholdCells`        | settings | count             | 4096                        | dead derived cells tolerated before `reclaim()` runs (§6.4) |
-| `stretch.edgeFadeStartUv`                 | settings | UV fraction [0,1] | 0.65                        | fade starts this far from centre                            |
-| `stretch.overfillMargin`                  | settings | ratio             | 1.3                         | BFS fill-stop multiplier over viewport extent               |
-| `stretch.hiddenConfirmMs`                 | settings | ms                | 120                         | sustained-clip time before hysteresis hides a cell          |
-| `stretch.fadeFloorAlpha`                  | settings | 0-1               | 0.15                        | never fully invisible before culled; WCAG-checked           |
-| `stretch.breadcrumbDepth`                 | settings | count             | 6                           | breadcrumb strip length                                     |
-| `stretch.maxVisibleCellsReserve`          | settings | count             | 256                         | initial `LayoutSink` arena reservation                      |
-| `ring.radius0`                            | settings | px (world)        | 160                         | innermost unbound-dimension ring radius                     |
-| `ring.radiusStep`                         | settings | px (world)        | 70                          | radius increment per ring                                   |
-| `ring.tilt0`                              | settings | degrees           | 15                          | innermost ring's tilt from vertical                         |
-| `ring.tiltStep`                           | settings | degrees           | 8                           | tilt increment per ring                                     |
-| `ring.tiltMax`                            | settings | degrees           | 75                          | cap on ring tilt (keeps focus unoccluded)                   |
-| `ring.lodCollapseIndex`                   | settings | ring index        | 6                           | ring index beyond which members collapse to a badge         |
-| `ring.depthCueExponent`                   | settings | exponent          | 1.5                         | alpha falloff exponent vs. `cos(tilt)`                      |
-| `ring.clusterThreshold`                   | settings | count             | 12                          | valence above which a spoke clusters                        |
-| `axis.snapRadiusScreenPx`                 | settings | px (screen)       | 36                          | drag-to-rebind snap radius                                  |
-| `axis.hitRadiusWorld`                     | settings | world units       | 6                           | capsule radius for edge/gizmo ray hit tests                 |
-| `axis.gizmoLength`                        | settings | world units       | 50                          | drawn length of an axis drop-target gizmo                   |
-| `label.maxNudgeWorld`                     | settings | world units       | 30                          | collision-avoidance max nudge before abbreviation           |
-| `pack.fanMaxVisible`                      | settings | count             | 24                          | members shown in a fan before badge LOD                     |
-| `pack.fanArcDegrees`                      | settings | degrees           | 110                         | angular spread of a pack's fan                              |
-| `pack.nestingLodDepth`                    | settings | levels            | 3                           | max recursive pack-frame draw depth before badge            |
-| `pack.nestDimFactor`                      | settings | ratio/level       | 0.85                        | opacity multiplier per nesting level                        |
-| `pack.minWidthPx`/`minHeightPx`           | settings | px (world)        | 80 / 60                     | comparable-size floor for axis-placed packs                 |
-| `pack.spacingPx`                          | settings | px (world)        | 24                          | clearance between packs along the bound axis                |
-| `pack.packingTightnessPx`                 | settings | px                | 6.0                         | gap between constituent chips inside a pack                 |
-| `pack.maxConstituentsShown`               | settings | count             | 40                          | simultaneous chip render cap, never a data cap              |
-| `view.labelSizePx`                        | settings | px                | 12.0                        | shared axis/dimension-name label text size                  |
-| `view.transitionSpeed`                    | settings | units/s           | 10.0                        | view-switch crossfade rate                                  |
-| `transition.tossFadeSeconds`              | settings | s                 | 0.25                        | fade-out duration for discarded view-minted geometry        |
-| `ui.zigzag.reducedMotion`                 | ui       | bool              | false                       | collapses crossfades/springs to instant cuts                |
-| `ui.zigzag.viewOnlyCellOpacity`           | ui       | 0-1               | 0.55                        | fixed opacity for pack/axis-label helper cells              |
-| `viewport.scissorEnabled`                 | settings | bool              | true                        | diagnostics override for mixed-viewport scissor             |
-| `layout.zigzag.<sliceId>.lastView`        | layout   | string            | unset → `stretch-vanishing` | which View a slice reopens into                             |
-| `layout.zigzag.<sliceId>.axisBindings`    | layout   | structured        | `{}`                        | persisted axis→dimension-name bindings                      |
-| `layout.zigzag.<sliceId>.dimensionGroups` | layout   | structured        | `{}`                        | user-authored groups, per slice                             |
+| Setting                                   | Lives in | Type/unit         | Default                     | Rationale                                                     |
+| ----------------------------------------- | -------- | ----------------- | --------------------------- | ------------------------------------------------------------- |
+| `view.arena.reclaimThresholdCells`        | settings | count             | 4096                        | dead derived cells tolerated before `reclaim()` runs (§6.4)   |
+| `stretch.edgeFadeStartUv`                 | settings | UV fraction [0,1] | 0.65                        | fade starts this far from centre                              |
+| `stretch.overfillMargin`                  | settings | ratio             | 1.3                         | BFS fill-stop multiplier over viewport extent                 |
+| `stretch.hiddenConfirmMs`                 | settings | ms                | 120                         | sustained-clip time before hysteresis hides a cell            |
+| `stretch.fadeFloorAlpha`                  | settings | 0-1               | 0.15                        | never fully invisible before culled; WCAG-checked             |
+| `stretch.breadcrumbDepth`                 | settings | count             | 6                           | breadcrumb strip length                                       |
+| `stretch.maxVisibleCellsReserve`          | settings | count             | 256                         | initial `LayoutSink` arena reservation                        |
+| `ring.radius0`                            | settings | px (world)        | 160                         | innermost unbound-dimension ring radius                       |
+| `ring.radiusStep`                         | settings | px (world)        | 70                          | radius increment per ring                                     |
+| `ring.tilt0`                              | settings | degrees           | 15                          | innermost ring's tilt from vertical                           |
+| `ring.tiltStep`                           | settings | degrees           | 8                           | tilt increment per ring                                       |
+| `ring.tiltMax`                            | settings | degrees           | 75                          | cap on ring tilt (keeps focus unoccluded)                     |
+| `ring.lodCollapseIndex`                   | settings | ring index        | 6                           | ring index beyond which members collapse to a badge           |
+| `ring.depthCueExponent`                   | settings | exponent          | 1.5                         | alpha falloff exponent vs. `cos(tilt)`                        |
+| `ring.clusterThreshold`                   | settings | count             | 12                          | valence above which a spoke clusters                          |
+| `axis.snapRadiusScreenPx`                 | settings | px (screen)       | 36                          | drag-to-rebind snap radius; floored at `ui.minTouchPx`        |
+| `axis.hitRadiusWorld`                     | settings | world units       | 6                           | capsule radius for edge/gizmo ray hit tests                   |
+| `axis.gizmoLength`                        | settings | world units       | 50                          | drawn length of an axis drop-target gizmo                     |
+| `label.maxNudgePx`                        | settings | px (screen)       | 30                          | how far a label slides along its edge before it is ellipsized |
+| `pack.fanMaxVisible`                      | settings | count             | 24                          | members shown in a fan before badge LOD                       |
+| `pack.fanArcDegrees`                      | settings | degrees           | 110                         | angular spread of a pack's fan                                |
+| `pack.nestingLodDepth`                    | settings | levels            | 3                           | max recursive pack-frame draw depth before badge              |
+| `pack.nestDimFactor`                      | settings | ratio/level       | 0.85                        | opacity multiplier per nesting level                          |
+| `pack.minWidthPx`/`minHeightPx`           | settings | px (world)        | 80 / 60                     | comparable-size floor for axis-placed packs                   |
+| `pack.spacingPx`                          | settings | px (world)        | 24                          | clearance between packs along the bound axis                  |
+| `pack.packingTightnessPx`                 | settings | px                | 6.0                         | gap between constituent chips inside a pack                   |
+| `pack.chip.widthPx`/`heightPx`            | settings | logical px        | 140 / 36                    | preferred chip size before font metrics grow it               |
+| `pack.chip.maxWidthShare`                 | settings | share 0.1-1       | 0.9                         | most of the frame's width one chip may take                   |
+| `pack.chip.maxLines`                      | settings | count 1-10        | 2                           | lines of constituent text a chip shows                        |
+| `pack.maxConstituentsShown`               | settings | count             | 40                          | simultaneous chip render cap, never a data cap                |
+| `view.transitionSpeed`                    | settings | units/s           | 10.0                        | view-switch crossfade rate                                    |
+| `transition.tossFadeSeconds`              | settings | s                 | 0.25                        | fade-out duration for discarded view-minted geometry          |
+| `ui.zigzag.reducedMotion`                 | ui       | bool              | false                       | collapses crossfades/springs to instant cuts                  |
+| `ui.zigzag.viewOnlyCellOpacity`           | ui       | 0-1               | 0.55                        | fixed opacity for pack/axis-label helper cells                |
+| `viewport.scissorEnabled`                 | settings | bool              | true                        | diagnostics override for mixed-viewport scissor               |
+| `layout.zigzag.<sliceId>.lastView`        | layout   | string            | unset → `stretch-vanishing` | which View a slice reopens into                               |
+| `layout.zigzag.<sliceId>.axisBindings`    | layout   | structured        | `{}`                        | persisted axis→dimension-name bindings                        |
+| `layout.zigzag.<sliceId>.dimensionGroups` | layout   | structured        | `{}`                        | user-authored groups, per slice                               |
 
-Existing tunables reused unchanged: `scene_.layout_speed`/`alpha_speed`, `presentation_config_`'s
-padding/clearance fields, `scene_.neighborhood_radius`. Every new setting group needs the Schema &
-Purpose page and Notes page bidirectionally xanalinked per
-`.claude/rules/architectural_governance.md` §2 (V-R29) — this table is that page's content.
+Lengths in this table are logical pixels converted with `UiMetrics::px()`, so they follow
+`ui.scale`. No setting here names a font or a text size. Reused unchanged from the fitted UI and the
+existing presentation settings, not duplicated:
+
+- typography and scale: `ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minFontPx`,
+  `ui.minTouchPx`, and the five `ui.font.<role>.family`/`points` pairs. Cell content uses `Body`,
+  edge labels and chips `Label`, badges and ticks `Caption`, pack titles `Title`;
+- cell presentation: `zigzag.cellHorizontalPaddingPx`, `zigzag.cellVerticalPaddingPx`,
+  `zigzag.cellBandGapPx`, `zigzag.contentMaxWidthPx` (the width limit handed to the measurer),
+  `zigzag.rankClearancePx`, `zigzag.minReadableTextPx`, `zigzag.connectionBeamWidthPx`;
+- motion: `scene_.layout_speed`/`alpha_speed`. Every new setting group needs the Schema & Purpose
+  page and Notes page bidirectionally xanalinked per `.claude/rules/architectural_governance.md` §2
+  (V-R29) — this table is that page's content.
 
 ______________________________________________________________________
 
 ## 12. Rendering additions
 
-| Addition                                            | New/reuse                                                                      | Size                                                                                                         | Backend coverage                                                              |
-| --------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| Fully-inside clip test                              | New, beside `outsideFrustum` in `draw_budget.hpp`                              | ~20 lines, shares corner-building code                                                                       | Pure math; covered by headless layout unit tests                              |
-| Per-instance billboard rotation for labels          | New: extend `glyph.vert.glsl`'s instance transform with a face-camera flag bit | Small-medium: one attribute bit + a `mat3` camera-basis uniform already derivable from `view.front`/`upward` | New comparison scene with rotated/tilted labels, diffed across GL/GLES/Vulkan |
-| Scissor rect on `RenderDevice`                      | New `setScissorRect`/`clearScissor`, per backend                               | Small per backend (`glScissor`; Vulkan dynamic scissor state)                                                | Two side-by-side mock viewports, assert no bleed, across all three backends   |
-| Depth-range partition                               | New `setDepthRange(min,max)`, per backend                                      | Small, same shape as scissor                                                                                 | Same comparison scene extended with an embedded sub-viewport                  |
-| CPU ray construction/unprojection                   | New `unprojectScreenToRay` in `spatial.hpp`, inverse of `projectToScreen`      | Tiny, pure math                                                                                              | Headless unit test only                                                       |
-| Pack-frame & ring/gizmo draw primitives             | Reuse `Canvas::addRect`/`addLine`, `Beams`                                     | None beyond composing existing primitives                                                                    | Added to existing scene-generator tooling                                     |
-| `FrameContext` per-contributor viewport/VP override | New optional field                                                             | Tiny, header-only                                                                                            | Exercised by the mixed-viewport scene                                         |
+| Addition                                            | New/reuse                                                                                                      | Size                                                          | Backend coverage                                                            |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Fully-inside clip test                              | New, beside `outsideFrustum` in `draw_budget.hpp`                                                              | ~20 lines, shares corner-building code                        | Pure math; covered by headless layout unit tests                            |
+| Edge and axis labels                                | Reuse: screen-space `Canvas::addText(box, ...)` with `TextFit`, `ui::projectPlane`/`ui::labelLOD` (ruling V15) | None in the renderer                                          | Label scenes at three zooms in the existing comparison                      |
+| Pack frames and chips                               | Reuse: `ui::WorldPanel`                                                                                        | None in the renderer                                          | A pack scene added to the comparison                                        |
+| Pane and chrome clipping in screen space            | Reuse: `Canvas::pushClip`/`popClip`                                                                            | None                                                          | Covered by the two-pane scene                                               |
+| Scissor rect on `RenderDevice`                      | New `setScissorRect`/`clearScissor`, per backend                                                               | Small per backend (`glScissor`; Vulkan dynamic scissor state) | Two side-by-side mock viewports, assert no bleed, across all three backends |
+| Depth-range partition                               | New `setDepthRange(min,max)`, per backend                                                                      | Small, same shape as scissor                                  | Same comparison scene extended with an embedded sub-viewport                |
+| CPU ray construction/unprojection                   | New `unprojectScreenToRay` in `spatial.hpp`, inverse of `projectToScreen`                                      | Tiny, pure math                                               | Headless unit test only                                                     |
+| Pack-frame & ring/gizmo draw primitives             | Reuse `Canvas::addRect`/`addLine`, `Beams`                                                                     | None beyond composing existing primitives                     | Added to existing scene-generator tooling                                   |
+| `FrameContext` per-contributor viewport/VP override | New optional field                                                                                             | Tiny, header-only                                             | Exercised by the mixed-viewport scene                                       |
 
-Nothing here requires a new vertex format class beyond the billboard-flag bit; the glyph, beam, and
-image pipelines already cover rects, lines, text, edges, and images — everything every proposed view
-draws.
+Nothing here requires a new vertex format or shader: the glyph, beam and image pipelines, with the
+fitted UI's boxed text and world panels, cover rects, lines, text, edges and images — everything
+every proposed view draws. The device additions that remain are the scissor rectangle and the depth
+range for world-space panes.
 
 ______________________________________________________________________
 
 ## 13. Performance budget and probes
 
-| Pass                           | Complexity                                                                         | Cached as                                              | Invalidated by                                                                                                                  |
-| ------------------------------ | ---------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Stretch BFS packing            | O(k log k), k = cells placed before fill-stop                                      | Skyline state + BFS frontier queue, kept across frames | Focus change (full rebuild); resize (resume, no restart); content edit (re-measure + reflow only cells after it in visit order) |
-| Clip/fade classification       | O(k) per frame, 8-corner test per visible cell                                     | Hysteresis timers per `CellRef`                        | Fully-inside state transition; cleared on focus change                                                                          |
-| All-dim ring placement         | O(valence) per focus change, O(1) amortised per dimension (append-only slot table) | Per-dimension ring-slot table, session-scoped          | Explicit dimension deletion only; never by navigation                                                                           |
-| Edge-label collision avoidance | O(v²) worst case, bounded by the LOD cutoff                                        | Per-frame, not cached                                  | N/A                                                                                                                             |
-| Pack fan layout                | O(m log m) per pack, m bounded by `pack.fanMaxVisible`                             | Cached per pack id like cell measurement               | Pack membership change, member content edit, enter/exit                                                                         |
-| Content-fit measurement        | One `measureText` call per uncached `(CellRef, ViewKind, widthLimit)`              | `cell_layouts_`-equivalent map                         | Text/format edit; `widthLimit` change                                                                                           |
-| Mixed-viewport compositing     | O(views) scissor/depth-range state changes per frame                               | N/A                                                    | N/A                                                                                                                             |
-| Toss (§6.4)                    | O(1) epoch bump; O(discarded) deferred reclamation; O(visible) re-derivation       | N/A                                                    | Rebind, focus change invalidating the display layer                                                                             |
+| Pass                           | Complexity                                                                             | Cached as                                              | Invalidated by                                                                                                                  |
+| ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Stretch BFS packing            | O(k log k), k = cells placed before fill-stop                                          | Skyline state + BFS frontier queue, kept across frames | Focus change (full rebuild); resize (resume, no restart); content edit (re-measure + reflow only cells after it in visit order) |
+| Clip/fade classification       | O(k) per frame, 8-corner test per visible cell                                         | Hysteresis timers per `CellRef`                        | Fully-inside state transition; cleared on focus change                                                                          |
+| All-dim ring placement         | O(valence) per focus change, O(1) amortised per dimension (append-only slot table)     | Per-dimension ring-slot table, session-scoped          | Explicit dimension deletion only; never by navigation                                                                           |
+| Edge-label collision avoidance | O(v²) worst case, bounded by the LOD cutoff                                            | Per-frame, not cached                                  | N/A                                                                                                                             |
+| Pack fan layout                | O(m log m) per pack, m bounded by `pack.fanMaxVisible`                                 | Cached per pack id like cell measurement               | Pack membership change, member content edit, enter/exit                                                                         |
+| Content-fit measurement        | One `text::fit()` per uncached (cell, width limit, font role); zero on a settled frame | `text::ShapingCache` plus a per-cell extent map        | Text or format edit; width limit, `ui.fontScale` or font-role change                                                            |
+| Mixed-viewport compositing     | O(views) scissor/depth-range state changes per frame                                   | N/A                                                    | N/A                                                                                                                             |
+| Toss (§6.4)                    | O(1) epoch bump; O(discarded) deferred reclamation; O(visible) re-derivation           | N/A                                                    | Rebind, focus change invalidating the display layer                                                                             |
+
+**Shaping**: wrap a settled frame in `text::ShapingStatsScope` and read `ShapingCache::Stats`; both
+must report zero layout and HarfBuzz calls (V-R37). `tools/ui-text-baseline.cpp` is the model for a
+per-view scene that reports the same counts with frame timings on each backend.
 
 **Measurement**: `tools/layout-latency-probe.cpp` is the existing headless-probe shape; extend it
 (or add a sibling) to call each view's `layout()` against synthetic manifolds at increasing valence
@@ -2066,6 +2191,19 @@ All tests run headless per `.claude/rules/headless_tests.md` (V-R33): `SDL_VIDEO
   `groupsOf()` list both uses, unbinding one axis leaves the other bound, the invariant verifier
   passes throughout, and a stretch-vanishing layout places the radius-1 neighbour once per axis with
   distinct (cell, axis) identities (V-R35).
+- **Text fit and typography** (in the test binary that links the library and the view presentation —
+  `zigzag_test` today, which §15's last porting step re-homes when `apps/zigzag/` goes): for each
+  view, sweep the responsive fixture batch 8 used — 640x480, 1280x800 and 2560x1440, four font
+  scales, Sans, Serif, Monospace and a CJK face — over `tests/samples/ui/long-labels.tsv`, and
+  assert no fitted run leaves its declared box (`SPDLOG_LEVEL=ui.layout=debug` reports none), every
+  shortened or hidden label keeps its full accessible name, and a warm frame reports zero shaping
+  calls and uploads (V-R36, V-R37).
+- **Text policy gate**: `apps/xuzz/view_draw_adapter.*` and `view_chrome.*` are added to the files
+  `tools/check-ui-text-policy.py` scans, so a byte-prefix cut or a literal font size fails
+  `make lint`.
+- **Focus**: a `FocusManager` test registers two panes and a modal chrome scope, and asserts pane
+  cycling, modal isolation and focus restoration, and that a GPU pick queued before a toss or a
+  scope change is discarded (V-R38).
 - **Invariant**: `verifyViewManifoldInvariant` run as a standing check inside every other new test
   file, not only its own — any test that mutates a `ViewManifold` calls it before asserting on
   anything else.
@@ -2116,12 +2254,15 @@ Each step builds and keeps `make test` green; each is committable independently.
 1. **Implement `AllDimWalkView` and `DimensionalPackView`** the same way, each with its own
    `xuzz_test` file: ring-slot stability across focus changes for the former; pack reversibility
    (move posward then negward returns to the same real cell, §9.3.5) for the latter.
-1. **Add `apps/xuzz/view_draw_adapter` and `view_host_app`; retire `ViewCoordinator`.** The host
-   owns the pane tree and draws each pane's records. `ZigzagVisualizer` and `xanadu::Views` are each
-   registered as one legacy view behind the same `View` interface, so the three new views and the
-   two old presentations are selectable side by side and nothing regresses. *Tests*: new
-   `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle; `tests/zigzag/test_visualizer.cpp`
-   unchanged; `tools/compare-backends.sh` gains a scene per new view.
+1. **Add `apps/xuzz/view_draw_adapter`, `view_chrome` and `view_host_app`; retire
+   `ViewCoordinator`.** The host owns the pane tree, registers each pane with
+   `FocusManager::addPane()`, and draws each pane's records through the fitted UI (§1.5): boxed
+   fitted text, `WorldPanel` pack frames, widget-scene chrome. `ZigzagVisualizer` and
+   `xanadu::Views` are each registered as one legacy view behind the same `View` interface, so the
+   three new views and the two old presentations are selectable side by side and nothing regresses.
+   *Tests*: new `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle;
+   `tests/zigzag/test_visualizer.cpp` unchanged; `tools/compare-backends.sh` gains a scene per new
+   view.
 1. **Move view actions into `apps/xuzz/view_commands`** with their `system://keymap` defaults
    (§11.1), absorbing `apps/zigzag/zigzag_commands.cpp`. **Retire `ViewAxisBinding` as live
    storage** — it survives only as the `system://layout` serialisation and preset format (§7.1,
@@ -2267,6 +2408,28 @@ rather than a link, so "which axes use this dimension" needs a scan or a side in
 walks the binding structure cannot see it; (c) refusing the doubled binding outright — it removes a
 standard ZigZag arrangement to save one cell.
 
+**V14. View text, chrome, focus and legibility come from the fitted UI layer; the view system adds
+none of its own.** Why: the library now fits text by grapheme and cluster, caches shaping, owns
+typography and scale, projects label legibility, and arbitrates focus, modality and GPU picks
+(§1.5), each tested across fonts, scales and backends; a second implementation inside the view
+system would diverge from it at the first font-scale change. Price: every text-bearing piece of a
+view lives in `apps/xuzz/`, because the layer is in `libgleditor` and the engine does not link it,
+so `layout()` sees text only as sizes from a measurer and as a minimum readable line height; view
+settings may not name fonts or text sizes. Refused: (a) a view-owned label size and truncation rule
+(the first draft's `view.labelSizePx` and "abbreviated" mode) — it is what
+`tools/check-ui-text-policy.py` now rejects; (b) linking `libgleditor` into the engine so `layout()`
+could call `text::fit()` directly — it would put fonts and a glyph cache under `xuzz_test` and end
+its no-graphics-device guarantee.
+
+**V15. Edge and axis labels are screen-space fitted text at projected anchors.** Why: a label's job
+is to be read, and text rasterised on a tilted world plane at ring distance is not legible at the
+sizes all-dim walk produces; the fitted UI already decides legibility from the projected plane and
+keeps the name when the label is hidden. Price: labels do not occlude or get occluded by cells, so
+depth is cued by opacity alone, and label overlap is resolved in screen space each time the layout
+changes. Refused: a face-camera flag in the glyph vertex shader (the first draft's plan) — a new
+vertex attribute across three backends to produce text that still shrinks below readability with
+distance.
+
 ______________________________________________________________________
 
 ## 17. Open questions
@@ -2353,3 +2516,7 @@ ______________________________________________________________________
   status: it is implemented (`StoreActivityLog`).
 - 2026-10-07 — Bindings and group memberships are occurrence cells (§7.1, §7.2, ruling V13), so a
   dimension or group may be on several axes and in several groups. Closes the former VU7.
+- 2026-10-07 — Reconciled with the fitted UI layer (§1.5, rulings V14 and V15, V-R36 to V-R38): text
+  through `text::fit()` and font roles, retained layout and draws, labels in screen space, pack
+  frames as `WorldPanel`s, panes and chrome through `FocusManager` and widget scenes. Drops the
+  billboard shader addition and `view.labelSizePx`.
