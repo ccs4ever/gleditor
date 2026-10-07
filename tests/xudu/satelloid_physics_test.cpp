@@ -12,10 +12,10 @@
 #include <glm/geometric.hpp>
 #include <glm/vec3.hpp>
 
+#include "common/ui/xanadoc/satelloid.hpp"
+#include "common/ui/xanadoc/tenuous_tether.hpp"
 #include "common/xanadu/tension_layout.hpp"
 #include "common/xanadu/universal_link_endpoint.hpp"
-#include "xudu/satelloid.hpp"
-#include "xudu/tenuous_tether.hpp"
 
 namespace xanadu {
 namespace {

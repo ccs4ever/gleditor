@@ -38,19 +38,49 @@ void LinkContext::setCandidates(const std::vector<zigzag::CellRef> &linkIds) {
   for (const auto id : linkIds) {
     keys.push_back(keyOf(id));
   }
+  const auto packages = session.readerLinkPackages().links();
+  keys.insert(keys.end(), packages.begin(), packages.end());
   navigator.setCandidates(std::move(keys));
 }
 
-xanadu::LinkKey LinkContext::keyOf(const zigzag::CellRef id) const {
-  return {.authority = session.store().documentId(), .id = id};
+xanadu::LinkKey LinkContext::keyOf(const std::uint64_t id) const {
+  return session.presentationLinkKey(id);
+}
+
+void LinkContext::packageVisibilityChanged() {
+  const auto selected = navigator.selection();
+  if (selected && selected->key.authority != session.store().documentId() &&
+      !session.readerLinkPackages().find(selected->key))
+    std::ignore = execute(nav::Dismiss{});
+}
+
+std::optional<Link> LinkContext::recordOf(const std::uint64_t id) const {
+  const auto key = keyOf(id);
+  if (const auto *pkg = session.readerLinkPackages().package(key))
+    return resolvePackageLink(key, *pkg, {}, {}).link;
+  const auto found = session.store().links().find(id);
+  if (found == session.store().links().end()) return std::nullopt;
+  return found->second;
 }
 
 std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
 LinkContext::resolve(const xanadu::LinkKey &key) const {
+  return resolveForPresentation(key);
+}
+
+std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
+LinkContext::resolveForPresentation(const xanadu::LinkKey &key,
+                                    const std::optional<int> cellRadius) const {
   const auto &primary = session.store();
-  if (key.authority != primary.documentId()) {
+  for (std::size_t i = 0; i < session.storeCount(); ++i)
+    if (session.store(i).documentId() == key.authority &&
+        session.readerLinkPackages().containsAuthority(key.authority))
+      return std::unexpected(xanadu::LinkQueryError::LinkNotFound);
+  const auto *package = session.readerLinkPackages().package(key);
+  if (!package && key.authority != primary.documentId()) {
     return std::unexpected(xanadu::LinkQueryError::LinkNotFound);
   }
+  if (package) return packageIndex(cellRadius).resolve(key, *package);
   std::vector<xanadu::DocumentView> documents;
   documents.reserve(session.views().size());
   for (const auto &view : session.views()) {
@@ -61,13 +91,49 @@ LinkContext::resolve(const xanadu::LinkKey &key) const {
   std::vector<zigzag::CellRef> everyCell;
   std::vector<xanadu::CellView> cells;
   if (nullptr != manifold) {
-    everyCell = manifold->cellsWithinRadius(zigzag::noCell, -1);
+    everyCell = manifold->cellsWithinRadius(!cellRadius      ? zigzag::noCell
+                                            : cellFocusQuery ? cellFocusQuery()
+                                                             : zigzag::noCell,
+                                            cellRadius.value_or(-1));
     cells.push_back({.store    = session.store(manifoldStoreIndex).documentId(),
                      .version  = manifoldVersion,
                      .manifold = *manifold,
                      .cells    = everyCell});
   }
   return xanadu::resolveLinkOccurrences(primary, key.id, documents, cells);
+}
+
+PackageOccurrenceIndex
+LinkContext::packageIndex(const std::optional<int> cellRadius) const {
+  std::vector<PackageDocumentView> documents;
+  for (const auto &view : session.views())
+    documents.push_back({.store   = session.store(view.storeIndex),
+                         .version = view.version,
+                         .text    = view.pieces});
+  std::vector<zigzag::CellRef> everyCell;
+  std::vector<PackageCellView> cells;
+  if (manifold && focusCell) {
+    everyCell = manifold->cellsWithinRadius(!cellRadius      ? zigzag::noCell
+                                            : cellFocusQuery ? cellFocusQuery()
+                                                             : zigzag::noCell,
+                                            cellRadius.value_or(-1));
+    cells.push_back({.store    = session.store(manifoldStoreIndex),
+                     .version  = manifoldVersion,
+                     .manifold = *manifold,
+                     .cells    = everyCell});
+  }
+  return PackageOccurrenceIndex(documents, cells);
+}
+std::vector<LinkOccurrences>
+LinkContext::packagePresentation(const int cellRadius) const {
+  const auto keys = session.readerLinkPackages().links();
+  if (keys.empty()) return {};
+  const auto index = packageIndex(cellRadius);
+  std::vector<LinkOccurrences> result;
+  for (const auto &key : keys)
+    result.push_back(
+        index.resolve(key, *session.readerLinkPackages().package(key)));
+  return result;
 }
 
 std::optional<xanadu::OccurrenceSite> LinkContext::caretSite() const {
@@ -154,6 +220,48 @@ xanadu::NavigationResult
 LinkContext::execute(const xanadu::NavigationCommand &command) {
   const auto named    = keyNamed(command);
   const auto selected = navigator.selection();
+  if (named && named->authority != session.store().documentId() &&
+      !session.readerLinkPackages().find(*named))
+    return std::unexpected(NavigationError::LinkNotFound);
+  if (selected && selected->occurrences &&
+      selected->key.authority != session.store().documentId()) {
+    auto side           = selected->active;
+    auto cursor         = selected->cursor(side);
+    const auto *at      = std::get_if<nav::EnterAt>(&command);
+    const bool entering = std::holds_alternative<nav::Enter>(command) ||
+                          (at && at->key == selected->key);
+    if (at && at->key == selected->key) {
+      side              = at->side;
+      cursor.member     = at->member;
+      cursor.occurrence = at->occurrence;
+    }
+    if (entering && cursor.member && cursor.occurrence &&
+        *cursor.member < selected->occurrences->members(side).size()) {
+      const auto &member = selected->occurrences->members(side)[*cursor.member];
+      if (*cursor.occurrence < member.occurrences.size()) {
+        const auto &site     = member.occurrences[*cursor.occurrence].site;
+        const bool focusable = std::visit(
+            [this](const auto &where) {
+              using Site = std::decay_t<decltype(where)>;
+              if constexpr (std::is_same_v<Site, DocumentSite>)
+                return bool(focusDocument) && viewIndexOf(where).has_value();
+              else
+                return bool(focusCell) && manifold &&
+                       manifold->contains(where.cell) &&
+                       where.store ==
+                           session.store(manifoldStoreIndex).documentId() &&
+                       where.version == manifoldVersion;
+            },
+            site);
+        if (!focusable) {
+          if (unavailable)
+            unavailable("The chosen package endpoint is no longer open. Open "
+                        "its pinned publication and select the link again.");
+          return std::unexpected(NavigationError::MemberNotInView);
+        }
+      }
+    }
+  }
   const bool starting =
       std::holds_alternative<xanadu::nav::StepLink>(command) ||
       (named && (!selected || selected->key != *named));
@@ -184,6 +292,12 @@ void LinkContext::apply(xanadu::NavigationEffect effect) {
                          effect.resolve->key.id,
                          xanadu::name(supplied.error()));
       previewing.reset();
+      if (effect.resolve->key.authority != session.store().documentId()) {
+        if (unavailable)
+          unavailable("The saved link package is disabled or unavailable. Its "
+                      "activity record has been retained.");
+        if (effect.focus) focus(*effect.focus);
+      }
       return;
     }
     if (!effect.preview) {

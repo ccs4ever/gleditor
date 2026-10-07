@@ -7,8 +7,8 @@
 #include <optional>
 #include <string>
 
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/system_docs.hpp"
-#include "xudu/session.hpp"
 
 namespace {
 class TemporaryConfig {

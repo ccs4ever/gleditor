@@ -3,7 +3,7 @@
  * @brief Flying Cell Satelloid proxy quads and focus ring overlay
  * implementation.
  */
-#include "xudu/satelloid.hpp"
+#include "common/ui/xanadoc/satelloid.hpp"
 #include "world_card_presentation.hpp"
 #include <gleditor/render_state.hpp>
 
@@ -17,7 +17,7 @@
 
 #include <gleditor/ranges.hpp>
 
-#include "xudu/link_context.hpp"
+#include "common/ui/xanadoc/link_context.hpp"
 
 namespace xanadu {
 struct SatelloidOverlay::Presentation {

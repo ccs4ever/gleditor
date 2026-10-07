@@ -27,12 +27,12 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/ui/xanadoc/link_context.hpp"
+#include "common/ui/xanadoc/satelloid.hpp"
+#include "common/ui/xanadoc/tenuous_tether.hpp"
 #include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
 #include "common/xanadu/framing.hpp"
-#include "xudu/link_context.hpp"
-#include "xudu/satelloid.hpp"
-#include "xudu/tenuous_tether.hpp"
 
 namespace xanadu {
 
@@ -252,6 +252,49 @@ void LinkBeams::rebuildStrands(RenderState &state) {
       });
     }
     strandToLoom_.assign(transclusionStrands.size(), -1);
+  }
+
+  if (linkContext_ != nullptr) {
+    // One representative connector per resolved occurrence. This is a visual
+    // scaffold, never an authorial pairing or the navigation identity. Avoid
+    // allocating the Cartesian product of discontinuous endsets.
+    for (const auto &resolved :
+         linkContext_->packagePresentation(cellRadius_)) {
+      const auto endpoints = [this, activeDocCount](const auto &members) {
+        std::vector<LinkEnd> ends;
+        for (const auto &member : members)
+          for (const auto &occurrence : member.occurrences)
+            std::visit(
+                [&](const auto &site) {
+                  using Site = std::decay_t<decltype(site)>;
+                  if constexpr (std::is_same_v<Site, DocumentSite>) {
+                    if (const auto view = linkContext_->viewIndexOf(site);
+                        view && *view < activeDocCount)
+                      ends.push_back(LinkEnd::forDocument(
+                          *view, site.range.start, site.range.end));
+                  } else {
+                    ends.push_back(LinkEnd::forCell(site.cell, site.range.start,
+                                                    site.range.end));
+                  }
+                },
+                occurrence.site);
+        return ends;
+      };
+      const auto left  = endpoints(resolved.left);
+      const auto right = endpoints(resolved.right);
+      if (left.empty() || right.empty()) continue;
+      const auto id     = session.packageRenderId(resolved.key);
+      const auto append = [&](const LinkEnd &a, const LinkEnd &b) {
+        strands.push_back(Strand{.link = id,
+                                 .type = resolved.link.type,
+                                 .tier = ProminenceTier::Curated,
+                                 .from = a,
+                                 .to   = b});
+      };
+      for (const auto &end : left) append(end, right.front());
+      for (std::size_t i = 1; i < right.size(); ++i)
+        append(left.front(), right[i]);
+    }
   }
 
   ++described;
@@ -1354,9 +1397,8 @@ bool LinkBeams::picked(const render::PickingResult &pick,
     // A beam body says which link, not which member: one strand of a 2x3 link
     // is one of six the renderer happened to draw, so selecting pins the whole
     // link and leaves the member to the reader.
-    std::ignore = linkContext_->execute(xanadu::commandForPick(
-        linkContext_->keyOf(static_cast<zigzag::CellRef>(strand.link)),
-        std::nullopt));
+    std::ignore = linkContext_->execute(
+        xanadu::commandForPick(linkContext_->keyOf(strand.link), std::nullopt));
   }
   // Selecting a link is a request to see both ends of it, which is the one
   // case where the far document is moved whether or not the sworph is on.
@@ -2032,29 +2074,10 @@ std::string sideName(const xanadu::LinkSide side) {
 void LinkBeams::describe(gleditor::a11y::Builder &into) {
   namespace a11y = gleditor::a11y;
   std::vector<std::pair<std::uint64_t, xanadu::AccessibleLinkNode>> nodes;
-  std::vector<zigzag::CellRef> onScreen;
+  std::vector<std::uint64_t> onScreen;
   onScreen.reserve(strands.size());
   for (const auto &strand : strands) {
-    // Numbered by the link rather than by its position, so that a link keeps
-    // its identity as others are found and lost around it -- and so that what
-    // comes back names a link this can look up. Link ids are small sequential
-    // counters from the store, well inside the forty-eight bits a node id
-    // leaves for them.
-    auto &node = into.add(strand.link + 1, a11y::Role::Link);
-    // Named by what it connects rather than by what it looks like. A beam is
-    // a coloured line and its colour is its type, which is exactly the kind
-    // of thing that has to be said in words for anybody who is not looking at
-    // it.
-    node.label = std::string{linkTypeName(strand.type)} + " link, document " +
-                 std::to_string(strand.from.doc) + " to document " +
-                 std::to_string(strand.to.doc);
-    node.description = "bytes " + std::to_string(strand.from.start) + " to " +
-                       std::to_string(strand.from.end) + ", and bytes " +
-                       std::to_string(strand.to.start) + " to " +
-                       std::to_string(strand.to.end);
-    node.focusable = true;
-    node.actions =
-        a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
+    onScreen.push_back(strand.link);
   }
   std::ranges::sort(onScreen);
   const auto repeats = std::ranges::unique(onScreen);
@@ -2072,17 +2095,20 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
   const auto selected    = nullptr != linkContext_ ? linkContext_->selection()
                                                    : gleditor::cpp26::nullopt;
   std::uint64_t nextPart = kLinkPartNodeBase;
-  const auto &table      = session.store().links();
   for (const auto link : onScreen) {
-    const auto found = table.find(link);
-    if (table.end() == found) {
+    const auto record =
+        linkContext_ != nullptr ? linkContext_->recordOf(link)
+        : session.store().links().contains(link)
+            ? std::optional<Link>{session.store().links().at(link)}
+            : std::nullopt;
+    if (!record) {
       continue;
     }
     const auto key =
         linkContext_ != nullptr
             ? linkContext_->keyOf(link)
             : xanadu::LinkKey{.authority = session.store().documentId(),
-                              .id        = link};
+                              .id        = static_cast<zigzag::CellRef>(link)};
     nodes.emplace_back(link + 1ULL, xanadu::a11y_node::Link{.key = key});
 
     // One node per link however many strands draw it, so a 2x3 link is one
@@ -2156,16 +2182,19 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
     auto &node = into.add(link + 1ULL, a11y::Role::Link);
     // Named by what it is and how many ends it has rather than by where one
     // strand runs: the ends are endsets, and neither is the source.
-    node.label = std::string{linkTypeName(found->second.type)} + " link, " +
-                 std::to_string(found->second.left.size()) + " left and " +
-                 std::to_string(found->second.right.size()) + " right members";
-    node.description = found->second.owner.empty()
-                           ? std::string{}
-                           : "by " + found->second.owner;
-    node.value       = open ? "selected" : "";
-    node.children    = members;
-    node.focusable   = true;
-    node.actions     = a11y::bit(a11y::Action::Click);
+    node.label = std::string{linkTypeName(record->type)} + " link, " +
+                 std::to_string(record->left.size()) + " left and " +
+                 std::to_string(record->right.size()) + " right members";
+    node.description =
+        record->owner.empty()
+            ? std::string{}
+            : "by " + record->owner +
+                  (record->curator.empty() ? ""
+                                           : "; curator " + record->curator);
+    node.value     = open ? "selected" : "";
+    node.children  = members;
+    node.focusable = true;
+    node.actions   = a11y::bit(a11y::Action::Click);
     for (auto &part : parts) {
       auto &child       = into.add(part.local, part.role);
       child.label       = std::move(part.label);

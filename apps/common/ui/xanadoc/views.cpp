@@ -34,6 +34,12 @@
 #include <gleditor/state.hpp>
 
 #include "common/ui/hypertime_graph.hpp"
+#include "common/ui/xanadoc/beams.hpp"
+#include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
+#include "common/ui/xanadoc/pouch_drawer.hpp"
+#include "common/ui/xanadoc/satelloid.hpp"
+#include "common/ui/xanadoc/session.hpp"
+#include "common/ui/xanadoc/wireframe_hull.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
@@ -43,12 +49,6 @@
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/transcopyright_crypto.hpp"
 #include "common/xanadu/transcopyright_logic.hpp"
-#include "xudu/beams.hpp"
-#include "xudu/kinetic_tether_overlay.hpp"
-#include "xudu/pouch_drawer.hpp"
-#include "xudu/satelloid.hpp"
-#include "xudu/session.hpp"
-#include "xudu/wireframe_hull.hpp"
 
 namespace xanadu {
 

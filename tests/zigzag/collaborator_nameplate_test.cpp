@@ -1,4 +1,4 @@
-#include "xudu/collaborator_overlay.hpp"
+#include "common/ui/xanadoc/collaborator_overlay.hpp"
 #include <gleditor/text/diagnostics.hpp>
 #include <gtest/gtest.h>
 #include <limits>

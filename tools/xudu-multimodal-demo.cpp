@@ -35,12 +35,12 @@
 #include <gleditor/renderer.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "common/ui/xanadoc/beams.hpp"
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/provenance.hpp"
 #include "common/xanadu/store.hpp"
-#include "xudu/beams.hpp"
-#include "xudu/session.hpp"
 
 namespace fs = std::filesystem;
 using gleditor::FileTextSource;

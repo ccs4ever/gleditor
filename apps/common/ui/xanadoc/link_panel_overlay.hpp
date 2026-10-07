@@ -33,11 +33,11 @@
 #include <gleditor/ui/overlay.hpp>
 
 #include "common/ui/link_panel_presentation.hpp"
+#include "common/ui/xanadoc/link_context.hpp"
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "xudu/link_context.hpp"
-#include "xudu/session.hpp"
 
 namespace xanadu {
 

@@ -1,5 +1,5 @@
 #include "../lib/mocks/device.hpp"
-#include "xudu/transcopyright_overlay.hpp"
+#include "common/ui/xanadoc/transcopyright_overlay.hpp"
 #include <algorithm>
 #include <cstring>
 #include <gleditor/render_state.hpp>
@@ -171,7 +171,7 @@ TEST_F(TranscopyrightOverlayTest, ScaledSafeBoxesPreserveFullAccessibleLabels) {
 TEST_F(TranscopyrightOverlayTest,
        StandardScreenAndFontMatrixDrawsContainedInk) {
   add(10, "عملة طويلة מאוד ");
-  for (const auto size :
+  for (const auto &size :
        {std::pair{640, 480}, std::pair{1280, 800}, std::pair{2560, 1440}}) {
     for (const auto scale : {.8F, 1.F, 1.5F, 2.F}) {
       for (const auto *family :

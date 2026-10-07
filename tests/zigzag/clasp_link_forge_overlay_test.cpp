@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "../lib/mocks/device.hpp"
-#include "xudu/clasp_link_forge.hpp"
+#include "common/ui/xanadoc/clasp_link_forge.hpp"
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/diagnostics.hpp>
 

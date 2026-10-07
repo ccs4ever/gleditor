@@ -5,8 +5,8 @@
 #include <gleditor/render_state.hpp>
 
 #include "common/ui/page_break_presentation.hpp"
-#include "xudu/page_break_overlay.hpp"
-#include "xudu/session.hpp"
+#include "common/ui/xanadoc/page_break_overlay.hpp"
+#include "common/ui/xanadoc/session.hpp"
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text_source.hpp>
 #include <tuple>

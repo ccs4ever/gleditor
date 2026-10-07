@@ -65,14 +65,12 @@ em++ "${EM_FLAGS[@]}" \
 
 echo "==> Compiling xuzz WebAssembly target..."
 mapfile -t COMMON_XANADU_SRCS < <(find apps/common/xanadu -name '*.cpp')
-mapfile -t XUDU_SRCS < <(find apps/xudu -maxdepth 1 -name '*.cpp')
-mapfile -t ZIGZAG_SRCS < <(find apps/zigzag -name '*.cpp')
+mapfile -t COMMON_UI_SRCS < <(find apps/common/ui -name '*.cpp')
 mapfile -t XUZZ_SRCS < <(find apps/xuzz -name '*.cpp')
 em++ "${EM_FLAGS[@]}" \
   "${LIB_SRCS[@]}" \
   "${COMMON_XANADU_SRCS[@]}" \
-  "${XUDU_SRCS[@]}" \
-  "${ZIGZAG_SRCS[@]}" \
+  "${COMMON_UI_SRCS[@]}" \
   "${XUZZ_SRCS[@]}" \
   -o "$OUTPUT_DIR/xuzz.html"
 

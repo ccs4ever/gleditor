@@ -13,11 +13,11 @@
 
 #include <argparse/argparse.hpp>
 
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/mutable_link.hpp"
 #include "common/xanadu/spool.hpp"
-#include "xudu/session.hpp"
 
 namespace xanadu {
 class BatchOrchestrator {

@@ -5,6 +5,7 @@
 #ifndef ZIGZAG_VISUALIZER_HPP
 #define ZIGZAG_VISUALIZER_HPP
 
+#include "common/ui/slice/unified_transclusion_engine.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/quoted_structure.hpp"
 #include "common/xanadu/store.hpp"
@@ -15,7 +16,6 @@
 #include "common/xanadu/zigzag/zz_xudu_projector.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
-#include "zigzag/unified_transclusion_engine.hpp"
 
 #include <array>
 #include <atomic>

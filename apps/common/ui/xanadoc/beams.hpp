@@ -40,6 +40,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/anchor_lanes.hpp"
 #include "common/xanadu/enfilade/spanfilade.hpp"
 #include "common/xanadu/link_layout.hpp"
@@ -48,7 +49,6 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/tension_layout.hpp"
-#include "xudu/session.hpp"
 
 namespace xanadu {
 class LinkContext;

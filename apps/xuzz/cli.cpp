@@ -9,8 +9,8 @@
 #include <iostream>
 #include <string_view>
 
+#include "common/ui/xanadoc/session.hpp"
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
-#include "xudu/session.hpp"
 #include <gleditor/app.hpp>
 
 namespace fs = std::filesystem;

@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "../lib/mocks/device.hpp"
-#include "xudu/pouch_drawer.hpp"
+#include "common/ui/xanadoc/pouch_drawer.hpp"
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>

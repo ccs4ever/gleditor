@@ -54,6 +54,7 @@
 #include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/publication_subscriptions.hpp"
+#include "common/xanadu/reader_link_packages.hpp"
 #include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/swarm.hpp"
@@ -459,6 +460,11 @@ public:
   PublicationOutbox &publicationOutbox();
   PublicationInbox &publicationInbox();
   LinkPackageExchange &linkPackageExchange();
+  ReaderLinkPackages &readerLinkPackages();
+  [[nodiscard]] std::expected<Session *, std::string>
+  setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
+  [[nodiscard]] std::uint64_t packageRenderId(const LinkKey &key);
+  [[nodiscard]] LinkKey presentationLinkKey(std::uint64_t id) const;
   std::vector<Publication> packagePublicationSources();
   PublicationPin pinPublication(const Publication &publication) const;
   std::string prepareLinkPackage(const Publication &source,
@@ -849,6 +855,10 @@ private:
   std::unique_ptr<PublicationOutbox> publicationOutbox_;
   std::unique_ptr<PublicationInbox> publicationInbox_;
   std::unique_ptr<LinkPackageExchange> linkPackageExchange_;
+  std::unique_ptr<ReaderLinkPackages> readerLinkPackages_;
+  std::map<std::uint64_t, LinkKey> packageRenderKeys_;
+  std::map<std::pair<std::string, zigzag::CellRef>, std::uint64_t>
+      packageRenderIds_;
   std::unique_ptr<PublicationDiscovery> publicationDiscovery_;
   std::unique_ptr<PublicationSubscriptions> publicationSubscriptions_;
   bool testPublicationSwarm_{};

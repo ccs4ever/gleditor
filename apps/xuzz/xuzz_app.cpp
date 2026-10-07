@@ -51,24 +51,24 @@
 #include "common/xanadu/zigzag/zzcore.hpp"
 
 #include "common/ui/hypertime_graph.hpp"
+#include "common/ui/slice/zigzag_commands.hpp"
+#include "common/ui/xanadoc/batch_orchestrator.hpp"
+#include "common/ui/xanadoc/beams.hpp"
+#include "common/ui/xanadoc/bridge_coordinator.hpp"
+#include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
+#include "common/ui/xanadoc/link_context.hpp"
+#include "common/ui/xanadoc/link_panel_overlay.hpp"
+#include "common/ui/xanadoc/overview_overlay.hpp"
+#include "common/ui/xanadoc/pouch_drawer.hpp"
+#include "common/ui/xanadoc/satelloid.hpp"
+#include "common/ui/xanadoc/session.hpp"
+#include "common/ui/xanadoc/swarm_telescope_overlay.hpp"
+#include "common/ui/xanadoc/tenuous_tether.hpp"
+#include "common/ui/xanadoc/views.hpp"
+#include "common/ui/xanadoc/wireframe_hull.hpp"
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/reading_place.hpp"
-#include "xudu/batch_orchestrator.hpp"
-#include "xudu/beams.hpp"
-#include "xudu/bridge_coordinator.hpp"
-#include "xudu/kinetic_tether_overlay.hpp"
-#include "xudu/link_context.hpp"
-#include "xudu/link_panel_overlay.hpp"
-#include "xudu/overview_overlay.hpp"
-#include "xudu/pouch_drawer.hpp"
-#include "xudu/satelloid.hpp"
-#include "xudu/session.hpp"
-#include "xudu/swarm_telescope_overlay.hpp"
-#include "xudu/tenuous_tether.hpp"
-#include "xudu/views.hpp"
-#include "xudu/wireframe_hull.hpp"
-#include "zigzag/zigzag_commands.hpp"
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/logging.hpp>
 
@@ -727,6 +727,16 @@ int XuzzApp::run(const int argc, char **argv) {
   links.setReadableTextPx(readablePx(xanadu::LayoutConfig{}.readableTextPx));
 
   xanadu::LinkContext linkContext(*session);
+  linkContext.setUnavailableHandler([state](std::string message) {
+    state->showDialog(render::DiagnosticSeverity::Warning,
+                      "Link endpoint unavailable", std::move(message));
+  });
+  views.selectIndependentLink = [&linkContext](const xanadu::LinkKey &key) {
+    std::ignore = linkContext.execute(xanadu::nav::SelectLink{.key = key});
+  };
+  views.packageVisibilityChanged = [&linkContext] {
+    linkContext.packageVisibilityChanged();
+  };
   KeyboardPane keyboardPane(state);
   renderer->addPickObserver(&keyboardPane);
 

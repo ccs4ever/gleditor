@@ -1,4 +1,4 @@
-#include "xudu/session.hpp"
+#include "common/ui/xanadoc/session.hpp"
 
 #include <algorithm>
 #include <array>
@@ -643,6 +643,69 @@ PublicationInbox &Session::publicationInbox() {
   return *publicationInbox_;
 }
 
+ReaderLinkPackages &Session::readerLinkPackages() {
+  if (!readerLinkPackages_) {
+    auto reader = std::make_unique<ReaderLinkPackages>(
+        xanadocsDirectory().parent_path() / "package-visibility");
+    if (!reader->preferences().empty())
+      for (const auto &status : linkPackageExchange().statuses())
+        if (status.phase == LinkPackagePhase::Ready ||
+            status.phase == LinkPackagePhase::Published ||
+            (!status.received && !status.package.links.empty())) {
+          if (auto result = reader->retain(status.package, status.hash);
+              !result)
+            throw ReaderLinkPackagesUnreadable(result.error());
+        }
+    for (const auto &entry : stores)
+      if (entry.store && reader->containsAuthority(entry.store->documentId()))
+        throw ReaderLinkPackagesUnreadable(
+            "Package authority conflicts with an open store");
+    readerLinkPackages_ = std::move(reader);
+  }
+  return *readerLinkPackages_;
+}
+std::expected<Session *, std::string>
+Session::setLinkPackageEnabled(const LinkPackageStatus &package, bool on) try {
+  if (on && package.phase != LinkPackagePhase::Ready &&
+      package.phase != LinkPackagePhase::Published)
+    throw std::invalid_argument("Verify the package before enabling it");
+  auto &reader = readerLinkPackages();
+  if (on)
+    for (const auto &entry : stores)
+      if (entry.store &&
+          entry.store->documentId() ==
+              ReaderLinkPackages::keyOf(package.hash, 0).authority)
+        throw std::invalid_argument(
+            "Package authority conflicts with an open store");
+  if (on)
+    if (auto result = reader.retain(package.package, package.hash); !result)
+      throw std::invalid_argument(result.error());
+  if (auto result = reader.setEnabled(package.hash, on); !result)
+    throw ReaderLinkPackagesUnreadable(result.error());
+  invalidate();
+  return this;
+} catch (const std::exception &error) {
+  return std::unexpected(std::string(error.what()));
+}
+std::uint64_t Session::packageRenderId(const LinkKey &key) {
+  const auto name = std::pair{key.authority.str(), key.id};
+  if (const auto found = packageRenderIds_.find(name);
+      found != packageRenderIds_.end())
+    return found->second;
+  // Native operation indices are 32 bits. This private presentation namespace
+  // never leaves the renderer; activity uses the verified immutable authority.
+  const auto id = (1ULL << 32U) + packageRenderKeys_.size();
+  packageRenderKeys_.emplace(id, key);
+  packageRenderIds_.emplace(name, id);
+  return id;
+}
+LinkKey Session::presentationLinkKey(const std::uint64_t id) const {
+  if (const auto found = packageRenderKeys_.find(id);
+      found != packageRenderKeys_.end())
+    return found->second;
+  return {.authority = store().documentId(),
+          .id        = static_cast<zigzag::CellRef>(id)};
+}
 LinkPackageExchange &Session::linkPackageExchange() {
   if (!linkPackageExchange_) {
     LinkPackageExchange::Options options;
@@ -1105,6 +1168,9 @@ void Session::loadRetainedScrolls(const Store &store,
 
 std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
                               const bool aIsTemporary) {
+  if (readerLinkPackages().containsAuthority(aStore->documentId()))
+    throw std::invalid_argument(
+        "Store authority conflicts with a retained package");
   loadRetainedScrolls(*aStore, aPath);
   if (swarmSource) {
     aStore->setContentSource(swarmSource.get());
@@ -2799,6 +2865,28 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
         }
       }
     }
+  }
+
+  const auto packageKeys = readerLinkPackages().links();
+  const std::vector<PackageDocumentView> packageDocuments{
+      {store(view.storeIndex), view.version, mine}};
+  const auto packageIndex =
+      packageKeys.empty()
+          ? nullptr
+          : std::make_unique<PackageOccurrenceIndex>(
+                packageDocuments, std::span<const PackageCellView>{});
+  for (const auto &key : packageKeys) {
+    const auto *link = readerLinkPackages().find(key);
+    if (!link || link->type == LinkType::Format) continue;
+    const auto colour = linkColourWithInstanceShift(
+        packageRenderId(key), link->type, ProminenceTier::Curated);
+    for (const auto *ends : {&link->left, &link->right})
+      for (const auto &span : *ends)
+        for (const auto &match : packageIndex->occurrences(span))
+          found.push_back(
+              {.start  = std::get<DocumentSite>(match.site).range.start,
+               .end    = std::get<DocumentSite>(match.site).range.end,
+               .colour = colour});
   }
 
   // Passages that are withheld or transcopyright-locked in this document's

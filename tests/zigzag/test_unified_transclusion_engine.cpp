@@ -12,6 +12,7 @@
 #include <tuple>
 
 #include "../lib/mocks/device.hpp"
+#include "common/ui/slice/unified_transclusion_engine.hpp"
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
@@ -21,7 +22,6 @@
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/diagnostics.hpp"
 #include "gleditor/text/font.hpp"
-#include "zigzag/unified_transclusion_engine.hpp"
 
 using namespace zigzag;
 

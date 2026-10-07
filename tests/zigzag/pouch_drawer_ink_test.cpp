@@ -1,5 +1,5 @@
 #include "../lib/mocks/device.hpp"
-#include "xudu/pouch_drawer.hpp"
+#include "common/ui/xanadoc/pouch_drawer.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -205,7 +205,7 @@ TEST(PouchDrawerInkTest,
     EXPECT_FALSE(missingInk) << diagnostic;
     EXPECT_TRUE(forge);
   };
-  for (const auto size :
+  for (const auto &size :
        {std::pair{640, 480}, std::pair{1280, 800}, std::pair{2560, 1440}})
     for (const auto scale : {.8F, 1.F, 1.5F, 2.F})
       for (const auto *family :
@@ -223,7 +223,7 @@ TEST(PouchDrawerInkTest,
         for (auto &font : theme.fonts) font.family = family;
         check(metrics, theme);
       }
-  for (const auto size : {std::pair{640, 480}, std::pair{1280, 800}})
+  for (const auto &size : {std::pair{640, 480}, std::pair{1280, 800}})
     for (const auto *family : {"Monospace", "Noto Sans CJK JP"}) {
       SCOPED_TRACE("narrow resize " + std::to_string(size.first) + "x" +
                    std::to_string(size.second) + " family=" + family);

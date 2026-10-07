@@ -7,7 +7,7 @@
 #include <set>
 
 #include "../lib/mocks/device.hpp"
-#include "xudu/swarm_telescope_overlay.hpp"
+#include "common/ui/xanadoc/swarm_telescope_overlay.hpp"
 
 namespace {
 namespace ui = gleditor::ui;
@@ -97,8 +97,9 @@ TEST(SwarmTelescopeOverlayTest,
             EXPECT_DOUBLE_EQ(node->bounds->left, box.rect.left);
             EXPECT_DOUBLE_EQ(node->bounds->top,
                              size.height - box.rect.bottom - box.rect.height);
-            if (visual->id != 1)
+            if (visual->id != 1) {
               EXPECT_EQ(node->label, visual->accessibleLabel);
+            }
             EXPECT_LE(visual->fitted.widthPx, box.contentRect.width + .01F);
             EXPECT_LE(visual->fitted.heightPx, box.contentRect.height + .01F);
             if (!visual->text.empty()) {

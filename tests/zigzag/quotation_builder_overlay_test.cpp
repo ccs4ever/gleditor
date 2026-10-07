@@ -385,7 +385,9 @@ TEST(QuotationBuilderOverlayTest,
     const auto tab   = std::ranges::find(scene->visuals, page,
                                               &ui::WidgetVisual::accessibleLabel);
     EXPECT_NE(tab, scene->visuals.end());
-    if (tab != scene->visuals.end()) EXPECT_TRUE(overlay.activateNode(tab->id));
+    if (tab != scene->visuals.end()) {
+      EXPECT_TRUE(overlay.activateNode(tab->id));
+    }
     overlay.drawFrame(ctx);
   };
   go("Selector");

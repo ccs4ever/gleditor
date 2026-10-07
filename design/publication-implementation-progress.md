@@ -391,6 +391,23 @@ and four publication integrations across the recorded runs. Docker image `485bcd
 network-disabled smoke tests; all 32 changed/new C++ hashes match the host. The review now shows
 compact identities and readable ranges, with full key inspection and accessibility descriptions.
 
+## Private reader package layers (2026-10-07)
+
+Package review now enables/disables immutable reader contributions, persists private choices and
+selects signed links through the existing navigation panel. Exact global address matching resolves
+document and slice occurrences without adopting links or editing visited stores. Both endsets remain
+complete, and author editions are unchanged. New package revisions remain independently disabled.
+Native/package authority conflicts and accessibility selections delivered after disable are refused.
+
+The touched legacy UI components now live in `apps/common/ui/xanadoc/` and `apps/common/ui/slice/`;
+Make and WebAssembly collection use that shared tree. See
+[the reader layer report](ux_publication_layers_validation_2026-10-07.md) for test scope, evidence
+and remaining limits. The namespace package journey and 12 transport cases passed. The image passed
+135 publication smoke cases plus both reader UI cases. Final focused tests, native UI suites,
+format-check and lint passed. Full commentary authoring and P1–P7 acceptance remain outstanding.
+Vulkan orchestration exposed descriptor-pool exhaustion and a drag timeout; its backend check
+remains red, as documented in the report.
+
 ## Remaining work
 
 Investigate the
@@ -401,9 +418,9 @@ completion race remains unconfirmed.
 1. Capture an immutable store snapshot and move initial signing/sealing off the rendering command
    path. Dependency review, seeding, pointer announcement, completion/retry, signed topics and the
    explicit mock verification boundary are implemented in the outbox.
-1. Add private package visibility preferences and reader contribution rendering/navigation without
-   appending operations to visited stores. Filter discovered packages by the publication's exact
-   spans, and support individual link selection/editing during package preparation.
+1. Support individual link selection/editing during package preparation and creating packages
+   independently of an existing source publication. Extend document-span filtering to explicit
+   slice/edition scopes when those are selected in the interface.
 1. Validate commentary document creation, publication and Alice's reply citing both commentaries.
    Rerun P1–P7 and rejection/offline/retry cases through the UI. Fixture, unit and transport passes
    do not substitute for that acceptance run.

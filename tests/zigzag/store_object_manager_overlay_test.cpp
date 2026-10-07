@@ -82,8 +82,9 @@ TEST(StoreObjectManagerOverlayTest, FittedRowsShareSafeGeometryAndFullLabels) {
             visibleName |= !visual->fitted.shaping.glyphs.empty();
             foundName = true;
             EXPECT_NE(visual->accessibleLabel.find("名称"), std::string::npos);
-            if (box.contentRect.height >= visual->font->metrics().lineHeight)
+            if (box.contentRect.height >= visual->font->metrics().lineHeight) {
               EXPECT_FALSE(visual->fitted.shaping.glyphs.empty());
+            }
           }
         }
         EXPECT_TRUE(foundName);

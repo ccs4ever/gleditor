@@ -8,9 +8,9 @@
 
 #include <gleditor/doc.hpp>
 
+#include "common/ui/slice/zigzag_visualizer.hpp"
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
-#include "zigzag/zigzag_visualizer.hpp"
 
 using namespace zigzag;
 

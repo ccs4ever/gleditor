@@ -13,9 +13,9 @@
 #include <gleditor/state.hpp>
 
 #include "cli.hpp"
-#include "xudu/bridge_coordinator.hpp"
-#include "xudu/views.hpp"
-#include "zigzag/zigzag_visualizer.hpp"
+#include "common/ui/slice/zigzag_visualizer.hpp"
+#include "common/ui/xanadoc/bridge_coordinator.hpp"
+#include "common/ui/xanadoc/views.hpp"
 
 namespace xuzz {
 

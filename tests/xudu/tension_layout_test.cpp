@@ -11,8 +11,8 @@
 
 #include <glm/geometric.hpp>
 
+#include "common/ui/xanadoc/tenuous_tether.hpp"
 #include "common/xanadu/tension_layout.hpp"
-#include "xudu/tenuous_tether.hpp"
 
 namespace xanadu {
 namespace {

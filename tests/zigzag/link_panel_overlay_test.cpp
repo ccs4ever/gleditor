@@ -13,8 +13,8 @@
 
 #include "../lib/mocks/device.hpp"
 #include "common/ui/link_panel_presentation.hpp"
+#include "common/ui/xanadoc/link_panel_overlay.hpp"
 #include "common/xanadu/link_views.hpp"
-#include "xudu/link_panel_overlay.hpp"
 
 namespace {
 namespace ui  = gleditor::ui;

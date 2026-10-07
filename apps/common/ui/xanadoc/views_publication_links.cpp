@@ -124,22 +124,35 @@ void Views::publishIndependentLinks() {
 void Views::linksAndResponses(const std::string &query) {
   renderer->runWithState([this, query](RenderState &) {
     try {
-      if (query == "cached") {
+      if (query == "cached" || query == "matching") {
         const auto retained = session.linkPackageExchange().statuses();
         auto packages       = choice("Retained package", {}, {});
-        if (!retained.empty()) {
-          packages.options.clear();
-          packages.optionValues.clear();
-        }
         for (const auto &pkg : retained) {
+          if (query == "matching" && (pkg.phase != LinkPackagePhase::Ready &&
+                                      pkg.phase != LinkPackagePhase::Published))
+            continue;
+          if (query == "matching" && packageFilterSource &&
+              !packageReferences(pkg.package, *packageFilterSource))
+            continue;
+          if (packages.options == std::vector<std::string>{"None"}) {
+            packages.options.clear();
+            packages.optionValues.clear();
+          }
           packages.options.push_back(
               pkg.package.title + " — " +
               std::string(linkPackagePhaseName(pkg.phase)));
           packages.optionValues.push_back(pkg.id);
         }
+        if (packages.options == std::vector<std::string>{"None"}) {
+          packages.options      = {"No matching packages"};
+          packages.optionValues = {""};
+        }
         form.open(
             "Retained link packages",
-            "Signed endpoints are retained privately for review.",
+            query == "matching" && packageFilterSource
+                ? "Verified endpoints overlap document passages in " +
+                      packageFilterSource->title + "."
+                : "Signed endpoints are retained privately for review.",
             {actions({"Show selected package", "Close"}, {"show", "close"}),
              std::move(packages)},
             [this](const auto &answers) {
@@ -154,8 +167,9 @@ void Views::linksAndResponses(const std::string &query) {
             "Links and responses",
             "Search the source's registered global scrolls. No curator key is "
             "required.",
-            {actions({"Find packages", "Review retained packages", "Close"},
-                     {"find", "cached", "close"}),
+            {actions({"Find packages", "Review retained packages", "Close",
+                      "Review packages matching selected passages"},
+                     {"find", "cached", "close", "matching"}),
              sources(pubs)},
             [this, pubs](const auto &answers) {
               renderer->runWithState([this, pubs, answers](RenderState &) {
@@ -168,14 +182,22 @@ void Views::linksAndResponses(const std::string &query) {
                   if (answers[1].answer().empty())
                     throw std::runtime_error(
                         "Publish or download the signed work first.");
+                  const auto source = pubs.at(std::stoull(answers[1].answer()));
+                  packageFilterSource = source;
+                  if (answers[0].answer() == "matching") {
+                    linksAndResponses("matching");
+                    return;
+                  }
                   std::vector<std::string> keys;
                   for (const auto &[key, scroll] :
                        pubs.at(std::stoull(answers[1].answer())).scrolls) {
                     (void)scroll;
                     keys.push_back(key);
                   }
-                  linksAndResponses(session.publicationDiscovery().submitLinks(
-                      std::move(keys)));
+                  const auto id = session.publicationDiscovery().submitLinks(
+                      std::move(keys));
+                  packageQuerySources.insert_or_assign(id, source);
+                  linksAndResponses(id);
                 } catch (const std::exception &error) {
                   state->showDialog(render::DiagnosticSeverity::Error,
                                     "Links and responses unavailable",
@@ -220,31 +242,36 @@ void Views::linksAndResponses(const std::string &query) {
            std::move(packages)},
           [this, query, entries,
            keys = status.scrollKeys](const auto &answers) {
-            renderer->runWithState(
-                [this, query, entries, keys, answers](RenderState &) {
-                  try {
-                    const auto action = answers[0].answer();
-                    if (action == "close") return;
-                    if (action == "cached") {
-                      linksAndResponses("cached");
-                      return;
-                    }
-                    if (action == "fetch" && !answers[1].answer().empty()) {
-                      const auto &entry =
-                          entries.at(std::stoull(answers[1].answer()));
-                      linkPackageStatus(session.linkPackageExchange().fetch(
-                          entry.first, entry.second, keys));
-                      return;
-                    }
-                    if (action == "retry")
-                      (void)session.publicationDiscovery().submitLinks(keys);
-                    linksAndResponses(query);
-                  } catch (const std::exception &error) {
-                    state->showDialog(render::DiagnosticSeverity::Error,
-                                      "Package discovery unavailable",
-                                      error.what());
-                  }
-                });
+            renderer->runWithState([this, query, entries, keys,
+                                    answers](RenderState &) {
+              try {
+                const auto action = answers[0].answer();
+                if (action == "close") return;
+                if (action == "cached") {
+                  linksAndResponses("cached");
+                  return;
+                }
+                if (action == "fetch" && !answers[1].answer().empty()) {
+                  const auto &entry =
+                      entries.at(std::stoull(answers[1].answer()));
+                  const auto source = packageQuerySources.find(query);
+                  linkPackageStatus(
+                      session.linkPackageExchange().fetch(entry.first,
+                                                          entry.second, keys),
+                      source == packageQuerySources.end()
+                          ? std::nullopt
+                          : std::optional<Publication>{source->second});
+                  return;
+                }
+                if (action == "retry")
+                  (void)session.publicationDiscovery().submitLinks(keys);
+                linksAndResponses(query);
+              } catch (const std::exception &error) {
+                state->showDialog(render::DiagnosticSeverity::Error,
+                                  "Package discovery unavailable",
+                                  error.what());
+              }
+            });
           });
     } catch (const std::exception &error) {
       state->showDialog(render::DiagnosticSeverity::Error,
@@ -252,8 +279,9 @@ void Views::linksAndResponses(const std::string &query) {
     }
   });
 }
-void Views::linkPackageStatus(const std::string &id) {
-  renderer->runWithState([this, id](RenderState &) {
+void Views::linkPackageStatus(const std::string &id,
+                              std::optional<Publication> source) {
+  renderer->runWithState([this, id, source](RenderState &) {
     try {
       const auto pkg = session.linkPackageExchange().status(id);
 
@@ -270,6 +298,13 @@ void Views::linkPackageStatus(const std::string &id) {
       if (pkg.identity == PublicationIdentity::MockVerified)
         note += " — mock verification";
       if (!pkg.error.empty()) note += " — " + pkg.error;
+      const bool verified = pkg.phase == LinkPackagePhase::Ready ||
+                            pkg.phase == LinkPackagePhase::Published;
+      const bool matches =
+          !source || !verified || packageReferences(pkg.package, *source);
+      if (source && verified)
+        note += matches ? " — overlaps selected document passages"
+                        : " — no byte overlap with selected document passages";
       form.open(
           "Link package status", note,
           {std::move(control),
@@ -277,12 +312,18 @@ void Views::linkPackageStatus(const std::string &id) {
                                   ? id
                                   : pkg.package.title + " #" +
                                         std::to_string(pkg.package.sequence)})},
-          [this, id](const auto &answers) {
-            renderer->runWithState([this, id, answers](RenderState &) {
+          [this, id, source, matches](const auto &answers) {
+            renderer->runWithState([this, id, source, matches,
+                                    answers](RenderState &) {
               try {
                 const auto action = answers[0].answer();
                 if (action == "close") return;
                 if (action == "review") {
+                  if (!matches)
+                    throw std::runtime_error(
+                        "This package references the scroll, but not the "
+                        "selected document's passages. Review it in the "
+                        "unfiltered retained-package list if desired.");
                   reviewIndependentLinks(id);
                   return;
                 }
@@ -293,7 +334,7 @@ void Views::linkPackageStatus(const std::string &id) {
                   const auto pkg = session.linkPackageExchange().status(id);
                   (void)session.linkPackageExchange().submit(pkg.package, true);
                 }
-                linkPackageStatus(id);
+                linkPackageStatus(id, source);
               } catch (const std::exception &error) {
                 state->showDialog(render::DiagnosticSeverity::Error,
                                   "Package unavailable", error.what());
@@ -320,6 +361,21 @@ void Views::reviewIndependentLinks(const std::string &id,
             "Wait for package verification before reviewing endpoints.");
       const auto &pkg = status.package;
       reviewLinkPackage(pkg);
+      const auto enabled = session.readerLinkPackages().enabled(status.hash);
+      auto control =
+          actions({"Inspect selected link", "Open related publication",
+                   "Back to status", "Close", "Inspect full scroll identities"},
+                  {"inspect", "open", "back", "close", "keys"});
+      if (status.phase == LinkPackagePhase::Ready ||
+          status.phase == LinkPackagePhase::Published || enabled) {
+        control.options.push_back(enabled ? "Disable reader layer"
+                                          : "Enable reader layer");
+        control.optionValues.push_back("toggle");
+      }
+      if (enabled) {
+        control.options.push_back("Select link for navigation");
+        control.optionValues.push_back("navigate");
+      }
       const auto index = std::min(selected, pkg.links.size() - 1);
       auto links       = choice("Link identity", {}, {});
       links.options.clear();
@@ -349,12 +405,10 @@ void Views::reviewIndependentLinks(const std::string &id,
       curator.optionDescriptions = {pkg.curator.hex()};
       form.open(
           "Review independent links",
-          pkg.title + " — signature verified; curator enrollment unchecked.",
-          {actions({"Inspect selected link", "Open related publication",
-                    "Back to status", "Close",
-                    "Inspect full scroll identities"},
-                   {"inspect", "open", "back", "close", "keys"}),
-           std::move(curator), std::move(links),
+          pkg.title + " — " +
+              (enabled ? "reader layer enabled" : "reader layer disabled") +
+              "; signature verified; enrollment unchecked.",
+          {std::move(control), std::move(curator), std::move(links),
            endset("Left endset", pkg.links[index].left),
            endset("Right endset", pkg.links[index].right), std::move(pins)},
           [this, id, index, pins = pkg.publications](const auto &answers) {
@@ -363,6 +417,26 @@ void Views::reviewIndependentLinks(const std::string &id,
               try {
                 const auto action = answers[0].answer();
                 if (action == "close") return;
+                if (action == "toggle") {
+                  const auto status = session.linkPackageExchange().status(id);
+                  if (auto result = session.setLinkPackageEnabled(
+                          status,
+                          !session.readerLinkPackages().enabled(status.hash));
+                      !result)
+                    throw std::runtime_error(result.error());
+                  if (packageVisibilityChanged) packageVisibilityChanged();
+                  reviewIndependentLinks(id, index);
+                  return;
+                }
+                if (action == "navigate") {
+                  const auto status = session.linkPackageExchange().status(id);
+                  if (!session.readerLinkPackages().enabled(status.hash))
+                    throw std::runtime_error("Enable this reader layer first.");
+                  if (selectIndependentLink)
+                    selectIndependentLink(ReaderLinkPackages::keyOf(
+                        status.hash, std::stoull(answers[2].answer())));
+                  return;
+                }
                 if (action == "keys") {
                   inspectIndependentLinkKeys(id, index, answers[3].chosen,
                                              answers[4].chosen);

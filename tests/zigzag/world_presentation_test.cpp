@@ -1,10 +1,10 @@
 #include "../lib/mocks/world_device.hpp"
-#include "xudu/kinetic_tether_overlay.hpp"
-#include "xudu/satelloid.hpp"
-#include "xudu/wireframe_hull.hpp"
-#include "xudu/world_card_presentation.hpp"
-#include "zigzag/zigzag_commands.hpp"
-#include "zigzag/zigzag_visualizer.hpp"
+#include "common/ui/slice/zigzag_commands.hpp"
+#include "common/ui/slice/zigzag_visualizer.hpp"
+#include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
+#include "common/ui/xanadoc/satelloid.hpp"
+#include "common/ui/xanadoc/wireframe_hull.hpp"
+#include "common/ui/xanadoc/world_card_presentation.hpp"
 #include <gleditor/app.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/diagnostics.hpp>

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -28,16 +29,16 @@
 #include <gleditor/state.hpp>
 
 #include "common/ui/hypertime_graph.hpp"
+#include "common/ui/xanadoc/kinetic_tether_overlay.hpp"
+#include "common/ui/xanadoc/pouch_drawer.hpp"
+#include "common/ui/xanadoc/session.hpp"
+#include "common/ui/xanadoc/wireframe_hull.hpp"
 #include "common/xanadu/framing.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/reading_place.hpp"
 #include "common/xanadu/spool.hpp"
 #include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
-#include "xudu/kinetic_tether_overlay.hpp"
-#include "xudu/pouch_drawer.hpp"
-#include "xudu/session.hpp"
-#include "xudu/wireframe_hull.hpp"
 
 namespace xanadu {
 
@@ -178,10 +179,15 @@ public:
   void publicationDownloadStatus(const std::string &id);
   void publishIndependentLinks();
   void linksAndResponses(const std::string &query = {});
-  void linkPackageStatus(const std::string &id);
+  void linkPackageStatus(const std::string &id,
+                         std::optional<Publication> source = {});
   void inspectIndependentLinkKeys(const std::string &id, std::size_t link,
                                   std::size_t left, std::size_t right);
   void reviewIndependentLinks(const std::string &id, std::size_t selected = 0);
+  std::function<void(const LinkKey &)> selectIndependentLink;
+  std::function<void()> packageVisibilityChanged;
+  std::optional<Publication> packageFilterSource;
+  std::map<std::string, Publication> packageQuerySources;
   void publicationUpdates(const std::string &subscription = {},
                           std::int64_t sequence           = -1);
   void discoverPublications(const std::string &query = {});

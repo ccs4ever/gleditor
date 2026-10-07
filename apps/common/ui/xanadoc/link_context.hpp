@@ -25,10 +25,10 @@
 
 #include <gleditor/cpp26.hpp>
 
+#include "common/ui/xanadoc/session.hpp"
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/store_activity_log.hpp"
-#include "xudu/session.hpp"
 
 namespace zigzag {
 class Manifold;
@@ -93,7 +93,19 @@ public:
 
   /// The key of link @p id in the primary store, which holds every link the
   /// beams draw; federated links need their own authority design.
-  [[nodiscard]] xanadu::LinkKey keyOf(zigzag::CellRef id) const;
+  [[nodiscard]] xanadu::LinkKey keyOf(std::uint64_t id) const;
+  /// Verified enabled packages and native links share the command boundary.
+  [[nodiscard]] std::expected<LinkOccurrences, LinkQueryError>
+  resolveForPresentation(const LinkKey &key,
+                         std::optional<int> cellRadius = std::nullopt) const;
+  [[nodiscard]] std::vector<LinkOccurrences>
+  packagePresentation(int cellRadius) const;
+  [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
+  void packageVisibilityChanged();
+  LinkContext *setUnavailableHandler(std::function<void(std::string)> handler) {
+    unavailable = std::move(handler);
+    return this;
+  }
 
   /**
    * @brief Carry out @p command. Render thread only: it may move the caret.
@@ -140,6 +152,8 @@ public:
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
 
 private:
+  [[nodiscard]] PackageOccurrenceIndex
+  packageIndex(std::optional<int> cellRadius) const;
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
   resolve(const xanadu::LinkKey &key) const;
   void noteOrigin();
@@ -161,6 +175,7 @@ private:
   CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;
   std::uint64_t changes{};
+  std::function<void(std::string)> unavailable;
 };
 
 } // namespace xanadu

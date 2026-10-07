@@ -198,8 +198,8 @@ The Spanfilade indexes span occurrences across documents and cells for transclus
 Xuzz renders explicit links as cyan/magenta ribbons and shared-content transclusions as gold prisms.
 Its beam layout and margin brackets help distinguish dense, overlapping passages.
 `BridgeCoordinator` brings ZigZag cell anchors and an accessibility source into the page scene.
-Current beam activation still follows a rendered strand directly; the exact, many-to-many traversal
-interface is described as a proposal in the
+Native and reader-enabled package links share exact member and occurrence navigation through the
+link context. The wider interaction contract is described in the
 [Xuzz navigation workflow](design/ui_workflow_xuzz_navigation.md).
 
 Publication signs an authorship record, seals content and operations for sharing, and can publish
@@ -235,10 +235,15 @@ repaired prerequisites and remaining network/UI work. `Ctrl+Alt+Shift+P` prepare
 signed package from a selected publication's authored links; review it before publishing to the
 explicit test swarm. `Ctrl+Alt+Shift+L` discovers packages referencing that publication's registered
 global scrolls, fetches and reviews both endsets, and opens cited immutable snapshots through the
-download panel. Retained packages reopen offline. These controls do not yet enable package display
-layers. Catalog format 2 distinguishes documents and packages; old development catalogs must be
-regenerated. See
-[the package validation report](design/ux_publication_links_validation_2026-10-06.md).
+download panel. Review offers Enable/Disable reader layer and Select link for navigation. Reader
+choices pin immutable package versions, persist privately and reopen offline; new package versions
+start disabled. Layers mark exact passages and add beams without importing links or changing visited
+stores. The existing link panel browses either endset, crosses sides and enters an explicitly chosen
+occurrence. A missing endpoint remains visible; open its pinned publication before entering it.
+Review packages matching selected passages filters retained packages by global scroll key and byte
+overlap with the selected document. Catalog format 2 distinguishes documents and packages; old
+development catalogs must be regenerated. See
+[the reader layer validation report](design/ux_publication_layers_validation_2026-10-07.md).
 
 ### Configuration and computation
 

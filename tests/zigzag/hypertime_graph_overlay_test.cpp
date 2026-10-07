@@ -128,8 +128,9 @@ TEST(HypertimeGraphOverlayTest,
             EXPECT_DOUBLE_EQ(node->bounds->left, box.rect.left);
             EXPECT_DOUBLE_EQ(node->bounds->top,
                              size.height - box.rect.bottom - box.rect.height);
-            if (!visual->accessibleLabel.empty() && visual->interactive)
+            if (!visual->accessibleLabel.empty() && visual->interactive) {
               EXPECT_FALSE(visual->fitted.shaping.glyphs.empty());
+            }
             if (visual->action == "node" &&
                 visual->accessibleLabel.starts_with("I · Version ")) {
               EXPECT_EQ(visual->text, "I");
@@ -147,7 +148,9 @@ TEST(HypertimeGraphOverlayTest,
               EXPECT_NE(node->value.find("in comparison"), std::string::npos);
             }
           }
-          if (!comparison) EXPECT_TRUE(foundVersion);
+          if (!comparison) {
+            EXPECT_TRUE(foundVersion);
+          }
         }
 }
 TEST(HypertimeGraphOverlayTest,

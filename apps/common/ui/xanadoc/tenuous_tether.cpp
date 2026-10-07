@@ -2,7 +2,7 @@
  * @file tenuous_tether.cpp
  * @brief Implementation of tenuous elastic tether ribbons.
  */
-#include "xudu/tenuous_tether.hpp"
+#include "common/ui/xanadoc/tenuous_tether.hpp"
 
 #include <algorithm>
 #include <cmath>

@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 
 #include "../lib/mocks/device.hpp"
-#include "xudu/overview_overlay.hpp"
+#include "common/ui/xanadoc/overview_overlay.hpp"
 #include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/diagnostics.hpp>
@@ -15,7 +15,7 @@ TEST(OverviewOverlayTest, ScalesAndClampsConfiguredPanelToSafeArea) {
   config.heightPx = 4000;
   config.leftPx   = -100;
   config.bottomPx = 2000;
-  for (const auto size :
+  for (const auto &size :
        {std::pair{640, 480}, std::pair{1280, 800}, std::pair{2560, 1440}}) {
     for (const auto scale : {.8F, 1.F, 1.5F, 2.F}) {
       gleditor::ui::UiMetrics metrics{.contentScale = scale,

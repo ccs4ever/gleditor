@@ -16,6 +16,7 @@
 #include "common/xanadu/publication_inbox.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/publication_subscriptions.hpp"
+#include "common/xanadu/reader_link_packages.hpp"
 #include "common/xanadu/store.hpp"
 
 namespace {
@@ -1178,6 +1179,115 @@ TEST_F(PublicationOutboxNetworkTest,
   EXPECT_THAT(preparedLog, testing::HasSubstr("Review independent links"));
   EXPECT_THAT(preparedLog, testing::HasSubstr("Published to rendezvous"));
   EXPECT_THAT(preparedLog, testing::HasSubstr("mock verification"));
+  curators.clear();
+  xanadu::LinkPackageExchange::Options devinOptions;
+  devinOptions.directory      = devinProfile / "data/xudu/link-packages";
+  devinOptions.verifyIdentity = [](const auto &) {
+    return xanadu::PublicationIdentity::MockVerified;
+  };
+  devinOptions.makePublisher = xanadu::publicationSwarmTransport(
+      devinKeys, network, nodes,
+      devinProfile / "data/xudu/author-catalog" / devinKeys.publicKey.hex());
+  xanadu::LinkPackageExchange devin(std::move(devinOptions));
+  const auto devinStatus = devin.statuses().front();
+  ASSERT_TRUE(
+      devin.waitFor(devinStatus.id, xanadu::LinkPackagePhase::Published, 60s));
+  const auto layerEvidence =
+      fs::current_path() / "build/publication-layers/network-ui";
+  fs::create_directories(layerEvidence);
+  const auto read = [](const fs::path &path) {
+    std::ifstream input(path, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>(input), {}};
+  };
+  for (const std::string user : {"Bob", "Carl"}) {
+    const auto readerProfile = root / (user + "-layer-reader");
+    fs::create_directories(readerProfile / "workspace/published");
+    std::ofstream(readerProfile / "workspace/published/source.xanadoc",
+                  std::ios::binary)
+        << xanadu::encodePublication(publication);
+    const auto userBase = uiBase(readerProfile, true);
+    const auto userLog  = layerEvidence / (user + "-fetch.log");
+    const auto fetch =
+        userBase +
+        " --chord Ctrl+Alt+Shift+L --chord Return --wait-ms 35000 --chord "
+        "Return --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-catalog.ppm")).string()) +
+        " --chord Right --chord Return --wait-ms 35000 --chord Return --chord "
+        "Right --chord Return --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-review.ppm")).string()) +
+        " --chord Right --chord Return --wait-ms 30000 --chord Return --chord "
+        "Right --chord Return --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-opened.ppm")).string()) + " > " +
+        quote(userLog.string()) + " 2>&1";
+    ASSERT_EQ(std::system(fetch.c_str()), 0) << read(userLog);
+    xanadu::LinkPackageExchange offline(
+        {.directory = readerProfile / "data/xudu/link-packages"});
+    const auto cached = offline.statuses();
+    ASSERT_EQ(cached.size(), 1U) << read(userLog);
+    ASSERT_EQ(cached[0].package.title, "Devin's links") << read(userLog);
+    ASSERT_EQ(cached[0].phase, xanadu::LinkPackagePhase::Ready);
+    xanadu::PublicationInbox inbox(
+        {.directory = readerProfile / "data/xudu/publication-inbox"});
+    const auto downloads = inbox.statuses();
+    ASSERT_EQ(downloads.size(), 1U) << read(userLog);
+    ASSERT_EQ(downloads[0].phase, xanadu::PublicationDownloadPhase::Ready);
+    const auto native         = downloads[0].storePath;
+    const auto originalNodes  = read(native / "ops.nodes"),
+               originalTables = read(native / "store.tables");
+    auto offlineBase =
+        userBase.substr(0, userBase.find(" --test-publication-swarm"));
+    const auto workspace = quote((readerProfile / "workspace").string());
+    offlineBase.replace(offlineBase.find(workspace), workspace.size(),
+                        quote(native.string()));
+    const std::string reviewControls =
+        " --chord Ctrl+Alt+Shift+L --chord Right --chord Return --chord Return "
+        "--chord Right --chord Return";
+    const std::string toggle = " --chord Right --chord Right --chord Right "
+                               "--chord Right --chord Right --chord Return";
+    const std::string navigate =
+        " --chord Right --chord Right --chord Right --chord Right --chord "
+        "Right --chord Right --chord Return";
+    const auto enableLog = layerEvidence / (user + "-enabled.log");
+    const auto enable =
+        offlineBase + reviewControls + toggle + " --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-enabled.ppm")).string()) + navigate +
+        " --chord Alt+Shift+J --chord Alt+Shift+J --chord Alt+Shift+L "
+        "--chord Alt+Shift+Return "
+        "--dump-a11y --capture " +
+        quote((layerEvidence / (user + "-navigated.ppm")).string()) +
+        " --chord Alt+Shift+X --chord Alt+Shift+Return --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-cell-navigated.ppm")).string()) +
+        " > " + quote(enableLog.string()) + " 2>&1";
+    ASSERT_EQ(std::system(enable.c_str()), 0) << read(enableLog);
+    EXPECT_THAT(read(enableLog), testing::HasSubstr("reader layer enabled"));
+    EXPECT_THAT(read(enableLog),
+                testing::HasSubstr(
+                    "Left 2/2 · occurrence 1/2 · document 0, bytes 6 to 11"));
+    EXPECT_THAT(read(enableLog), testing::HasSubstr("reading: left member 2"));
+    EXPECT_THAT(read(enableLog),
+                testing::HasSubstr("Research [value kind: none] (Focused)"));
+    EXPECT_TRUE(xanadu::ReaderLinkPackages(readerProfile /
+                                           "data/xudu/package-visibility")
+                    .enabled(cached[0].hash));
+    const auto disableLog = layerEvidence / (user + "-restart-disabled.log");
+    const auto disable =
+        offlineBase + reviewControls + " --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-restart.ppm")).string()) + toggle +
+        " --dump-a11y --capture " +
+        quote((layerEvidence / (user + "-disabled.ppm")).string()) +
+        " --chord Right --chord Right --chord Right --chord Return --dump-a11y "
+        "--capture " +
+        quote((layerEvidence / (user + "-disabled-document.ppm")).string()) +
+        " > " + quote(disableLog.string()) + " 2>&1";
+    ASSERT_EQ(std::system(disable.c_str()), 0) << read(disableLog);
+    EXPECT_THAT(read(disableLog), testing::HasSubstr("reader layer enabled"));
+    EXPECT_THAT(read(disableLog), testing::HasSubstr("reader layer disabled"));
+    EXPECT_FALSE(xanadu::ReaderLinkPackages(readerProfile /
+                                            "data/xudu/package-visibility")
+                     .enabled(cached[0].hash));
+    EXPECT_EQ(read(native / "ops.nodes"), originalNodes);
+    EXPECT_EQ(read(native / "store.tables"), originalTables);
+  }
 }
 
 TEST_F(PublicationOutboxNetworkTest,

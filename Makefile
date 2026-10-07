@@ -598,13 +598,10 @@ ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
 LIB_SRCS_C += $(ZSTD_SEEKABLE_SRCS)
 endif
 GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
-# The xanalogical engine and common data models are shared between xudu and zigzag
-# under apps/common/xanadu/.
+# The engine and graphical presentations are shared under apps/common/.
 COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
 COMMON_UI_SRCS     := $(shell find apps/common/ui -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
-XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
-ZIGZAG_SRCS    := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
@@ -620,8 +617,6 @@ GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 COMMON_UI_OBJS     := $(call obj,$(COMMON_UI_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
-XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
-ZIGZAG_OBJS     := $(call obj,$(ZIGZAG_SRCS))
 XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
@@ -699,8 +694,8 @@ RPATH_FLAGS += -Wl,-rpath,$(libdir)
 endif
 endif
 
-ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) $(XUZZ_OBJS) \
-	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
+ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
+	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS))
@@ -838,8 +833,8 @@ $(OBJDIR)/xudu: $(OBJDIR)/xuzz
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
-$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) \
 	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
@@ -899,7 +894,7 @@ $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_OBJS) $(XUDU_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
