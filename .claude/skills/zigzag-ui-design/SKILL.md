@@ -13,7 +13,7 @@ interaction models for ZigZag slice views in `xuzz`. `zigzag` is retired as a se
 
 New slice views are specified in [`design/view-system.md`](../../../design/view-system.md): a view
 is a registered `View` over a `ViewManifold`, with pure layout in `apps/common/xanadu/view/` and
-renderer wiring in `apps/xuzz/`. Sections 2 and 3 below describe the two presentations
+drawing in `apps/common/ui/view/`. Sections 2 and 3 below describe the two presentations
 `ZigzagVisualizer` implements today; the Matrix View in §3 was never built.
 
 ## 1. Core Architectural Concept
@@ -99,7 +99,7 @@ ______________________________________________________________________
 1. **One link choke point**: any cell the view mints goes through `ViewManifold`, which keeps at
    most one neighbour per direction per dimension and tosses view cells on rebind.
 1. **Lattice & Dimension Shaders**: Ensure fixed-size tiles use instanced quad batching with
-   dimension color coding; draw calls live in `apps/xuzz/`.
+   dimension color coding; draw calls live in `apps/common/ui/view/`.
 1. **Keymap, Picking & Accessibility**: every action ships with a default chord in
    `system://keymap`; expose cell nodes to `a11y::Builder` with current coordinate values, and give
    view-only cells a role other than `cell`.

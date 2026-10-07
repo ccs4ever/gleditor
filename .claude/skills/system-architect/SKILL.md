@@ -13,8 +13,11 @@ This skill defines the multi-agent architecture and operational protocols for ma
 code quality, modular architectural layering, empirical performance optimization, and clean
 layer-appropriate configuration across **`gleditor`** (core library and plain editor) and
 **`xuzz`**, the one application for xanadocs and ZigZag slices. `xudu` and `zigzag` are retired as
-applications; `apps/xudu/` and `apps/zigzag/` hold components that `xuzz` links, and new code goes
-in the engine (`apps/common/xanadu/`) or in `apps/xuzz/`.
+applications and nothing should live in `apps/xudu/` or `apps/zigzag/`. The library stays generic
+(the plain editor uses it and has no Xanadu reference); xanalogical code goes in `apps/common/` —
+`apps/common/xanadu/` without a graphics device, `apps/common/ui/` with one — and `apps/xuzz/` holds
+only what is unique to that program. Library tests live in `tests/lib/` and are not repeated in
+`xuzz_test`.
 
 ```
        +-------------------------------------------------------------+

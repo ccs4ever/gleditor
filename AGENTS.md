@@ -118,6 +118,9 @@ make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against 
 - `gleditor_test` links the real shared library (catches export-boundary bugs). `xudu_test` and
   `xuzz_test` link only the xanalogical engine, no graphics device, on purpose. `zigzag_test` covers
   the slice model and the transclusion engine.
+- **A test sits with its code, once.** Generic library behaviour is tested in `tests/lib/` and
+  nowhere else; `xuzz_test` is kept to xuzz's own code and must not repeat the library's battery
+  (font, scale and backend sweeps belong to `tests/lib/`).
 - `make test` ends with `tools/swarm-netns-test.sh` under `unshare -Urnm`. That needs the `veth`
   kernel module; without it the run ends in `Error: Unknown device type.` and a non-zero exit
   **after all four gtest binaries passed**. `sudo modprobe veth` is the fix and it is the user's to
@@ -249,17 +252,22 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   (Spanfilade, Chronofilade + `EdlTransform`, Holefilade, Arrayfilade — all ephemeral replay
   products that mint no operations), `identity/` (BEP 10 plugins, Hashcash PoW, network controller),
   `vortex/` (core, VM, host, stdlib), `vql/`, `vpl/`, `vprolog/`, `zigzag/`.
-- `apps/xudu/` — xuzz's xanadoc UI components, in namespace `xanadu`: `beams.cpp`, `session.cpp`,
-  `bridge_coordinator.cpp`, `views.cpp`, overlays. Not a program: `xudu` is retired as an
-  application and these objects link into `xuzz`. Add no new files here. Emits no Structure
-  operations directly (only `batch_orchestrator.cpp` does); the editor is text-ops only.
-- `apps/zigzag/` — xuzz's ZigZag visualizer components: `zigzag_visualizer.cpp`,
-  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`. Not a program either, and likewise
-  closed to new files; `design/view-system.md` plans its removal.
-- `apps/common/ui/` — overlays shared by both: `hypertime_graph.cpp`,
-  `quotation_builder_overlay.cpp`, `store_object_manager.cpp`.
-- `apps/xuzz/` — sovereign unified application entry point (`main.cpp`, `xuzz_app.cpp`, `cli.cpp`,
-  `view_coordinator.cpp`).
+- **Where code goes.** `src/` and `include/gleditor/` are generic only (the plain editor uses them
+  and has no Xanadu reference by design). Everything xanalogical goes in `apps/common/`:
+  `apps/common/xanadu/` if it needs no graphics device, `apps/common/ui/` if it draws or takes
+  input. `apps/xuzz/` is for what is truly unique to the xuzz program, which should be rare.
+- `apps/xudu/` and `apps/zigzag/` — **nothing should live here.** They still hold xuzz's xanadoc UI
+  components (`beams.cpp`, `session.cpp`, `bridge_coordinator.cpp`, `views.cpp`, overlays; in
+  namespace `xanadu`) and its visualizer (`zigzag_visualizer.cpp`,
+  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`) until they are moved;
+  `design/view-system.md` §17 step 1 says where each file goes. Add no file to either, and move a
+  file when you change it. The xanadoc components emit no Structure operations directly (only
+  `batch_orchestrator.cpp` does); the editor is text-ops only.
+- `apps/common/ui/` — xanalogical UI shared by any graphical front end: `hypertime_graph.cpp`,
+  `quotation_builder_overlay.cpp`, `store_object_manager.cpp`, the link-panel and page-break
+  presentations.
+- `apps/xuzz/` — the program: `main.cpp`, `xuzz_app.cpp`, `cli.cpp`, and for now
+  `view_coordinator.cpp`.
 - `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
 - `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
   any more: the YAML slice format is deleted and every slice is a store.
@@ -398,9 +406,14 @@ Rules:
   store; a proposed separate activity store records completed reader visits), R11 and R12 are the
   ones most often needed.
 - [`view-system.md`](design/view-system.md) — proposal, unbuilt: xuzz's pluggable View system over
-  the store (`ViewManifold`, cell-based axis bindings and dimension groups, the O(1) toss of
-  view-minted cells) and the stretch vanishing, all-dim walk and dimensional pack views. Read before
-  adding a zigzag view or touching `ViewAxisBinding`.
+  the store. Slice views (stretch vanishing, all-dim walk, dimensional pack) over a `ViewManifold`
+  with cell-based bindings and an O(1) toss; page views (base, stacked vanishing); scenes and panes;
+  and where all of it lives. Read before adding a view or touching `ViewAxisBinding`,
+  `ZigzagVisualizer` or `xanadu::Views`.
+- [`world-space-rendering-plan.md`](design/world-space-rendering-plan.md) — plan, unbuilt, library
+  only: unprojection matching the projection code, render regions (device scissor and depth range),
+  placed planes and a page arrangement seam. Records the backends' clip-space conventions, Vulkan's
+  reversed Z included.
 - [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
   carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),

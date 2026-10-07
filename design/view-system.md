@@ -1,37 +1,43 @@
 # A Pluggable View System for Xanadocs and ZigZag Slices
 
-Status: proposal. Date: 2026-10-07.
+Status: proposal, unbuilt. Date: 2026-10-07.
 
 ## Abstract
 
-`ZigzagVisualizer` is a single 4,000-line class that owns one fixed-axis layout algorithm, and
-`xanadu::Views` is a single coordinator that owns xanadoc presentation; neither exposes a seam
-another layout strategy could plug into, and `apps/xuzz/view_coordinator.{hpp,cpp}` composes exactly
-one of each, program-wide. This document specifies a `View` abstraction that sits between the store
-and the renderer: a registry of swappable layout strategies, a `ViewManifold` that separates
-configuration a user set (which dimensions are bound to which axes) from presentation geometry a
-view minted to draw the current frame, and a per-frame pipeline (`layout` →
-`AnimationState::advance` → draw adapter) that is pure, allocation-disciplined, and testable without
-a GPU. It specifies, precisely enough to implement without further design work, three ZigZag views —
-**stretch vanishing**, **all-dim walk**, and **dimensional pack view** — the `d.pack`/`d.packing`
-dimension pair a pack view needs, and the one invariant every ZigZag view must hold: a cell has at
-most one neighbour per dimension per direction, including every view-minted cell, at every moment,
-even while dimensions are being rebound. It specifies a toss operation that is literally O(1) — a
-generation counter increment — and separates it honestly from the O(visible) and O(discarded) work
-that follows it but never blocks it. Xanadoc-side (`PageView`) layout algorithms are explicitly out
-of scope; this document fixes only the seam a follow-up specification will fill.
+Xuzz draws ZigZag slices through one 5,000-line class, `ZigzagVisualizer`, and xanadoc pages through
+one coordinator, `xanadu::Views`. Neither exposes a seam another layout could plug into, and
+`ViewCoordinator` composes exactly one of each. This document specifies a view system that sits
+between the store and the renderer:
+
+- a registry of **slice views**, which lay out cells, and **page views**, which lay out pages, with
+  no closed list of either;
+- a **view space** for slice views in which view-minted cells live apart from the store, keep
+  ZigZag's one-neighbour-per-direction rule, and are tossed in constant time when dimensions are
+  rebound;
+- a **binding model** in which axes, dimension groups and their order are cells, with no fixed
+  number of any;
+- three slice views — **stretch vanishing**, **all-dim walk** and **dimensional pack view** — and
+  two page views — the **base view** and the **stacked vanishing view** — each specified to the
+  level of an algorithm and its acceptance tests;
+- **scenes and panes**, so pages and cells share one world or sit side by side;
+- where every piece of code goes: generic rendering backbone in `libgleditor`, everything
+  xanalogical in `apps/common/`, and only program start-up in `apps/xuzz/`.
+
+Everything a view places — cells, pages, edges, labels — is placed in world space under a real
+camera. The library work that needs (unprojection, device scissor, depth range and placed planes) is
+planned separately in [`world-space-rendering-plan.md`](world-space-rendering-plan.md).
 
 ## How to read this, for implementing agents
 
-Section 3 (requirements) is the acceptance test; section 18 maps every clause of the user's original
-request to the requirement, section, and ruling that satisfies it. Section 6 (the view space) and
-section 8 (the API) are normative — every signature there is the one to implement, not an example.
-Sections 9 (the three views) are the detailed algorithms; implement them against section 8's types,
-not against the ASCII diagrams alone. Section 15 (migration) is the order of work; each step keeps
-`make test` green on its own. Section 16 (rulings) records what was decided and why, including the
-alternatives each one refused — read it before arguing with a decision made here, because the
-alternative was very likely already considered and priced. Section 17 (open questions) is not this
-document's job to close; do not block implementation on it.
+Section 3 is the acceptance test, and section 20 maps every clause of the two requests behind this
+document to it. Sections 5 to 8 are normative: where code lives, the view space, the binding model
+and the API. Sections 9 and 10 are the views. Section 17 is the order of work; each step keeps
+`make test` green. Section 18 records each ruling with its price and what it refused — read it
+before arguing with a decision, because the alternative was probably considered. Section 19 lists
+what is still open; do not block on it.
+
+Code is cited by path, and by line where the line was checked against the tree at `af5f1d5`. Paths
+under `apps/xudu/` and `apps/zigzag/` are where the code sits today; §17 step 1 moves it.
 
 ______________________________________________________________________
 
@@ -39,21 +45,20 @@ ______________________________________________________________________
 
 ### 1.1 What exists today
 
-`ZigzagVisualizer` (`apps/zigzag/zigzag_visualizer.hpp:110-114`) multiply inherits
-`gleditor::FrameContributor`, `gleditor::PickObserver`, `gleditor::a11y::Source`,
-`gleditor::ui::FocusScope`, and `xanadu::ZigzagPresentationSurface`. There is no `View`/`Layout`
-interface and no registry: one instance owns the manifold engine, the focus cell, the dimension
-bindings, render-state caching, the palette, the command bar, cell editing, and drawing. Two view
-modes exist — `enum class ViewMode { CellContent, Topology }`
-(`apps/zigzag/zigzag_visualizer.hpp:191-200`) — both laid out by one function,
-`rebuildActiveViewTopology()` (`apps/zigzag/zigzag_visualizer.cpp:1158-1390`), which walks exactly
-three bound dimensions out to a fixed radius and stacks each newly discovered cell at
-`offset = unitDir * spacing` from its parent: a recursive chain layout along three fixed axes, not a
-general N-dimensional placement.
+**Slices.** `ZigzagVisualizer` (`apps/zigzag/zigzag_visualizer.hpp`) inherits
+`gleditor::FrameContributor`, `PickObserver`, `a11y::Source`, `ui::FocusScope` and
+`xanadu::ZigzagPresentationSurface`. One instance owns the engine, the focus cell, the bindings, the
+layout, the palette, the command bar, cell editing and drawing. It has two modes,
+`enum class ViewMode { CellContent, Topology }` (`zigzag_visualizer.hpp:209`), both laid out by
+`rebuildActiveViewTopology()`, which walks exactly three bound dimensions out to a fixed radius
+(`mapAxis` over unit vectors x, y and z, `zigzag_visualizer.cpp:1410-1414`). Every cell is then
+drawn on one planar `Canvas` at its x and y (`zigzag_visualizer.cpp:1971-2070`); the z a depth-bound
+cell was given reaches the beams between cells but not the canvas the cells are drawn on.
 
-Binding is `ViewAxisBinding` (`apps/common/xanadu/zigzag/zzstructure.hpp:103-109`):
+Binding is three named fields:
 
 ```cpp
+// apps/common/xanadu/zigzag/zzstructure.hpp:103
 struct ViewAxisBinding {
   DimID x_dimension = "d.1";
   DimID y_dimension = "d.2";
@@ -61,1417 +66,1295 @@ struct ViewAxisBinding {
 };
 ```
 
-three named fields, no group, no list, no runtime count — the entirety of "dimension binding" is
-three slots. `enum class DimensionBundle` (`zzstructure.hpp:111-165`) adds five hardcoded named
-triples (`Execution`, `Scope`, `Contract`, `Logic`, `Stdlib`, `Custom`); it is the closest existing
-analogue to a dimension group, and it is a closed C++ enum of exactly-three-dimension presets, not
-data a user can build.
+and `enum class DimensionBundle` (`zzstructure.hpp:111`) adds a closed set of named triples. That is
+the whole of "dimension binding": no list, no group, no runtime count.
 
-`apps/xuzz/view_coordinator.{hpp,cpp}` holds exactly one `xanadu::Views&` and one
-`shared_ptr<zigzag::ZigzagVisualizer>` and toggles between `Unified`, `XanadocOnly`, `ZigzagOnly` —
-one xanadoc view and one zigzag view, program-wide, with no pane/viewport manager. `xanadu::Views`
-(`apps/xudu/views.{hpp,cpp}`, 2043+263 lines) is likewise one coordinator, not a pluggable
-abstraction — it owns document switching, onion-skin comparison, camera framing, link UI, and
-drawing directly.
+**Pages.** The library places each open `Doc` in a horizontal row (`AbstractRenderer::documentSlot`,
+`include/gleditor/renderer.hpp:312`; `render::kDefaultDocumentGap`) and flows a document's pages
+downwards (`Doc::pageGapPx`, `include/gleditor/doc.hpp:775`; each `Page` carries its own model
+matrix). When a link or a transclusion is activated, `LinkBeams` re-seats the row and moves the far
+*document* so the linked passages are level: it builds one `TensionBody` per document and one
+`TensionConstraint` for the link, steps `TensionLayoutEngine` 25 times, and animates the documents
+to the result (`apps/xudu/beams.cpp`, the block ending in `far->animateMoveTo(...)`;
+`apps/common/xanadu/tension_layout.hpp`). `xanadu::Views` (`apps/xudu/views.hpp:54`) owns document
+switching, alongside and onion-skin comparison, camera framing and the link UI. None of it is
+replaceable: the arrangement is the code.
 
-### 1.2 Xuzz is the only application
+**Composition.** `apps/xuzz/view_coordinator.hpp` holds one `xanadu::Views&` and one
+`shared_ptr<zigzag::ZigzagVisualizer>` and switches between `Unified`, `XanadocOnly` and
+`ZigzagOnly` (`apps/xuzz/cli.hpp:24`). There is no pane, no second camera and no registry.
 
-`xudu` and `zigzag` are retired as programs. Commit `b48bf09` ("fold xudu and zigzag into unified
-sovereign xuzz application") deleted `apps/xudu/main.cpp` and `apps/zigzag/main.cpp`; the Makefile
-links `$(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS)` into the one `build/xuzz`, and `build/xudu` and
-`build/zigzag` are symlinks to it. `apps/xudu/` and `apps/zigzag/` survive only as directories of
-components that `xuzz` links, and `apps/xuzz/view_coordinator.hpp` already includes both
-(`xudu/views.hpp`, `zigzag/zigzag_visualizer.hpp`).
+### 1.2 One application, and where code goes
 
-This document therefore specifies a view system *for xuzz*, and adds no code to either legacy
-directory:
+`xudu` and `zigzag` are retired as programs: commit `b48bf09` deleted their `main.cpp` files, and
+`build/xudu` and `build/zigzag` are symlinks to `build/xuzz`. Their directories still hold the
+components `xuzz` links. That is now also wrong. The rule this document follows, and
+`.claude/rules/architectural_governance.md` §1 states, is:
 
-- the framework and the built-in views' pure layout code go in the engine,
-  `apps/common/xanadu/view/`, where `xuzz_test` (which links the engine and no graphics device) can
-  test them;
-- everything that touches the renderer, input or the window goes in `apps/xuzz/`;
-- `ZigzagVisualizer` and `xanadu::Views` are the things being replaced. Each migration step (§15)
-  moves a responsibility out of them into a view or into `apps/xuzz/`, and the step that empties one
-  deletes it. Nothing new is written against "the zigzag side" or "the xudu side" as a separately
-  buildable unit, and no seam exists to keep the two apart: a slice view and a page view are two
-  kinds of view in one program, distinguished by what they lay out (cells or pages), not by which
-  application owns them.
+1. **`libgleditor`** (`src/`, `include/gleditor/`) holds generic components only — the backbone that
+   xuzz and others specialise. `apps/gleditor` uses it and has no Xanadu reference by design, so
+   nothing with a cell, a link, a xanadoc or a view kind in its name goes there. Its tests are in
+   `tests/lib/` and are not repeated anywhere else.
+1. **`apps/common/`** holds everything xanalogical: `apps/common/xanadu/` for code that needs no
+   graphics device and can be shared with `vquery`, `vpl`, `vprolog` and the compilers, and
+   `apps/common/ui/` for code that draws or takes input through the library.
+1. **`apps/xuzz/`** holds only what is unique to the xuzz program: `main.cpp`, the command line and
+   the application wiring. That should stay rare.
+1. **`apps/xudu/` and `apps/zigzag/` hold nothing.** §17 step 1 moves what is there today.
 
-`.claude/rules/architectural_governance.md` §1 still words its isolation rule in terms of
-`apps/xudu` and `apps/zigzag` as applications. That wording predates the fold and should be revised
-alongside this work; the rule that survives unchanged is that `src/` and `include/gleditor/` never
-include `apps/`.
+### 1.3 Why none of this hosts the views
 
-### 1.3 Why none of this hosts three new views
+- **Stretch vanishing** needs content-fitted placement, an edge fade and an all-or-nothing clip
+  rule. The fixed-radius chain layout has none, and the library's culling test is "entirely outside"
+  (`outsideFrustum`, `include/gleditor/draw_budget.hpp`), never "entirely inside".
+- **All-dim walk** needs every dimension a cell is linked on, arranged in three dimensions. Three
+  named fields have no room for a fourth dimension, and one planar canvas has no third dimension.
+- **Dimensional pack view** needs user-built dimension groups and a new kind of cell, a pack, that
+  must never become document structure.
+- **The stacked vanishing view** needs each *page* placed on its own: at its own depth, with its own
+  opacity. A `Doc` places its pages itself, in one fixed column.
+- **The base view** exists, but only as `LinkBeams` moving whole documents; nothing can replace or
+  refine it.
+- **Mixing** needs more than one of each. `ViewCoordinator` has one of each.
 
-- **Stretch vanishing** needs per-cell content-fit placement, edge opacity, and a hard clip rule
-  none of today's fixed-radius chain layout or binary frustum culling expresses
-  (`include/gleditor/draw_budget.hpp:54-92`'s `outsideFrustum` is "fully outside," never "fully
-  inside," and there is no partial-clip test at all).
-- **All-dim walk** needs every dimension a cell participates in, bound or not, arranged in 3-D —
-  `ViewAxisBinding`'s three slots have no room for an unbound dimension at all, and `rasterize()`'s
-  radius walk never visits a dimension that is not one of the three bound ones.
-- **Dimensional pack view** needs user-authored, uncapped dimension *groups* and a new kind of cell
-  — a pack container — that `DimensionBundle`'s closed five-entry enum cannot represent and that no
-  existing cell kind models.
-- All three need view-minted cells (pack containers, ring-slot placeholders, axis-label anchors)
-  that must never become real document structure and must disappear cheaply when a dimension is
-  rebound. No such mechanism exists above `apps/common/xanadu/zigzag/arena_manifold.hpp`'s
-  ephemeral-cell machinery, and nothing above it enforces that a view obeys the
-  one-neighbour-per-direction invariant while minting those cells.
-- No multi-pane compositor exists: `ViewCoordinator` toggles visibility of one zigzag presentation
-  and one xanadoc view; "many xanadoc views and many zigzag views mixed freely in one screen" has no
-  extension point to build on.
+### 1.4 What is reused
 
-### 1.4 What already exists and is reused, not reinvented
-
-- `ArenaManifold` (`apps/common/xanadu/zigzag/arena_manifold.hpp`) already gives copy-on-write
-  overlay over a base `Manifold`, an `ephemeralBit` on every ref it mints, `mark()`/`release()`/
-  `discard()` choice-point undo, and a federation (`Space`) mechanism — this is reused wholesale as
-  the substrate for every view's derived state (§6.1).
-- `cell_views.hpp`'s `CellGraph` concept, `RankView`, and `neighbours()` already work over both
-  `Manifold` and `ArenaManifold` and are reused unchanged for every traversal a view needs.
-- `dimensionsOf(CellRef)` (`manifold.hpp:468-469`) is the exact, uncapped "every dimension a cell
-  participates in" primitive all-dim walk needs.
-- `system_docs.hpp`'s `LayoutConfig::fromStore`/`SettingSpec` pattern is reused unchanged for every
-  new tunable this document introduces.
-- `d.clone`'s single-dimension, dual-direction idiom (`Manifold::cloneMaster`,
-  `manifold.hpp:446-458`) is the structural precedent `d.pack` follows (§9.3.2).
+- `ArenaManifold` (`apps/common/xanadu/zigzag/arena_manifold.hpp`): cells with no operations behind
+  them, refs that carry `ephemeralBit` and are refused by every write to a store, and
+  `mark()`/`release()` as truncation. §6 uses it unchanged.
+- `cell_views.hpp`: the `CellGraph` concept, `RankView` and `neighbours()` work over `Manifold` and
+  `ArenaManifold` alike.
+- `Manifold::dimensionsOf()` (`manifold.hpp:469`): every dimension a cell is linked on, uncapped —
+  what all-dim walk enumerates.
+- `ValueKind::OpHandle` and `handleTarget()` (`manifold.hpp:440`): a cell whose value names another
+  cell. §6.3 uses it for every view cell that stands for a real one.
+- `TensionLayoutEngine` (`apps/common/xanadu/tension_layout.hpp`): today's link alignment, kept as
+  the base view's first coalescing strategy (§10.3).
+- `LinkOccurrences`, `DocumentSite`, `LinkKey` (`apps/common/xanadu/link_occurrences.hpp`) and the
+  activity log (`link_navigation.hpp`, `store_activity_log.hpp`): where link ends are and where the
+  reader has been.
+- `system_docs.hpp`'s `SettingSpec` pattern for every tunable.
 
 ### 1.5 The fitted UI layer
 
-The UI text-fit overhaul (`design/ui-text-fit-baseline.md` through `ui-text-fit-batch9.md` and the
-review follow-up) landed after this document's first draft. It gives the library a shared answer to
-several things this document had specified for itself, and the document now builds on it:
+The UI text-fit work (`design/ui-text-fit-baseline.md` to `ui-text-fit-batch9.md`) gave the library
+shared answers that views use and do not repeat:
 
-| Need                                    | Fitted UI facility                                                                                              | Used here for                                        |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Text that fits a box without byte cuts  | `text::fit()` and `TextFit` (`Clip`, `Ellipsis`, `Wrap`, grapheme- and cluster-safe), `<gleditor/text/fit.hpp>` | cell content, edge labels, chips, badges             |
-| Shape once, reuse                       | `text::ShapingCache`, `<gleditor/text/shaping_cache.hpp>`                                                       | the content measurer; retained draws                 |
-| Boxed text and clipping on a `Canvas`   | `Canvas::addText(box, ...)`, `Canvas::addText(box, FittedText)`, `pushClip`/`popClip`                           | every text draw the adapter makes                    |
-| Typography and scale                    | `ui::Theme` font roles (`Caption`, `Label`, `Body`, `Title`, `Mono`), `ui::UiMetrics`, the `ui.*` settings      | all view text; no view-owned font or point size      |
-| Projected legibility                    | `ui::projectPlane()`, `ui::labelLOD()`, `<gleditor/ui/world_panel.hpp>`                                         | hiding labels too small to read, keeping their names |
-| Widget scenes on a world plane          | `ui::WorldPanel`                                                                                                | pack frames with their chips                         |
-| Keyboard, pointer, modality, pane focus | `ui::FocusScope`, `ui::FocusManager` (`addPane`, `cyclePane`, `push`, GPU pick targets)                         | pane focus, view chrome, drag gestures               |
-| Flow, stack, grid and split layout      | `<gleditor/ui/layout.hpp>`, `<gleditor/ui/widgets.hpp>`, `ui::ScreenOverlay`                                    | the binding HUD, view palette, group editor          |
-| Proof that a warm frame shapes nothing  | `text::ShapingStatsScope`, `ShapingCache::Stats`, `tools/ui-text-baseline.cpp`                                  | V-R37's test                                         |
-| A lint gate on text policy              | `tools/check-ui-text-policy.py`, run by `make lint`                                                             | the adapter and view chrome sources                  |
+| Need                                      | Library facility                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- |
+| Text fitted to a box, never cut by byte   | `text::fit()`, `TextFit` (`<gleditor/text/fit.hpp>`)                                |
+| Shape once                                | `text::ShapingCache`                                                                |
+| Boxed text and CPU clipping               | `Canvas::addText(box, ...)`, `pushClip`/`popClip`                                   |
+| Typography and scale                      | `ui::Theme` font roles, `ui::UiMetrics`, the `ui.*` settings                        |
+| Legibility of a projected plane           | `ui::projectPlane()`, `ui::labelLOD()` (`<gleditor/ui/world_panel.hpp>`)            |
+| Focus, modality, pane focus, GPU picks    | `ui::FocusScope`, `ui::FocusManager` (`addPane`, `cyclePane`, `push`, pick targets) |
+| Screen chrome                             | `<gleditor/ui/layout.hpp>`, `<gleditor/ui/widgets.hpp>`, `ui::ScreenOverlay`        |
+| Proof that a settled frame shapes nothing | `text::ShapingStatsScope`, `ShapingCache::Stats`                                    |
+| Text policy lint                          | `tools/check-ui-text-policy.py`                                                     |
 
-All of it lives in `libgleditor`, which `xuzz_test` does not link. That fixes the division of labour
-in §5: the engine-side `layout()` asks for sizes through the measurer in `LayoutInput` and never
-names a font, and everything in the table is called from `apps/xuzz/`. The visualizer already works
-this way after batch 8 — fitted labels and retained shaping are separate from cell and dimension
-identity, and visual fitting never changes canonical cell text — so the views inherit a working
-pattern, not a plan.
+All of it is in `libgleditor`, which the engine does not link. So a view's layout sees text only as
+sizes returned by a measurer, and everything in the table is called from `apps/common/ui/`.
 
 ______________________________________________________________________
 
 ## 2. Scope
 
-This document covers the shared view framework (`apps/common/xanadu/view/`), the ZigZag-side
-invariants and the `ViewManifold`, the three required ZigZag views, mixed-viewport compositing, and
-the `PageView` seam. It does not design any xanadoc (page) view's layout algorithm — see ruling V12
-and section 10.3.
+In scope: the view framework; the slice view space and binding model; three slice views; the page
+model and two page views; scenes, panes and mixing; interaction, settings, accessibility, tests and
+migration; and the placement of all of it under §1.2.
+
+Out of scope: how the library implements unprojection, scissor, depth range and placed planes (see
+[`world-space-rendering-plan.md`](world-space-rendering-plan.md)); the page views listed as
+candidates in §10.5; the schema of `system://activity` beyond what a view writes to it.
 
 ______________________________________________________________________
 
 ## 3. Requirements
 
-Each requirement is a single testable sentence. "MUST" requirements are acceptance-blocking;
-"SHOULD" requirements are strongly preferred but not blocking. Requirement IDs are stable and are
-the traceability table's (§18) left-hand keys.
+Each is one testable sentence. IDs are stable; §20 uses them.
 
 ### 3.1 Framework
 
-- **V-R1.** A `View` MUST be installable through a single registration call
-  (`ViewRegistry:: registerView`) with no enum, switch statement, or other closed list anywhere in
-  the framework naming a specific view kind.
-- **V-R2.** A pane MUST be able to hold any installed `View`, slice-backed or page-backed, chosen
-  independently of every other pane's choice.
-- **V-R3.** `View::layout()` MUST be a pure function of
-  `(ViewManifold state, focus, viewport, tunables)` — no GPU call, no heap allocation outside a
-  caller-owned arena, no mutation of animation or store state — and MUST be callable from a headless
-  unit test with no rendering device.
-- **V-R4.** Every per-frame data structure a `View` writes into (`LayoutSink`'s spans) MUST be
-  caller-owned and reused across frames; growth MUST be logged (`GLEDITOR_LOG_DEBUG`), never silent,
-  and MUST never be a hard-capped truncation that drops data a view would otherwise draw.
+- **V-R1.** A view MUST be installed by one registration call, with no enum, switch or other closed
+  list naming a view kind anywhere in the framework.
+- **V-R2.** `layout()` MUST be a pure function of its input: no graphics call, no allocation outside
+  caller-owned storage, no mutation of a view space, a store or animation state; and it MUST run in
+  a test with no graphics device.
+- **V-R3.** Anything a view must mint or cache MUST be produced in a separate `prepare()` phase that
+  runs only when an input changed, never per frame.
+- **V-R4.** Every placed thing MUST be placed in world space — a position, an orientation and a size
+  in the scene — so that one camera transform moves, rotates and scales all of it together.
+- **V-R5.** A layout record that cannot fit the caller's storage MUST cause the storage to grow and
+  the growth to be logged; it MUST never be dropped.
 
-### 3.2 ZigZag view-space invariants
+### 3.2 Slice view space
 
-- **V-R5.** For every `(cell, dimension, direction)` where `cell` is real or view-minted and
-  `dimension` is one this view currently treats as structural (bound axis, group member, or a
-  view-owned bookkeeping dimension), the view's manifold MUST answer at most one neighbour — I1,
-  §6.3.
-- **V-R6.** A view-minted `CellRef` MUST be refused, by construction, as the target of any operation
-  that would persist it into a real `Store` — I2, §6.3.
-- **V-R7.** Rebinding a dimension MUST make every cell minted under the previous binding unreachable
-  through a single, constant-time operation, independent of how many cells were minted — I3, §6.4.
-  The constant-time operation and the proportional-cost work that follows it MUST be stated and
-  tested separately (§6.4, §13).
-- **V-R8.** Every view-minted cell MUST resolve, within a bounded number of hops, to a real
-  `CellRef` that a renderer or editor can act on — I4, §6.3.
-- **V-R9.** A view MUST NOT write a `DimLink` for a bound dimension onto a real cell's own slot for
-  binding or display purposes — I5, §6.3; a view that needs "the effective posward neighbour on this
-  axis is a pack, not the real neighbour" expresses that through view-owned dimensions, never by
-  shadowing the real one.
-- **V-R10.** The focus/cursor identity MUST be stored as a real `CellRef`, never a view-minted one,
-  so that it survives a toss — I6, §6.3.
+- **V-R6.** For every cell a view holds, real or view-minted, and every dimension, the view space
+  MUST answer at most one neighbour in each direction.
+- **V-R7.** A view-minted cell MUST be refused as the subject or target of any write to a store.
+- **V-R8.** No view MUST ever cause a real cell to be shadowed in a view arena.
+- **V-R9.** Rebinding MUST discard every derived view cell, and reclaim its storage, in a number of
+  steps that does not depend on how many were minted.
+- **V-R10.** Every view-minted cell MUST resolve to a real cell in a bounded number of steps.
+- **V-R11.** The cursor MUST be recoverable after a toss from real cells and plain numbers alone.
+- **V-R12.** Movement, rebinding and view switching MUST append no operation to the visited store.
 
-### 3.3 Mixing
+### 3.3 Binding
 
-- **V-R11.** A pane MUST be able to show a `SliceView` or a `PageView` with no special-casing at the
-  pane-tree level beyond the `View` base interface.
-- **V-R12.** A `SliceView` embedded inside, or beside, a `PageView` MUST expose only real `CellRef`s
-  across that boundary (never a view-minted one) and MUST expose the focus cell and a
-  transform/placement hook, matching what `BridgeCoordinator`/`ZigzagPresentationSurface` provide
-  today.
-- **V-R13.** Splitting, closing, and cycling focus between panes MUST NOT alter any other pane's
-  camera, caret, or binding state.
+- **V-R13.** The number of axes, the number of axes one dimension or group is bound to, the number
+  of groups a dimension belongs to, and the size and nesting depth of a group MUST each be uncapped.
+- **V-R14.** A group MUST be bindable to an axis exactly as a dimension is, and changing its
+  membership MUST change every axis that shows it.
+- **V-R15.** Bindings, groups and ring order MUST survive a toss and a session, and MUST be undoable
+  without touching hypertime.
 
 ### 3.4 Stretch vanishing
 
-- **V-R14.** Every cell this view displays MUST be rendered at its full, untruncated content-fit
-  size.
-- **V-R15.** Only the accursed cell's immediate neighbours along currently bound dimensions MUST be
-  exactly axis-aligned with it; cells at radius ≥ 2 MAY depart from strict grid alignment.
-- **V-R16.** A cell whose content-fit box would be partially clipped by the viewport boundary MUST
-  NOT be drawn at all (not faded, not cropped).
-- **V-R17.** Cell opacity MUST decrease monotonically as a function of distance from the viewport
-  centre, with a configurable floor.
-- **V-R18.** Given the same manifold state, focus, and viewport, two `layout()` calls MUST produce
-  identical cell positions (determinism).
+- **V-R16.** Every cell drawn MUST be drawn at the size that fits its whole content.
+- **V-R17.** The accursed cell's immediate neighbours on bound dimensions MUST be exactly aligned to
+  its axes; no other cell need be.
+- **V-R18.** A cell that the viewport would cut MUST NOT be drawn.
+- **V-R19.** Opacity MUST fall monotonically toward the viewport's edges, to a configurable floor.
+- **V-R20.** The same input MUST produce the same placement.
 
 ### 3.5 All-dim walk
 
-- **V-R19.** Every dimension the accursed cell participates in, bound or not, MUST appear in the
-  layout, labelled by that dimension's own name.
-- **V-R20.** Bound dimensions MUST occupy fixed screen/world axes; unbound dimensions MUST occupy
-  ring positions arranged in three-dimensional space such that the accursed cell remains visually
-  unoccluded as valence grows.
-- **V-R21.** A dimension's assigned ring position MUST be stable across focus changes and across the
-  addition or removal of other dimensions (no global reassignment).
-- **V-R22.** Dragging a ring edge onto a bound axis, and an equivalent keyboard action, MUST produce
-  the identical rebind outcome.
-- **V-R23.** A ring position MUST display the far cell's own valence (its neighbour count across its
-  own dimensions).
+- **V-R21.** Every neighbour of the accursed cell, on every dimension and in both directions, MUST
+  be shown, its edge labelled with the dimension's name.
+- **V-R22.** Neighbours on bound dimensions MUST lie on the cell's axes; the rest MUST be arranged
+  on rings that use the third dimension, and the accursed cell MUST stay unoccluded at the rest
+  camera whatever the valence.
+- **V-R23.** The two neighbours on one dimension MUST lie diametrically opposite through the
+  accursed cell.
+- **V-R24.** The order of dimensions around the rings MUST be the same at every cell and MUST be the
+  user's to change.
+- **V-R25.** Dragging an edge onto an axis, and a keyboard action, MUST produce the same rebind.
+- **V-R26.** Each neighbour MUST show its own valence.
 
 ### 3.6 Dimensional pack view
 
-- **V-R24.** A dimension group MUST be user-authorable (create, rename, add/remove member, delete),
-  of any size, and MUST be bindable to a single axis exactly as a single dimension would be.
-- **V-R35.** One dimension or group MUST be bindable to any number of axes at once, and one
-  dimension MUST be able to belong to any number of groups, with no cap on either (§7.1, ruling
-  V13).
-- **V-R25.** A real cell's posward pack along a bound group MUST be the set of cells reached by one
-  more hop, from any already-packed cell, along any member dimension of the group, continuing until
-  no such hop exists (the BFS-frontier rule, §9.3.3), with duplicates, cycles, and ragged ends
-  handled without special-casing (§9.3.3).
-- **V-R26.** Movement from a pack container to the next pack container MUST be single-valued in each
-  direction, and moving posward then negward (or vice versa) MUST return to the starting cell or
-  container (reversibility, §9.3.5 proves this for the chosen representation).
-- **V-R27.** Every constituent of a pack MUST be individually retrievable (focusable as itself,
-  outside the pack framing) without copying it.
-- **V-R28.** A pack MUST be representable as a constituent of another pack (nesting), to an
-  implementation-chosen but not model-limited depth.
+- **V-R27.** With a group bound to an axis, step *n* from a real cell MUST be the pack of the cells
+  *n* steps from it along each member dimension, one lane per member, and the rank of packs MUST
+  continue while any lane still has a cell.
+- **V-R28.** Movement from pack to pack MUST be single-valued and reversible.
+- **V-R29.** Each constituent MUST be retrievable as the real cell it stands for, never as a copy.
+- **V-R30.** A group that contains a group MUST produce a pack that contains a pack; the container
+  relation MUST be `d.pack` and the rank of constituents MUST be `d.packing`.
 
-### 3.7 Non-functional
+### 3.7 Page views
 
-- **V-R29.** No new system xanadoc setting introduced by this document MAY be a naked numeric
-  literal in application code; each MUST be a `SettingSpec` field read from `system://layout` or
-  `system://settings`, with a bidirectionally linked Schema & Purpose page and Notes page, no
-  markdown syntax, native format links for headers.
-- **V-R30.** Every new key binding introduced by this document MUST be defined in `system://keymap`
-  with a default chord and dispatch through a registered Vortex-reachable action name, never a
-  hardcoded key handler.
-- **V-R31.** `View::layout()` and the draw adapter MUST perform zero dynamic heap allocation on the
-  steady-state per-frame path (reused arenas only).
-- **V-R32.** Every view-minted cell and every synthetic geometry record MUST have an accessibility
-  role distinct from `cell` (`pack`, `label`, `group`, etc.) and MUST never be announced as though
-  it were stored data.
-- **V-R36.** View text MUST be fitted, never cut by bytes: cell content, labels, chips and badges go
-  through `text::fit()` with a `TextFit`; fonts come from `ui::Theme` roles scaled by
-  `ui::UiMetrics`, never a literal family and size; and a label that is shortened or hidden for
-  legibility MUST keep its full text as its accessible name. View presentation sources MUST pass
-  `tools/check-ui-text-policy.py`.
-- **V-R37.** A settled frame — no focus move, rebind, store change, resize, theme change or running
-  animation — MUST perform zero text layout calls, zero HarfBuzz calls and zero buffer uploads.
-- **V-R38.** Views MUST take input only through `ui::FocusManager` (each pane a registered scope,
-  view chrome as modal scopes), and every view command MUST run on the thread that owns the pane's
-  `ViewManifold`.
-- **V-R33.** Every behaviour this document specifies MUST be exercisable and testable headless (no
-  window, no real display, no audio device), per `.claude/rules/headless_tests.md`.
-- **V-R34.** Movement within a view (stepping, entering/leaving a pack, following a ring spoke) MUST
-  append no operation to the visited store (R8); a completed transition is recorded as a `Visit` in
-  the reader's `system://activity` store through the existing `xanadu::ActivityLog`
-  (`apps/common/xanadu/link_navigation.hpp`, `store_activity_log.hpp`) — §8.7, §10.4.
+- **V-R31.** A page view MUST place each page individually: position, orientation, size, opacity.
+- **V-R32.** The base view MUST flow a document's pages vertically and documents horizontally when
+  no link is active, and MUST bring the pages that hold an active link's ends together, aligned at
+  the linked passages, without overlap.
+- **V-R33.** A page that flies MUST leave a marker in its home place and a tether to it.
+- **V-R34.** The stacked vanishing view MUST stagger a document's pages along a line receding in
+  depth, at the direction that maximises the legible text of the current page and its neighbours.
+- **V-R35.** In that view opacity MUST fall slowly with distance along the line, and a page holding
+  a non-formatting link or a transclusion MUST be fully opaque wherever it stands.
+- **V-R36.** Navigating to a page MUST cycle the intervening pages when the target is near and MUST
+  split the deck and fly the target to the top of its stack when it is far; which applies MUST be a
+  pure function of the distance and two timings.
+- **V-R37.** A page view MUST never change the text, the pagination or the store.
+
+### 3.8 Mixing
+
+- **V-R38.** A scene MUST be able to hold slice views and page views together in one world, and a
+  window MUST be able to show several scenes side by side.
+- **V-R39.** Splitting, closing and focusing a pane MUST NOT change another pane's camera, cursor or
+  bindings.
+- **V-R40.** Only real cells and document sites MUST cross between a slice view and a page view.
+
+### 3.9 Non-functional
+
+- **V-R41.** Every tunable MUST be a `SettingSpec` in a system xanadoc with its schema and notes
+  pages; none MAY be a literal in code, and none MAY name a font or a text size.
+- **V-R42.** Every action MUST have a default chord in `system://keymap`, dispatch through a
+  registered Vortex-reachable name, and have a keyboard form if it has a pointer form.
+- **V-R43.** View text MUST be fitted by `text::fit()`, drawn in a theme font role, and keep its
+  full text as its accessible name when shortened or hidden.
+- **V-R44.** A settled frame MUST perform no layout call, no shaping call and no buffer upload.
+- **V-R45.** A view-only thing MUST have an accessibility role other than `cell` or `page`.
+- **V-R46.** Views MUST take input only through `ui::FocusManager`, and a view command MUST run on
+  the thread that owns the pane's view space.
+- **V-R47.** Everything here MUST be testable headless.
+- **V-R48.** Code MUST be placed as §1.2 says, and a test MUST sit with the code it tests: generic
+  behaviour in `tests/lib/` only, view behaviour never re-testing the library.
 
 ______________________________________________________________________
 
 ## 4. Concepts and vocabulary
 
-| Term            | Meaning                                                                                                                                     |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| View            | An installed, swappable layout+interaction strategy over either a slice or a xanadoc page.                                                  |
-| Viewport        | A screen rectangle (`ViewportDesc`) plus an optional camera/view-projection override.                                                       |
-| Pane            | One slot in a `ViewHost` pane tree; owns exactly one `Viewport` and one `View` instance.                                                    |
-| Host            | `ViewHost`: the pane tree manager that composes panes into one program window.                                                              |
-| Slice view      | A `View` refinement (`SliceView`) whose layout source is a ZigZag `Manifold`.                                                               |
-| Page view       | A `View` refinement (`PageView`) whose layout source is xanadoc span/paragraph structure; this document only fixes the seam (§10.3).        |
-| View manifold   | `ViewManifold`: a pane's binding arena and derived arena over one real base `Manifold`.                                                     |
-| Binding layer   | The view manifold's arena that survives a toss: axis slots, occurrences, group cells and their membership.                                  |
-| Derived layer   | The arena that does not survive a toss: packs, ring-slot placeholders, placement helpers, anything minted purely to draw the current frame. |
-| View cell       | Any cell minted by a view (`ephemeralBit` set, carries a `ViewEpoch`).                                                                      |
-| Axis            | One slot in a view's `ViewAxisSet`, showing an occurrence of a real dimension or of a group.                                                |
-| Bound dimension | A dimension with an occurrence under at least one axis slot; it may be under several.                                                       |
-| Dimension group | A user-authored, named, ordered set of member dimensions, itself a cell, bindable to an axis like a single dimension.                       |
-| Pack            | A view-minted container cell standing for one step of a group's BFS-frontier walk from a real cell or a previous pack.                      |
-| Container       | A pack cell in its role as the thing constituents hang off (`d.pack` posward).                                                              |
-| Constituent     | A cell reached by a pack's BFS step, held in the container's `d.packing` rank.                                                              |
-| Valence         | The count of a cell's own `(dimension, direction)` neighbour pairs across every dimension it participates in.                               |
-| Toss            | `ViewManifold::toss()`: the O(1) epoch bump that makes every derived-layer `ViewCellRef` stale at once.                                     |
-| Epoch           | `ArenaManifold::ViewEpoch`: a monotonically increasing counter; a `ViewCellRef` carries the epoch it was minted under.                      |
+| Term            | Meaning                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------ |
+| View            | An installed layout and interaction strategy. A slice view lays out cells; a page view lays out pages. |
+| Placement       | One view instance with its state and its origin in a scene.                                            |
+| Scene           | One world: a set of placements that share coordinates, so beams can join them.                         |
+| Pane            | A rectangle of the window showing one scene through its own camera.                                    |
+| View space      | `ViewManifold`: the real manifold plus a placement's binding arena and derived arena.                  |
+| Binding arena   | View cells that survive a toss: axes, occurrences, groups, ring order.                                 |
+| Derived arena   | View cells that do not: packs and whatever else a view mints to show the current place.                |
+| View cell       | A cell minted in a view arena. Its ref has `ephemeralBit`; a store refuses it.                         |
+| Occurrence      | A view cell that stands for one use of a real cell or a group; its value is a handle to it.            |
+| Axis            | A slot in the binding arena that shows a dimension or a group.                                         |
+| Dimension group | A named, ordered set of dimensions and groups; itself a view cell.                                     |
+| Lane            | The position of one group member inside every pack of that group.                                      |
+| Pack            | A container view cell: step *n* along a bound group. Its constituents are one per lane.                |
+| Origin          | The real cell a rank of packs is counted from.                                                         |
+| Valence         | The number of (dimension, direction) pairs on which a cell has a neighbour.                            |
+| Toss            | Discarding the derived arena's contents in constant time.                                              |
+| Epoch           | A counter a toss increments; a `ViewCellRef` carries the epoch it was minted in.                       |
+| Deck            | A document's pages in order, as the stacked vanishing view arranges them.                              |
+| Mark            | A page's fact that it holds a non-formatting link end or transcluded content.                          |
+| Riffle, split   | The two ways a deck moves to a new page: page by page, or parted in one motion.                        |
 
 ______________________________________________________________________
 
 ## 5. Architecture
 
-### 5.1 Layer diagram
+### 5.1 Layers
 
 ```text
-   apps/xuzz/                      (the one application; renderer, input, window)
-     view_host_app.{hpp,cpp}       pane tree wiring, focus, gesture routing
-     view_draw_adapter.{hpp,cpp}   layout records -> Canvas/Beams, picking, a11y
-     view_commands.{hpp,cpp}       registers every view action for system://keymap
-                  |
-                  v
-   apps/common/xanadu/view/        (engine: no graphics device, linked by xuzz_test)
-     View, SliceView, PageView, ViewRegistry, ViewHost, ViewManifold,
-     ViewAxisSet, mintViewLink, LayoutInput/LayoutSink, AnimationState
-     builtin/  StretchVanishingView, AllDimWalkView, DimensionalPackView
-                  |
-                  v
-   apps/common/xanadu/zigzag/{manifold,arena_manifold,cell_views}.hpp
-   apps/common/xanadu/{store,store_activity_log,system_docs}.hpp
-
-   include/gleditor/{canvas,beams,render/*}.hpp   <- used by apps/xuzz only
+ apps/xuzz/                      the program: main, command line, application wiring
+      |
+      v
+ apps/common/ui/view/            draws and takes input; links libgleditor
+   ViewHost, scene presenter, draw adapter, chrome, commands
+      |                    \
+      v                     v
+ apps/common/xanadu/view/     libgleditor  (generic; knows no cell, link or view)
+   no graphics device           ui::PaneTree, ui::PlaneSet, Beams, Doc + PageArrangement,
+   View, SliceView, PageView,   spatial: project and unproject, render regions,
+   ViewRegistry, ViewManifold,  text::fit, ShapingCache, FocusManager, widgets
+   ViewAxisSet, layout records,
+   text raster, built-in views
+      |
+      v
+ apps/common/xanadu/            zigzag/, store, link_occurrences, tension_layout, system_docs
 ```
 
-The built-in views sit in the engine because their work is derivation and geometry: cells in,
-placement records out. The two things a layout needs from the graphics side — the size of a cell's
-content and the viewport — arrive as data in `LayoutInput` (§8.4), the first through a
-`function_ref` measurer, so a test supplies a fixed-size measurer and asserts on records without a
-font, a window or a GPU.
+The split between the two `apps/common` layers is the graphics device. Deriving packs, choosing ring
+slots, packing content boxes and staggering a deck are geometry over cells, pages and numbers, so
+they sit in the engine, where `vquery`, `vpl` and `vprolog` can run them too: a result slice can be
+printed through any slice view by the text raster (§8.7) with no window. Turning the records into
+quads, glyphs, beams and accessibility nodes needs the library, so it sits in `apps/common/ui/`.
 
 ### 5.2 Package map
 
 ```text
-apps/common/xanadu/view/                 (NEW — engine)
-  view.hpp               View identity/lifecycle, ViewDescriptor, ViewRegistry
-  view_host.hpp          ViewHost pane tree, Viewport, mixed composition (model only)
-  view_error.hpp         ViewError, std::expected aliases
-  slice_view.hpp         SliceView refinement (lays out cells)
-  page_view.hpp          PageView refinement (lays out pages; declarations only, §10.3)
-  view_manifold.hpp      ViewManifold: binding arena + derived arena over one Manifold
-  view_binding.hpp       ViewAxisSet, dimension-group API
-  view_link.hpp          mintViewLink choke point, verifyViewManifoldInvariant
-  view_layout.hpp        LayoutInput/LayoutSink, PlacedItem/PlacedEdge/AxisGizmo/PackFrame
-  view_gesture.hpp       ViewGesture drag-to-rebind state machine (pure: events in, intents out)
-  view_strategy.hpp      PackBuilder / RingBuilder / VanishingTraversal
-  view_animation.hpp     AnimationState, epoch-guarded stable-id scheme
-  pack_dims.hpp          d.pack / d.packing accessors, PackBuilder implementation
-  builtin/
+apps/common/xanadu/view/                 engine; linked by xuzz_test and the language tools
+  view.hpp               View, ViewDescriptor, ViewRegistry, ViewSubject
+  view_error.hpp         ViewError
+  view_records.hpp       SubjectId, PlacedItem, PlacedEdge, PlacedFrame, DropTarget,
+                         MotionHint, LayoutSink, PaneFrame, ContentExtent
+  view_manifold.{hpp,cpp}  ViewManifold, ViewCellRef, verifyViewSpace
+  view_binding.{hpp,cpp}   ViewAxisSet: axes, occurrences, groups, ring order, undo
+  slice_view.hpp         SliceView, SliceCursor, SlicePrepareInput, SliceLayoutInput
+  page_view.hpp          PageView, PageRef, PageCatalog, PageCursor, PageLayoutInput
+  view_gesture.{hpp,cpp} drag-to-rebind as a pure state machine: events in, intents out
+  raster.{hpp,cpp}       layout records -> text grid, for REPLs, --raster and golden tests
+  slice/
     stretch_vanishing_view.{hpp,cpp}
     all_dim_walk_view.{hpp,cpp}
     dimensional_pack_view.{hpp,cpp}
-    builtin_views.cpp    registerBuiltinViews(ViewRegistry&)
+    pack_rank.{hpp,cpp}  lanes and steps (§9.3), usable by any view
+  page/
+    base_view.{hpp,cpp}
+    coalesce.{hpp,cpp}   CoalesceStrategy; the TensionLayoutEngine strategy
+    stacked_vanishing_view.{hpp,cpp}
+    deck.{hpp,cpp}       stagger search, opacity, riffle-or-split (§10.4)
+  builtin_views.{hpp,cpp}  registerBuiltinViews(ViewRegistry &)
 
-apps/xuzz/                               (the application)
-  view_host_app.{hpp,cpp}     (REPLACES view_coordinator.{hpp,cpp}) owns the ViewHost, routes
-                              input and focus, calls reclaim()/layout()/advance()/draw per pane
-  view_draw_adapter.{hpp,cpp} (NEW) layout records -> Canvas/Beams, scissor/depth range, picking,
-                              AccessKit nodes, the text::fit-backed content measurer
-  view_commands.{hpp,cpp}     (NEW; absorbs apps/zigzag/zigzag_commands.cpp) view actions
-  view_chrome.{hpp,cpp}       (NEW) binding HUD, view palette, group editor as ui::Widget scenes
+apps/common/ui/view/                     draws and takes input
+  view_host.{hpp,cpp}      scenes, placements, panes; owns each pane's FocusScope
+  view_presenter.{hpp,cpp} layout records -> ui::PlaneSet, Beams, Doc page arrangements;
+                           the text::fit measurer; picking; AccessKit nodes
+  view_animation.{hpp,cpp} tweens between successive layouts by SubjectId
+  view_chrome.{hpp,cpp}    binding HUD, view palette, group editor as ui::Widget scenes
+  view_commands.{hpp,cpp}  registers every view action
 
-apps/zigzag/zigzag_visualizer.*          (RETIRED by §15; no new code)
-apps/xudu/views.*                        (wrapped as the one legacy page view until the follow-up)
+apps/xuzz/                               the program
+  main.cpp, cli.{hpp,cpp}, xuzz_app.{hpp,cpp}   builds the host, loads settings, runs
 
-include/gleditor/render/viewport.hpp     (NEW) ViewportDesc, setScissorRect/setDepthRange
-include/gleditor/spatial.hpp             (EXTEND) unprojectScreenToRay()
+libgleditor additions                    generic; planned in world-space-rendering-plan.md
+  include/gleditor/spatial.hpp           projectToViewport, unprojectToRay, ray tests
+  include/gleditor/draw_budget.hpp       insideFrustum
+  include/gleditor/render/device.hpp     render regions: scissor rectangle and depth slice
+  include/gleditor/ui/plane_set.hpp      many retained planes, one transform and opacity each
+  include/gleditor/ui/pane_tree.hpp      split, close, resize and focus order over rectangles
+  include/gleditor/doc.hpp               PageArrangement: where a Doc puts each page
 ```
 
 ### 5.3 Dependency rules
 
-1. `apps/common/xanadu/view/` includes the engine (`apps/common/xanadu/`) and the header-only
-   `<gleditor/cpp26*.hpp>` facilities, and nothing that needs a graphics device. `xuzz_test` links
-   it as it links the rest of the engine.
-1. `apps/xuzz/` includes the view framework and the library (`include/gleditor/`). It is the only
-   place a layout record meets a renderer call.
-1. No new file is added under `apps/xudu/` or `apps/zigzag/`, and no new code includes
-   `zigzag_visualizer.hpp`. Existing includes of it shrink to zero as §15 proceeds.
-1. Nothing under `src/` or `include/gleditor/` includes anything under `apps/`. The draw adapter
-   consumes the view framework's record types, which is why it lives in `apps/xuzz/` and not in
-   `src/render/`.
-1. A third-party view is a `ViewDescriptor` handed to `ViewRegistry`; it needs rule 1's headers
-   only.
+1. `apps/common/xanadu/view/` includes the engine and those library headers that are header-only and
+   need no device: `<gleditor/cpp26*.hpp>`, `<gleditor/spatial.hpp>` and
+   `<gleditor/draw_budget.hpp>`. The projection and frustum arithmetic a layout needs is therefore
+   the library's own, tested once in `tests/lib/`, and not a second copy.
+1. `apps/common/ui/view/` includes the view framework and the library. It is the only place a layout
+   record meets a renderer call.
+1. `apps/xuzz/` includes `apps/common/` and the library, and holds no view, layout or drawing code.
+1. Nothing under `src/` or `include/gleditor/` includes anything under `apps/`, and no library type
+   is named for a xanalogical thing. A `ui::PlaneSet` holds planes, not cells; a `PageArrangement`
+   places pages of any document, the plain editor's included.
+1. Nothing is added under `apps/xudu/` or `apps/zigzag/`.
+1. A third-party view needs rule 1's headers only.
 
 ______________________________________________________________________
 
-## 6. The view space
+## 6. The slice view space
 
-### 6.1 Decision: extend `ArenaManifold`, do not invent a new type
+### 6.1 Two arenas over one manifold
 
-Three representations were considered for "where a view's minted cells live":
+A slice placement owns a `ViewManifold`: the real `Manifold` it shows, read-only, and two
+`ArenaManifold`s over it, each constructed with no store so that no provenance cells are projected
+into them (`ArenaManifold(base, nullptr)`).
 
-1. A bespoke `ViewManifold`-as-ground-up type, independent of `ArenaManifold`.
-1. One `ArenaManifold` per derived-layer generation, dropped and replaced wholesale on rebind.
-1. One `ArenaManifold` per pane, reused for the pane's lifetime, extended with a generation counter.
+- The **binding arena** holds what the user set: axes, the occurrence under each, groups and their
+  members, and the ring order. It lives as long as the placement.
+- The **derived arena** holds what a view mints to show where the cursor is: pack containers and
+  their constituents. It is emptied by every toss.
 
-(1) is refused: it would duplicate the CSR `DimLink` one-neighbour-per-direction invariant,
-copy-on-write shadowing, and the ephemeral/real boundary bit `ArenaManifold` already has, tested, in
-production for Vlog and VQL — building a second ephemeral-cells-over-a-base type is the exact
-mistake R12 (`design/store-slice-convergence.md:502-563`) warns against: a privilege ("which type
-gets to mint without ops") pushed one level down, encoded twice, divergeable twice.
+They are siblings, not layers of one arena. An arena is a stack: a binding edited after derived
+cells exist would be minted above them, so emptying the derived cells would either destroy it or
+have to be done first, on the rebind path. Two arenas remove the ordering. Derived cells never link
+to binding cells; a view reads the binding arena to learn which real dimensions are bound and then
+works with those real refs, which mean the same thing in every arena over the same base.
 
-(2) is refused: `ArenaManifold`'s construction is not a trivial no-op (it may seed provenance cells
-and federation `Space`s key by the arena instance's own identity), so swapping the whole object on
-every rebind would re-seed that machinery every frame and invalidate every `CellRef` a page view or
-a speculative drag-preview held across the swap — breaking V-R8's recoverability for exactly the
-case (a discarded speculative preview) that most needs it to hold.
+### 6.2 A view arena never shadows a real cell
 
-(3), chosen: `ArenaManifold` already has the right shape —
-`mark()`/`release()`/`discard()`(`arena_manifold.hpp:586-601`) are a bounded-cost choice-point
-mechanism. What it lacks is a cheap way to answer "is this ref still good" without walking anything.
-§6.4 adds exactly that.
+`ArenaManifold` is copy-on-write. Linking a real cell, in either direction, calls `shadow()`
+(`arena_manifold.cpp:1422`), which copies the cell's whole slot, link run and content run into the
+arena and enters it in an `unordered_map`; from then on every read of that cell is answered from the
+copy. For a view that is three defects in one:
 
-A `ViewManifold` therefore wraps `ArenaManifold`s constructed once per pane, for the pane's
-lifetime, over `base = <the real Manifold the pane is showing>` — two of them, for the reason §6.2
-gives.
+- the copy is stale the moment the store advances, and the view goes on reading it;
+- each shadow is a hash insert at mint time and a hash erase inside `release()`, which makes
+  emptying the arena proportional to the number of shadows;
+- a real cell now carries view links that an ordinary walk of the arena would find.
 
-### 6.2 Two layers, two sibling arenas
+`ensureDimension()` has the same effect by another road: it registers a name in a map that
+`release()` does not roll back, and links the new dimension into the base's `d.dims` rank, shadowing
+a real cell to do it (`arena_manifold.cpp:78`).
 
-Two kinds of ephemeral state exist, and they have different lifetimes, so they live in two
-`ArenaManifold`s. Both are constructed once per pane over the same real base `Manifold`; they are
-siblings, not nested (an arena's base is a `const Manifold *`, so nesting is not available and is
-not needed).
+So the rule is absolute, and it is what makes everything else in this section simple:
 
-1. **Binding arena**: the axis-slot rank, the occurrence cells and their `d.binds` and
-   `d.occurrence` links, group cells and their membership (the `d.dim-group` ranks). This is
-   configuration the user set — the equivalent of a window layout — and it survives every toss.
-   Losing it on a pack recomputation would reset which dimensions are bound to which axis on every
-   focus move, breaking "movement works as expected".
-1. **Derived arena**: pack containers, ring-slot placeholders, placement helpers, *and the
-   view-owned dimension cells those hang on* (`d.pack`, `d.packing`, one `axisStep` dimension per
-   bound axis, `d.ring-dim`) — anything minted purely to answer "what does the current frame look
-   like". Everything in it is tossed on every rebind.
+**No view code passes a real ref as either end of `link()`, calls `setContent()` or `setValueBits()`
+on a real cell, or calls `ensureDimension()`.** A view-owned dimension is a bare cell from
+`makeCell(name)`, used as a link key; `link()` only requires that the arena contains it. Reads of
+real structure fall through to the base (`ArenaManifold::linked` does this for any cell the arena
+does not hold), so they are always current.
 
-A single arena with two nested marks was the first design and is refused. An arena is a stack: a
-binding edited after display cells exist would be minted *above* the display mark, so either the
-display layer is released synchronously before every binding edit (O(cells minted), on the rebind
-path — exactly what V-R7 forbids) or the next release destroys the binding just made. Two arenas
-remove the ordering problem. The price is a second arena object per pane and one rule: derived cells
-never link to binding cells. They do not need to — the derived layer reads the binding arena to
-learn which *real* dimension cells are bound, and real refs mean the same thing in every arena over
-the same base.
+### 6.3 Standing for a real cell
 
-### 6.3 The invariants
-
-Each invariant below corresponds to one of V-R5 through V-R10. "Enforcement" names the mechanism;
-"Test" names the check that would fail if the mechanism regressed.
-
-**I1 — at most one neighbour per (cell, dimension, direction).** Scoped precisely: for every cell
-`c` the view currently holds, real or view-minted, and every dimension `d` that is currently bound,
-a group member of a currently-bound group, or a view-owned bookkeeping dimension (`d.pack`,
-`d.packing`, `d.dim-group`, `d.binds`, `d.occurrence`, a ring-slot dimension), `linked(c, d, dir)`
-answers at most one `CellRef` for each `dir`. **Enforcement**: for free, by representation —
-`ArenaManifold::link()` calls `setOneSide()` on both ends and evicts whatever either end held, so no
-code path through it can produce two posward neighbours on one dimension. The only way to violate I1
-is to write a `DimLink` directly instead of through the single choke point (§6.5), which this
-document forbids as an implementation rule and backs with a `clang-tidy` pattern match (§6.5).
-**Test**: a property test (`verifyViewManifoldInvariant`, §6.5) run after randomised sequences of
-bind/pack/ring/toss operations, asserting `dimensionsOf(c)` carries at most one `DimLink` per scoped
-dimension for every `c` the arena holds.
-
-**I2 — a view-minted cell never reaches a store.** Already a byte-level invariant one layer down:
-`Manifold::applyStructure` refuses any `SetLink` whose target `isEphemeral()` (`manifold.hpp:699`),
-and `Store::setLink` throws on an ephemeral ref. A view routine cannot, even by a bug, cause a pack
-container's `CellRef` to end up as the target of a persisted `SetLink`, because the encoding refuses
-it. **Enforcement**: inherited from the `ephemeralBit` scheme. **Test**: an
-`ArenaManifoldTest`-style unit that mints a view cell, hands its `CellRef` to a real
-`Store::setLink`, and asserts the typed refusal rather than success.
-
-**I3 — rebinding tosses every view-minted cell in a single constant-time operation.** See §6.4.
-
-**I4 — every view cell resolves to a real cell within a bounded number of hops.** For a shadowed
-base cell this is free: `CellSlot::birthOp` on a shadow is the base cell's own ref. For a
-constructed view cell (a pack container, a ring-slot placeholder), resolution walks the view-owned
-bookkeeping dimension that names its real referent (`d.pack`/`d.packing` for a pack, a `d.ring-dim`
-link for a ring slot) until it bottoms out at a non-ephemeral ref, bounded by the same
-`traversalBound()` cycle guard `cell_views.hpp`'s `RankView` already uses. **Enforcement**:
-`ViewManifold::resolveReal(ViewCellRef) -> std::expected<CellRef, ViewError>` (§8.2) is the only
-sanctioned path. **Test**: for every view-minted cell reachable from the accursed cell at radius ≤
-N, assert `resolveReal` terminates within the bound and returns a non-ephemeral ref.
-
-**I5 — a view never shadows a real cell's bound-dimension `DimLink`.** A view answers "what is `c`'s
-effective posward neighbour on bound dimension/group G" by computation — walking the real dimensions
-in G and returning a view cell as the answer — never by calling
-`link(c, boundDim, …, packContainer)` on the real dimension itself, because doing so would
-copy-on-write-shadow `c` and leave a `DimLink` on a bound dimension whose far end is ephemeral,
-visible to any ordinary real-dimension walk starting from the shadow. **Enforcement**:
-`mintViewLink` (§6.5) is never called with a real cell as `from` and a bound real dimension as
-`dim`; every pack/ring/placement mutation targets a view-owned dimension instead. **Test**: a
-property check that no `DimLink` on any currently-bound real dimension ever points at an ephemeral
-ref.
-
-**I6 — focus survives a toss.** The focus cell is stored as a real `CellRef`
-(`SliceView::focusCell()` returns one; `focusCell(CellRef)` refuses an ephemeral argument). After a
-toss, the new derived layer is re-derived from the unchanged focus, never from a now-dead view cell.
-**Enforcement**: typed at the API boundary (§8.2). **Test**: toss, then assert `focusCell()` is
-unchanged and resolves without error.
-
-### 6.4 The O(1) toss, stated exactly
-
-**The mechanism: dimensions are cells, so a toss forgets the dimensions.** Every link a view mints
-is keyed by a view-owned dimension cell living in the derived arena (§6.2). The `ViewManifold` holds
-the handles to those dimension cells. A toss abandons the handles; from then on no reader can ask
-for a link on `d.pack`, `d.packing` or an `axisStep` dimension of the old generation, because
-nothing holds the `DimRef` to ask with. The cells and links are still physically in the arena. They
-are unreachable, which is what the requirement asks for.
-
-Concretely `ArenaManifold` gains two fields and two methods:
+A view cell that represents a real one — a pack constituent, the origin of a pack rank, the
+occurrence under an axis — is an **occurrence**: a bare cell whose typed value is a handle to its
+target.
 
 ```cpp
-// apps/common/xanadu/zigzag/arena_manifold.hpp -- additions to the existing class
-using ViewEpoch = std::uint32_t;
+const auto cell = arena.makeCell();
+arena.setValueBits(cell, xanadu::ValueKind::OpHandle, target); // target is a CellRef
+// later
+const auto real = arena.handleTarget(cell); // one read
+```
 
-[[nodiscard]] ViewEpoch currentEpoch() const noexcept { return epoch_; }
-/// Dense index below which every cell this arena minted is dead. A cell is
-/// current iff its dense index >= epochFloor(); one compare, no stamp per
-/// slot, so CellSlot does not grow.
-[[nodiscard]] std::uint32_t epochFloor() const noexcept { return epochFloor_; }
+This is the handle cell the engine already has for version annotations, and `promote()` already
+knows how to turn one into a real `OpHandle` cell (`arena_manifold.cpp:1838`). The relation between
+an occurrence and its target is a value and not a link, deliberately: a link would shadow the target
+(§6.2). Everything *between* view cells — which constituents a pack has and in what order, which
+pack follows which, which occurrence an axis shows — is links on view-owned dimensions.
 
-/// The O(1) toss: two integer stores. Touches no slot, link or content run
-/// and runs no destructor. Reclamation is reclaimDead(), a separate call.
-void invalidateEpoch() noexcept {
+### 6.4 The invariants
+
+**I1 — one neighbour per direction.** For every cell and dimension the view space answers at most
+one neighbour posward and one negward. *Held by:* the link representation, which has one `pos` and
+one `neg` per (cell, dimension), and by `ViewManifold::link` (§6.6), which refuses to displace an
+occupant at either end. *Tested by:* the verifier after random sequences of bind, derive and toss.
+
+**I2 — a view cell never reaches a store.** *Held by:* `ephemeralBit`; `Manifold::applyStructure`
+and `Store::setLink` refuse such a ref. *Tested by:* handing a view cell to `Store::setLink` and
+asserting the typed refusal.
+
+**I3 — no real cell is shadowed.** *Held by:* `ViewManifold::link` accepting only view cells of its
+own arena as ends and only that arena's dimensions as keys. *Tested by:* `shadowCount() == 0` on
+both arenas after every test, and in debug builds after every `prepare()`.
+
+**I4 — a toss is constant-time.** §6.5.
+
+**I5 — every view cell resolves to a real cell.** An occurrence resolves in one read. A pack
+container resolves to its first present constituent's real cell, at most one step per nesting level.
+*Held by:* `ViewManifold::resolveReal`. *Tested by:* resolving every derived cell after each
+`prepare()`.
+
+**I6 — the cursor is real.** A `SliceCursor` (§8.5) is a real origin cell plus an axis, a signed
+step count and lane indices. It names no view cell, so a toss cannot invalidate it. *Tested by:*
+tossing at every cursor position of the worked examples and re-deriving the same real cell.
+
+### 6.5 The toss
+
+```cpp
+void ViewManifold::toss() noexcept {
+  derived_.release(empty_); // truncate to the mark taken on the empty arena
+  empty_ = derived_.mark();
   ++epoch_;
-  epochFloor_ = static_cast<std::uint32_t>(slots_.size());
+  dims_ = {}; // forget the view-owned dimension cells of the old generation
 }
-
-private:
-  ViewEpoch epoch_{0};
-  std::uint32_t epochFloor_{0};
 ```
 
-and `ViewManifold::toss()` is `derived_.invalidateEpoch()` plus resetting its own fixed-size table
-of dimension handles to "not minted" — a constant number of stores, independent of how many cells
-the view minted (the per-axis `axisStep` handles are themselves cells in the derived arena, found
-through one `axisStepRoot` handle, so the table does not grow with the axis count).
+This is constant-time, and it reclaims the storage in the same step. The argument is
+`ArenaManifold::release()` itself (`arena_manifold.cpp:1566`). Its loops run over, in order: quote
+spaces, proxy shadowed edges, quote occurrences and proxies added since the mark — federation state,
+which a view arena has none of; trail entries since the mark — none, because `trail()` skips any
+cell minted under the innermost mark and every derived cell is; and shadows since the mark — none,
+by I3. What is left is four `resize()` calls on vectors of trivially destructible records and a
+fix-up of the `d.store-refs` tails of attached spaces. No step visits a minted cell.
 
-What each kind of stale state becomes after a toss:
+That last fix-up is the one thing to change. It begins by looking up the name `d.store-refs`, and on
+a slice with no such dimension `Manifold::dimensionNamed` falls back to scanning every dimension of
+the base and reading its name (`manifold.cpp:785`). That does not depend on how much was minted, but
+it is neither constant nor allocation-free, and it serves only arenas with attached spaces. Guarding
+it with `if (!spaces_.empty())` makes `release()` on a view arena a fixed number of steps and
+changes nothing for any other caller.
 
-| Stale state                                              | Why it cannot be observed                                                                                                  |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| a `ViewCellRef` held by a gesture, preview or animation  | carries its epoch; `ViewManifold` refuses it with `ViewError::StaleEpoch` on one integer compare                           |
-| a pack container, ring slot or other derived cell        | dense index is below `epochFloor()`; `ViewManifold`'s graph view (§8.2) does not answer for it                             |
-| a link on a real cell's shadow, keyed by an old `DimRef` | the key is a dead dimension cell; no current reader holds it, and `dimensionsOf()` through the graph view filters by floor |
+Because `release()` truncates, a later mint reuses the same dense indices. A `CellRef` kept across a
+toss would silently name a different cell, so nothing keeps a bare one: a `ViewCellRef` pairs the
+ref with the epoch it was minted in, and `ViewManifold` refuses a pair whose epoch is not current
+with one integer compare. Animation identity includes the epoch for the same reason (§8.9).
 
-The third row is why I5 matters to the toss and not only to correctness: a view links real cells
-only on view-owned dimensions, so the shadow a real cell acquires in the derived arena carries
-nothing but old-generation keys, and there is nothing on a real dimension to undo. Valence (§9.2) is
-read from the base manifold, which the view never wrote.
+What a toss does not do is rebuild. Re-deriving what the new place needs is `prepare()`'s work
+(§8.5), bounded by what is on screen (§6.7).
 
-What is and is not constant-time:
+*How the claim is tested.* The test asserts the preconditions that make `release()` loop-free —
+`shadowCount()`, `trailSize()` and the space count are zero on the derived arena — then mints 0, 10³
+and 10⁶ cells, tosses, and asserts `cellCount()` is back to its empty value and every earlier
+`ViewCellRef` is refused. The preconditions are the proof; `tools/layout-latency-probe` additionally
+reports toss time at each size, which must be flat.
 
-- **O(1): the toss.** `invalidateEpoch()` and the handle reset. This is the operation V-R7 and I3
-  name, and the only work on the rebind path. A drag-to-rebind that previews five candidate axes in
-  one frame performs five tosses at this cost.
-- **O(1): every staleness check.** One integer compare per `ViewCellRef` or per dense index.
-- **O(discarded), off the rebind path: reclamation.** `ViewManifold::reclaim()` calls
-  `derived_.release(m0)` — `m0` being the mark taken on the empty derived arena at construction —
-  and resets the floor to zero. It runs at the start of the next derivation, before any
-  current-generation cell is minted, at most once per frame however many tosses preceded it, and
-  only when the dead cell count exceeds `view.arena.reclaimThresholdCells` (§11.3). Each cell is
-  freed once, so the cost is amortised against the minting that created it. Correctness never
-  depends on it having run.
-- **O(visible): re-derivation.** Re-minting the dimension handles (a constant number plus one per
-  bound axis) and the packs, rings and placement the new frame shows, lazily (§9.3.6) — bounded by
-  what is on screen, never by the slice.
+`ArenaManifold` therefore gains two things and no new concept: the guard above, and `shadowCount()`,
+a `const` accessor for a count it already keeps for `Mark`.
 
-**How the claim is tested** (§13, §15 step 1). `ArenaManifold` exposes a debug operation counter
-(slot writes, link writes, trail pushes, shadow-map operations). The test mints 0, 100 and 10,000
-derived cells, calls `ViewManifold::toss()`, and asserts the counter delta is zero and identical in
-all three cases; then asserts every pre-toss `ViewCellRef` is refused, that a walk from the focus
-through the graph view meets no cell below the floor, and that `reclaim()` afterwards returns the
-arena's cell count to its empty value. An operation count, not a wall-clock time, so it is
-deterministic in CI.
-
-A view never calls `mark()`, `release()` or `invalidateEpoch()` itself; `ViewManifold` owns all
-three, so a view cannot leak a mark (the "no cap on outstanding marks" hazard of
-`arena_manifold.hpp` does not arise at this call site).
-
-### 6.5 The choke point and the verifier
+### 6.6 The choke point and the verifier
 
 ```cpp
-// apps/common/xanadu/view/view_link.hpp
+// apps/common/xanadu/view/view_manifold.hpp
 [[nodiscard]] std::expected<void, ViewError>
-mintViewLink(ArenaManifold &arena, zigzag::CellRef from, zigzag::DimRef dim,
-             zigzag::DimVector dir, zigzag::CellRef to) noexcept {
-  if (arena.linked(from, dim, dir).has_value()) {
-    // ArenaManifold::link() would evict the old neighbour -- correct for
-    // ordinary unification (Vlog rebinding a variable), wrong for a view,
-    // where "two things want this slot" is a bug in the view's own
-    // derivation, not an intentional rebind. Refuse instead of evicting.
-    return std::unexpected(ViewError::OccupiedDirection);
-  }
-  auto result = arena.link(from, dim, dir, to);
-  if (!result) return std::unexpected(ViewError::UnknownDimensionOrRef);
-  return {};
-}
-
-struct InvariantViolation {
-  zigzag::CellRef cell;
-  zigzag::DimRef dimension;
-  int neighbourCountFound; // > 1 means violated
-};
-[[nodiscard]] std::vector<InvariantViolation>
-verifyViewManifoldInvariant(const ArenaManifold &arena,
-                            std::span<const zigzag::DimRef> scopedDimensions);
+ViewManifold::link(Layer layer, ViewCellRef from, ViewDim dim, zigzag::DimVector dir,
+                   ViewCellRef to) noexcept;
 ```
 
-`mintViewLink` is the only function in the codebase permitted to call `ArenaManifold::link()`/
-`linkedMinting()` on behalf of a view; every strategy object (`PackBuilder`, `RingBuilder`,
-`VanishingTraversal`, or a plugin's own strategy) is handed this free function by reference and
-never an `ArenaManifold&` directly. This is enforced by code review and a `clang-tidy` check
-matching `ArenaManifold::link(` outside `view_link.cpp`, the same discipline `Store::setLink()`
-already gets as the one place a real `SetLink` happens. `verifyViewManifoldInvariant` is the
-debug/test analogue of `Manifold::verifyAgainstFullRebuild()` — it reports every violation found,
-not just the first.
+It refuses, changing nothing, when: either ref or the dimension is stale (`StaleEpoch`); either end
+is not a view cell of that layer's arena (`RealCellInViewLink`); `from` already has a neighbour on
+`dim` in `dir`, or `to` already has one in the opposite direction (`OccupiedDirection`).
+`ArenaManifold::link` would evict in that last case, which is right for unification and wrong for a
+view, where two claimants for one slot is a bug in the derivation. Unlinking is the same call with
+no `to`. Strategies and views are handed a `ViewManifold &` and have no other way to write.
 
-### 6.6 Naming collision avoided
+`verifyViewSpace(const ViewManifold &)` returns every violation it finds of: I3; links that are not
+two-sided; a link whose key or far end is not a view cell of the same arena; an occurrence whose
+handle is not a real cell of the base or a live group; a group reachable from itself; a `d.binds`,
+`d.dim-group`, `d.pack` or `d.packing` rank of the wrong shape. Every test that mutates a view space
+calls it before asserting anything else.
 
-`arena_manifold.hpp:124-128,365-378` already defines `BoundDimensionMember`/`BoundDimensionSet`/
-`bindDimension()`/`boundDimensionSet()` for a different purpose entirely — binding one arena
-dimension across federated spaces. Every view-binding type in this document is named `ViewAxis*`/
-`ViewGroup*` to stay clear of it; a reader of `arena_manifold.hpp` must not be led to think the view
-system is the federation feature.
+### 6.7 Derivation is windowed
+
+A view mints derived cells only for what it is about to show: the packs within the viewport of the
+cursor, plus a margin. Walking a long rank of packs mints at the leading edge. When the derived
+arena passes `view.arena.windowCells`, the placement tosses and `prepare()` re-derives the window
+around the cursor. That is always possible, because a pack is a function of (origin, axis, step) and
+the pane keeps, as real refs, where each lane has reached. The derived arena is therefore bounded by
+what is on screen, not by how far the reader has walked.
 
 ______________________________________________________________________
 
-## 7. Binding model
+## 7. The binding model
 
-### 7.1 Axes are cells, not struct fields
+### 7.1 Structure
 
-**Ruling (V4): a binding is cells on a view-owned rank inside the view manifold, not a struct field
-and not a fixed array.** The view mints one `axisDim` dimension cell once per pane; each axis slot
-is a cell on that rank. Adding an axis mints one more rank member; there is no fixed count.
-`ViewAxisBinding`'s X/Y/Z struct and `DimensionBundle`'s closed five-entry enum are retired as live
-storage (§16, ruling V4) and reduced to two roles only: (a) the serialization/preset shape persisted
-into `system://layout` (§7.4), since dimension names, not `CellRef`s, are what survives a session
-boundary; and (b) an initial seed a user can pick from when creating a new group, exactly as
-`DimensionBundle` already enumerates five named presets today.
+Bindings are cells in the binding arena. Four view-owned dimensions carry them:
 
-**Ruling (V13): a slot does not link to its target; it links to an *occurrence* of it.** Linking an
-axis slot straight to a dimension cell on `d.binds` would give the dimension cell one negward
-`d.binds` neighbour, and a cell has only one: the dimension could sit under one axis and no more.
-Classic ZigZag puts the same dimension on two axes freely (`d.1` across and down shows a rank and
-its continuation at once), and the same defect would stop a dimension belonging to two groups. So
-every *use* of a dimension or group is its own view-minted cell in the binding arena, an occurrence,
-and three view-owned dimensions carry the structure:
-
-| Dimension      | Rank                                                               | Reads as                                     |
-| -------------- | ------------------------------------------------------------------ | -------------------------------------------- |
-| `d.binds`      | axis slot, then the occurrence in force, then any stacked beneath  | "this axis shows that"                       |
-| `d.occurrence` | the target (a real dimension cell, or a group cell), then its uses | "everywhere this dimension or group is used" |
-| `d.dim-group`  | a group cell, then its member occurrences in order                 | "this group contains these" (§7.2)           |
+| Dimension      | Rank                                                   | Reads as                           |
+| -------------- | ------------------------------------------------------ | ---------------------------------- |
+| `d.axes`       | the placement's axis head, then one slot per axis      | "these are the axes, in order"     |
+| `d.binds`      | an axis slot, then the occurrence it shows             | "this axis shows that"             |
+| `d.dim-group`  | a group cell, then one occurrence per member, in order | "this group contains these"        |
+| `d.ring-order` | the ring head, then one occurrence per dimension       | "this is the order round the ring" |
 
 ```text
-   axisDim rank:      [axis X] ---- [axis Y] ---- [axis Z]
-                         |             |             |
-   d.binds:           (occ a)       (occ b)       (occ c)
-                         |             |             |
-   d.occurrence:   [d.1] - (occ a) - (occ b)    [G] - (occ c)
+ d.axes:        [head] --- [axis 0] --- [axis 1] --- [axis 2]
+                              |            |            |
+ d.binds:                  (occ: d.1)   (occ: d.1)   (occ: G)
 
-   d.1 is on X and on Y; group G is on Z. d.1's own d.binds slots are empty.
+ d.dim-group:   [G "contact"] --- (occ: d.email) --- (occ: d.phone) --- (occ: d.address)
+
+ d.ring-order:  [head] --- (occ: d.2) --- (occ: d.clone) --- (occ: d.email) --- ...
+
+ (occ: X) is an occurrence whose handle names X. d.1 is on two axes; d.email is in a
+ group and in the ring order. Each use is its own cell, so nothing is spent twice.
 ```
 
-An occurrence is the clone idiom applied to bindings: its target is the head of its `d.occurrence`
-rank, found the way `cloneMaster()` finds a clone's master (`manifold.hpp:446-458`), cycle guard
-included. I1 holds on all three dimensions without exception, because each occurrence is a distinct
-cell with its own two slots per dimension. Binding `d.1` to axis Y is: mint an occurrence, append it
-to `d.1`'s `d.occurrence` rank, link `axisY -d.binds-> occurrence`. Unbinding unlinks and splices
-the occurrence out of both ranks.
+An axis slot, a group and a head are bare view cells; a group's content is its name. An occurrence
+(§6.3) names a real dimension cell or a group cell. Because each *use* is its own cell, the
+arithmetic that would otherwise cap things does not arise: a dimension can be on any number of axes
+and in any number of groups, a group can be nested in several parents and shown on several axes, and
+none of it touches the real dimension cell.
 
-The cost, argued rather than assumed: two cells and three links per binding (slot and occurrence)
-against three fields in `ViewAxisBinding`. Resolving "what is on this axis" is one hop to the
-occurrence and then a walk to the head of its `d.occurrence` rank — O(uses of that target), which is
-the number of axes and groups naming it, a handful. In exchange the reverse question, "which axes
-and groups use this dimension", is the same rank read forwards, with no index: it is what
-`rebindAllAxesOf()` and the binding HUD need. Nothing here is capped: not the axis count, not the
-number of axes one dimension is on, not the number of groups it belongs to.
+Resolving what an axis shows is two reads: the slot's posward neighbour on `d.binds`, then its
+handle. The reverse questions — which axes show this dimension, which groups contain it — are scans
+of the axis rank and of the groups. Those are a handful of cells each, and the HUD is the only
+caller.
 
-What a doubled binding means on screen:
+`ViewAxisBinding` and `DimensionBundle` stop being live storage. `ViewAxisBinding` remains as the
+shape of a three-axis preset, and `DimensionBundle`'s triples become seed presets from which a group
+can be created.
 
-- **Movement.** Stepping on either axis moves along the one dimension. I1 is untouched: the cell
-  still has one posward and one negward neighbour on it.
-- **Layout.** The same neighbour is placed once per axis that shows it, so a radius-1 neighbour on
-  `d.1` appears on the X spoke and on the Y spoke. `PlacedItem` therefore carries the axis it was
-  placed for (§8.4), and animation identity is the pair (cell, axis), so the two placements tween
-  independently. Past radius 1, stretch vanishing keeps its first-placement-wins rule (§9.1.3), with
-  axis-rank order breaking the tie.
-- **All-dim walk.** A dimension on any axis is a spoke, not a ring member, however many axes it is
-  on. Dropping a dragged edge on an axis binds *that axis* and leaves every other axis alone, so
-  dragging an already-bound spoke onto a second axis doubles it; swapping two axes stays the
-  separate swap action.
-- **Derived cells.** Each axis has its own `axisStep` dimension (§6.2), so packs derived for a group
-  on X and the same group on Y are separate ranks and cannot collide.
+### 7.2 Groups
 
-### 7.2 Dimension groups
+A group is created, renamed, reordered, extended, shrunk and deleted through `ViewAxisSet` (§8.3). A
+member is a dimension or another group; a group that would become reachable from itself is refused
+(`GroupCycle`). An empty group can exist but cannot be bound (`EmptyGroupBind`).
 
-A group is a view-minted cell `g` in the binding arena (deliberately not on `system://settings`'
-`d.groups`/`d.subgroups`, which group *settings fields*, not dimensions of a slice being browsed —
-reusing that name risks a collision the first time a slice happens itself to be a system xanadoc).
-`g` heads a `d.dim-group` rank of member occurrences (§7.1): each member is an occurrence of a real
-dimension cell or of another group (§9.3.7), any number, uncapped, in the order the user gave. A
-dimension may therefore be a member of any number of groups and bound alone to an axis at the same
-time, and a group may be nested in several parents.
+A group is bound as a dimension is, by an occurrence under the axis slot, so binding code never asks
+which it has. "Rebinding a whole set at once" is editing the group: every axis that shows it reads
+the new membership at the next `prepare()`, because its occurrence names the group and not a copy of
+its members. Deleting a group removes every occurrence of it and tells the user which axes and
+parent groups lost it.
 
-A group is bound exactly as a dimension is — an occurrence of `g` under the axis slot — so
-axis-binding code never cases on "is the target a dimension or a group", and one group may be on
-several axes. Rebinding an entire set at once is: change `g`'s membership; every axis showing `g`
-picks up the new membership on the next read, because its occurrence resolves to `g`'s identity, not
-to a snapshot of its members. Deleting `g` walks its `d.occurrence` rank and removes each use; the
-status line names the axes and parent groups that lost it.
+Group membership is ordered, and the order is meaningful: it is the order of the lanes (§9.3).
 
-### 7.3 Rebind sequence
+### 7.3 Axes and what a view can place
+
+The number of axes is not capped, but a view has only so many directions to give them. Each view
+states which axis indices it places and where (§8.5, `axisDirection`): stretch vanishing and pack
+view place axes 0 and 1 in the plane and axis 2 in depth; all-dim walk places the same three as
+spokes. Axes beyond what a view places are still bound, still listed in the HUD and still have
+movement actions; all-dim walk shows their neighbours on the rings, badged with the axis.
+
+When one dimension is bound to two axes, stepping on either moves along it; its immediate neighbours
+are placed once per axis, so a placement's identity includes the axis (§8.4).
+
+### 7.4 The rebind sequence
 
 ```text
-1. ViewManifold::rebind(op):
-     -> op(axes)                          -- binding arena only, e.g.
-          mint occurrence; link it on d.occurrence and d.binds  -- choke point, I1
-          undo stack entry pushed
-     -> toss()                            -- derived arena: O(1), section 6.4
-2. ViewHost observes the return and invokes view->onBindingChanged()
-3. Next frame, before layout(): ViewManifold::reclaim() if over threshold
-     -- O(discarded), once per frame however many rebinds preceded it
-4. layout() lazily re-derives dimension handles, packs, rings, placement
-     -- O(visible)
+1. ViewAxisSet edit                binding arena: mint or unlink occurrences; push undo entry
+2. ViewManifold::toss()            derived arena: constant time (§6.5)
+3. placement marked stale          nothing else happens on the input path
+4. next frame: prepare()           re-derive what the cursor's place needs: O(visible)
+5. layout()                        pure; fills the pane's records
 ```
 
-The binding edit and the toss touch different arenas, so step 1 costs the edit itself (a constant
-number of link writes for a single bind; O(members changed) for a group edit) plus the constant-time
-toss. No step on the rebind path is proportional to the number of derived cells.
+Step 1 costs the edit: a constant number of cells for one bind, the number of members changed for a
+group edit. Nothing on the path depends on how much was derived.
 
-### 7.4 Undo and persistence
+### 7.5 Undo and persistence
 
-Undo is view-local, never hypertime: each mutating `ViewAxisSet` call pushes one entry to an
-in-process stack scoped to the pane's lifetime; `undo()` pops and reverses it. No operation is
-appended to the real store by a bind, an undo, or a redo (R8).
+Undo is local to the placement: each `ViewAxisSet` edit pushes its inverse, and undo replays it and
+tosses. It is not hypertime, and it appends nothing to any store.
 
-Bindings persist across sessions in `system://layout` under `layout.zigzag.<sliceId>.axisBindings`
-and `layout.zigzag.<sliceId>.dimensionGroups`, keyed by dimension *name*, not `CellRef` — the view's
-own arena is fresh every session, so persisted `CellRef`s would already be dead; `attach()` reads
-the last-known names back and replays them through `bind()`/`createGroup()`. This is per-slice, not
-per-user-global (open question VU1, §17) and is deliberately not stored in `system://activity`
-(which records *completed visits*, not standing configuration) and not in the slice's own store
-(binding a dimension for browsing is not a Structure fact about the document — R8's refusal of
-implicit promotion applies identically here).
+Bindings, groups and ring order are written to `system://layout`, per slice, by dimension *name*
+(refs do not survive a session), under `layout.slice.<sliceId>.axes`, `.groups` and `.ringOrder`. On
+attach they are replayed through `ViewAxisSet`; a name that no longer resolves is skipped and
+reported. They are not written to the slice's own store — how a reader looks is not a fact about the
+document (R8) — and not to `system://activity`, which records visits.
 
 ______________________________________________________________________
 
 ## 8. The API
 
-### 8.1 View identity, registry, descriptor
+Declarations are normative in shape and naming; bodies are not shown. Everything in §8.1 to §8.7 is
+in `apps/common/xanadu/view/`, namespace `xanadu::view`.
+
+### 8.1 Views and the registry
 
 ```cpp
-// apps/common/xanadu/view/view.hpp
-namespace xanadu::view {
+// view.hpp
+enum class ViewSubject : std::uint8_t { Slice, Page };
 
-/// Opaque, stable identity for an installed View kind (not an instance) --
-/// a small interned string, the same shape DimID/dispatchAction names
-/// already use. No enum: a plugin needs no case added anywhere.
-using ViewKindId = std::string; // e.g. "zigzag.stretch-vanishing"
-
+/// A layout and interaction strategy. One instance per placement, so an
+/// instance may keep caches; it keeps no cursor and no binding.
 class View {
 public:
   virtual ~View() = default;
-  [[nodiscard]] virtual ViewKindId kind() const noexcept = 0;
-
-  /// Once, when a pane starts showing this instance. @p store is the real
-  /// backing store -- a View never owns persistence, it is handed it.
-  virtual void attach(const xanadu::Store &store) = 0;
-  virtual void detach() noexcept                  = 0;
-
-  /// Binding changed (axis rebind, group edit). Never mutates the real
-  /// store; always followed by a derived-layer toss before the next layout().
-  virtual void onBindingChanged() = 0;
-
-  /// The real accursed cell moved. No layout obligation itself -- layout()
-  /// is pulled, not pushed -- but lets a view drop caches keyed by old focus.
-  virtual void onCursorMoved(zigzag::CellRef previous,
-                             zigzag::CellRef current) noexcept = 0;
-
-  virtual void onStoreAdvanced(xanadu::MicroversionId newVersion) noexcept = 0;
-
-  /// Pure, allocation-free, GPU-free layout (V-R3). noexcept: the render
-  /// path never throws; a recoverable problem is reported through
-  /// LayoutSink's own typed fields.
-  virtual void layout(const struct LayoutInput &in,
-                      struct LayoutSink &out) const noexcept = 0;
+  [[nodiscard]] virtual std::string_view kind() const noexcept = 0;
 };
 
-/// The ZigZag-side refinement: exposes the real Manifold a SliceView
-/// renders and the one ViewManifold it mints into.
-class SliceView : public View {
-public:
-  [[nodiscard]] virtual const class ViewManifold &viewManifold() const noexcept = 0;
-  [[nodiscard]] virtual zigzag::CellRef focusCell() const noexcept              = 0;
-  virtual void focusCell(zigzag::CellRef real) = 0; // refuses an ephemeral ref
-};
-
-/// The xanadoc seam (§10.3). Thin on purpose: only what the follow-up spec
-/// needs to not have to touch this chapter again.
-class PageView : public View {
-public:
-  [[nodiscard]] virtual xanadu::DocRef document() const noexcept = 0;
-};
-
-struct ViewCapabilities {
-  bool needsThreeD{false};
-  bool supportsDragRebind{false};
-  bool mintsViewCells{true};
-  bool pageCompatible{false};
+struct ChordSpec {
+  std::string action, call, chord, context;
 };
 
 struct ViewDescriptor {
-  ViewKindId id;
-  std::string displayName, description, iconGlyph;
-  ViewCapabilities capabilities;
-  gleditor::cpp26::function_ref<std::vector<xanadu::settings::SettingSpec>()> settingSpecs;
-  struct DefaultChord { std::string actionId, vortexCall, chord, context; };
-  std::vector<DefaultChord> defaultChords;
-  gleditor::cpp26::function_ref<std::unique_ptr<View>(const zigzag::Manifold &base)> makeInstance;
+  std::string kind; // "slice.stretch-vanishing", "page.base"
+  std::string name, description, glyph;
+  ViewSubject subject{};
+  std::vector<settings::SettingSpec> settings;
+  std::vector<ChordSpec> chords;
+  std::function<std::unique_ptr<View>()> make;
 };
 
 class ViewRegistry {
 public:
-  static ViewRegistry &instance() noexcept;
-  /// Refuses (ViewError::DuplicateViewId) a second registration of the same
-  /// id -- a collision is a config error to surface, not a silent override.
-  std::expected<void, ViewError> registerView(ViewDescriptor descriptor);
-  [[nodiscard]] std::span<const ViewDescriptor> installed() const noexcept;
-  [[nodiscard]] gleditor::cpp26::optional<const ViewDescriptor &> find(const ViewKindId &id) const noexcept;
-private:
-  std::vector<ViewDescriptor> views_; // stable order: install order
+  /// Refuses a second descriptor of the same kind (DuplicateViewKind) and a
+  /// default chord that is already taken (ChordCollision).
+  std::expected<void, ViewError> add(ViewDescriptor descriptor);
+  [[nodiscard]] std::span<const ViewDescriptor> views() const noexcept;
+  [[nodiscard]] gleditor::cpp26::optional<const ViewDescriptor &>
+  find(std::string_view kind) const noexcept;
 };
 
-} // namespace xanadu::view
+void registerBuiltinViews(ViewRegistry &registry);
 ```
 
-A built-in view self-registers at static-init time through the same `registerView()` call a plugin
-would call explicitly (a dynamically-loaded or Vortex-authored view has no static-init moment, so
-the registry supports the explicit path universally, and built-ins happen to invoke it from a
-static-init shim) — one registration path, mirroring how `registerZigzagCommands()` is one shared
-function both ZigZag and Xuzz call (`zigzag_commands.hpp:46-48`).
+The registry is an object the host owns, not a singleton, and built-in views are added by one
+explicit call, as `registerZigzagCommands()` is one call today. A plugin calls `add()` the same way.
+The host seeds each descriptor's settings and chords into `system://settings` and `system://keymap`
+when it is added, so a third-party view's tunables and bindings appear where the built-in ones do.
+`make` is a `std::function` because a descriptor outlives the call that registered it; a
+`function_ref` would dangle.
 
-**Vortex-authored views.** A view whose layout math is simple enough to express as Vortex
-structure/arithmetic calls registers through the identical `ViewRegistry::registerView()`, wrapping
-a `VortexCore` program reference in a `makeInstance` closure. What must stay C++: anything touching
-the draw adapter, anything needing the epoch/mark machinery's direct manipulation, anything on the
-hot path where a VM dispatch per cell would blow the frame budget (all-dim walk's ring geometry at
-high valence). What can be Vortex: a custom pack-membership predicate, a custom opacity curve, a
-custom grid-conflict tie-break rule — pure functions over already-resolved cell data. This is
-exactly the line AGENTS.md's "new C++ must justify why it is not Vortex" draws.
+**Views in Vortex.** A descriptor's `make` may wrap a Vortex program. What can be Vortex is whatever
+is a pure function over resolved cells: a pack's lane filter, an opacity curve, a tie-break, a whole
+small layout. What stays C++ is the per-item arithmetic of the built-in views, where a VM dispatch
+per cell at high valence would cost the frame, and everything under `apps/common/ui/`, which calls
+the renderer.
 
 ### 8.2 `ViewManifold`
 
 ```cpp
-// apps/common/xanadu/view/view_manifold.hpp
-namespace xanadu::view {
+// view_manifold.hpp
+using ViewEpoch = std::uint64_t;
+enum class Layer : std::uint8_t { Binding, Derived };
 
-/// A real or view-minted cell, tagged with the epoch it was minted/read
-/// under -- staleness becomes an O(1) local check, never an arena walk.
-/// Converts to CellRef for free at every read-only call.
+/// A view cell and the generation it belongs to. Binding cells are epoch 0
+/// for the placement's life; a derived cell is valid only in its own epoch.
 struct ViewCellRef {
   zigzag::CellRef ref{zigzag::noCell};
-  ArenaManifold::ViewEpoch epoch{0};
-  [[nodiscard]] constexpr operator zigzag::CellRef() const noexcept { return ref; }
-  [[nodiscard]] constexpr bool isEphemeral() const noexcept {
-    return (ref & zigzag::ephemeralBit) != 0;
-  }
+  ViewEpoch epoch{};
+  Layer layer{Layer::Derived};
   bool operator==(const ViewCellRef &) const = default;
 };
+using ViewDim = ViewCellRef; // a view-owned dimension is a view cell
 
-/// Read-only graph over one pane's view space: the base manifold, plus the
-/// derived arena's current generation. Cells below the derived arena's
-/// epochFloor() and links keyed by dead dimension cells are not answered, so
-/// RankView/neighbours() from cell_views.hpp work over it unchanged and can
-/// never walk into a tossed generation.
-class ViewGraph; // satisfies zigzag::CellGraph; holds two pointers
-
-/// Owns the two sibling arenas of §6.2. A caller never sees a Mark or an
-/// epoch setter -- rebind()/toss()/reclaim() are the only lifecycle entry
-/// points, so "take a mark, forget to release it" cannot happen outside.
 class ViewManifold {
 public:
   explicit ViewManifold(const zigzag::Manifold &base);
 
-  [[nodiscard]] const zigzag::Manifold &base() const noexcept { return base_; }
-  [[nodiscard]] ViewGraph graph() const noexcept;
-  [[nodiscard]] ArenaManifold::ViewEpoch epoch() const noexcept {
-    return derived_.currentEpoch();
-  }
+  [[nodiscard]] const zigzag::Manifold &base() const noexcept;
+  [[nodiscard]] ViewEpoch epoch() const noexcept;
+  [[nodiscard]] class ViewAxisSet &axes() noexcept;
+  [[nodiscard]] const class ViewAxisSet &axes() const noexcept;
 
-  [[nodiscard]] class ViewAxisSet &axes() noexcept { return axes_; }
-  [[nodiscard]] const class ViewAxisSet &axes() const noexcept { return axes_; }
-
-  /// The view-owned dimensions of the current generation, minted on first
-  /// use after a toss. Two DimRefs for packs (ruling V2).
-  [[nodiscard]] zigzag::DimRef packDim();    // d.pack: container -> first
-  [[nodiscard]] zigzag::DimRef packingDim(); // d.packing: constituent rank
-  [[nodiscard]] zigzag::DimRef ringDim();    // d.ring-dim
-  [[nodiscard]] zigzag::DimRef axisStepDim(ViewAxisId axis);
-
-  /// Mint a derived cell / link in the current generation. link() is
-  /// mintViewLink (§6.5) over the derived arena; strategies get these, never
-  /// an ArenaManifold&.
-  [[nodiscard]] std::expected<ViewCellRef, ViewError> mintCell();
+  // -- mint: every write of a view cell goes through these four ------------
+  [[nodiscard]] std::expected<ViewCellRef, ViewError> mint(Layer layer);
+  [[nodiscard]] std::expected<ViewCellRef, ViewError>
+  mint(Layer layer, std::string_view text);
+  /// A cell that stands for @p target: a real cell, or a group of this space.
+  [[nodiscard]] std::expected<ViewCellRef, ViewError>
+  mintOccurrence(Layer layer, zigzag::CellRef target);
+  /// §6.6. Refuses rather than displaces.
   [[nodiscard]] std::expected<void, ViewError>
-  link(ViewCellRef from, zigzag::DimRef dim, zigzag::DimVector dir,
+  link(Layer layer, ViewCellRef from, ViewDim dim, zigzag::DimVector dir,
        ViewCellRef to) noexcept;
+  [[nodiscard]] std::expected<void, ViewError>
+  unlink(Layer layer, ViewCellRef from, ViewDim dim,
+         zigzag::DimVector dir) noexcept;
 
-  /// Edit the binding arena, then toss. See §7.3.
-  template <typename BindOp>
-  auto rebind(BindOp &&op) -> decltype(op(axes_)) {
-    auto result = std::forward<BindOp>(op)(axes_);
-    toss();
-    return result;
-  }
-
-  /// The O(1) toss (§6.4). No loop, no allocation, no destructor.
-  void toss() noexcept {
-    derived_.invalidateEpoch();
-    dims_ = {};
-  }
-
-  /// O(discarded). Called by the host at the start of a derivation, never
-  /// from rebind(); a no-op under view.arena.reclaimThresholdCells.
-  void reclaim() noexcept;
-
-  /// I4: resolve any view cell to a real CellRef, bounded by traversalBound().
-  /// Refuses a stale ref with ViewError::StaleEpoch.
+  // -- read ----------------------------------------------------------------
+  [[nodiscard]] std::optional<ViewCellRef>
+  linked(ViewCellRef from, ViewDim dim, zigzag::DimVector dir) const noexcept;
+  [[nodiscard]] std::optional<zigzag::CellRef>
+  target(ViewCellRef occurrence) const noexcept;
+  /// I5. An occurrence: its target. A pack: its first present constituent's.
   [[nodiscard]] std::expected<zigzag::CellRef, ViewError>
   resolveReal(ViewCellRef cell) const noexcept;
 
-private:
-  struct DerivedDims { // fixed size: the O(1) reset in toss()
-    zigzag::DimRef pack{zigzag::noCell};
-    zigzag::DimRef packing{zigzag::noCell};
-    zigzag::DimRef ring{zigzag::noCell};
-    zigzag::CellRef axisStepRoot{zigzag::noCell}; // rank of per-axis dims
-  };
+  // -- the derived generation ----------------------------------------------
+  /// View-owned dimensions of the current epoch, minted on first use.
+  [[nodiscard]] ViewDim packDim();    // d.pack: container, then first constituent
+  [[nodiscard]] ViewDim packingDim(); // d.packing: the constituents, in lane order
+  [[nodiscard]] ViewDim axisStepDim(ViewAxisId axis); // packs along one axis
+  [[nodiscard]] std::size_t derivedCellCount() const noexcept;
+  void toss() noexcept; // §6.5
 
+private:
   const zigzag::Manifold &base_;
-  ArenaManifold bindings_; // survives every toss
-  ArenaManifold derived_;  // tossed on every rebind
-  ArenaManifold::Mark derivedEmpty_; // taken at construction; reclaim() target
-  DerivedDims dims_;
-  class ViewAxisSet axes_;
+  zigzag::ArenaManifold bindings_;
+  zigzag::ArenaManifold derived_;
+  zigzag::Mark empty_; // taken on the empty derived arena
+  ViewEpoch epoch_{1};
+  // handles to the current generation's dimension cells; cleared by toss()
 };
 
-} // namespace xanadu::view
+struct ViewSpaceViolation {
+  ViewCellRef cell;
+  std::string_view rule; // "I3", "two-sided", "rank-shape", ...
+};
+[[nodiscard]] std::vector<ViewSpaceViolation>
+verifyViewSpace(const ViewManifold &space);
 ```
 
-### 8.3 Binding model API
+A view reads real structure from `base()` with the existing `CellGraph` tools and view structure
+through `linked()` and `target()`. There is no merged graph type, because the two never mix: no link
+joins a real cell to a view cell (§6.2).
+
+### 8.3 `ViewAxisSet`
 
 ```cpp
-// apps/common/xanadu/view/view_binding.hpp
-namespace xanadu::view {
-
-/// A single real dimension, or a group cell's identity -- zzstructure never
-/// distinguishes the two at the type level (a dimension is a cell), so
-/// axis code never cases on which.
+// view_binding.hpp
+using ViewAxisId = std::uint32_t; // position on the d.axes rank
+inline constexpr ViewAxisId noAxis = ~ViewAxisId{0};
+/// A real dimension cell, or a group cell of this placement's binding arena.
 using BindTarget = zigzag::CellRef;
-using ViewAxisId = std::uint32_t; // position on the axisDim rank
 
 class ViewAxisSet {
 public:
-  [[nodiscard]] std::size_t axisCount() const noexcept;      // not a cap
-  std::size_t addAxis();                                     // open-ended
-  std::expected<void, ViewError> removeAxis(std::size_t index);
+  // -- axes ----------------------------------------------------------------
+  [[nodiscard]] std::size_t axisCount() const noexcept; // not a cap
+  ViewAxisId addAxis();
+  std::expected<void, ViewError> removeAxis(ViewAxisId axis);
+  /// Replace what the axis shows. The target's other axes are left alone.
+  std::expected<void, ViewError> bind(ViewAxisId axis, BindTarget target);
+  std::expected<void, ViewError> unbind(ViewAxisId axis);
+  std::expected<void, ViewError> swap(ViewAxisId first, ViewAxisId second);
+  [[nodiscard]] std::optional<BindTarget> shown(ViewAxisId axis) const noexcept;
+  [[nodiscard]] bool isGroup(BindTarget target) const noexcept;
 
-  /// Replaces what the axis shows with a new occurrence of target (§7.1).
-  /// The same target may be on any number of axes at once; binding it here
-  /// leaves its other axes alone. Every link goes through mintViewLink.
-  std::expected<void, ViewError> bind(std::size_t axisIndex, BindTarget target);
-  [[nodiscard]] gleditor::cpp26::optional<BindTarget> boundTarget(std::size_t axisIndex) const noexcept;
-  /// Every axis showing target, in axis-rank order: target's d.occurrence
-  /// rank filtered to occurrences that sit under an axis slot.
-  [[nodiscard]] std::vector<ViewAxisId> axesOf(BindTarget target) const;
-  /// Every group target is a member of, by the same rank.
-  [[nodiscard]] std::vector<zigzag::CellRef> groupsOf(BindTarget target) const;
+  // -- groups --------------------------------------------------------------
+  std::expected<BindTarget, ViewError>
+  createGroup(std::string_view name, std::span<const BindTarget> members);
+  std::expected<void, ViewError> renameGroup(BindTarget group,
+                                             std::string_view name);
+  std::expected<void, ViewError> insertMember(BindTarget group,
+                                              std::size_t position,
+                                              BindTarget member);
+  std::expected<void, ViewError> removeMember(BindTarget group,
+                                              std::size_t position);
+  std::expected<void, ViewError> moveMember(BindTarget group, std::size_t from,
+                                            std::size_t to);
+  std::expected<void, ViewError> deleteGroup(BindTarget group);
+  [[nodiscard]] std::size_t memberCount(BindTarget group) const noexcept;
+  [[nodiscard]] std::optional<BindTarget>
+  member(BindTarget group, std::size_t position) const noexcept;
 
-  zigzag::CellRef createGroup(std::string_view name, std::span<const zigzag::DimRef> members);
-  std::expected<void, ViewError> renameGroup(zigzag::CellRef group, std::string_view name);
-  std::expected<void, ViewError> addMember(zigzag::CellRef group, zigzag::DimRef dim);
-  std::expected<void, ViewError> removeMember(zigzag::CellRef group, zigzag::DimRef dim);
-  /// Refused (ViewError::GroupCycle) if outer is reachable from inner.
-  std::expected<void, ViewError> nestGroup(zigzag::CellRef outer, zigzag::CellRef inner);
-  [[nodiscard]] std::vector<zigzag::DimRef> membersOf(zigzag::CellRef group) const;
+  // -- ring order (§9.2) ---------------------------------------------------
+  /// The dimension's place in the order, appending it if it is new.
+  std::size_t ringPlace(zigzag::DimRef dimension);
+  [[nodiscard]] std::optional<std::size_t>
+  ringPlaceIfKnown(zigzag::DimRef dimension) const noexcept;
+  std::expected<void, ViewError> moveInRing(zigzag::DimRef dimension,
+                                            std::size_t place);
 
-  /// "Rebind an entire set at once": re-link every axis bound to oldTarget
-  /// to newTarget instead.
-  std::expected<void, ViewError> rebindAllAxesOf(zigzag::CellRef oldTarget, BindTarget newTarget);
+  // -- who uses what: scans of a handful of cells --------------------------
+  void forEachAxisShowing(
+      BindTarget target,
+      gleditor::cpp26::function_ref<void(ViewAxisId)> visit) const;
+  void forEachGroupContaining(
+      BindTarget target,
+      gleditor::cpp26::function_ref<void(BindTarget)> visit) const;
 
-  void undo();
-  [[nodiscard]] bool canUndo() const noexcept;
-
-private:
-  ArenaManifold *arena_; // non-owning; the ViewManifold owns this set
-  zigzag::DimRef axisDim_{zigzag::noCell};
-  zigzag::DimRef dimGroupDim_{zigzag::noCell};
-  zigzag::DimRef bindsDim_{zigzag::noCell};
-  zigzag::DimRef occurrenceDim_{zigzag::noCell};
-  std::vector<struct BindingEdit> undoStack_;
+  // -- undo: local to the placement, never hypertime -----------------------
+  bool undo();
+  bool redo();
 };
-
-} // namespace xanadu::view
 ```
 
-### 8.4 Per-frame pipeline and output records
+Every mutator edits the binding arena through `ViewManifold::mint` and `link`, and the caller tosses
+afterwards (§7.4). `ringPlace()` is the one mutator a view calls for itself, and only from
+`prepare()`.
+
+### 8.4 Layout records
 
 ```cpp
-// apps/common/xanadu/view/view_layout.hpp
-namespace xanadu::view {
+// view_records.hpp
 
-struct ViewportDesc {
-  int x, y, width, height;               // pixels
-  float nearDepth{0.0F}, farDepth{1.0F}; // depth-range slice, §12
-  glm::mat4 viewProjection{1.0F};         // host-owned camera
+/// What a placed thing is: its identity for picking, accessibility and
+/// animation. Two placements of the same cell differ in `slot`.
+enum class SubjectKind : std::uint8_t {
+  Cell,     // value: a real CellRef
+  ViewCell, // value: a view CellRef; epoch says which generation
+  Page,     // value: document << 32 | page
+  Label,    // value: the dimension or link the label names
+  Badge,    // value: what is counted
+  Marker,   // value: view-defined (ghost, tail, tick)
+};
+struct SubjectId {
+  SubjectKind kind{};
+  std::uint32_t slot{}; // axis, lane, deck or ring place of this placement
+  std::uint64_t value{};
+  ViewEpoch epoch{};
+  bool operator==(const SubjectId &) const = default;
+};
+
+/// The pane as a layout sees it. Coordinates are placement-local: x right,
+/// y up, z towards the viewer, one unit per Canvas pixel on the plane z = 0
+/// at the rest camera.
+struct PaneFrame {
+  float widthPx{}, heightPx{};
+  glm::mat4 localToClip{1.0F}; // the clip space FrameContext::viewProjection uses
+  float minReadableLinePx{};   // from zigzag.minReadableTextPx and ui.minFontPx
 };
 
 struct ContentExtent {
-  float widthPx{0.0F};
-  float heightPx{0.0F};
+  float width{}, height{}, lineHeight{};
+  std::uint32_t lines{};
 };
+/// Size of a subject's content at a width limit, in local units. The
+/// presenter measures with text::fit() in the subject's font role; a test
+/// supplies fixed sizes. This is all a layout knows about text.
+using Measure =
+    gleditor::cpp26::function_ref<ContentExtent(SubjectId, float maxWidth)>;
 
-struct LayoutInput {
-  const ViewManifold &view;
-  zigzag::CellRef focus;
-  ViewportDesc viewport;
-  /// Content-fit size of a real cell at a width limit, in Canvas pixels. The
-  /// application passes a measurer over text::fit() and a ShapingCache with
-  /// the Body role's font; a test passes a fixed one. This is what keeps
-  /// layout() free of fonts, themes and any graphics device.
-  gleditor::cpp26::function_ref<ContentExtent(zigzag::CellRef, float)> measure;
-  /// Smallest line height the adapter will draw as text (from
-  /// zigzag.minReadableTextPx and ui.minFontPx). Layout uses it to choose
-  /// ContentMode; it never names a font.
-  float minReadableLinePx{};
-  std::uint64_t frameId; // deterministic tie-break
+enum class Facing : std::uint8_t { Plane, Camera };
+enum class ContentMode : std::uint8_t { Full, Abbreviated, Coarse, Badge, None };
+enum ItemFlags : std::uint32_t {
+  itemFocus    = 1U << 0,
+  itemViewOnly = 1U << 1, // draws with view-only chrome; never role cell/page
+  itemMarked   = 1U << 2,
+  itemGhost    = 1U << 3,
 };
-
-inline constexpr ViewAxisId noAxis = ~ViewAxisId{0};
+inline constexpr std::uint32_t noIndex = ~std::uint32_t{0};
 
 struct PlacedItem {
-  ViewCellRef cell;
-  glm::vec3 position;
-  glm::quat orientation{1, 0, 0, 0};
+  SubjectId id;
+  glm::vec3 centre{};
+  glm::quat orientation{1.0F, 0.0F, 0.0F, 0.0F}; // used when facing == Plane
   float width{}, height{};
   float opacity{1.0F};
-  /// The axis this placement belongs to, or noAxis off the spokes. With cell
-  /// it is the animation identity: one dimension on two axes places the
-  /// same neighbour twice (§7.1).
-  ViewAxisId axis{noAxis};
-  enum class Visibility : std::uint8_t { Visible, ClippedHidden, Lod } visibility{};
-  std::uint16_t depthLayer{};
-  /// Full: wrapped, unbounded lines. Abbreviated: one ellipsized line via
-  /// TextFit, never a byte prefix. Badge: a count. The accessible name is
-  /// the full text in every mode.
-  enum class ContentMode : std::uint8_t { Full, Abbreviated, Badge } contentMode{};
-  std::uint32_t packId{}; // 0 = not inside a pack
+  Facing facing{Facing::Plane};
+  ContentMode content{ContentMode::Full};
+  std::uint32_t flags{};
+  std::uint32_t frame{noIndex}; // the PlacedFrame this item sits in
 };
 
+enum class EdgeKind : std::uint8_t { Dimension, Link, Transclusion, Tether };
 struct PlacedEdge {
-  ViewCellRef from, to;         // `to` may be a ring-slot placeholder
-  zigzag::DimRef dimension;
-  zigzag::DimVector direction;
-  glm::vec3 labelAnchor;
-  bool boundToAxis{};
+  SubjectId from, to;
+  glm::vec3 a{}, b{};
+  EdgeKind kind{};
+  std::uint64_t relation{}; // DimRef, or the link's cell
+  float opacity{1.0F};
+  std::uint32_t label{noIndex}; // the PlacedItem that names this edge
 };
 
-struct AxisGizmo {
-  glm::vec3 origin, direction;
-  zigzag::DimRef boundDimension{zigzag::noCell}; // noCell = unbound slot
-  float snapRadiusWorld{};
+/// A container drawn round other items: a pack, a lane table, a deck.
+struct PlacedFrame {
+  SubjectId id;
+  glm::vec3 centre{};
+  glm::quat orientation{1.0F, 0.0F, 0.0F, 0.0F};
+  float width{}, height{};
+  std::uint32_t parent{noIndex};
+  std::uint32_t count{}; // what it stands for, when collapsed to a badge
+  bool collapsed{};
 };
 
-struct PackFrame {
-  std::uint32_t id{}, parentPackId{};
-  glm::vec3 position{}; float width{}, height{}, depth{};
-  std::uint16_t constituentCount{};
-  bool collapsedToBadge{};
+/// Where a dragged edge may be dropped: an axis, as a segment with a radius.
+struct DropTarget {
+  ViewAxisId axis{noAxis};
+  glm::vec3 a{}, b{};
+  float radius{};
 };
 
-/// Caller-owned, reused across frames -- zero dynamic allocation (V-R31).
+enum class MotionPath : std::uint8_t { Straight, Arc };
+/// How one subject should travel to its new place. Absent: the default ease.
+struct MotionHint {
+  SubjectId id;
+  float delayMs{}, durationMs{};
+  MotionPath path{MotionPath::Straight};
+};
+
+/// Caller-owned and reused. push() never drops: the sink grows, and logs
+/// that it did on the view.layout category.
 class LayoutSink {
 public:
-  void push(const PlacedItem &) noexcept;
-  void push(const PlacedEdge &) noexcept;
-  void push(const AxisGizmo &) noexcept;
-  void push(const PackFrame &) noexcept;
+  std::uint32_t push(const PlacedItem &item);
+  std::uint32_t push(const PlacedFrame &frame);
+  void push(const PlacedEdge &edge);
+  void push(const DropTarget &target);
+  void push(const MotionHint &hint);
+  void clear() noexcept;
   [[nodiscard]] std::span<const PlacedItem> items() const noexcept;
+  [[nodiscard]] std::span<const PlacedFrame> frames() const noexcept;
   [[nodiscard]] std::span<const PlacedEdge> edges() const noexcept;
-  [[nodiscard]] std::span<const AxisGizmo> gizmos() const noexcept;
-  [[nodiscard]] std::span<const PackFrame> packs() const noexcept;
-  [[nodiscard]] std::size_t itemCountNeeded() const noexcept; // growth diagnostics
+  [[nodiscard]] std::span<const DropTarget> dropTargets() const noexcept;
+  [[nodiscard]] std::span<const MotionHint> hints() const noexcept;
 };
-
-} // namespace xanadu::view
 ```
 
-`View::layout(const LayoutInput&, LayoutSink&) const noexcept` reads `in.view.graph()` through
-`CellGraph`-conformant calls, may call strategy objects (§8.6) that mint into the derived layer via
-`mintViewLink`, but never touches `AnimationState`, Choreograph, or GPU state. Calling it twice with
-different candidate bindings and discarding one — the drag-rebind preview needs exactly this — costs
-nothing and corrupts nothing, because it is `const` on the view and writes only into caller-owned
-`LayoutSink` storage.
+Every record is a position in the world and nothing else: a cell, a page, a label and a pack frame
+are all planes with a centre, an orientation and a size. `Facing::Camera` asks the presenter to turn
+the plane to the camera each frame, which is a matrix and not new geometry. Labels are items like
+any other, so they are placed, faded and culled by the same rules.
 
-**Layout is retained, not per-frame.** `layout()` is pure, so its output is valid until an input
-changes. The host keeps each pane's `LayoutSink` and a stamp of what produced it — focus, view
-epoch, the store's advance counter, viewport, `UiMetrics`, theme revision, and the measurer cache's
-revision — and calls `layout()` again only when the stamp differs. The draw adapter keeps its
-canvases against the same stamp: fitted text is stored as `FittedText` and redrawn with
-`Canvas::addText(box, FittedText)`, which shapes nothing. During an animation the adapter re-places
-retained quads; it does not refit text. A settled frame therefore costs no layout call, no HarfBuzz
-call and no buffer upload (V-R37), which is the result batch 8 measured for the visualizer's own
-labels (`design/ui-text-fit-batch8.md`).
+### 8.5 Slice views
 
 ```cpp
-// apps/common/xanadu/view/view_animation.hpp
-struct AnimId {
-  zigzag::CellRef cellOrSyntheticHash;
-  ArenaManifold::ViewEpoch mintedEpoch;
+// slice_view.hpp
+
+/// I6: real cells and numbers only. step == 0 is the origin itself.
+struct SliceCursor {
+  zigzag::CellRef origin{zigzag::noCell};
+  ViewAxisId axis{noAxis};         // the group axis the cursor has stepped along
+  std::int32_t step{};             // signed packs from the origin on that axis
+  std::vector<std::uint32_t> lanes; // into nested packs; empty: the pack as a whole
+  /// All-dim walk: the selected spoke, a dimension and a direction (§9.2.6).
+  std::optional<zigzag::DirectedDim> spoke;
+  bool operator==(const SliceCursor &) const = default;
 };
 
-class AnimationState {
-public:
-  /// Before dereferencing any ViewCellRef in `target`, compares its epoch
-  /// against viewEpoch: a stale epoch drops the entry from the animation
-  /// set rather than easing toward a dangling identity. This IS the
-  /// mechanism satisfying "nothing dereferences a tossed cell": an epoch
-  /// comparison, not a liveness scan.
-  void advance(const LayoutSink &target, float dtSeconds,
-              ArenaManifold::ViewEpoch viewEpoch) noexcept;
-};
-```
+/// The real cell under the cursor: the origin, or the selected (else first
+/// present) constituent's target.
+[[nodiscard]] std::optional<zigzag::CellRef>
+cellAt(const ViewManifold &space, const SliceCursor &cursor) noexcept;
 
-Per-pane, per-frame pipeline, replacing `rebuildActiveViewTopology`/`updateCellPositions`'s fused
-loop:
-
-```text
-attach()                          -- once, on pane open; replays system://layout bindings
-onBindingChanged()/onCursorMoved()/onStoreAdvanced()  -- as triggered, never per-frame
-layout(input, sink)                -- pure; re-run only when an input changed (below)
-AnimationState::advance(sink,dt,epoch)  -- epoch-guarded tween, Choreograph-backed (§12)
-apps/xuzz view_draw_adapter draw(ctx, animated)  -- Canvas/Beams, picking, a11y
-detach()                           -- once, on pane close; writes bindings back to system://layout
-```
-
-### 8.5 Extension points
-
-| #   | Extension                    | Interface                                         | Guaranteed                                                                                      | Must never do                                                                                                                                   |
-| --- | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| a   | New slice view               | `SliceView` + `ViewDescriptor` via `registerView` | Fresh `ViewManifold` per pane; valid `LayoutInput`; `mintViewLink` as the only mutation surface | Call `ArenaManifold::link()` directly; shadow a bound dimension (I5); persist via the real `Store` from a read path; allocate inside `layout()` |
-| b   | New page view                | `PageView` (follow-up)                            | Same `View` contract; a `Viewport`; `Manifold::contentOf`/`textOf` for embedded content         | Depend on a graphics device in `layout()`; embed an ephemeral `CellRef` handed to it by a `SliceView`                                           |
-| c   | New pack/derivation strategy | `PackBuilder`/`RingBuilder`/`VanishingTraversal`  | A `ViewManifold&`, the `mintViewLink` function, the current `ViewAxisSet`                       | Mint through anything but `ViewManifold::mintCell`/`link`; retain a `ViewCellRef` across a frame without re-validating its epoch                |
-| d   | New layout record kind       | add a field/`push()` overload to `LayoutSink`     | Backward compatible: an unknown-to-them record kind is ignored, not a failure                   | Embed a raw `CellRef` without going through `ViewCellRef`                                                                                       |
-| e   | New gesture                  | `ViewGesture` state machine + `View::hitTest`     | Exclusive ownership of `Idle→…→Idle`; a speculative `layout()` call per preview frame           | Commit a binding mutation before `{Committed}`; bypass `ViewAxisSet::bind()` to write `d.binds` directly                                        |
-
-### 8.6 Strategy objects
-
-```cpp
-// apps/common/xanadu/view/view_strategy.hpp
-namespace xanadu::view {
-
-/// Dimensional pack view's d.pack/d.packing builder (§9.3) -- separable so
-/// other views or a plugin reuse the same BFS-frontier semantics.
-class PackBuilder {
-public:
-  /// Computes (lazily -- membership only; §9.3.6) the next pack step from
-  /// @p source along every dimension in @p group.
-  [[nodiscard]] std::vector<zigzag::CellRef>
-  computeNextStep(const ArenaManifold &arena, zigzag::CellRef source,
-                  std::span<const zigzag::DimRef> group,
-                  std::span<const zigzag::CellRef> alreadyPacked) const noexcept;
-
-  /// Mints the container (via d.pack), its d.packing rank, and the
-  /// predecessor->container link on the axis's axisStep dimension. Calls
-  /// mintViewLink for every edge it writes.
-  [[nodiscard]] std::expected<zigzag::CellRef, ViewError>
-  materialize(ViewManifold &view, std::span<const zigzag::CellRef> members,
-             zigzag::CellRef previousRepresentative, zigzag::DimRef axisStep) const;
+struct BindingPreview { // "as if this axis showed that": for a drag in flight
+  ViewAxisId axis{noAxis};
+  BindTarget target{zigzag::noCell};
 };
 
-/// All-dim walk's unbound-dimension ring placement -- per-dimension slot
-/// assignment, append-only (§9.2.1).
-class RingBuilder {
-public:
-  [[nodiscard]] float ringSlotAzimuth(zigzag::DimRef dim) noexcept;
-  [[nodiscard]] AxisGizmo gizmoFor(std::size_t axisIndex, const ViewAxisSet &axes) const noexcept;
+struct SliceLayoutInput {
+  const ViewManifold &space;
+  const SliceCursor &cursor;
+  PaneFrame frame;
+  Measure measure;
+  std::optional<BindingPreview> preview;
 };
 
-/// Stretch vanishing's shelf/skyline BFS packer (§9.1.1).
-class VanishingTraversal {
-public:
-  void reset() noexcept; // new focus -- full rebuild, cheap (frontier is small)
-  [[nodiscard]] bool stepOnce(const ArenaManifold &arena, LayoutSink &sink) noexcept;
-  // false once the overfill-margin budget (§9.1.6) is hit
+enum class MoveKind : std::uint8_t {
+  AlongAxis,  // one step on `axis` in `direction`
+  AlongSpoke, // one step to the selected spoke's neighbour
+  NextSpoke,
+  PreviousSpoke,
+  EnterPack,
+  LeavePack,
+  NextLane,
+  PreviousLane,
+  Retrieve, // the cell under the cursor becomes the origin
 };
-
-} // namespace xanadu::view
-```
-
-### 8.7 Movement and editing
-
-```cpp
-// slice_view.hpp (continued)
-enum class MoveDirection : std::uint8_t { Positive, Negative };
-struct MoveRequest { std::size_t axisIndex; MoveDirection direction; };
-
-/// Result: a real CellRef (I6) plus the view path taken, for breadcrumb UI.
+struct MoveRequest {
+  MoveKind kind{MoveKind::AlongAxis};
+  ViewAxisId axis{noAxis};
+  zigzag::DimVector direction{zigzag::DimVector::POS};
+};
 struct MoveOutcome {
-  zigzag::CellRef realCellAfter;
-  std::vector<zigzag::CellRef> viewPath; // empty outside pack/ring views
-  bool rebindOccurred{false};            // all-dim walk's §9.2.3 case
+  SliceCursor cursor;
+  bool moved{};
+  bool originChanged{}; // the host tosses and re-prepares
 };
 
 class SliceView : public View {
 public:
-  // ... (§8.1) ...
+  /// The local direction posward on an axis points, or nothing if this view
+  /// does not place that axis (§7.3).
+  [[nodiscard]] virtual std::optional<glm::vec3>
+  axisDirection(ViewAxisId axis) const noexcept = 0;
 
-  /// Movement never calls anything on the real Manifold/Store that appends
-  /// an operation (R8) -- enforced by construction: this signature has no
-  /// access to a mutable Store, only ViewManifold's read-only base().
-  virtual MoveOutcome move(MoveRequest request) = 0;
+  /// The only phase that may mint, extend the ring order or fill caches.
+  /// Runs when the cursor, the epoch, the store or the frame changed.
+  virtual std::expected<void, ViewError>
+  prepare(ViewManifold &space, const SliceCursor &cursor,
+          const PaneFrame &frame, Measure measure) {
+    return {};
+  }
 
-  /// Write-through editing: resolves a possibly-view-minted anchor to its
-  /// real cell via ViewManifold::resolveReal(), then hands the resolved
-  /// real CellRef to the host's existing edit path unchanged. Refuses
-  /// (ViewError::EphemeralEditTarget) if resolution bottoms out at nothing.
-  [[nodiscard]] std::expected<zigzag::CellRef, ViewError>
-  resolveEditTarget(ViewCellRef shown) const;
+  /// Pure (V-R2).
+  virtual void layout(const SliceLayoutInput &in,
+                      LayoutSink &out) const noexcept = 0;
 
-  /// Explicit, user-named promotion (never implicit, never called from
-  /// move()/layout()). Delegates to zigzag::promote(store, parent, arena,
-  /// root, budget), which refuses above its own PromotionBudget rather
-  /// than silently truncating.
-  [[nodiscard]] std::expected<void, ViewError>
-  promotePack(zigzag::CellRef packContainer, xanadu::Store &store);
+  /// Pure: where the cursor goes. Every cursor motion is one of these, so a
+  /// view never mutates to move. The default handles AlongAxis by stepping
+  /// along the dimension the axis shows, from cellAt(cursor).
+  [[nodiscard]] virtual MoveOutcome move(const ViewManifold &space,
+                                         const SliceCursor &cursor,
+                                         MoveRequest request) const noexcept;
 };
 ```
 
-**Activity-store recording.** The activity store exists: `xanadu::StoreActivityLog`
-(`apps/common/xanadu/store_activity_log.hpp`) appends branching `Visit`s — parent, target
-`OccurrenceSite`, `Arrival`, optional link context — to the reader's `system://activity` store, and
-`tests/xuzz/store_activity_log_test.cpp` pins it. `SliceView::move()` returns a `MoveOutcome`;
-`ViewHost::dispatchMove()` decides, after the call returns, whether the outcome is a completed
-transition (debounced for a continuous drag, immediate for a discrete step) and appends one `Visit`
-through the same `ActivityLog` interface link navigation uses, with the *real* focus cell as its
-target. A view cell is never a visit target (I6). Whether a `Visit` should also carry the view kind
-and the bindings in force, so Activity Back can restore them, is VU6.
-
-### 8.8 Error model
+Editing is write-through and belongs to the host: it resolves `cellAt(cursor)`, which is always a
+real cell, and hands it to the existing edit path. Keeping a pack is explicit and separate:
 
 ```cpp
-// apps/common/xanadu/view/view_error.hpp
-namespace xanadu::view {
-
-enum class ViewError {
-  OccupiedDirection,       // mintViewLink: (cell,dim,dir) already has a neighbour
-  StaleGeneration,         // a ViewCellRef's epoch no longer matches currentEpoch()
-  EphemeralRefToStore,     // a view-minted CellRef was handed to a real Store call
-  UnknownDimensionOrRef,   // arena op refused the ref/dim outright
-  GroupCycle,              // nestGroup() would make a group reachable from itself
-  DuplicateViewId,         // registerView() with an existing id
-  ChordCollision,          // a plugin's default chord collides with an existing one
-  EphemeralEditTarget,     // resolveEditTarget() bottomed out at nothing resolvable
-  PromotionBudgetExceeded, // promotePack() over PromotionBudget::maxOps
-  EmptyGroupBind,          // bind() with a group that has zero members
-  AxisAlreadyBound,        // bind() target already bound to a different axis
-  UnknownAxisIndex,        // move()/bind() referenced a nonexistent axis index
-};
-
-[[nodiscard]] constexpr std::string_view messageKey(ViewError e) noexcept; // i18n lookup key
-
-} // namespace xanadu::view
+/// Mints the pack as real structure by zigzag::promote(), which refuses
+/// above its budget. Never called by a view, a move or a layout.
+[[nodiscard]] std::expected<void, ViewError>
+promotePack(const ViewManifold &space, ViewCellRef container,
+            xanadu::Store &store, xanadu::MicroversionId parent);
 ```
 
-Every refusal message specified in §11's status-line table maps onto exactly one of these. "No cell
-further along `<dimension>` `<direction>`" is not an error in this model — it is a `MoveOutcome`
-whose `realCellAfter == previous focus`, surfaced through status-line feedback, since "nowhere to
-go" is a normal outcome, not a malformed request.
+### 8.6 Page views
+
+```cpp
+// page_view.hpp
+struct PageRef {
+  std::uint32_t document{}; // position in the placement's document list
+  std::uint32_t page{};
+  auto operator<=>(const PageRef &) const = default;
+};
+
+struct DocumentFacts {
+  DocumentId id;
+  std::uint32_t pages{};  // known so far
+  bool paginating{};      // more are coming
+  bool background{};      // shown for context, behind the row
+  bool rightToLeft{};     // base direction of the text
+};
+struct PageFacts {
+  float width{}, height{}, lineHeight{}; // local units
+  bool link{};         // holds an end of a non-formatting link
+  bool transclusion{}; // holds content also present elsewhere
+};
+
+/// What pagination and the link index currently know. The presenter
+/// implements it over the library's documents; a test implements it by hand.
+class PageCatalog {
+public:
+  virtual ~PageCatalog() = default;
+  [[nodiscard]] virtual std::uint32_t documents() const noexcept = 0;
+  [[nodiscard]] virtual DocumentFacts
+  document(std::uint32_t index) const noexcept = 0;
+  [[nodiscard]] virtual PageFacts page(PageRef page) const noexcept = 0;
+  [[nodiscard]] virtual std::optional<PageRef>
+  pageOf(const DocumentSite &site) const noexcept = 0;
+};
+
+/// One end of a link, or of a transclusion, on a page.
+struct LinkEnd {
+  PageRef page;
+  float top{}, bottom{}; // of the passage, from the page's top, local units
+  LinkSide side{LinkSide::Left};
+  std::uint32_t member{};
+};
+struct ActiveLink {
+  LinkKey key;
+  std::span<const LinkEnd> ends; // every member of both endsets
+  std::uint32_t anchor{};        // the end the reader is at
+};
+
+struct PageCursor {
+  PageRef page; // the page that holds the caret
+  bool operator==(const PageCursor &) const = default;
+};
+
+struct PageLayoutInput {
+  const PageCatalog &catalog;
+  PageCursor cursor;
+  std::optional<ActiveLink> active;
+  PaneFrame frame;
+};
+
+class PageView : public View {
+public:
+  /// Fill caches (the stagger search of §10.4). Mints nothing: a page view
+  /// has no view space.
+  virtual void prepare(const PageLayoutInput &in) {}
+  virtual void layout(const PageLayoutInput &in,
+                      LayoutSink &out) const noexcept = 0;
+  /// How to travel from one cursor to another: MotionHints into @p out.
+  virtual void transition(const PageLayoutInput &from,
+                          const PageLayoutInput &to,
+                          LayoutSink &out) const noexcept {}
+};
+```
+
+A page view is a pure function of a catalog, a cursor and an optional active link. It cannot reach
+the text, the pagination or a store, which is how V-R37 holds.
+
+### 8.7 The text raster
+
+```cpp
+// raster.hpp
+struct RasterOptions {
+  std::uint32_t columns{80}, rows{24};
+  bool edges{true};
+};
+/// Draws the records orthographically onto a character grid, nearest first.
+[[nodiscard]] std::string
+rasterise(const LayoutSink &layout, const RasterOptions &options,
+          gleditor::cpp26::function_ref<std::string(SubjectId)> text);
+```
+
+This is what `xuzz --raster` prints today, generalised to any view. `vquery`, `vpl` and `vprolog`
+can show a result slice through a slice view with it, and golden layout fixtures (§16) are stored as
+rasters beside their numeric dumps, so a reviewer can read a layout change as a picture.
+
+### 8.8 The host
+
+In `apps/common/ui/view/`, namespace `xanadu::view`.
+
+| Type             | Holds                                                                                     | Does                                                             |
+| ---------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `SlicePlacement` | a `ViewManifold`, a `SliceCursor`, one `SliceView`, an origin transform, a `LayoutSink`   | move, bind, toss, prepare, lay out                               |
+| `PagePlacement`  | a document list, a `PageCursor`, one `PageView`, an origin transform, a `LayoutSink`      | follow the caret, lay out, plan transitions                      |
+| `Scene`          | placements that share one world                                                           | resolves beams between its placements (§11.2)                    |
+| `Pane`           | a scene, a camera, a `ui::FocusScope`, the placement that has the keyboard                | routes input; draws its scene through its camera into its region |
+| `ViewHost`       | the `ViewRegistry`, the scenes, a library `ui::PaneTree`, the presenter and the animation | split, close, focus; per-frame pipeline; persistence             |
+
+Switching the view of a placement replaces its `View` and keeps its cursor and, for a slice, its
+bindings. Switching a placement between a slice and pages replaces the placement.
+
+### 8.9 The pipeline
+
+```text
+on a command, on the owner thread:
+    placement.move / bind / switch view
+    bindings changed  -> ViewManifold::toss()          constant time
+    placement marked stale
+
+each frame, for each stale placement:
+    view.prepare(...)       may mint and cache; O(visible)
+    view.layout(...)        pure; refills the placement's LayoutSink
+    view.transition(...)    page views: MotionHints for the change just made
+
+each frame, for each pane:
+    animation.advance(dt)   tween every SubjectId towards its new record
+    presenter.draw(pane)    render region = the pane; planes, beams, pages; picks; a11y
+```
+
+A placement is stale when its cursor, its epoch, its store's version, its frame, the UI metrics or
+the theme changed. A frame in which nothing is stale and no tween is running re-submits retained
+geometry and does nothing else (V-R44).
+
+The animation layer keeps, for each `SubjectId` it is showing, a copy of the last record. A subject
+missing from a new layout fades out from that copy; nothing is looked up. A derived view cell's id
+includes its epoch, so after a toss its old id matches nothing and it fades, while the real cells
+and pages around it tween.
+
+### 8.10 Extension points
+
+| To add                  | Implement                         | You are given                                       | You must never                                                            |
+| ----------------------- | --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
+| a slice view            | `SliceView`, a `ViewDescriptor`   | a `ViewManifold`, a cursor, a frame, a measurer     | write in `layout()`; link a real cell; keep a `ViewCellRef` across a toss |
+| a page view             | `PageView`, a `ViewDescriptor`    | a `PageCatalog`, a cursor, the active link, a frame | reach a document's text or a store                                        |
+| a way to coalesce pages | `CoalesceStrategy` (§10.3)        | page boxes, link ends, the anchor                   | depend on wall-clock time                                                 |
+| a deck order            | `DeckSource` (§10.5)              | the catalog                                         | reorder a document's own pages in the store                               |
+| a pack rule             | a function over `pack_rank.hpp`   | the base manifold, a group's leaf dimensions        | mint outside `prepare()`                                                  |
+| a record kind           | a new `SubjectKind` or `EdgeKind` | presenters ignore kinds they do not know            | carry a view `CellRef` without its epoch                                  |
+| a gesture               | a state machine in `view_gesture` | pointer events and the current records              | change a binding before the gesture commits                               |
+
+### 8.11 Errors
+
+```cpp
+// view_error.hpp
+enum class ViewError : std::uint8_t {
+  OccupiedDirection,  // link(): an end already has a neighbour there
+  RealCellInViewLink, // link(): an end or the key is not a view cell of that arena
+  StaleEpoch,         // a ViewCellRef from a tossed generation
+  UnknownTarget,      // an occurrence's target is neither real nor a live group
+  UnknownAxis,
+  GroupCycle,
+  EmptyGroupBind,
+  DuplicateViewKind,
+  ChordCollision,
+  PromotionRefused,   // promote()'s own budget or refusal
+  ArenaRefused,       // the arena refused; carries nothing more
+};
+[[nodiscard]] constexpr std::string_view messageKey(ViewError error) noexcept;
+```
+
+"Nothing further that way" is not an error: it is a `MoveOutcome` with `moved == false`.
 
 ______________________________________________________________________
 
-## 9. The three views
+## 9. The slice views
+
+Coordinates are placement-local (§8.4): x right, y up, z towards the viewer; "away" is −z. An axis
+*shows* a dimension or a group (§7); where a view other than the pack view meets a group on an axis
+it uses the group's first member dimension, and the HUD says so.
 
 ### 9.1 Stretch vanishing
 
 #### 9.1.1 Purpose
 
-Reading a lot of actual cell content fast — scanning a rank's worth of text without scrolling cell
-by cell — when exact structural alignment matters less than seeing everything. Reach for it when
-auditing content, not relationships.
+To read a great deal of cell content at once. Every cell is as large as its content needs and cells
+are packed almost touching. Only the cells next to the accursed cell are guaranteed to line up with
+it; further out, alignment is given up for density. Reach for it to read data, not to study
+structure.
 
-#### 9.1.2 Semantics
+#### 9.1.2 What is shown
 
-Let `c` be the accursed cell and `B` the set of currently bound dimensions. The view displays the
-largest set of cells reachable from `c` by hops along `B` that fits the viewport under the
-shelf-pack rule below, each rendered at its full content-fit size, with radius-1 neighbours along
-`B` exactly axis-aligned to `c` and every other displayed cell packed as tightly as content allows.
+From the accursed cell `c`, every cell reachable by steps along the dimensions shown on the placed
+axes, breadth first, until the viewport is tiled. A cell reached twice is placed once, where it was
+first reached; the second route is drawn as an edge only.
 
-#### 9.1.3 Layout algorithm
+#### 9.1.3 Placement
 
-**Placement: shelf/skyline packing seeded from the accursed cell (BFS order).**
+Let `e(x, u)` be half the extent of cell `x`'s content box along direction `u`, and `g` the gap
+(`stretch.gap`). Axis 0 runs along +x and axis 1 along +y.
 
-Three candidates were weighed:
+1. **The focus.** `c` is placed at the origin at its measured size.
 
-- *Row/column track sizing (ragged table)*: cheap and deterministic, but implies a grid the
-  requirement explicitly rejects past radius 1 — most cells are not axis-aligned, so forcing them
-  into rows/columns fights "only immediate neighbours aligned" and wastes space around differently
-  sized content-fit boxes.
-- *Constraint relaxation (iterative, spring-like)*: organic, but not deterministic or stable under
-  small edits — a one-character content edit can cascade a relaxation solve into a visibly different
-  arrangement elsewhere, reading as random reshuffling rather than "that cell grew a little."
-  Refused for V-R18 (determinism) and the stability property stretch vanishing exists to provide.
-- *Shelf/skyline packing (NFDH-style), chosen.* Walk cells in strict breadth-first order from `c`:
-  first its axis-aligned immediate neighbours along `B` (each placed on its axis's unit vector at
-  `axisUnit * axisSpacing`, with
-  `axisSpacing = (focusExtent + neighbourExtent)/2 + rankClearancePx`), then every cell reached by
-  one more hop from an already-placed cell, in a fixed tie-break order (ascending `CellRef`, so two
-  runs with the same input always visit frontier ties identically). For each new cell, maintain a
-  skyline (a sorted list of `(xStart, xEnd, yTop)` segments) and place the cell's content-fit box at
-  the lowest skyline position reachable from the cell it was discovered through, sliding along the
-  skyline until it touches that anchor's edge with the configured gap and no overlap.
+1. **Radius 1, exactly aligned.** For each placed in-plane axis, in axis order, with direction `u`,
+   and each sign `s`: the neighbour `n` of `c` is centred at
 
-This wins on the three properties the requirement needs:
+   ```math
+   s \cdot u \cdot \bigl(e(c,u) + e(n,u) + g\bigr)
+   ```
 
-- *Determinism (V-R18)*: fixed visit order plus a no-backtracking insertion rule → identical output
-  for identical input, every time; a headless test computes twice and diffs positions.
-- *Stability under small edits*: a cell's content growing by Δpx perturbs only its own skyline
-  segment and whatever was placed after it in visit order — no global relaxation pass, so a one-cell
-  edit's visual blast radius is bounded, matching "cells slide to stay adjacent to the cell they
-  were reached from."
-- *Cost*: O(n log n) for n visible cells (skyline insertion is a binary search over segments); the
-  breadth-first budget below (§9.1.6) makes the practical cost O(viewport fill count), independent
-  of the slice's total size.
+   so its centre is on `c`'s axis line and its edge is one gap from `c`'s. This is the only place
+   alignment is promised (V-R17).
 
-#### 9.1.4 Immediate-neighbour exactness
+1. **Further out, anchored slide.** Take placed cells in the order they were placed. For each `p`,
+   each placed in-plane axis in order with direction `u` and perpendicular `v`, and each sign: let
+   `n` be `p`'s neighbour. If `n` is already placed, emit the edge and continue. Otherwise the
+   wanted centre is `p`'s centre plus `s·u·(e(p,u) + e(n,u) + g)`. If the box there overlaps a
+   placed box grown by `g`, slide it along `v` by the smallest distance that clears, trying first
+   the side that points away from the focus's axis line, and accept the result only while `n` still
+   overlaps `p` along `v` by at least `stretch.minContact`, so it visibly belongs to the cell it
+   came from. If no slide within that range clears, move the wanted centre outward along `u` past
+   the nearest blocker and try again.
 
-Radius-1 neighbours along `B` are placed first, exactly axis-aligned, using measured content-fit
-extents for spacing (so "drawn very closely together" is satisfied by measurement, not a fixed grid
-pitch). Everything at radius ≥ 2 is placed by the skyline packer, never forced onto an axis — this
-is the structural meaning of "only the immediate neighbours need be completely aligned."
+1. **Stop at the viewport.** A placed cell is *expanded* — its own neighbours visited — only if its
+   box meets the viewport rectangle grown by `stretch.overfill`. Cells beyond that are not expanded,
+   so the walk ends when the pane is tiled, whatever the size of the slice.
 
-#### 9.1.5 Edge fade
+Placed boxes are kept in a uniform grid, so an overlap query touches a constant number of boxes on
+average and the whole placement is linear in the number of cells placed. The order of every loop is
+fixed, so the same input gives the same placement (V-R20). A change to one cell's content moves that
+cell and those placed after it by the slide rule; nothing is relaxed globally, so a small edit has a
+small effect.
 
-Computed in normalised viewport space so the fade reads as "near the screen's edge" regardless of
-camera distance or FOV: project each candidate cell's four content-fit corners through
-`viewProjection * presentationTransform` to clip space, perspective-divide to NDC, map to `[0,1]`
-viewport UV. Let `d = min(u, 1-u, v, 1-v)` (the closest corner's normalised distance to the nearest
-edge). The fade curve is:
+Two alternatives were weighed. A ragged table of row and column tracks is a grid, which is what the
+view gives up beyond radius 1, and it wastes the space around boxes of different sizes. Spring
+relaxation fills space well but is not stable: one character typed can rearrange the far side of the
+pane.
+
+#### 9.1.4 The depth axis
+
+Axis 2 runs away from the viewer. A cell reached along it from `p` is placed in the next plane
+behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x and y and sliding by the
+same rule within that plane, which has its own grid. Planes in front of the focus are drawn only
+where they do not cover it.
+
+#### 9.1.5 Fade and clip
+
+Project the four corners of a cell's box with `frame.localToClip`, and let `m` be the least distance
+from any corner to any edge of the pane, as a fraction of the pane's size. With `e = min(1, 2m)`, so
+that `e` is 0 at the edge and 1 at the centre:
 
 ```math
-\text{opacity} = \mathrm{smoothstep}(\text{edgeFadeStartUv}, 0, d)
+\text{opacity} = f + (1 - f)\cdot\operatorname{smoothstep}(0,\ b,\ e)
 ```
 
-— full opacity while `d > edgeFadeStartUv` (a configurable band, default 0.65 of the way to the
-centre), fading to the configured floor at the edge. `smoothstep` rather than a linear ramp because
-a linear fade reads as a visible band edge; the cubic Hermite curve has zero derivative at both
-ends. This is a layout-time scalar multiplied into `PlacedItem.opacity`; the animation layer may
-further multiply a transition fade on top, never replace it.
+where `f` is `stretch.fadeFloor` and `b` is `stretch.fadeBand`. Opacity is constant over the middle
+of the pane and falls smoothly through the outer band to the floor (V-R19).
 
-#### 9.1.6 Partially-clipped-⇒-invisible rule, with hysteresis
+A cell whose box is not entirely inside the view is not emitted at all (V-R18): the test is the
+library's `insideFrustum`, the mirror of `outsideFrustum`. The presenter applies the same test to
+each cell's *animated* box, so a cell in flight appears only once it is wholly inside, and it uses a
+margin of `stretch.clipMargin` pixels before showing a cell again, so a cell resting on the edge
+does not flicker as the camera moves.
 
-The exact test is the mirror of `outsideFrustum`'s "fully outside": a cell is drawn only if its
-content-fit box's clip-space AABB has all four corners inside every clip plane (fully inside). A
-cell that straddles an edge is `ClippedHidden` — not drawn — same as fully outside; it is never
-faded or cropped (satisfying V-R16's "not faded, not cropped," since a half-drawn cell with real
-text reads as missing data, which this document treats as exactly the kind of silent ceiling the
-project's conventions refuse). The accursed cell itself is exempt: `layout()` force-sets its
-visibility to `Visible` after the clip pass regardless of the geometric test, and skips the
-edge-fade multiplier for it — it must not vanish, though it may be scissor-clipped like any
-oversized object.
+The accursed cell is never faded and never hidden. A cell larger than the pane cannot be shown
+whole, so it is shown only when it is the accursed cell, scrolling within the pane; as a neighbour
+it is represented by its tick (§9.1.6), which says so.
 
-Hysteresis against flicker: because a cell's drawn position is still easing toward its target,
-testing the *animated* position every frame would flip visibility near the boundary mid-tween. A
-cell transitions `Visible → ClippedHidden` only after its animated position has tested fully-outside
-for a configurable sustained duration (`stretch.hiddenConfirmMs`); it transitions back the instant
-it tests fully-inside again — appearing late is safe, disappearing late is the flicker risk, so the
-asymmetry is deliberate. This state lives in `AnimationState`, not in the pure `layout()` function,
-keeping layout itself frame-rate-independent and testable as a pure function.
+#### 9.1.6 Staying oriented
 
-#### 9.1.7 Breadth-first budget
-
-The packer maintains the bounding region of everything placed so far; after each complete BFS level
-it checks whether that region's projected viewport-space extent exceeds the viewport by a
-configurable overfill margin (default 1.3×). Once exceeded, BFS stops enqueuing new frontier cells
-for this frame; already-enqueued-but-unplaced cells from the same level are deferred, not placed
-(keeping the level atomic), and the frontier queue is cached across frames so a window resize or
-zoom-out resumes packing from where it stopped rather than restarting. This budget — not a
-cell-count ceiling — is what bounds cost: a user with a densely connected cell sees BFS stop filling
-once the screen is full, never a hard "top 50 neighbours only" cutoff.
-
-#### 9.1.8 Interaction
-
-Movement is the ordinary step action on each bound axis — stretch vanishing changes layout, not the
-movement vocabulary. Pointer click focuses a visible cell through the library's `PickObserver` path;
-hover previews a faded cell's full content in a `ui::Tooltip` placed by `ui::placeNear` inside the
-safe area, without moving focus. There is no pointer-only affordance, so no further keyboard twin is
-needed.
-
-Because alignment is given up past radius 1, three cues keep the reader oriented: the accursed cell
-carries the focus emphasis and is never faded; each radius-1 neighbour carries a tick naming the
-dimension and direction that reached it; and a breadcrumb strip lists the last
-`stretch.breadcrumbDepth` cells walked, read from the reader's activity log (§8.7).
-
-#### 9.1.9 Degenerate cases
-
-- A cell with no neighbours on any bound dimension: drawn alone, centred; the axis-tick decoration
-  is simply absent (no "0 neighbours" badge — absence of the tick is the signal).
-- A single-cell slice: the home cell alone fills the pane.
-- Content taller/wider than the viewport: the cell scrolls internally; a corner glyph marks "more
-  below/right."
-- A rank hundreds of cells long: the breadth-first budget (§9.1.7) stops filling when the viewport
-  is full; the tick on the last cell placed along that rank shows how many were not
-  (`d.2 → (+214 more)`), so the walk never stops at an unannounced radius.
-
-#### 9.1.10 Accessibility
-
-Each visible cell is a node, role `cell`, name = full untruncated text, with a relation to its
-axis-aligned immediate neighbours (`nextAlong:<dimension>`/`prevAlong:<dimension>`). A culled
-(would-be-clipped) cell is absent from the tree, not present-but-hidden, matching what is drawn. The
-breadcrumb strip (§9.1.8) is an ordered list node (`role: list`, children `role: listitem`). The
-fade floor (`stretch.fadeFloorAlpha`) must be chosen so a faded cell's text still meets WCAG-AA
-contrast against the background colour at the floor value — a testable constraint, checked in the
-same headless harness that validates other rendering contracts.
-
-#### 9.1.11 Tunables
-
-See §11's settings table (`stretch.*`).
-
-#### 9.1.12 Acceptance tests
-
-Two `layout()` calls with identical input produce byte-identical `PlacedItem` positions
-(determinism, V-R18); a cell whose box straddles the viewport boundary never appears in
-`LayoutSink::items()` (V-R16); every radius-1 bound-dimension neighbour's position shares its bound
-axis's coordinate with the focus cell exactly (V-R15); opacity at the configured fade band boundary
-matches the `smoothstep` formula within floating-point tolerance (V-R17).
-
-#### 9.1.13 Diagram
+Alignment is gone past radius 1, so three things replace it: the accursed cell carries the focus
+emphasis; each of its immediate neighbours carries a tick naming the dimension and direction that
+reached it; and a breadcrumb strip in the chrome lists the last `stretch.breadcrumbs` cells walked,
+read from the activity log. Where the walk stopped at the viewport with more cells along a rank, the
+last cell placed on that rank carries the count not shown.
 
 ```text
-  viewport
+ pane
  +--------------------------------------------------+
  |  . faint .   +-------+ +----------+   . faint .  |
  |  +------+    | up 1  | | reached  |  +-------+   |
@@ -1482,1041 +1365,1376 @@ matches the `smoothstep` formula within floating-point tolerance (V-R17).
  |    +----------+     +--------+ +------+          |
  |    | r = 2    |     | down 1 | | r=2  |          |
  +--------------------------------------------------+
-   radius 1: on c's axes, spaced by measured size
-   radius 2 and beyond: skyline-packed against the cell that reached them
-   near the edge: fainter; a box the edge would cut is not drawn at all
+   radius 1: on c's axes, one gap away
+   radius 2 and beyond: slid against the cell that reached them
+   near the edge: fainter; a box the edge would cut is not drawn
 ```
 
-______________________________________________________________________
+#### 9.1.7 Interaction, edge cases, accessibility
+
+Movement is the ordinary step on each bound axis. A click focuses the cell clicked; hover shows a
+faded cell's content in a `ui::Tooltip`. Nothing here is pointer-only.
+
+A cell with no neighbours is drawn alone. A slice of one cell fills the pane with it.
+
+Each cell drawn is an accessibility node with role `cell`, its full text as its name, and relations
+to its neighbours along each bound dimension. A cell not drawn is not in the tree. The breadcrumb is
+a list.
+
+#### 9.1.8 Acceptance
+
+Two layouts of the same input are identical. Every radius-1 neighbour shares the focus's coordinate
+on the axis perpendicular to its own. No two emitted boxes overlap. No emitted box fails
+`insideFrustum`. Opacity at the centre is 1, at the band's inner edge is 1, and at the pane's edge
+is the floor. A slice of 10⁶ cells and one of 10³ place the same number of cells for the same pane.
 
 ### 9.2 All-dim walk
 
 #### 9.2.1 Purpose
 
-Understanding everything one cell connects to, across every dimension at once, before deciding which
-relationship actually matters — "audit a contact cell's every relationship." Reach for it when the
-structure, not the content, is the question.
+To see everything one cell is connected to, on every dimension, and to choose which of those
+connections the axes should follow. The number of connections is the cell's valence, and the view
+makes it visible as how full the wheel is.
 
-#### 9.2.2 Semantics
+#### 9.2.2 What is shown
 
-For the accursed cell `c`, enumerate every `(dimension, direction)` pair where
-`linked(c, dim, dir) ≠ noCell` — exactly `dimensionsOf(c)` read in both directions; its cardinality
-is `c`'s valence. Bound dimensions occupy fixed spokes on the screen/world axes. Unbound dimensions
-occupy ring positions arranged around the spoke structure in three dimensions, so the view's total
-displayed valence equals `c`'s true valence exactly — nothing hidden (V-R19).
+The accursed cell `c` at the hub. For every dimension `c` is linked on and each direction, the
+neighbour, joined to the hub by an edge labelled with the dimension's name. Dimensions shown on a
+placed axis put their neighbours on that axis; all others go on rings. Nothing `c` is linked to is
+left out (V-R21).
 
-#### 9.2.3 Layout algorithm
+This view mints no derived cells. The neighbours are real cells, the labels are the dimension cells'
+own content, and the order round the rings is the `d.ring-order` rank in the binding arena (§7.1).
 
-**Geometry: concentric tilted rings assigned by dimension-arrival order; bound dimensions keep their
-fixed spoke placement.**
+#### 9.2.3 The wheel
 
-Candidates weighed:
+Let R, U and F be the local unit vectors right, up and away, the hub box be the accursed cell's
+content capped at `ring.hubMaxShare` of the pane, and every ring cell use one slot box of
+`ring.slotWidth` by `ring.slotHeight`, with gap `g`.
 
-- *Helix* (`angle = n·goldenAngle, z = n·pitch`): elegant, but a dimension's angle is a function of
-  total count under the naive formula, so adding one more connected dimension reshuffles every other
-  dimension's position — violates V-R21 (stability).
-- *Spherical Fibonacci cap*: near-optimal point distribution for large n, but the same reshuffle
-  problem (points are indexed by position-among-n), and it does not naturally give the
-  "posward/negward diametrically opposite" pairing the requirement asks for.
-- *Concentric tilted rings by dimension, chosen.* Each dimension (not each cell) owns one ring at a
-  fixed angular slot, assigned the first time that dimension is seen at this focus cell and cached
-  per-dimension for the session — re-encountering the same dimension reuses its slot; removing a
-  dimension frees its slot without renumbering the others; adding one allocates the next free slot.
-  Within a dimension's ring, its posward neighbour sits at one fixed azimuth and its negward
-  neighbour at `azimuth + π` (diametrically opposite). Bound dimensions sit on their axis spokes (as
-  in §9.1.4) and are excluded from ring allocation. Unbound dimensions' rings stack at increasing
-  radius and increasing depth tilt as valence grows: ring `k` (0-indexed by first-seen order among
-  unbound dimensions) sits at `radius(k) = r0 + k·rStep`, tilted
-  `tilt(k) = min(tiltMax, tilt0 + k·tiltStep)`. Tilt never reaches 90°, so every ring's near half
-  stays in front of the focus along the view axis — the focus is never occluded as valence grows
-  into the hundreds (V-R20).
-
-Position formula, for dimension `d` with ring index `k`, member direction `s ∈ {+1, -1}`:
+Ring `j` (0, 1, 2, …) is a circle centred on the hub, of radius
 
 ```math
-\begin{aligned}
-\text{azimuth}(d) &= d.\text{ringBaseAzimuth} \\
-\text{radius}(k) &= r_0 + k \cdot r_{\text{step}} \\
-\text{tilt}(k) &= \min(\text{tiltMax},\ t_0 + k \cdot t_{\text{step}}) \\
-\text{position}(d, s) &= \text{focusPos} \\
-&\quad + \text{radius}(k)\cos(\text{azimuth}(d) + [s<0]\pi)\cos(\text{tilt}(k))\,\hat{\text{right}} \\
-&\quad + \text{radius}(k)\sin(\text{tilt}(k))\,\hat{\text{up}} \\
-&\quad + \text{radius}(k)\sin(\text{azimuth}(d) + [s<0]\pi)\cos(\text{tilt}(k))\,\hat{\text{forward}}
-\end{aligned}
+r_j = r_0 + j\,\Delta r, \qquad r_0 = \max\bigl(\texttt{ring.radius},\ \tfrac{w_h + w_s}{2} + g,\ \tfrac{h_h + h_s}{2} + g\bigr)
 ```
 
-`right̂`/`up̂`/`forward̂` are the host camera's own basis (`view.front`/`view.upward`), so the wheel
-orients itself to the camera rather than to a fixed world frame and stays legible as the user
-orbits.
+lying in the plane spanned by R and
 
-Justified against the three criteria: *legibility* — each dimension gets a fixed, recognisable ring,
-and tilt increases gradually so near rings (the ones a reader is likely cycling through) stay
-near-face-on; *stability* — slot assignment is append-only per dimension id, never recomputed from
-total count; *non-occlusion* — bounded tilt plus drawing the focus last/on top keeps every ring's
-front arc visible.
+```math
+U_j = \cos\tau_j\,U + \sin\tau_j\,F, \qquad \tau_0 = 0, \quad \tau_j = (-1)^{j+1}\left\lceil \tfrac{j}{2} \right\rceil \texttt{ring.tiltStep}
+```
 
-#### 9.2.4 Dimension-name labels; ring-slot placeholders
+Ring 0 is the wheel, flat in the plane of the pane. Later rings share its centre and its horizontal
+diameter and lean alternately away and towards the viewer, which is the use of the third dimension:
+each new ring is a new circle of the same sphere-like figure, not a wider and wider disc.
 
-A dimension is itself a cell whose content is its name, so an edge label is simply `textOf(dim)`
-applied to the dimension cell itself — no view-minted label cell is needed for the label text. A
-view-minted ring-slot placeholder cell *is* needed for each unbound dimension `c` links on, carrying
-a `d.ring-dim` link to the real dimension cell, giving the renderer a stable screen anchor distinct
-from the dimension cell's own text. This ring-slot cell is view-minted (ephemeral, tossed on rebind
-per I3, recoverable per I4).
+A dimension occupies a *pair slot*: two places diametrically opposite, the posward neighbour at
+angle θ and the negward at θ + π (V-R23). Ring `j` has
 
-**Ruling (V15): edge labels are screen-space fitted text at projected anchors, not billboards in the
-world.** `PlacedEdge::labelAnchor` is a world position; the adapter projects it, asks
-`ui::projectPlane()`/`ui::labelLOD()` whether a label of the `Label` role's line height is legible
-there, and draws the dimension name with `Canvas::addText(box, ...)` under
-`TextFit{Overflow::Ellipsis, EllipsisAt::Middle}` in a box clamped to the pane. Middle ellipsis
-keeps both ends of names such as `d.contact.phone.mobile`. Depth is cued by opacity
-(`ring.depthCueExponent`), and a label that fails the legibility test is not drawn while its edge
-and its accessible name remain. Labels that would overlap are resolved in screen space: the nearer
-ring's label keeps its place and the farther one moves along its edge toward the neighbour, up to
-`label.maxNudgePx`, then yields to an ellipsized box.
+```math
+m_j = \left\lfloor \frac{\pi\, r_j}{w_s + g} \right\rfloor
+```
 
-#### 9.2.5 Movement into an unbound ring neighbour
+pair slots (rounded down to an even number on ring 0), at angles `θ = θ⁰_j + i·π/m_j`, with
+`θ⁰_0 = 0` and `θ⁰_j` half a slot for `j ≥ 1`. A neighbour's centre is
 
-**Ruling: a temporary bind, scoped to the current view epoch, not a persistent rebind and not a
-refusal.** Entering via a ring spoke whose dimension is not currently bound rebinds the
-least-recently-used axis to that dimension and walks focus there, re-deriving the whole axis/ring
-layout fresh at the new focus (I3's toss-and-rebuild naturally re-evaluates whichever dimension the
-user just walked along). No `d.binds` link outside this one axis is rewritten. The temporary bind is
-stacked on that axis slot ahead of the binding the user chose, is not written to `system://layout`,
-is not an undo entry, and is lifted — restoring the user's binding — when the reader next moves
-along a different axis or switches view. The move is announced on the status line
-(`"<dimension> is now bound to <axis>."`) so the user is never surprised by a side-effect of walking
-somewhere. This is argued against two alternatives: a hard refusal ("movement only along bound
-dimensions") would contradict Nelson's "move along any connection, bound or not," and a *silent
-persistent* rebind would corrupt the user's deliberately chosen bindings on an ordinary lateral
-move.
+```math
+\text{hub} + r_j\bigl(\cos\theta\,R + \sin\theta\,U_j\bigr)
+```
 
-#### 9.2.6 Drag-to-rebind
+Because the pair is opposite through the hub, each dimension reads as a straight line through the
+accursed cell, which is what an axis is.
 
-State machine:
-`Idle → Picking(edge) → Dragging(edge, candidateAxis?) → {Committed | Cancelled} → Idle`.
-`Idle → Picking`: a CPU-side ray-vs-capsule hit test (via a new `unprojectScreenToRay`,
-`spatial.hpp` extension) against each visible edge, confirmed against the GPU pick delivered to the
-pane's scope through `FocusScope::pointerPick` before committing to a drag (CPU prediction and GPU
-ground truth must agree; a mismatch means no drag starts, never a wrong one). The
-`PointerPickTarget` identity `FocusManager` attaches to the request already discards a pick that
-outlived its scope or focus revision; the gesture adds the view epoch, so a pick that outlived a
-toss is discarded the same way. `Picking → Dragging`: past a small pixel threshold, re-test every
-frame against the bound-axis `AxisGizmo`s; the nearest one within a screen-space snap radius becomes
-`candidateAxis`. While dragging, a speculative `layout()` call previews where the dragged
-dimension's neighbours would relocate, discarded if not committed (safe and cheap because `layout()`
-is pure, §8.4). `Dragging → Committed`: pointer-up with a `candidateAxis` set calls
-`ViewAxisSet::bind(candidateAxis, draggedDimension)`. `Dragging → Cancelled`: pointer-up with no
-candidate, or Escape, discards the preview with no state change. The keyboard twin (select the
-spoke, invoke "Bind selected spoke to axis…", confirm with Enter) produces the identical end state
-(V-R22).
+**The axes are spokes of the same wheel.** On ring 0 the slot at θ = 0 belongs to axis 0 and the
+slot at θ = π/2 to axis 1, whether or not those axes are bound, so binding and unbinding never moves
+anything else. Axis 2 is the line through the hub along F. Neighbours on a bound dimension therefore
+sit exactly on the cell's axes (V-R22), and the step actions move along them as in any view.
 
-#### 9.2.7 LOD at high valence
+**Keeping the hub visible.** Seen from the rest camera, a ring leaning by τ projects to an ellipse
+whose vertical half-axis is `r_j·cos τ`. The lean is clamped so that it never closes over the hub:
 
-**Second-hop stubs**: a ring member with further neighbours on other dimensions draws a short,
-unlabelled, reduced-alpha stub beam — an affordance, not a recursive placement; activating it moves
-focus there, producing a fresh `layout()` call. **Ring aggregation**: rings beyond a configurable
-index collapse their members into one "aggregate ring" badge per dimension (`+37`), still positioned
-and tilted per §9.2.3, expandable by activation into individually placed members — a display budget,
-never a silent omission.
+```math
+\cos\tau_j \;\ge\; \frac{(h_h + h_s)/2 + g}{r_j}
+```
 
-#### 9.2.8 Interaction
+Outer rings are larger and may lean further. The rest camera is turned by `view.camera.restYaw` and
+`restPitch`, so the pair on axis 2 and the near halves of leaning rings do not stand directly in
+front of the hub.
 
-Arrow-key movement along a bound axis works as in every other view. `[`/`]` (ring-select) move a
-selection cursor around unbound spokes without moving focus, previewing the far cell's content in a
-side panel. `Return` on a selected spoke walks focus there (§9.2.5). `B` binds the selected spoke to
-the next available axis (keyboard twin of drag).
+The wheel is fixed in the placement, not in the camera: orbiting turns the whole figure, and every
+cell and label turns to face the viewer (`Facing::Camera`), so text stays readable while the
+structure rotates. Two alternatives were refused. A helix and a Fibonacci sphere give even spacing
+but index each point by the total count, so one more dimension moves all of them, and neither puts a
+dimension's two neighbours opposite each other. A basis taken from the camera would make the figure
+follow the viewer round, which defeats looking at it from another side.
 
-#### 9.2.9 Degenerate cases
+#### 9.2.4 Which slot a dimension gets
 
-A cell with no neighbours on any dimension: empty ring, hub drawn alone, side-panel note
-`"No linked cells on any dimension."` A single-cell slice: same. Valence in the hundreds, one per
-dimension — that is, hundreds of dimensions: aggregate rings per §9.2.7, never a frame-rate cliff
-from individually rendering hundreds of positions.
+The unbound dimensions that have a neighbour at `c` are taken in ring order and given the free pair
+slots in order: ring 0's unreserved slots by increasing angle, then ring 1's, and so on. So the
+wheel is exactly as full as the cell's valence, a low-valence cell is a small figure, and the
+*order* of dimensions round it is the same at every cell (V-R24): `d.email` is always before
+`d.phone`, though the angle each sits at depends on which other dimensions are present. A new
+dimension is appended to the ring order the first time it is met, in `prepare()`. The user changes
+the order by dragging a spoke round the wheel or from the HUD.
 
-#### 9.2.10 Accessibility
+The alternative, a fixed slot per dimension for the whole slice, keeps angles constant but spreads a
+cell's few neighbours over rings sized for every dimension in the slice, which hides valence and
+pushes the figure out of the pane.
 
-The hub is `role: cell` with a `valence` property per dimension (`"d.2: 3 neighbors"`); each spoke
-is a child `role: group` named by its dimension, containing the neighbour node(s), or, when
-clustered, a single `role: group` named `"d.7: 214 more, collapsed"` with an expand action. Reading
-order is a stable, declared order — bound axes first, in axis-rank order, then unbound dimensions in
-the slice's own declaration order — never angular/visual position, which is meaningless to a screen
-reader.
+#### 9.2.5 Labels and valence
 
-#### 9.2.11 Tunables
+Each edge has a label item (`SubjectKind::Label`) at `ring.labelAt` of the way from the hub, facing
+the camera, in the `Label` font role, fitted with a middle ellipsis so both ends of a name such as
+`d.contact.phone.mobile` survive. It is a plane in the world like the cells. When it projects too
+small to read the presenter does not draw it, and its edge and its accessible name remain.
 
-See §11's settings table (`ring.*`, `axis.*`, `label.*`).
+Each neighbour carries a badge with its own valence (V-R26), and a short stub for each further
+connection it has when `ring.stubs` is on. Activating a neighbour moves there.
 
-#### 9.2.12 Acceptance tests
+#### 9.2.6 Walking an unbound dimension
 
-A dimension's ring slot is unchanged across a focus move that does not remove it (V-R21); drag and
-keyboard rebind paths leave the axis resolving to the identical target (V-R22); every ring
-position's `PlacedItem`/side-panel data carries the far cell's own neighbour count (V-R23); a
-property test confirms no dimension's ring slot is ever recomputed from the total dimension count.
+`[` and `]` select a spoke — a dimension and a direction — without moving. `Return` walks to the
+selected neighbour, and the selection stays on that dimension and direction, so `Return` again
+continues along the rank. Walking never changes a binding. The selected spoke's cell is shown in
+full in the side list while selected.
 
-#### 9.2.13 Diagram
+Binding the dimension is a separate, explicit act: `B` binds the selected spoke's dimension to the
+next axis, and dragging does the same to a chosen axis.
+
+#### 9.2.7 Dragging an edge to an axis
 
 ```text
-                 d.employer (ring k=1, tilted)
-                      *
-                      |
-   d.2 (bound, X)  ---c---  d.1 (bound, Y)
-                      |
-                      *
-                 d.phone (ring k=0)
-       (unbound rings fan back into depth as valence grows; bound
-        dimensions stay on the flat screen axes)
+ Idle --press on an edge or its label--> Armed
+ Armed --moved past ring.dragThreshold--> Dragging     (release before that: a click)
+ Dragging --pointer within a DropTarget's radius--> Dragging(over that axis)
+ Dragging(over axis) --release--> Committed: ViewAxisSet::bind(axis, dimension); toss
+ Dragging --release elsewhere, or Escape--> Idle; nothing changed
 ```
 
-______________________________________________________________________
+The view emits one `DropTarget` per placed axis. While a drag is over an axis the host lays out with
+a `BindingPreview`, which is an input to a pure function and changes no binding, so cancelling has
+nothing to undo. What is under the pointer is decided by the GPU pick delivered to the pane's focus
+scope; the unprojected ray is used only to measure distance to the drop targets. A pick that arrives
+after a toss is discarded by its epoch. Dropping on an axis binds that axis and leaves the others
+alone; dragging a spoke along the wheel instead reorders the ring. The keyboard form — select the
+spoke, `B`, choose the axis — ends in the same call (V-R25).
+
+#### 9.2.8 High valence
+
+There is no cap. More dimensions fill more rings. The camera frames the outermost occupied ring, but
+not beyond the distance at which a slot's text is still readable; past that the outer rings run off
+the pane and the reader orbits, zooms, or steps the selection, which turns the selected spoke to the
+front. Cells that project below the readable size are drawn as badges with their valence. The side
+list in the chrome always holds every dimension by name, in ring order.
+
+#### 9.2.9 Edge cases and accessibility
+
+A cell with no neighbours is a hub alone, and the side list says "No linked cells on any dimension."
+
+The hub is role `cell`. Each dimension is a child group named for it, holding its neighbours, each
+named with its text and its valence. Reading order is the axes in axis order and then the ring
+order; it never depends on angle.
+
+#### 9.2.10 Acceptance
+
+The items placed equal the neighbours of `c` over `dimensionsOf(c)` exactly. For every dimension
+with two neighbours, their centres sum to twice the hub's. Bound-axis neighbours lie on R, U and F.
+The clamp inequality holds for every ring. The order of dimensions by (ring, angle) equals their
+ring order, at any focus. Binding or unbinding an axis moves no unbound dimension. Drag and keyboard
+leave `shown(axis)` equal. A cancelled drag leaves the binding arena unchanged.
+
+```text
+                 d.employer
+                     o
+          d.phone  \ | /  d.email          ring 0: flat, the wheel
+                    \|/
+   d.2 (axis 0) o----c----o d.2            axis 0 on the horizontal spoke
+                    /|\
+          d.email  / | \  d.phone          each dimension's two neighbours opposite
+                     o
+                 d.employer
+        ( ring 1 leans back at the top and forward at the bottom; ring 2 the other way )
+```
 
 ### 9.3 Dimensional pack view
 
 #### 9.3.1 Purpose
 
-Browsing a cell's data by category rather than by one dimension at a time — "browse a
-person-by-(email|phone|address) pack and pull one phone number out," or collapsing a many-dimension
-table onto one axis for continuous reading. Reach for it when several dimensions should be treated
-as one unit.
+To treat several dimensions as one. A group is bound to an axis, and each step along that axis is a
+*pack*: the cells that many steps away along each of the group's dimensions. A person cell with
+`{d.email, d.phone, d.address}` on the horizontal axis reads as a table: one row per dimension, one
+column per step.
 
-#### 9.3.2 The break a pack repairs
+#### 9.3.2 Lanes and steps
 
-Let `G = {d1, …, dk}` be a group bound to one axis. A real cell `c` may have up to `k` distinct
-posward neighbours (one per `di`) and up to `k` distinct negward neighbours — not single-valued,
-which is exactly I1 broken by construction if rendered naively as "the posward neighbour along the
-axis." A **pack** restores single-valuedness by replacing "the posward neighbour" with "the posward
-pack," one view-minted cell standing for the set of posward neighbours across every member
-dimension.
+Let group `G` have members `m₁ … m_k` in order; each is a dimension or a group. From a real cell `c`
+and a signed step count `n ≠ 0`, lane `i` holds
 
-#### 9.3.3 Two dimensions, not one: `d.pack` and `d.packing`
+- for a dimension `d`: the cell `|n|` links from `c` along `d` in the direction of `n`'s sign, if
+  the rank reaches that far without returning to `c`;
+- for a group `g`: the pack of `g` at step `n` from `c`, if it is not empty.
 
-**Ruling (V2): `d.pack` and `d.packing` are two distinct `DimRef`s, matching the names the
-requirement used.**
+The pack of `G` at step `n` from `c` is that row of lanes. It exists while at least one lane holds
+something, and the rank of packs ends at the first step where none does — "as far as there is at
+least one cell to pack" (V-R27). If lane `i` holds something at step `n` it does at every step
+nearer, so the rank has no holes. A ring rank is walked once round and stops.
 
-- **`d.pack`** relates a pack container to its own contents. The container is the headcell; its
-  `d.pack` posward neighbour is the pack's first constituent. Entering a pack is one step posward on
-  `d.pack`; leaving is one step negward from that first constituent back to the container. A
-  constituent that is itself a container for a nested sub-pack carries its own `d.pack` posward link
-  to its own first sub-constituent — nesting falls out of this for free, because the same dimension,
-  read from a different cell's slot, plays "container" or "constituent" depending on which direction
-  is read, exactly the dual-role idiom `d.clone` already uses (`Manifold::cloneMaster`,
-  `manifold.hpp:446-458`: a member holds the negward link to its master; the master is whichever
-  cell a negward walk bottoms out at).
-- **`d.packing`** is the rank of constituents within one pack: `constituent_k`'s `d.packing` posward
-  neighbour is `constituent_{k+1}`. This is a separate dimension from `d.pack` specifically so the
-  container is never itself a member of its own constituent rank — a container's own `d.packing`
-  slot is simply unused. Movement along `d.packing` from constituent to constituent never needs to
-  special- case "am I at the head, where the container lives instead."
-- **Movement from pack to pack** (one position on the bound axis to the next) uses a *third*
-  relationship: the bound axis's own `axisStep` dimension (`ViewManifold::axisStepDim(axis)`, a
-  derived-arena dimension cell, §6.2), walked exactly as a single bound dimension would be — the
-  predecessor (a real cell at step 0, or a container at step ≥ 1) has a posward neighbour on this
-  axis equal to the next container, and vice versa negward.
+Two definitions were refused. A breadth-first frontier — every cell one more hop from *any* cell
+already packed, along *any* member — mixes dimensions: the second pack would hold the phone of an
+e-mail address. It also grows as `kⁿ`, and a cell in it has no single dimension to say how it got
+there. Taking only the immediate neighbours gives one pack and no rank.
 
-**Why two dimensions here, against the alternative of one dimension with two conventional direction
-names** (following `d.clone`'s single-`DimRef` precedent to its conclusion): the requirement names
-`d.pack` as "the container" and `d.packing` as "the constituents" as two separate vocabulary items,
-and the container→first-constituent step and the sibling-rank-among-constituents step are genuinely
-different relations — collapsing them onto one `DimRef` would make the container a member of its own
-constituent rank (its own `d.packing` slot would need to mean something, and the obvious candidate,
-"the container is constituent zero," reintroduces exactly the "wrap the origin cell in a pack of
-one" problem §9.3.7 explicitly avoids for real cells at step 0). Keeping `d.clone`'s idiom for the
-*single* cross-container relationship (`d.pack`, used dual-role exactly as `d.clone` is) while
-giving the *rank among siblings* its own dimension (`d.packing`) is the smaller, more precise
-change: one extra `DimLink` per constituent cell (12 bytes), paid only by view-minted cells, never
-by real ones, in exchange for a representation with no double duty anywhere. This is priced in
-ruling V2 (§16); the single-dimension alternative, and the reasoning for it, is recorded in refused
-alternatives there.
+When two members reach the same cell at the same step it appears in both lanes, because each lane
+says which dimension reached it.
 
-#### 9.3.4 The BFS-frontier pack-step definition
+#### 9.3.3 The structure
 
-Step `n` of the pack rank is the set of cells reached by stepping from members of step `n-1` along
-*any* dimension in `G`, from the real cell `c` at step 0. Formally, with
-`Reach(S) = {m : ∃s ∈ S, ∃di ∈ G, linked(s, di, POS) = m}` (mirror with `NEG` for the negward pack):
+Everything is in the derived arena, and no real cell is linked (§6.2). For origin `c` on axis `a`:
+
+```text
+ axisStep[a]:  ... [K-1] --- (o: c) --- [K+1] --- [K+2] ...   the rank of packs
+                                          |
+ d.pack:                               [K+1] --- (L1)          a container, then its first constituent
+                                                  |
+ d.packing:                    (L1) --- (L2) --- ( ) --- (L4)  the constituents, one per lane
+
+ (o: c) an occurrence of the origin      (Li) an occurrence of lane i's real cell
+ ( ) an empty place: lane 3 has run out   [K] a pack container
+```
+
+- `d.pack` relates a container to its contents: the container's posward neighbour is its first
+  constituent. Entering a pack is that step; leaving is the step back.
+- `d.packing` is the rank of constituents inside one pack, in lane order. A lane with nothing in it
+  keeps an empty place, so a constituent's position in the rank is its lane and lanes line up from
+  pack to pack.
+- The packs along an axis are a rank on that axis's own `axisStep` dimension, with an occurrence of
+  the origin as step 0.
+
+`d.pack` and `d.packing` are two dimensions because they are two relations. On one dimension the
+container would be the head of its own constituents' rank — "constituent zero" — and a nested pack,
+which is both a constituent of its parent and a container of its children, would need two posward
+neighbours on it.
+
+Each of the three is a rank, so every cell has at most one neighbour each way on each (I1).
+
+#### 9.3.4 Worked examples
+
+*A simple group.* `G = (d.email, d.phone, d.address)`. From person `c`: e-mails `e1, e2`; one phone
+`p1`; addresses `a1, a2, a3`.
+
+```text
+          step 0     +1        +2        +3
+ d.email            [ e1 ]    [ e2 ]    [    ]
+ d.phone    c       [ p1 ]    [    ]    [    ]
+ d.address          [ a1 ]    [ a2 ]    [ a3 ]
+                                                  step +4 does not exist: every lane is empty
+```
+
+*A nested group, a duplicate and ragged ends.* `H = (d.name, G, d.contact)`, where `d.contact`
+happens to lead to `e1` as well.
+
+```text
+          step 0     +1                      +2
+ d.name             [ n1 ]                  [    ]
+ G          c       [[ e1 ][ p1 ][ a1 ]]    [[ e2 ][    ][ a2 ]]      lane 2 is a pack of G
+ d.contact          [ e1 ]                  [    ]
+```
+
+`e1` is in two places at step +1: once inside the nested pack, reached by `d.email`, and once in
+lane 3, reached by `d.contact`. They are two occurrences of one real cell; focusing either
+highlights both. Step +3 exists, because `G`'s lane still holds `a3`.
+
+#### 9.3.5 Movement
+
+The cursor is the origin, the axis, the step and the lanes selected (§8.5). Stepping along the group
+axis changes `step` by one if the pack there exists. That is single-valued — there is one pack at
+each step — and reversible, since stepping back subtracts what was added; in the structure, the
+`axisStep` rank is two-sided like any rank (V-R28). The origin does not change while the cursor
+steps along its packs, so the packs do not change under it.
+
+- **Enter** selects the first lane that holds something: `lanes` gains an index (`d.pack`, posward).
+  **Next lane** and **previous lane** move along `d.packing`, skipping empty places. **Leave** drops
+  the last index.
+- **Retrieve** makes the cell under the cursor the origin: the cursor becomes that real cell with
+  step 0, and the placement tosses (V-R29). Nothing is copied.
+- **A step on another axis** from inside a pack acts on the cell under the cursor, as a retrieve
+  followed by the step.
+
+#### 9.3.6 Layout: the lane table
+
+Packs stand side by side along the group axis's direction, and lanes stack across it, so a rank of
+packs is a table. Lane `i` has the same height in every visible pack — the tallest content in that
+lane, up to `pack.laneMaxLines` — so rows line up; each pack is as wide as its widest constituent,
+up to `pack.chipMaxWidth`. The origin column shows the origin cell in full, and the lane names — the
+members' names — are label items beside it, once.
+
+Each pack is a `PlacedFrame` with view-only chrome: a dashed border and a header with the group's
+name and the step. Each constituent is a `PlacedItem` inside it, `itemViewOnly` for an empty place
+and an ordinary cell item otherwise. A nested pack is a frame inside a lane, laid out the same way,
+drawn to `pack.nestDepth` levels and collapsed to a badge with its count below that. The depth drawn
+is a display budget; the structure nests as deep as the groups do (V-R30).
+
+When a second in-plane axis shows a dimension, each cell of the origin's rank on it is a row with
+its own rank of packs, derived only for the rows in view. When a second axis shows a group, it acts
+as its first member.
+
+#### 9.3.7 Cost
+
+Extending a rank of packs by one step is one link read per leaf dimension of the group. The
+placement keeps, for each row and direction, the real cell each lane has reached, so it never
+re-walks from the origin, and so it can re-derive the visible window after a toss (§6.7). Only packs
+in view, plus a margin of `pack.aheadSteps`, exist.
+
+#### 9.3.8 Keeping a pack
+
+A pack is a way of looking and vanishes when the binding changes. A reader who wants one kept asks
+for it by name: `promotePack()` (§8.5) hands the container and its constituents to
+`zigzag::promote()`, which mints real cells for them — a constituent becomes a real handle cell
+naming its original, as `promote()` already does for handle cells (`arena_manifold.cpp:1838`) — and
+refuses above its budget. It is never automatic. Whether the promoted `d.pack` and `d.packing`
+should be the slice's own named dimensions is VU4.
+
+#### 9.3.9 Edge cases and accessibility
+
+A group of one dimension gives packs of one lane; they still have pack chrome, because a pack must
+never be mistaken for the stored cell it stands for. An empty group cannot be bound. A cell with no
+neighbour on any member has no packs, and the step action reports that there is nothing that way.
+
+A pack is role `group`, named "*group* step *n*: *k* of *m* lanes"; each constituent is named with
+its text and "via *dimension*"; an empty place is named "*dimension*: nothing here". Entering and
+leaving move accessibility focus.
+
+#### 9.3.10 Acceptance
+
+Both worked examples derive exactly as drawn, including the two occurrences of `e1` and the
+existence of step +3. For every cursor on a rank of packs, a step posward and then negward returns
+the same cursor and the same real cell. Retrieve yields the real cell and appends no operation.
+After a toss the same cursor resolves to the same real cell. `verifyViewSpace` passes after every
+step. Binding an empty group is refused. Derived cell count is bounded by the window for a walk of
+any length.
+
+______________________________________________________________________
+
+## 10. The page views
+
+### 10.1 What a page view works with
+
+A page view arranges pages; it does not make them. Text, pagination, glyphs and the caret stay with
+the library's `Doc`, and links and transclusions stay with the engine. A page view sees only the
+`PageCatalog` of §8.6: how many documents and pages there are, how big each page is, whether a page
+is *marked* — holds an end of a non-formatting link (any `LinkType` but `Format`,
+`apps/common/xanadu/ops.hpp:229`) or content that also appears elsewhere — and where the ends of the
+active link fall. From that it emits one `PlacedItem` per page it wants drawn.
+
+The presenter turns those items into a library `PageArrangement` for each `Doc`: the transform and
+opacity of each page. Today a `Doc` computes each page's matrix itself, in one column
+(`src/doc.cpp`); the arrangement seam is the generic library change that lets anything else decide
+(see the rendering plan). The plain editor can use it too.
+
+Three things hold for every page view:
+
+- **The current page is live.** The page under the caret is drawn in full and is the editing
+  surface. No page view intercepts typing, and none changes what is on a page (V-R37).
+- **Pagination may be unfinished.** A document can gain pages while it is shown. A view arranges
+  what the catalog knows, says when more are coming, and is laid out again when they arrive.
+- **Legibility decides detail.** A page whose lines project smaller than
+  `PaneFrame::minReadableLinePx` is emitted `Coarse`, which the library already draws as bars
+  (`DrawBudget::coarseBelow`, `include/gleditor/draw_budget.hpp`).
+
+A page view has no view space. Pages are not cells and it mints nothing.
+
+### 10.2 Shared geometry
+
+Local units are Canvas pixels (§8.4); the presenter's placement transform carries
+`Doc::pixelsToWorld`. A document's pages have one width `W` and height `H` (from `PageFacts`).
+"Foreground" documents take part in the arrangement; a "background" document, opened for context
+(`RenderItemOpenDoc::depthZ`), is set back by `page.backgroundDepth` and dimmed to
+`page.backgroundOpacity`, as it is today.
+
+Link and transclusion beams are `PlacedEdge`s between passage anchors: for an end on page `p` whose
+passage spans `top` to `bottom`, the anchor is the page's placed plane at that height, on the edge
+facing the other end. They are world-space edges, so they follow pages wherever a view puts them.
+
+### 10.3 The base view
+
+`page.base`: what xuzz does today, as a view.
+
+#### 10.3.1 At rest
+
+Foreground documents stand in a row in list order, each one `page.base.documentGap` from the last. A
+document's pages flow downwards, `page.base.pageGap` apart. Every page is `Plane`-facing, upright
+and opaque. This is the library's present arrangement (`documentSlot`, `kDefaultDocumentGap`,
+`Doc::pageGapPx`), now produced by a view.
+
+```text
+   doc A        doc B        doc C
+  +------+     +------+     +------+
+  | A 1  |     | B 1  |     | C 1  |        documents left to right
+  +------+     +------+     +------+
+  +------+     +------+
+  | A 2  |     | B 2  |                     pages top to bottom
+  +------+     +------+
+```
+
+#### 10.3.2 With an active link
+
+When a link or a transclusion is active, the pages that hold its ends come together.
+
+- **Who moves.** The *participants* are the distinct pages among `ActiveLink::ends`, for every
+  member of both endsets. `ActiveLink::anchor` names the end the reader is at; its page is the
+  *anchor page* and does not move.
+- **Where to.** Each other participant is tied to the anchor page by its end nearest the anchor end,
+  and a `CoalesceStrategy` finds positions that best satisfy the ties.
+- **What "best fit" means.** Over the participants' positions, minimise the sum over ties of the
+  squared height difference between the two passages' centres and the squared difference between the
+  pages' horizontal gap and `page.base.coalesceGap`, with no two participants overlapping. Level
+  passages a small gap apart is what lets both ends be read in one glance.
+- **In front of the row.** Participants are lifted towards the viewer by `page.base.liftDepth`, so
+  they pass in front of the columns they leave and cannot collide with pages that stayed.
+- **What stays behind.** Each page that flew leaves a ghost marker in its home place (`itemGhost`)
+  and a `Tether` edge from the ghost to the page (V-R33). Pages that do not take part stay at home
+  at `page.base.contextOpacity`.
+- **The camera.** If the group of participants is larger than the pane, the pane's camera frames it;
+  the layout never shrinks a page.
+
+When the link is released everything returns home.
+
+```cpp
+// page/coalesce.hpp
+struct CoalesceBody {
+  PageRef page;
+  glm::vec3 home{}, position{}; // position: in, the start; out, the result
+  float width{}, height{};
+  bool pinned{}; // the anchor page
+};
+struct CoalesceTie {
+  std::uint32_t from{}, to{};  // bodies
+  float fromHeight{}, toHeight{}; // passage centres, from each page's top
+  float gap{};
+};
+class CoalesceStrategy {
+public:
+  virtual ~CoalesceStrategy() = default;
+  /// Pure: the same bodies and ties give the same positions.
+  virtual void solve(std::span<CoalesceBody> bodies,
+                     std::span<const CoalesceTie> ties) const noexcept = 0;
+};
+```
+
+The built-in strategy is today's: it loads the bodies and ties into a `TensionLayoutEngine` as
+`TensionBody` and `TensionConstraint` and steps it `page.base.coalesceSteps` times at a fixed time
+step, exactly as `LinkBeams` does now with 25 steps. It is a fixed number of steps and not "until
+settled", and it never reads a clock, so it is a pure function and can run inside `layout()`. A
+closed-form solver can replace it through the same interface.
+
+Today the unit that moves is the whole document. The base view's unit is the page: when every page
+of a document takes part, or it has one page, the document moves as before; otherwise only the pages
+that hold ends fly, and the rest of the document stays readable where it was.
+
+#### 10.3.3 Motion
+
+The page being brought to the reader is the subject of the move: it starts first and takes longest
+(`page.base.subjectMs`); pages that make room start `page.base.rowDelayMs` later and take
+`page.base.rowMs`. These are today's `anim::sworphSubject`, `sworphRow` and `sworphRowDelay`,
+expressed as `MotionHint`s.
+
+#### 10.3.4 Acceptance
+
+With no active link, page positions equal the row-and-column formula for any catalog. With one, the
+anchor page's position is unchanged; every tie's passages are level within
+`page.base.levelTolerance`; no two participants overlap; every moved page has exactly one ghost and
+one tether; non-participants are at home. Two layouts of the same input are identical. A
+many-to-many link with three ends on a side brings all six pages.
+
+### 10.4 The stacked vanishing view
+
+`page.stacked-vanishing`: a document as a deck of pages receding to a vanishing point.
+
+#### 10.4.1 Purpose
+
+To read one page with the next and previous in view, and to see at a glance how long the document is
+and where in it the connections are. The current page is large and whole; the rest stand behind it
+in a line that fades with distance, and the pages that hold links or transclusions stand out of the
+fade.
+
+#### 10.4.2 The deck
+
+A document's pages in order are its deck. The deck is parted at the current page `t` into two
+stacks:
+
+- the **upcoming stack**: page `t` on top, then `t+1`, `t+2`, … behind it;
+- the **passed stack**: page `t−1` on top, then `t−2`, … behind it.
+
+Both stacks recede along the same direction
 
 ```math
-\begin{aligned}
-\text{Pack}^+_0 &= \{c\} \\
-\text{Pack}^+_n &= \text{Reach}(\text{Pack}^+_{n-1}) \setminus \left(\text{Pack}^+_0 \cup \dots \cup \text{Pack}^+_{n-1}\right), & n \ge 1
-\end{aligned}
+\hat{u} = (\sin\psi\cos\varphi,\ \ \sin\psi\sin\varphi,\ \ -\cos\psi)
 ```
 
-The walk stops at the first `n` with `Pack⁺ₙ = ∅`.
+where ψ is the angle between the line and the view axis and φ is the direction, in the plane of the
+pane, in which each page is offset from the one in front. Page `t+i` is centred at
 
-This is chosen over a per-dimension "n-th neighbour" zip because a zip has no natural alignment
-between dimensions whose ranks differ in length — dimension A's 3rd posward cell has no reason to
-correspond to dimension B's 3rd — and needs ad hoc ragged-end handling the frontier definition gets
-for free.
+```math
+b + i\,s\,\hat{u}, \qquad i = 0, 1, 2, \dots
+```
 
-- **Duplicates**: two member dimensions reaching the same cell from the same source — the set
-  subtraction in `Reach(S)` de-duplicates within one step; the cell appears once in `Pack⁺ₙ`, with
-  (optionally, for the UI) both `di` edges recorded as provenance.
-- **Cycles**: a member dimension looping back onto an already-packed cell — the `\ (earlier packs)`
-  subtraction means a cell already claimed by a closer step is never re-claimed, so a loop simply
-  stops contributing once it closes, the same safety `cloneMaster`'s loop guard already has.
-- **Ragged ends**: a member dimension running out of cells before others — handled automatically by
-  `Reach`; a dimension contributing nothing from a given source simply does not appear in that
-  frontier, and the walk naturally narrows to the dimensions still producing cells.
+and page `t−i` at `b′ + (i−1)·s·û`, where `s` is `stack.spacing`, `b` is where the current page
+stands and `b′ = b − (W + stack.gutter)·x̂` puts the passed stack beside it, on the side a previous
+page lies in a book: the left for left-to-right text, the right when `DocumentFacts::rightToLeft`.
+Every page stays parallel to the pane. Turning pages to make a fan was refused: text foreshortened
+by rotation is harder to read than the same text smaller.
 
-**Worked example 1 (simple group).** `G = {d.author, d.topic}`. `Pack⁺₀ = {c}`.
-`Reach({c}) = {a1, t1}` → `Pack⁺₁ = {a1, t1}`. `Reach({a1, t1}) = {a2, t2}` → `Pack⁺₂ = {a2, t2}`.
-If `d.author` ends at `a2` but `d.topic` continues: `Reach({a2,t2}) = {t3}` → `Pack⁺₃ = {t3}` (the
-ragged end, handled automatically); `Reach({t3}) = ∅` → stop. Four containers along the axis from
-`c`: `[c] [a1,t1] [a2,t2] [t3]`.
+Because the two stacks are parallel lines in space, they converge on one vanishing point, and the
+spacing between pages shrinks with distance. That is the long line of pages. Both tops — the current
+page and the one before it — are whole and unobstructed, which is most of what "legible text in the
+current page and the pages close by" can mean; what the stagger direction controls is how much of
+each page *behind* a top is readable.
+
+When the pane is too narrow to show both tops at a readable size, the passed stack is tucked behind
+the current page with only a strip of `stack.tuckStrip` showing.
+
+#### 10.4.3 Choosing the direction
+
+A page behind another shows a strip along one horizontal edge and a strip along one vertical edge. A
+strip along the top shows whole lines — usually a heading and the opening lines. A strip down the
+side shows only the start or the end of every line. So the direction matters, and it depends on the
+shape of the pane, the page and the type size. The view searches for it.
+
+For a candidate `(φ, ψ)` and each of the `stack.nearPages` pages behind a top, project the page and
+subtract the pages in front of it and whatever falls outside the pane. Of what is left, count
+
+- each line wholly visible, if lines at that depth project at least `minReadableLinePx` high: 1;
+- each line partly visible: the fraction visible, times `stack.lineStartWeight` if its start is what
+  shows and `stack.lineEndWeight` if its end is.
+
+The candidate's score is the sum over those pages, each weighted by `stack.nearFalloff` raised to
+its distance from the top. Candidates are φ from 0° to 180° in steps of `stack.search.azimuthStep`
+and ψ from `stack.search.minRecession` to `stack.search.maxRecession` in steps of
+`stack.search.recessionStep`. The best score wins; the previous choice is kept while it is within
+`stack.search.hysteresis` of the best, so the deck does not swing as a pane is resized.
+
+The pages are congruent rectangles under one perspective, so each term is rectangle arithmetic, and
+the whole search is a few hundred candidates times a handful of pages. It runs in `prepare()`, when
+the pane, the page size, the line height or a setting changes, and never per frame (V-R34).
+
+#### 10.4.4 Opacity and the punctuation
+
+For a page `i` places behind its stack's top:
+
+```math
+\alpha_i = \max\bigl(\texttt{stack.fadeFloor},\ e^{-i/\texttt{stack.fadePages}}\bigr)
+```
+
+a slow fall — with the default of 12, the twelfth page behind is still a third opaque. A marked page
+is the exception: it is fully opaque wherever it stands, with an edge tab in its link type's colour
+(V-R35). Looking down the line, the solid pages are where the document is connected to something.
+The two tops are always opaque.
+
+#### 10.4.5 How far the line goes
+
+Unmarked pages are emitted until one would project shorter than `stack.minPagePx`; a tail marker
+then carries the number not drawn, or says that pagination is still running. Marked pages go on
+being emitted beyond that, as `Coarse` slivers, down to one pixel, so the punctuation continues to
+the vanishing point. Nothing is capped: a longer document has a longer tail count.
+
+#### 10.4.6 Several documents
+
+Each foreground document is a deck. Deck bases stand in a row as documents do in the base view, one
+deck's width plus `stack.deckGap` apart, and all share `û`, so every line converges on the same
+vanishing point. Background documents' decks are set back and dimmed. Beams join the passages of
+linked pages wherever those pages stand in their decks; the ends of the active link are marked pages
+by definition, so they are always solid.
 
 ```text
-   step0        step1         step2        step3
-  +-----+      +------+      +------+      +----+
-  |  c  | ---> | a1   | ---> |  a2  | ---> | t3 |
-  +-----+      | t1   |      |  t2  |      +----+
-               +------+      +------+
+            . vanishing point
+          .   .
+        ..     ..            pages thin out and fade with distance;
+      .|.|     .|#|          # a marked page: solid wherever it stands
+    . | | |   . | | |
+   +------+  +---------+
+   | t-1  |  |    t    |     two tops, whole and opaque:
+   |passed|  | current |     the page before, and the page being read
+   +------+  +---------+
 ```
 
-**Worked example 2 (nested group with a duplicate and a ragged end).**
-`G' = {d.author, d.topic, d.region}` where `d.region` nests the group `{d.city, d.country}` as one
-of its "dimensions" (§9.3.7): resolving `G'`'s contribution to `Reach` at a source cell first
-resolves `d.region`'s own nested pack from that source and treats its container's membership as
-`d.region`'s contribution to the outer step. Suppose at step 1, `d.author`'s posward from `c` is
-`a1` and `d.topic`'s posward from `c` is *also* `a1` (a convergence — both dimensions reach the one
-cell): `Reach({c})` evaluated over `{d.author, d.topic}` yields `{a1}` with two recorded provenance
-edges, so `Pack⁺₁ = {a1}` — a pack of one with two "how reached" tags, not two packs. If
-`d.region`'s nested pack from `c` is empty (no `d.city`/`d.country` links from `c`), `d.region`
-contributes nothing at step 1 — the ragged end — and `Pack⁺₁`'s membership is unaffected by the
-dimension that had nothing to offer.
+#### 10.4.7 Going to another page
 
-```text
-   step0              step1 (convergence + ragged nested dim)
-  +-----+            +--------------------------+
-  |  c  | ---------> | a1  (via d.author AND     |
-  +-----+            |      d.topic; d.region    |
-                      |      contributed nothing) |
-                      +--------------------------+
+Moving the cursor from page `a` to page `b` of one deck, `Δ = |b − a|` pages away, is done one of
+two ways (V-R36):
+
+```math
+\text{riffle} \iff \Delta \cdot \texttt{stack.minFlipMs} \le \texttt{stack.maxTransitionMs}
 ```
 
-#### 9.3.5 Movement is single-valued and reversible
+provided every page between is already paginated; otherwise **split**. With the defaults of 60 ms
+and 420 ms a page up to seven away is riffled to. The rule is stated in time and not as a page count
+because that is the real constraint: a riffle is only a riffle if each page can be seen to turn and
+the whole thing is over quickly.
 
-**Single-valued**: "move posward on the group axis" from a representative `r` is "move to the
-container of `Pack⁺₁(r)`," lazily materialized — exactly one target, by construction (`Pack⁺₁` is
-one set, hence one container). I1 holds for the view-visible axis: `r` has exactly one packed
-posward neighbour even though it may have `k` real per-dimension neighbours underneath.
+- **Riffle.** The pages between cross from one stack to the other one at a time, in order. Page `j`
+  of the run starts at `j·τ` and takes `τ`, on an arc that lifts it towards the viewer, with
+  `τ = max(minFlipMs, min(flipMs, maxTransitionMs / Δ))`. It reads as cycling through the pages.
+- **Split.** The deck parts at `b`. The pages between `a` and `b` cross to the other stack together,
+  as one block, in `stack.splitMs`; page `b` then flies forward out of the line to the top of its
+  stack, starting `stack.splitLeadMs` later, and the pages behind it close up. It reads as cutting a
+  deck of cards to a place.
 
-**Reversible, proved**: the axis `DimRef` (§9.3.3's third relationship) is maintained by
-`ArenaManifold::link()`'s own two-sided-link guarantee — every call to
-`link(predecessor, axisStep, POS, container)` also sets `container`'s negward `axisStep` slot to
-`predecessor` in the same call, exactly as every other `link()` call in the codebase does for every
-other dimension. Therefore `linked(linked(r, axisStep, POS), axisStep, NEG) == r` holds by the
-existing link-maintenance invariant applied to pack containers as cells like any other —
-reversibility is not a new property requiring new machinery to prove; it is the pre-existing
-two-sided-link guarantee, inherited for free (V-R26).
+Both are emitted by `transition()` as `MotionHint`s over the same target layout, so the rule and the
+choreography are testable without drawing anything. A page that becomes current in another
+document's deck — following a link — moves *that* deck by the same rule, measured from that deck's
+own top. With reduced motion every transition is a cut.
 
-#### 9.3.6 Laziness: nothing minted until the cursor steps there
+#### 10.4.8 Interaction
 
-Building `Pack⁺ₙ` from `Pack⁺ₙ₋₁` costs `O(|Pack⁺ₙ₋₁| × |G|)` link reads — cheap, bounded by the
-group's size (typically 2-4) times the previous pack's width. `PackBuilder::computeNextStep`
-performs only this read-only computation, eagerly enough to answer "is there a next step" (for a
-disabled- further-movement affordance at a ragged end), but the container cell and its
-`d.pack`/`d.packing` links are minted (`PackBuilder::materialize`) only when the cursor actually
-steps there. This is the same "lazy frontier" pattern `ArenaManifold::materializeFrontier()`
-(`arena_manifold.hpp:380-385`) already implements for federation proxies, reused rather than
-reinvented: compute reachability cheaply, mint lazily, cap the eager pre-mint at a small `maxSteps`.
+Next page and previous page move the cursor by one, which is a riffle of one. Next link and previous
+link are the existing link navigation; the target page comes to the top of its stack. Clicking any
+page in a line goes to it. Dragging along a line, or the wheel, scrubs through it. All of these have
+the existing keyboard forms; the view adds none that is pointer-only.
 
-#### 9.3.7 Nesting
+#### 10.4.9 Accessibility
 
-A dimension group can itself include another group as one of its "members" (a `d.dim-group` run may
-contain another group cell). Operationally, "stepping along a nested group's contribution" first
-resolves that inner group's own pack at the current source cell and treats the resulting container's
-membership as that member's contribution to the outer `Reach()`. This is recursive by construction
-and terminates because each nesting level strictly reduces the group-membership list being expanded
-— a group may not contain itself, detected and refused (`ViewError::GroupCycle`) the same way
-`cloneMaster`'s loop guard treats a self-referencing rank, never infinitely recursed (V-R28).
+Each deck is a list named for its document and its page count. Each page drawn is a list item named
+"page *n* of *N*", with "has links" or "has shared content" when marked. The current page exposes
+its text as it does today. The tail marker is an item named with the number of pages it stands for.
+Order is page order, never depth.
 
-#### 9.3.8 The origin cell is a pack of one, never minted
+#### 10.4.10 Acceptance
 
-`Pack⁺₀ = {c}` is never wrapped in a container — `c` is already its own recoverable real cell with
-its own identity, and wrapping it would both double the cell count of every pack-view axis for no
-benefit and violate I4 trivially (there is nothing to recover; it is already real). A one-member
-pack at step `n ≥ 1` (the convergence case) *is* minted as an ordinary container with one
-constituent, and renders with the same dashed-border/bracket visual distinction as any other pack —
-collapsing a one-constituent pack to look like an ordinary cell is refused (§16, ruling V9): it
-would reintroduce exactly the "mistake a view cell for stored data" risk the visual language exists
-to prevent.
+Page centres satisfy the two formulas for any cursor. For a fixed input the direction chosen is the
+maximum of the score over the candidates, and a second `prepare()` with the pane 1% wider keeps it.
+Opacity is non-increasing along each stack over unmarked pages and is 1 for every marked page. Every
+marked page of the catalog is emitted. `transition()` chooses riffle exactly when the inequality
+holds; a riffle's hints have strictly increasing delays in page order; a split gives every page of
+the block the same delay and duration. A right-to-left document's passed stack is on the right. No
+layout call changes the catalog.
 
-#### 9.3.9 Pack frame rendering
+### 10.5 Further page views and deck sources
 
-A pack frame is a widget scene on a world plane: one `ui::WorldPanel` per visible frame, its model a
-`PositionedPanel` whose children are the constituent chips, drawn through the frame's transform.
-`WorldPanel` supplies what a pack needs and this document would otherwise have to specify: fitted
-chip text, full accessible names that survive label LOD, the same projected boxes for drawing and
-for accessibility, and backgrounds that stay pickable when their labels are too small to read. Chip
-size follows the card pattern the fitted UI established (`pack.chip.widthPx`, `heightPx`,
-`maxWidthShare`, `maxLines`): font metrics grow a chip within the frame's safe share, and a chip
-never truncates by bytes. The fan below decides only where each chip's box goes.
+Two more page views fall out of code that exists and are worth registering once the two above are
+in. They are candidates, not requirements, and each needs its own section before it is built.
 
-**Fan, chosen over stacked-deck or grid.** Stacked-deck reads well for ordered small decks but hides
-member count at a glance and implies an ordering the group's members do not necessarily have (they
-arrive from different dimensions, not one sequence). A rigid grid wastes space for members with very
-different content-fit sizes, the same problem stretch vanishing's rejected row/column option has. A
-fan — members arranged along a shallow arc inside the frame, each slightly rotated and z-offset so
-all are edge-visible and no two fully overlap — scales legibly from one to a few dozen visible
-members (bounded by `pack.fanMaxVisible`, beyond which it degrades to a count badge, never a silent
-omission), and its arc radius grows with member count without requiring a relayout of the parent
-axis. Each fanned member's edge-facing side carries a thin colour tab matching the contributing
-dimension's colour, the same one its axis and ring edges use (read from `system://ui`, one encoding
-per dimension everywhere).
+| View                 | What it shows                                                                                | Carved from                                   |
+| -------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `page.contact-sheet` | every page of every document as a grid of small pages, marked pages highlighted; click to go | `apps/xudu/overview_overlay.*`                |
+| `page.alongside`     | two versions of a document in two columns, pages paired by the content they share            | `Views::showAlongside`, `Views::setOnionSkin` |
 
-#### 9.3.10 Axis placement; nesting LOD
+The stacked vanishing view takes its decks from a `DeckSource`, and the built-in source is "each
+document's pages in order". The same view over a different source answers a different question, with
+no new layout: the versions of the current page through hypertime, most recent on top; or the pages
+the reader has visited, from the activity log, as a walk they can riffle back through.
 
-The bound group's axis places packs at `packSpacing` intervals exactly as a single bound dimension
-places cells, sized to each pack's fan bounding box with a `packMinWidthPx`/`packMinHeightPx` floor
-so a one-member pack does not look degenerate beside a twenty-member one. A pack whose constituent
-is itself a pack draws the inner frame inside the fan slot at up to `pack.nestingLodDepth` levels
-before collapsing to a count badge — a display budget, not a model ceiling; the manifold may nest
-arbitrarily deep (V-R28), the draw pass simply stops expanding frames past the configured depth.
-Depth-`N` frames dim by `nestDimFactor^depth` as a legibility cue.
-
-#### 9.3.11 Enter/retrieve/leave
-
-**Entering** a pack descends `d.pack` posward from container to first constituent, then `d.packing`
-posward to reach any further constituent — a focus change, not a separate mode: the pack's
-representative becomes the new context, the camera dollies toward it, its fan expands, and sibling
-packs fade via the same edge-fade mechanism as stretch vanishing (§9.1.5), reused rather than
-duplicated. **Leaving** ascends `d.pack` negward from the first constituent back to the container,
-then the group axis to a sibling if desired — the reverse animation. **Retrieving** a constituent
-("Retrieve") focuses that cell as itself, outside the pack's container framing, via a focus move to
-its real `CellRef` — never a copy (V-R27); the view afterward shows that cell as an ordinary focused
-cell, either in the view that was active before pack view or in pack view with the retrieved cell as
-the new representative.
-
-#### 9.3.12 Interaction
-
-Step actions move pack-to-pack along the bound axis. "Enter pack" (`Return`) descends into the
-container; "Leave pack" (`Escape`) ascends back out. Selecting a constituent chip and invoking
-"Retrieve" (`Shift+Return`) focuses it directly.
-
-#### 9.3.13 Degenerate cases
-
-A group with one member dimension: the pack degenerates to an ordinary rank-walk along that
-dimension; the container still renders (for visual consistency) holding exactly one constituent, so
-entering and retrieving show the same cell. An empty group: cannot be bound to an axis — refused
-(`ViewError::EmptyGroupBind`). A pack with zero constituents (its representative has no links on any
-member dimension): still enterable, immediately empty, with a stated message, rather than refused
-outright — the user sees the empty state rather than being blocked from checking.
-
-#### 9.3.14 Accessibility
-
-A pack container is `role: group`, never `role: cell` (this matters more, not less, for a non-visual
-user, who has no border-dash cue available), named `"Pack: <N> constituents from <M> dimensions"`;
-each constituent chip is a child node named `"<cell text> (via <dimension>)"`, explicitly naming
-which member dimension contributed it (V-R32). Entering/leaving fires an ordinary a11y focus-change
-event.
-
-#### 9.3.15 Tunables
-
-See §11's settings table (`pack.*`).
-
-#### 9.3.16 Acceptance tests
-
-Moving posward then negward along the group axis returns to the starting representative for every
-step along both worked examples (V-R26, §9.3.5); `computeNextStep` on worked example 1 produces
-exactly `{a1,t1}`, `{a2,t2}`, `{t3}`, `∅` in order; on worked example 2 it produces `{a1}` with two
-provenance edges at step 1; "Retrieve" on a constituent focuses its real `CellRef` and leaves no new
-operation in `xudu-dump --section=ops`; binding an empty group is refused with `EmptyGroupBind`.
+```cpp
+// page/deck.hpp
+class DeckSource {
+public:
+  virtual ~DeckSource() = default;
+  [[nodiscard]] virtual std::uint32_t decks() const noexcept = 0;
+  /// The pages of one deck, in the order they stand.
+  [[nodiscard]] virtual std::span<const PageRef>
+  deck(std::uint32_t index) const noexcept = 0;
+};
+```
 
 ______________________________________________________________________
 
-## 10. Mixing xanadoc and zigzag views
+## 11. Scenes, panes and mixing
 
-### 10.1 Panes
+### 11.1 Scenes and placements
 
-A `ViewHost` owns a pane tree; each `Pane` owns one `Viewport{ViewportDesc}` and one
-`unique_ptr<View>`. Splitting, closing, and cycling focus are generic actions (`pane.split.*`,
-`pane.close`, `pane.focus.next`) — not "split zigzag"/"split xanadoc" — because either half may hold
-either kind of content. A `ViewHost` is the direct generalisation of
-`apps/xuzz/view_coordinator.{hpp,cpp}`'s single `Unified`/`XanadocOnly`/`ZigzagOnly` toggle to an
-actual tree; §15 gives the migration path from one to the other.
+A **scene** is one world. A **placement** is a view instance with its state, standing at an origin
+in a scene. A scene with one page placement and one slice placement is today's unified mode: pages
+and cells in the same space, under one camera, with beams between them. A scene with one placement
+is today's xanadoc-only or zigzag-only mode.
 
-Focus is not the host's to reinvent. Each pane is a `ui::FocusScope` registered with
-`FocusManager::addPane()`; `pane.focus.next` is `FocusManager::cyclePane()`; a slice pane's scope
-returns `usesGpuPointerPicking() == true` and receives cell picks through `pointerPick`; and view
-chrome that must hold the keyboard — the dimension picker, the group editor, the view palette — is a
-modal scope opened with `FocusManager::push()`, which already restores the pane's focus when it
-closes and limits which commands run meanwhile. Pane rectangles come from `ui::split()` over the
-window's `UiMetrics::pixelSafeArea()`, so a pane never extends under screen chrome and adjacent
-panes share an edge exactly.
+"Mixed freely" therefore has two forms, and both are needed (V-R38):
 
-Because accessibility reads view state on the render thread, a view command must not mutate a
-`ViewManifold` from the input thread. The host marshals every view action to the pane's owning
-thread before it runs, as `ZigzagCommandHooks::dispatch` does for the visualizer today
-(`apps/zigzag/zigzag_commands.hpp`); xuzz uses the render queue (V-R38).
+- **Together:** several placements in one scene. Their records are in one coordinate system, so a
+  beam from a passage on a page to a cell is an ordinary world-space edge.
+- **Side by side:** several panes, each showing a scene through its own camera. Two panes may show
+  the same scene from different places.
 
-### 10.2 Compositing
+A placement's origin is a transform the host owns. Each view lays out in its own local coordinates
+(§8.4) and never knows where in the scene it stands.
 
-Each pane's `ViewportDesc{x, y, width, height}` plus an optional owned `viewProjection` describes a
-screen rectangle. Two mechanisms keep one pane's draws out of a sibling's rectangle. Screen-space
-content — labels, chrome, tooltips — is clipped on the CPU with `Canvas::pushClip(paneRect)`, which
-exists. World-space content drawn through a camera still needs a device scissor
-(`RenderDevice::setScissorRect`, new, thin per backend), because a `Canvas` clip stack cannot clip
-another contributor's geometry. Depth is partitioned two ways: depth-clear between panes for
-non-overlapping splits (the common case — simpler, each pane owns the full `[0,1]` range), or
-depth-range partitioning (`setDepthRange(min,max)`, new) for true embedding (a slice view drawn
-inside a xanadoc cell's rectangle), extending the transform-resolver pattern
-`ZigzagVisualizer::setPresentationOrigin`/`setPresentationTransformResolver` already use. Render
-order is back-to-front for overlapping translucent panes (reusing `src/renderer.cpp:388-391`'s
-existing document sort, generalised from documents to panes); a nested sub-viewport draws after its
-host's background and before the host's own foreground overlays.
+### 11.2 Edges between placements
 
-### 10.3 The `PageView` seam
+Within a scene the host adds the edges that join placements: for each link whose ends lie in
+different placements of the scene, one `PlacedEdge` between the placed anchors, resolved from each
+placement's records by `SubjectId`. Only real cells and document sites are exchanged (V-R40): a page
+placement is told "this real cell is an end", never a view cell, and a slice placement is told "this
+`DocumentSite` is an end". `BridgeCoordinator` does this today for the one pair it knows.
 
-This document specifies only the seam a xanadoc view implements — not its layout algorithm, which is
-explicitly a follow-up specification's job (ruling V12). What is guaranteed to the follow-up:
+A link whose other end is in a different scene cannot be a beam, because there is no shared space to
+draw it in. Its end is drawn as a short stub towards the pane's edge, labelled with where it goes;
+activating it focuses the pane that shows the other end, or opens one.
 
-- `PageView` derives from `View` and implements the identical `attach`/`detach`/`onBindingChanged`/
-  `onCursorMoved`/`onStoreAdvanced`/`layout` contract `SliceView` implements; `ViewHost` never
-  special-cases "is this pane a slice pane or a page pane" beyond this one refinement boundary.
-- `LayoutInput`/`LayoutSink`/`ViewportDesc` are reused unchanged; a `PageView`'s `layout()` pushes
-  `PlacedItem`/`PlacedEdge` records whose `cell` field is left default — nothing about
-  `LayoutSink`'s shape is slice-specific.
-- A `PageView` needs nothing from `ViewManifold`/`ArenaManifold` — it has no zzstructure invariant
-  to keep, and this document does not require it to acquire one.
-- `Manifold::contentOf`/`textOf` already give a cell's content as an ordinary `PrimediaSpan`, so a
-  page embedding "the content of cell X" is an ordinary transclusion, not a special integration.
-- A `SliceView` embedded inside or beside a `PageView` exposes only real `CellRef`s across that
-  boundary and exposes focus identity plus a transform/placement hook (V-R12), matching what
-  `BridgeCoordinator`/`ZigzagPresentationSurface` already provide.
+### 11.3 Panes and focus
 
-What the follow-up specification must still decide: the xanadoc-side layout algorithm itself (onion-
-skin, flow, pagination inside a pane); which parts of today's `xanadu::Views` coordinator get carved
-into a concrete `PageView` versus staying host-level; and the UI for creating/arranging page panes
-analogous to §11's chord table. Nothing in this document's `View`/`ViewHost`/`LayoutSink` contract
-is expected to change to accommodate those decisions — that is the guarantee this section exists to
-make.
+The window is divided by a library `ui::PaneTree`: rectangles from `ui::split()` over the window's
+safe area, so a pane never lies under screen chrome and neighbours share an edge exactly. The tree
+is generic and knows nothing about views.
 
-### 10.4 Link-navigation contract across panes
+Each pane is a `ui::FocusScope` registered with `FocusManager::addPane()`. Cycling panes is
+`FocusManager::cyclePane()`. A pane's scope opts into GPU picking and receives picks through
+`pointerPick`. Chrome that must hold the keyboard is a modal scope opened with
+`FocusManager::push()`, which restores the pane's focus when it closes. None of this is new
+mechanism.
 
-`design/ui_workflow_xuzz_navigation.md`'s "one link identity and both endsets in view" and
-"companion document" rules generalise without new rules: selecting a link pins its context
-regardless of which pane holds the caret; entering an endpoint in a different pane moves that pane's
-focus without touching another pane's camera or caret; if no pane currently shows the target's kind
-of content, a new pane opens with an origin marker connecting back, never a silent replace of the
-pane the user was reading. Activity back/forward restores which pane layout was active at a visit's
-save point, since a visit's saved view already covers camera and companion state.
+Splitting, closing and focusing change the tree and nothing else: each pane has its own camera, each
+placement its own cursor and bindings (V-R39).
 
-### 10.5 View chrome
+Accessibility reads view state on the render thread, so a command must not change a view space from
+the input thread. The host marshals each view action to the thread that owns the placement before it
+runs, as `ZigzagCommandHooks::dispatch` does today (`apps/zigzag/zigzag_commands.hpp:33`).
 
-The binding HUD (which dimension or group each axis shows), the view palette and the group editor
-are `ui::Widget` scenes in `ui::ScreenOverlay`s, laid out with `ui::stack`/`ui::flow`/`ui::grid` and
-drawn by the shared widget painter — `List` rows for dimensions, `Tabs` for views, `TextField` for a
-group's name, `Badge` for valence counts. Nothing in them is drawn by hand. They inherit, without
-further specification here: fitted labels with full accessible names, focus order from
-`LayoutResult::focusOrder`, minimum touch size (`ui.minTouchPx`), safe-area clamping, and live
-response to `ui.scale`, `ui.fontScale` and the font roles. Axis drop targets in all-dim walk are
-world geometry, but their snap region is never smaller on screen than `ui.minTouchPx`.
+### 11.4 Compositing
 
-______________________________________________________________________
+Each pane draws its scene into a *render region*: a scissor rectangle and a depth slice (see the
+rendering plan). Tiled panes do not overlap, so they share the whole depth range and the scissor
+alone keeps them apart. A depth slice is needed only where regions overlap — an embedded view, or
+chrome over a scene — and the front region takes a slice nearer than what it covers. This keeps
+depth precision where it is needed and answers the worry that many panes would exhaust it.
 
-## 11. Interaction summary
+Within a region, opaque planes are drawn front to back with depth writes, and translucent ones back
+to front without. A deck's faded pages and a stretch view's faded cells are the translucent ones.
 
-### 11.1 Default chords
+### 11.5 Embedding
 
-Context key: **Z** = active while a ZigZag pane has the keyboard; **X** = reachable from anywhere in
-Xuzz (the `Alt`-prefixed twin); **AW** = all-dim walk only; **PV** = pack view only. Scheme: a
-single unclaimed leader, `Ctrl+Alt+V` ("View"), matching the project's existing `Ctrl+Alt+*` leader
-family (`Ctrl+Alt+N`, `Ctrl+Alt+[`/`]`, `Ctrl+Alt+L`).
+A placement can be shown inside another's plane: a slice view in a region of a page, or a page view
+in a cell. The embedded placement is its own scene and pane whose rectangle is the projected box of
+the host item, redrawn as that item moves; it takes a depth slice in front of its host. "Open this
+cell's content as a page" and "open this passage's cells as a slice" create such placements, or
+ordinary panes, at the reader's choice.
 
-| Action id                      | Vortex call                            | Default chord         | Context              |
-| ------------------------------ | -------------------------------------- | --------------------- | -------------------- |
-| `view.palette.toggle`          | `std:view/toggle_palette`              | `Ctrl+Alt+V`          | Z/X                  |
-| `view.cycle.forward`           | `std:view/cycle`                       | `Ctrl+Alt+Shift+V`    | Z/X                  |
-| `view.select.stretchVanishing` | `std:view/select("stretch-vanishing")` | `Ctrl+Alt+V` then `1` | Z                    |
-| `view.select.allDimWalk`       | `std:view/select("all-dim-walk")`      | `Ctrl+Alt+V` then `2` | Z                    |
-| `view.select.packView`         | `std:view/select("pack-view")`         | `Ctrl+Alt+V` then `3` | Z                    |
-| `pane.split.horizontal`        | `xuzz.pane.split("horizontal")`        | `Ctrl+Alt+Shift+H`    | X                    |
-| `pane.split.vertical`          | `xuzz.pane.split("vertical")`          | `Ctrl+Alt+Shift+J`    | X                    |
-| `pane.close`                   | `xuzz.pane.close`                      | `Ctrl+Alt+Shift+W`    | X                    |
-| `pane.focus.next`              | `xuzz.pane.focusNext`                  | `Ctrl+Alt+Shift+Tab`  | X                    |
-| `pane.openAsPage`              | `xuzz.pane.openSelectionAsPage`        | `Ctrl+Alt+Shift+O`    | X (selection active) |
-| `axis.rebind.cycle`            | `std:view/cycle_axis_dimension`        | `Ctrl+Tab`            | Z (HUD row focused)  |
-| `axis.rebind.pick`             | `std:view/pick_axis_dimension`         | `Ctrl+Alt+D`          | Z                    |
-| `group.new`                    | `std:view/new_dimension_group`         | `Ctrl+Alt+G`          | Z                    |
-| `group.edit`                   | `std:view/edit_dimension_group`        | `Ctrl+Alt+Shift+G`    | Z                    |
-| `rebind.undo`                  | `std:view/undo_rebind`                 | `Ctrl+Alt+Z`          | Z                    |
-| `ring.selectSpoke.next`        | `std:view/ring_select_next`            | `]`                   | AW                   |
-| `ring.selectSpoke.prev`        | `std:view/ring_select_prev`            | `[`                   | AW                   |
-| `ring.bindSelectedToAxis`      | `std:view/ring_bind_selected`          | `B`                   | AW                   |
-| `pack.enter`                   | `std:view/pack_enter`                  | `Return`              | PV                   |
-| `pack.leave`                   | `std:view/pack_leave`                  | `Escape`              | PV                   |
-| `pack.retrieveConstituent`     | `std:view/pack_retrieve`               | `Shift+Return`        | PV                   |
+### 11.6 Navigation and activity
 
-Every row is additive to `defaultSettingSpecs(SystemDocKind::Keymap)` and follows the existing
-`both()` registration idiom (`zigzag_commands.cpp:28-35`), giving each a bare-Z and `Alt`-X twin
-where applicable; a chord already starting with `Ctrl+Alt` needs no twin, since it is already
-globally reachable.
+`design/ui_workflow_xuzz_navigation.md` requires one link identity and both endsets in view. Across
+placements of one scene that is §11.2's edges. Across scenes it is the stubs, and the rule that
+following a link to a pane that is not showing its target brings that pane's cursor there without
+moving any other pane.
 
-### 11.2 Status-line and announcement text
+A completed move is recorded as a `Visit` through the existing `xanadu::ActivityLog`
+(`apps/common/xanadu/link_navigation.hpp:73`, `store_activity_log.hpp`), with the real cell or the
+document site as its target; a view cell is never a visit target. Stretch vanishing's breadcrumb and
+a walk `DeckSource` read the same log.
 
-| Situation                                    | Text                                                                  | Error                       |
-| -------------------------------------------- | --------------------------------------------------------------------- | --------------------------- |
-| No neighbour further along a dimension       | `"No cell further along <dimension> <direction>."`                    | none (normal `MoveOutcome`) |
-| Axis rebound by walking an unbound dimension | `"<dimension> is now bound to <axis>."`                               | none                        |
-| Binding discarded old helper cells           | `"Discarded N helper cells for <old binding>."`                       | none                        |
-| Axis already bound elsewhere                 | `"<dimension> is already on the <other-axis> axis."`                  | `AxisAlreadyBound`          |
-| Binding an empty group                       | `"Group '<name>' has no dimensions yet — add one before binding it."` | `EmptyGroupBind`            |
-| Entering a pack with zero constituents       | `"This pack has no constituents."`                                    | none (allowed, not refused) |
+### 11.7 Chrome
 
-### 11.3 Settings table
+The binding HUD, the view palette, the group editor and the all-dim walk's side list are
+`ui::Widget` scenes in `ui::ScreenOverlay`s: `List` rows for dimensions, `Tabs` for views,
+`TextField` for a group's name, `Badge` for counts. They inherit fitted labels with full accessible
+names, focus order, minimum touch size, safe-area clamping and live response to the `ui.*` settings.
+A pane's chrome is clipped to the pane with `Canvas::pushClip`.
 
-Rendering/physics tunables live in `system://settings` (beside existing `Zigzag*`/`Bridge*` keys);
-chord-adjacent UI behaviour in `system://ui`; per-slice layout/binding state in `system://layout` —
-the split `.claude/rules/architectural_governance.md` §2 already requires.
-
-| Setting                                   | Lives in | Type/unit         | Default                     | Rationale                                                     |
-| ----------------------------------------- | -------- | ----------------- | --------------------------- | ------------------------------------------------------------- |
-| `view.arena.reclaimThresholdCells`        | settings | count             | 4096                        | dead derived cells tolerated before `reclaim()` runs (§6.4)   |
-| `stretch.edgeFadeStartUv`                 | settings | UV fraction [0,1] | 0.65                        | fade starts this far from centre                              |
-| `stretch.overfillMargin`                  | settings | ratio             | 1.3                         | BFS fill-stop multiplier over viewport extent                 |
-| `stretch.hiddenConfirmMs`                 | settings | ms                | 120                         | sustained-clip time before hysteresis hides a cell            |
-| `stretch.fadeFloorAlpha`                  | settings | 0-1               | 0.15                        | never fully invisible before culled; WCAG-checked             |
-| `stretch.breadcrumbDepth`                 | settings | count             | 6                           | breadcrumb strip length                                       |
-| `stretch.maxVisibleCellsReserve`          | settings | count             | 256                         | initial `LayoutSink` arena reservation                        |
-| `ring.radius0`                            | settings | px (world)        | 160                         | innermost unbound-dimension ring radius                       |
-| `ring.radiusStep`                         | settings | px (world)        | 70                          | radius increment per ring                                     |
-| `ring.tilt0`                              | settings | degrees           | 15                          | innermost ring's tilt from vertical                           |
-| `ring.tiltStep`                           | settings | degrees           | 8                           | tilt increment per ring                                       |
-| `ring.tiltMax`                            | settings | degrees           | 75                          | cap on ring tilt (keeps focus unoccluded)                     |
-| `ring.lodCollapseIndex`                   | settings | ring index        | 6                           | ring index beyond which members collapse to a badge           |
-| `ring.depthCueExponent`                   | settings | exponent          | 1.5                         | alpha falloff exponent vs. `cos(tilt)`                        |
-| `ring.clusterThreshold`                   | settings | count             | 12                          | valence above which a spoke clusters                          |
-| `axis.snapRadiusScreenPx`                 | settings | px (screen)       | 36                          | drag-to-rebind snap radius; floored at `ui.minTouchPx`        |
-| `axis.hitRadiusWorld`                     | settings | world units       | 6                           | capsule radius for edge/gizmo ray hit tests                   |
-| `axis.gizmoLength`                        | settings | world units       | 50                          | drawn length of an axis drop-target gizmo                     |
-| `label.maxNudgePx`                        | settings | px (screen)       | 30                          | how far a label slides along its edge before it is ellipsized |
-| `pack.fanMaxVisible`                      | settings | count             | 24                          | members shown in a fan before badge LOD                       |
-| `pack.fanArcDegrees`                      | settings | degrees           | 110                         | angular spread of a pack's fan                                |
-| `pack.nestingLodDepth`                    | settings | levels            | 3                           | max recursive pack-frame draw depth before badge              |
-| `pack.nestDimFactor`                      | settings | ratio/level       | 0.85                        | opacity multiplier per nesting level                          |
-| `pack.minWidthPx`/`minHeightPx`           | settings | px (world)        | 80 / 60                     | comparable-size floor for axis-placed packs                   |
-| `pack.spacingPx`                          | settings | px (world)        | 24                          | clearance between packs along the bound axis                  |
-| `pack.packingTightnessPx`                 | settings | px                | 6.0                         | gap between constituent chips inside a pack                   |
-| `pack.chip.widthPx`/`heightPx`            | settings | logical px        | 140 / 36                    | preferred chip size before font metrics grow it               |
-| `pack.chip.maxWidthShare`                 | settings | share 0.1-1       | 0.9                         | most of the frame's width one chip may take                   |
-| `pack.chip.maxLines`                      | settings | count 1-10        | 2                           | lines of constituent text a chip shows                        |
-| `pack.maxConstituentsShown`               | settings | count             | 40                          | simultaneous chip render cap, never a data cap                |
-| `view.transitionSpeed`                    | settings | units/s           | 10.0                        | view-switch crossfade rate                                    |
-| `transition.tossFadeSeconds`              | settings | s                 | 0.25                        | fade-out duration for discarded view-minted geometry          |
-| `ui.zigzag.reducedMotion`                 | ui       | bool              | false                       | collapses crossfades/springs to instant cuts                  |
-| `ui.zigzag.viewOnlyCellOpacity`           | ui       | 0-1               | 0.55                        | fixed opacity for pack/axis-label helper cells                |
-| `viewport.scissorEnabled`                 | settings | bool              | true                        | diagnostics override for mixed-viewport scissor               |
-| `layout.zigzag.<sliceId>.lastView`        | layout   | string            | unset → `stretch-vanishing` | which View a slice reopens into                               |
-| `layout.zigzag.<sliceId>.axisBindings`    | layout   | structured        | `{}`                        | persisted axis→dimension-name bindings                        |
-| `layout.zigzag.<sliceId>.dimensionGroups` | layout   | structured        | `{}`                        | user-authored groups, per slice                               |
-
-Lengths in this table are logical pixels converted with `UiMetrics::px()`, so they follow
-`ui.scale`. No setting here names a font or a text size. Reused unchanged from the fitted UI and the
-existing presentation settings, not duplicated:
-
-- typography and scale: `ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minFontPx`,
-  `ui.minTouchPx`, and the five `ui.font.<role>.family`/`points` pairs. Cell content uses `Body`,
-  edge labels and chips `Label`, badges and ticks `Caption`, pack titles `Title`;
-- cell presentation: `zigzag.cellHorizontalPaddingPx`, `zigzag.cellVerticalPaddingPx`,
-  `zigzag.cellBandGapPx`, `zigzag.contentMaxWidthPx` (the width limit handed to the measurer),
-  `zigzag.rankClearancePx`, `zigzag.minReadableTextPx`, `zigzag.connectionBeamWidthPx`;
-- motion: `scene_.layout_speed`/`alpha_speed`. Every new setting group needs the Schema & Purpose
-  page and Notes page bidirectionally xanalinked per `.claude/rules/architectural_governance.md` §2
-  (V-R29) — this table is that page's content.
+The palette lists the views whose subject matches the focused placement, from the registry, built-in
+and third-party alike.
 
 ______________________________________________________________________
 
-## 12. Rendering additions
+## 12. Interaction summary
 
-| Addition                                            | New/reuse                                                                                                      | Size                                                          | Backend coverage                                                            |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Fully-inside clip test                              | New, beside `outsideFrustum` in `draw_budget.hpp`                                                              | ~20 lines, shares corner-building code                        | Pure math; covered by headless layout unit tests                            |
-| Edge and axis labels                                | Reuse: screen-space `Canvas::addText(box, ...)` with `TextFit`, `ui::projectPlane`/`ui::labelLOD` (ruling V15) | None in the renderer                                          | Label scenes at three zooms in the existing comparison                      |
-| Pack frames and chips                               | Reuse: `ui::WorldPanel`                                                                                        | None in the renderer                                          | A pack scene added to the comparison                                        |
-| Pane and chrome clipping in screen space            | Reuse: `Canvas::pushClip`/`popClip`                                                                            | None                                                          | Covered by the two-pane scene                                               |
-| Scissor rect on `RenderDevice`                      | New `setScissorRect`/`clearScissor`, per backend                                                               | Small per backend (`glScissor`; Vulkan dynamic scissor state) | Two side-by-side mock viewports, assert no bleed, across all three backends |
-| Depth-range partition                               | New `setDepthRange(min,max)`, per backend                                                                      | Small, same shape as scissor                                  | Same comparison scene extended with an embedded sub-viewport                |
-| CPU ray construction/unprojection                   | New `unprojectScreenToRay` in `spatial.hpp`, inverse of `projectToScreen`                                      | Tiny, pure math                                               | Headless unit test only                                                     |
-| Pack-frame & ring/gizmo draw primitives             | Reuse `Canvas::addRect`/`addLine`, `Beams`                                                                     | None beyond composing existing primitives                     | Added to existing scene-generator tooling                                   |
-| `FrameContext` per-contributor viewport/VP override | New optional field                                                                                             | Tiny, header-only                                             | Exercised by the mixed-viewport scene                                       |
+### 12.1 Default chords
 
-Nothing here requires a new vertex format or shader: the glyph, beam and image pipelines, with the
-fitted UI's boxed text and world panels, cover rects, lines, text, edges and images — everything
-every proposed view draws. The device additions that remain are the scissor rectangle and the depth
-range for world-space panes.
+Contexts: **X** anywhere in xuzz; **S** a slice placement has the keyboard; **AW** all-dim walk;
+**PV** pack view; **P** a page placement. Every row is a `ChordSpec` on a `ViewDescriptor` or on the
+host, seeded into `system://keymap`; none is handled in code. Rows marked † have not yet been
+checked against the existing keymap; registration refuses a collision (`ChordCollision`) and the
+conflict is then resolved in the table, not in code.
 
-______________________________________________________________________
+| Action               | Call                            | Default chord             | Context    |
+| -------------------- | ------------------------------- | ------------------------- | ---------- |
+| `view.palette`       | `std:view/palette`              | `Ctrl+Alt+V`              | X          |
+| `view.cycle`         | `std:view/cycle`                | `Ctrl+Alt+Shift+V`        | X          |
+| `view.select`        | `std:view/select(n)`            | `Ctrl+Alt+V` then `1`…`9` | X          |
+| `pane.split.right`   | `std:view/pane_split("right")`  | `Ctrl+Alt+Shift+H`        | X          |
+| `pane.split.down`    | `std:view/pane_split("down")`   | `Ctrl+Alt+Shift+J`        | X          |
+| `pane.close`         | `std:view/pane_close`           | `Ctrl+Alt+Shift+W`        | X          |
+| `pane.next`          | `std:view/pane_next`            | `Ctrl+Alt+Shift+Tab`      | X          |
+| `pane.openAsPage`    | `std:view/open_as_page`         | `Ctrl+Alt+Shift+O`        | S          |
+| `camera.rest`        | `std:view/camera_rest`          | `Ctrl+Alt+0` †            | X          |
+| `camera.orbit`       | `std:view/camera_orbit(dx, dy)` | `Ctrl+Alt+Shift+`arrows † | X          |
+| `axis.cycle`         | `std:view/axis_cycle`           | `Ctrl+Tab`                | S, HUD row |
+| `axis.pick`          | `std:view/axis_pick`            | `Ctrl+Alt+D`              | S          |
+| `group.new`          | `std:view/group_new`            | `Ctrl+Alt+G`              | S          |
+| `group.edit`         | `std:view/group_edit`           | `Ctrl+Alt+Shift+G`        | S          |
+| `bind.undo`          | `std:view/bind_undo`            | `Ctrl+Alt+Z`              | S          |
+| `ring.next`, `.prev` | `std:view/ring_select(±1)`      | `]`, `[`                  | AW         |
+| `ring.walk`          | `std:view/ring_walk`            | `Return`                  | AW         |
+| `ring.bind`          | `std:view/ring_bind`            | `B`                       | AW         |
+| `pack.enter`         | `std:view/pack_enter`           | `Return`                  | PV         |
+| `pack.leave`         | `std:view/pack_leave`           | `Escape`                  | PV, inside |
+| `pack.lane`          | `std:view/pack_lane(±1)`        | the cross-axis step keys  | PV, inside |
+| `pack.retrieve`      | `std:view/pack_retrieve`        | `Shift+Return`            | PV         |
+| `pack.keep`          | `std:view/pack_keep`            | `Ctrl+Alt+K` †            | PV         |
 
-## 13. Performance budget and probes
+`view.select(n)` picks the n-th installed view for the focused placement's subject, so the same
+chord serves slice and page placements and a third-party view gets a number without a new row.
+Movement along axes, next and previous page, and next and previous link keep their existing actions
+and chords. Pointer forms and their keyboard forms: orbit (secondary drag); rebind (drag an edge to
+an axis, or `ring.bind`); reorder the ring (drag a spoke round, or the HUD); go to a page (click, or
+page and link actions); scrub a deck (drag or wheel, or hold next page).
 
-| Pass                           | Complexity                                                                             | Cached as                                              | Invalidated by                                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
-| Stretch BFS packing            | O(k log k), k = cells placed before fill-stop                                          | Skyline state + BFS frontier queue, kept across frames | Focus change (full rebuild); resize (resume, no restart); content edit (re-measure + reflow only cells after it in visit order) |
-| Clip/fade classification       | O(k) per frame, 8-corner test per visible cell                                         | Hysteresis timers per `CellRef`                        | Fully-inside state transition; cleared on focus change                                                                          |
-| All-dim ring placement         | O(valence) per focus change, O(1) amortised per dimension (append-only slot table)     | Per-dimension ring-slot table, session-scoped          | Explicit dimension deletion only; never by navigation                                                                           |
-| Edge-label collision avoidance | O(v²) worst case, bounded by the LOD cutoff                                            | Per-frame, not cached                                  | N/A                                                                                                                             |
-| Pack fan layout                | O(m log m) per pack, m bounded by `pack.fanMaxVisible`                                 | Cached per pack id like cell measurement               | Pack membership change, member content edit, enter/exit                                                                         |
-| Content-fit measurement        | One `text::fit()` per uncached (cell, width limit, font role); zero on a settled frame | `text::ShapingCache` plus a per-cell extent map        | Text or format edit; width limit, `ui.fontScale` or font-role change                                                            |
-| Mixed-viewport compositing     | O(views) scissor/depth-range state changes per frame                                   | N/A                                                    | N/A                                                                                                                             |
-| Toss (§6.4)                    | O(1) epoch bump; O(discarded) deferred reclamation; O(visible) re-derivation           | N/A                                                    | Rebind, focus change invalidating the display layer                                                                             |
+### 12.2 Messages
 
-**Shaping**: wrap a settled frame in `text::ShapingStatsScope` and read `ShapingCache::Stats`; both
-must report zero layout and HarfBuzz calls (V-R37). `tools/ui-text-baseline.cpp` is the model for a
-per-view scene that reports the same counts with frame timings on each backend.
+| Situation                        | Text                                                           | Error              |
+| -------------------------------- | -------------------------------------------------------------- | ------------------ |
+| Nothing that way                 | "No cell further along *dimension* *direction*."               | none               |
+| No pack that way                 | "*group* has nothing further *direction* from here."           | none               |
+| Rebind tossed view cells         | "Showing *target* on axis *n*. Discarded *N* view-only cells." | none               |
+| Binding an empty group           | "Group '*name*' has no dimensions yet."                        | `EmptyGroupBind`   |
+| A group inside itself            | "'*inner*' already contains '*outer*'."                        | `GroupCycle`       |
+| A saved binding no longer exists | "Dimension '*name*' is gone; axis *n* is unbound."             | none               |
+| Deleting a group in use          | "Removed '*name*' from axes *…* and groups *…*."               | none               |
+| Keeping a pack refused           | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
+| Pages still arriving             | "*document*: *N* pages so far, still paginating."              | none               |
 
-**Measurement**: `tools/layout-latency-probe.cpp` is the existing headless-probe shape; extend it
-(or add a sibling) to call each view's `layout()` against synthetic manifolds at increasing valence
-(10/100/1000 connections per dimension, 1/10/100 dimensions) and report p50/p99 microseconds plus
-`itemCountNeeded`/arena-growth events, following `tools/benchmark-kjv-load.py`'s existing
-JSON-report convention. This is what makes "degrades gracefully, no ceiling" falsifiable rather than
-asserted: the probe shows the curve stays sub-frame-budget well past any valence a user would reach,
-rather than capping and calling it done. The O(1) toss claim specifically is tested as described in
-§6.4: an operation-count assertion on `ViewManifold::toss()`, independent of pre-existing cell count
-— not a wall-clock timing, so it is deterministic in CI.
+Each is also an accessibility announcement.
 
-______________________________________________________________________
+### 12.3 Settings
 
-## 14. Testing strategy
+Lengths are logical pixels, converted with `UiMetrics::px()`, so they follow `ui.scale`; angles are
+degrees; times are milliseconds. No setting names a font or a text size: cell content uses the
+`Body` role, labels and lane names `Label`, badges and ticks `Caption`, pack headers `Title`.
+Existing settings are used, not copied: the `ui.*` scale, font-role and touch-size settings; and
+`zigzag.cellHorizontalPaddingPx`, `cellVerticalPaddingPx`, `contentMaxWidthPx` (the width limit
+given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBeamWidthPx`.
 
-All tests run headless per `.claude/rules/headless_tests.md` (V-R33): `SDL_VIDEODRIVER=offscreen`,
-`SDL_AUDIODRIVER=dummy`, `LIBGL_ALWAYS_SOFTWARE=1`, the `make test`-exported XDG pair.
+| Setting                                          | Default      | Meaning                                                             |
+| ------------------------------------------------ | ------------ | ------------------------------------------------------------------- |
+| `view.arena.windowCells`                         | 4096         | derived cells before a placement tosses and re-derives (§6.7)       |
+| `view.camera.restYaw`, `restPitch`               | 12, 8        | the rest camera's turn, so depth is visible                         |
+| `view.motion.reduced`                            | false        | every tween and transition becomes a cut                            |
+| `view.viewOnlyOpacity`                           | 0.7          | chrome of view-only items                                           |
+| `stretch.gap`                                    | 4            | space between neighbouring boxes                                    |
+| `stretch.minContact`                             | 12           | least overlap with the cell a box was reached from                  |
+| `stretch.overfill`                               | 1.3          | viewport multiple the walk fills                                    |
+| `stretch.layerDepth`                             | 120          | distance between depth planes                                       |
+| `stretch.fadeBand`, `fadeFloor`                  | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                  |
+| `stretch.clipMargin`                             | 6            | margin before a hidden cell is shown again                          |
+| `stretch.breadcrumbs`                            | 6            | cells in the breadcrumb strip                                       |
+| `ring.radius`, `ring.radiusStep`                 | 220, 90      | ring 0's least radius; growth per ring                              |
+| `ring.tiltStep`                                  | 28           | lean added per pair of rings                                        |
+| `ring.slotWidth`, `ring.slotHeight`              | 140, 44      | a ring cell's box                                                   |
+| `ring.hubMaxShare`                               | 0.4          | most of the pane the hub's content may take                         |
+| `ring.labelAt`                                   | 0.55         | where on an edge its label sits                                     |
+| `ring.stubs`                                     | true         | draw second-hop stubs                                               |
+| `ring.dragThreshold`, `ring.dropRadius`          | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`) |
+| `pack.laneMaxLines`, `pack.chipMaxWidth`         | 3, 220       | limits on a constituent's box                                       |
+| `pack.nestDepth`                                 | 3            | nested packs drawn before collapsing to a badge                     |
+| `pack.aheadSteps`                                | 2            | packs derived beyond the pane                                       |
+| `page.backgroundDepth`, `page.backgroundOpacity` | 720, 0.42    | where and how dim a context document is                             |
+| `page.base.documentGap`, `page.base.pageGap`     | 432, 32      | between documents; between pages                                    |
+| `page.base.coalesceGap`, `liftDepth`             | 432, 90      | gap between coalesced pages; how far they come forward              |
+| `page.base.coalesceSteps`                        | 25           | fixed solver steps                                                  |
+| `page.base.contextOpacity`                       | 0.42         | pages not taking part while a link is active                        |
+| `page.base.levelTolerance`                       | 2            | how level tied passages must end up                                 |
+| `page.base.subjectMs`, `rowMs`, `rowDelayMs`     | 620, 450, 90 | motion of the page brought over and of those making room            |
+| `stack.spacing`, `stack.gutter`, `stack.deckGap` | 60, 48, 240  | along the line; between the two tops; between decks                 |
+| `stack.tuckStrip`                                | 40           | strip of the passed stack shown in a narrow pane                    |
+| `stack.nearPages`, `stack.nearFalloff`           | 6, 0.7       | pages scored behind each top; weight per place                      |
+| `stack.lineStartWeight`, `lineEndWeight`         | 0.5, 0.2     | value of a partly visible line                                      |
+| `stack.search.azimuthStep`, `recessionStep`      | 15, 5        | candidate grid                                                      |
+| `stack.search.minRecession`, `maxRecession`      | 10, 60       | range of the line's angle from the view axis                        |
+| `stack.search.hysteresis`                        | 0.05         | how much better a new direction must score                          |
+| `stack.fadePages`, `stack.fadeFloor`             | 12, 0.08     | fade rate along the line; least opacity                             |
+| `stack.minPagePx`                                | 8            | height below which unmarked pages stop                              |
+| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`   | 60, 120, 420 | riffle timings, and the bound that decides riffle or split          |
+| `stack.splitMs`, `stack.splitLeadMs`             | 320, 80      | block motion; delay before the target flies in                      |
 
-- **Unit (engine-only, no GPU)**: `tests/xuzz/view_manifold_test.cpp` — I1 property test after
-  random bind/pack/toss sequences; I2 (hand a `ViewCellRef` to a real `Store::setLink`, assert typed
-  refusal); I3/epoch staleness (mint, toss, assert the old `ViewCellRef` fails a liveness check); I4
-  (`resolveReal` terminates within the bound for nested packs). `tests/xuzz/pack_builder_test.cpp` —
-  both worked examples from §9.3.4 verbatim, plus cycle and ragged-end fixtures.
-- **Doubled bindings**: in `tests/xuzz/view_manifold_test.cpp`, bind one dimension to two axes and
-  put it in two groups; assert `boundTarget()` resolves to it on both axes, `axesOf()` and
-  `groupsOf()` list both uses, unbinding one axis leaves the other bound, the invariant verifier
-  passes throughout, and a stretch-vanishing layout places the radius-1 neighbour once per axis with
-  distinct (cell, axis) identities (V-R35).
-- **Text fit and typography** (in the test binary that links the library and the view presentation —
-  `zigzag_test` today, which §15's last porting step re-homes when `apps/zigzag/` goes): for each
-  view, sweep the responsive fixture batch 8 used — 640x480, 1280x800 and 2560x1440, four font
-  scales, Sans, Serif, Monospace and a CJK face — over `tests/samples/ui/long-labels.tsv`, and
-  assert no fitted run leaves its declared box (`SPDLOG_LEVEL=ui.layout=debug` reports none), every
-  shortened or hidden label keeps its full accessible name, and a warm frame reports zero shaping
-  calls and uploads (V-R36, V-R37).
-- **Text policy gate**: `apps/xuzz/view_draw_adapter.*` and `view_chrome.*` are added to the files
-  `tools/check-ui-text-policy.py` scans, so a byte-prefix cut or a literal font size fails
-  `make lint`.
-- **Focus**: a `FocusManager` test registers two panes and a modal chrome scope, and asserts pane
-  cycling, modal isolation and focus restoration, and that a GPU pick queued before a toss or a
-  scope change is discarded (V-R38).
-- **Invariant**: `verifyViewManifoldInvariant` run as a standing check inside every other new test
-  file, not only its own — any test that mutates a `ViewManifold` calls it before asserting on
-  anything else.
-- **No-ops-appended check**: a shared test helper `expectNoOpsAppended(store, fn)` wraps every
-  movement/rebind/toss test with a before/after `xudu-dump --section=ops` byte-identity check (R8),
-  added once and reused by every subsequent view test.
-- **Golden-layout**: determinism fixtures for stretch vanishing (skyline packing) and all-dim walk
-  (ring-slot assignment), stored under `tests/samples/` alongside existing fixtures — these are
-  `LayoutResult` snapshots, not `CompactOpNode`-shaped, so they are not invalidated by the
-  `CompactOpNode`-layout-change rule, but are regenerated whenever a layout algorithm's tie-break
-  order changes intentionally.
-- **UX journeys**: `design/ux_workflow_real_work.md` gains J17-J23 (audit-and-reaxis, read-a-table,
-  browse-a-pack, mix-doc-and-slice, switch-views-without-losing-place,
-  plugin-view-no-special-casing, rebind-and-undo), each with evidence (frames, a11y dumps,
-  `xudu-dump` before/after) and a watch-for list, following the existing journey format exactly —
-  see `.claude/skills/xuzz-ux-validation/ SKILL.md`'s "a step reachable only by a flag, script, or
-  file is a finding, not a pass" standard.
-- **Performance**: the `layout-latency-probe` extension in §13, run as part of the standing
-  benchmark suite, not merely on demand.
-
-______________________________________________________________________
-
-## 15. Migration plan
-
-Each step builds and keeps `make test` green; each is committable independently.
-
-1. **Add `invalidateEpoch()`/`currentEpoch()`/`epochFloor()` to `ArenaManifold`** (§6.4). Pure
-   addition, no behaviour change for existing callers (Vlog, VQL, federation). *Tests*: new
-   `ArenaManifoldTest` cases asserting `currentEpoch()` starts at 0 and increments exactly once per
-   call via an instrumented operation counter, checked with 0, 100, and 10,000 pre-minted cells
-   present. Existing `arena_manifold_test.cpp`/`arena_federation_test.cpp` unchanged.
-1. **Introduce
-   `apps/common/xanadu/view/{view,view_error,view_manifold,view_binding,view_link}.hpp`** with
-   `ViewManifold`, `ViewAxisSet`, `mintViewLink`, `verifyViewManifoldInvariant`; no app wiring yet.
-   *Tests*: new `tests/xuzz/view_manifold_test.cpp` covering I1-I4, all headless, linking only the
-   engine (`xuzz_test`).
-1. **Implement `d.pack`/`d.packing` via `PackBuilder`** (§9.3) as a standalone library
-   (`pack_dims.hpp`) with its own test exercising both worked examples directly against a fixture
-   `Manifold`. *Tests*: `tests/xuzz/pack_builder_test.cpp`, new. No application change yet.
-1. **Add `view_layout.hpp`'s record types and `view_animation.hpp`'s epoch-guarded
-   `AnimationState`**, still with no concrete view. *Tests*: a synthetic "null view" exercising
-   layout → animate → nothing-dereferences-a-stale-ref-after-`toss()`, using step 1's operation
-   counter to make "toss is O(1)" an assertion, not a claim.
-1. **Implement `StretchVanishingView`** in `apps/common/xanadu/view/builtin/`, as pure layout over
-   `LayoutInput`, registered through `registerBuiltinViews()`. No application wiring yet. *Tests*:
-   new `tests/xuzz/stretch_vanishing_view_test.cpp` with a fixed-size measurer covers determinism,
-   axis alignment at radius 1, the fade curve and the partially-clipped-invisible rule.
-1. **Implement `AllDimWalkView` and `DimensionalPackView`** the same way, each with its own
-   `xuzz_test` file: ring-slot stability across focus changes for the former; pack reversibility
-   (move posward then negward returns to the same real cell, §9.3.5) for the latter.
-1. **Add `apps/xuzz/view_draw_adapter`, `view_chrome` and `view_host_app`; retire
-   `ViewCoordinator`.** The host owns the pane tree, registers each pane with
-   `FocusManager::addPane()`, and draws each pane's records through the fitted UI (§1.5): boxed
-   fitted text, `WorldPanel` pack frames, widget-scene chrome. `ZigzagVisualizer` and
-   `xanadu::Views` are each registered as one legacy view behind the same `View` interface, so the
-   three new views and the two old presentations are selectable side by side and nothing regresses.
-   *Tests*: new `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle;
-   `tests/zigzag/test_visualizer.cpp` unchanged; `tools/compare-backends.sh` gains a scene per new
-   view.
-1. **Move view actions into `apps/xuzz/view_commands`** with their `system://keymap` defaults
-   (§11.1), absorbing `apps/zigzag/zigzag_commands.cpp`. **Retire `ViewAxisBinding` as live
-   storage** — it survives only as the `system://layout` serialisation and preset format (§7.1,
-   §7.4) — and reduce `DimensionBundle` to seed presets for dimension groups. *Tests*:
-   `test_visualizer.cpp`'s
-   `NavigationAlongDimensions`/`SwapDimensions`/`CycleDimensions`/`DimensionBundleSwitchingAndCycling`
-   are **adapted**, not retired — same observable behaviour, asserted against `ViewAxisSet`.
-1. **Port the legacy zigzag presentations to views and delete `ZigzagVisualizer`.** Its Cell Content
-   and Topology modes become two more built-in slice views; palette, command bar and cell editing
-   move to `apps/xuzz/`. `apps/zigzag/` then holds only `unified_transclusion_engine.*`, which moves
-   to the engine (below), and the directory is removed along with `ZIGZAG_SRCS` in the Makefile.
-   *Tests*: `tests/zigzag/test_visualizer.cpp` cases are re-homed into `tests/xuzz/` against the
-   views that replaced each behaviour; a case with no replacement is retired with a line naming why.
-1. **Standing no-ops-appended CI check**, added once as the `expectNoOpsAppended` helper (§14),
-   reused by every subsequent view test rather than reimplemented per test.
-1. **Golden-layout determinism fixtures** for stretch vanishing and all-dim walk, stored under
-   `tests/samples/`, regenerated whenever a layout algorithm's tie-break order changes intentionally
-   (not subject to the `CompactOpNode`-layout regeneration rule, since these are `LayoutResult`
-   snapshots).
-
-`UnifiedTransclusionEngine::ephemeralSlots_`'s bespoke ephemeral-cell cache is migrated at step 9:
-the engine moves to `apps/common/xanadu/` and mints through `ViewManifold::mintCell`/`link` rather
-than its own `ephemeralByParentAndIndex_` map, so the tree ends with one ephemeral-cell mechanism
-(`ArenaManifold`) and not three. It is its own sub-step so it does not block the three required
-views.
+The defaults that restate today's constants are converted from them at `Doc::pixelsToWorld` (1/18):
+24 world units of document gap, the same again between coalesced pages, and 40 of background depth.
+Each group of settings has its Schema and Notes pages (V-R41). Per-slice state —
+`layout.slice.<id>.view`, `.axes`, `.groups`, `.ringOrder` — and per-document-set state —
+`layout.pages.<id>.view` — live in `system://layout`.
 
 ______________________________________________________________________
 
-## 16. Rulings
+## 13. Rendering
 
-**V1. A pane's view space is two sibling `ArenaManifold`s, and the toss is an epoch bump on the
-derived one.** Why: `ArenaManifold` already has the one-neighbour-per-direction link maintenance and
-the ephemeral/real boundary bit, tested and in production; because dimensions are cells, abandoning
-the derived generation's dimension handles makes every link minted under them unreachable in a
-constant number of stores (§6.4). Price: two integer fields and three small methods on a class
-already shipping; a second arena object per pane; dead cells occupy memory until `reclaim()` runs,
-bounded by `view.arena.reclaimThresholdCells`; every read goes through `ViewGraph`'s floor compare.
-Refused: (a) a ground-up `ViewManifold` storage type — duplicates a tested invariant, the mistake
-R12 warns against; (b) dropping and reconstructing an arena per generation — re-seeds provenance and
-federation machinery on every rebind; (c) one arena with nested binding and display marks — an arena
-is a stack, so a binding edited after display cells exist forces a synchronous O(minted) release on
-the rebind path (§6.2); (d) `release(mark)` as the toss — O(work since the mark), which is not what
-the requirement asks for.
+### 13.1 Everything is in the world
 
-**V2. `d.pack` and `d.packing` are two distinct dimensions.** Why: the requirement names them as two
-separate vocabulary items with genuinely different relations — container→first-constituent versus
-rank-among-constituents — and collapsing them onto one `DimRef` makes the container a member of its
-own constituent rank. Price: one extra `DimLink` (12 bytes) per view-minted constituent cell, never
-paid by real cells. Refused: a single `DimRef` carrying both roles via `d.clone`'s dual-direction
-idiom, by direct analogy to `d.clone` — refused because `d.clone` has only one relation
-(member↔master) to encode in two directions, while a pack has two distinct relations (containment,
-and sibling rank) that happen to both be needed at once; forcing them onto one `DimRef` would
-require the container to occupy a slot in its own members' rank (as "member zero"), which conflicts
-with §9.3.8's rule that the origin/container is never itself minted as a constituent.
+A view's records are planes and segments in one scene (V-R4). The presenter draws each through the
+pane's camera, so dollying, orbiting and zooming act on cells, pages, edges and labels alike, and
+relative depth is real: a ring that leans back is further away, a deck's tenth page is smaller
+because it is further. Screen space is used for chrome only (§11.7).
 
-**V3. A pack step is a BFS frontier across the group's dimensions.** Why: it handles duplicates,
-cycles and ragged ends without special cases (§9.3.4); the per-dimension "n-th neighbour" zip
-alternative has strictly worse-defined behaviour on exactly those cases. Price: none of substance.
-Refused: the zip definition.
+Text stays readable under that camera by three means that do not take it out of the world:
+`Facing::Camera` turns a plane to face the viewer; the fitted UI's legibility test decides whether a
+label's text is drawn at its projected size; and a page or cell too small for text is drawn coarse.
+A label that is not drawn is still an edge with a name.
 
-**V4. Bindings are cells on a view-owned rank (`ViewAxisSet`), not a struct field or a fixed enum.**
-Why: all-dim walk and pack view both need more than three simultaneously bound axes/groups, and
-`ViewAxisBinding`'s three named fields and `DimensionBundle`'s closed five-entry enum are both
-ceilings the project's own conventions forbid. Price: O(bound-axis-count) traversal to answer
-"what's on X," versus O(1) struct read — accepted because the axis count must not be capped, the
-same trade R12 already accepted for `d.dims`. `ViewAxisBinding` and `DimensionBundle` are retired as
-live storage at migration step 8 and reduced to two remaining roles: the `system://layout`
-persistence/ serialisation shape (dimension names survive a session; `CellRef`s do not) and an
-initial-preset seed a user may pick from when creating a group. Refused: deleting them outright,
-which would leave no seed format and no backward-compatible session-restore shape.
+### 13.2 What draws what
 
-**V5. The one-neighbour-per-direction invariant is enforced at a single link choke point
-(`mintViewLink`) returning `std::expected`, plus a verifier (`verifyViewManifoldInvariant`).** Why:
-trusting every strategy object to call `arena.link()` correctly is not an invariant, it is a hope;
-one auditable function plus a `clang-tidy` pattern match against direct calls makes I1 a property of
-the code, not a convention. Price: one extra indirection per link mint. Refused: per-view discipline
-with no shared choke point.
+| Record                                          | Drawn with                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `PlacedItem` for a cell, label, badge or marker | a plane in a library `ui::PlaneSet`: retained fitted text and rectangles, one transform and opacity per plane |
+| `PlacedItem` for a page                         | the document's own `Page`, placed through its `Doc`'s `PageArrangement`                                       |
+| `PlacedFrame`                                   | a plane in the `PlaneSet` behind its items                                                                    |
+| `PlacedEdge`                                    | `gleditor::Beams`                                                                                             |
+| `DropTarget`                                    | a beam and a plane while a drag is in flight; hit-tested with the unprojected ray                             |
+| chrome                                          | `ui::ScreenOverlay` widget scenes                                                                             |
 
-**V6. A view never shadows a real cell's bound-dimension `DimLink`; redirection lives entirely on
-view-owned dimensions.** Why: shadowing a real cell for display purposes would leave a `DimLink` on
-a bound real dimension whose far end is ephemeral, visible to any ordinary real-dimension walk
-starting from the shadow, and there would be nothing to "undo" on toss because the base would
-already be mutated (copy-on-write). Price: a pack/ring cell is always one hop further from the real
-cell than a shadow would be. Refused: allowing shadowing plus an "undo shadow" pass on toss — the
-stronger, by-construction option (no shadow is ever written) was chosen over the weaker one (shadow,
-then undo).
+A plane's text is fitted once, when its record or the typography changes, and kept as `FittedText`.
+Moving, fading and turning a plane change its transform and opacity, which are per-draw uniforms
+(`DrawUniforms::mvp`, `opacity`, `include/gleditor/render/types.hpp:204`), not vertex data. That is
+what makes a settled frame, and most of an animated one, free of shaping and uploads (V-R44).
 
-**V7. Bindings persist in `system://layout`, keyed per-slice, by dimension name.** Why: a binding is
-configuration the user set, not document structure and not a completed visit — R8's distinction
-applies to configuration exactly as it applies to a cursor. Price: a group built for one slice does
-not travel to another slice automatically (open question VU1). Refused: per-user-global groups;
-storing bindings in the slice's own store; storing in `system://activity` (which records visits, not
-standing configuration).
+Picking uses the renderer's picking target as today: each plane and page carries an identity, a
+click requests the pick, and the result comes to the pane's scope with the `SubjectId` attached as
+its semantic target. The CPU ray from unprojection is for measuring — drop targets, scrubbing along
+a deck — not for deciding what is under the pointer.
 
-**V8. Promotion of a pack to real structure is explicit, per-pack, and never automatic.** Why: an
-ephemeral viewing choice becoming permanent document structure without the user asking is the exact
-failure mode R8 exists to prevent. Price: a user who wants a pack kept must ask by name, every time,
-via `promotePack()`, which delegates to the existing `promote()`/`PromotionBudget` refusal rather
-than silently truncating. Refused: auto-promoting a pack that has been open "a while";
-auto-promoting on edit.
+### 13.3 What the library must gain
 
-**V9. A pack of one constituent still renders with full pack chrome (dashed border, bracket glyph,
-`role: group`), never collapsed to look like an ordinary cell.** Why: collapsing it would
-reintroduce the "mistake a view cell for stored data" risk the visual/accessibility language exists
-to prevent, for the minor convenience of one fewer visual distinction in one case. Price: a
-one-member pack always looks slightly more elaborate than the single cell it could be confused with.
-Refused: collapsing a one-constituent pack.
+All generic, all tested in `tests/lib/`, none naming a xanalogical thing; planned in
+[`world-space-rendering-plan.md`](world-space-rendering-plan.md):
 
-**V10. Movement into an unbound ring neighbour is a temporary, visibly announced bind, not a
-persistent rebind and not a refusal.** Why: a hard refusal contradicts "move along any connection,
-bound or not"; a silent persistent rebind corrupts the user's deliberate bindings on an ordinary
-lateral move. Price: the user must read a one-line status message on every such move to know their
-axes changed. Refused: requiring an explicit confirm dialog before every such move (too heavy for an
-action with fully reversible, visibly announced undo); forcing an explicit separate "rebind" step
-before any lateral move through an unbound dimension.
+| Addition                                            | Needed for                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------- |
+| unprojection that inverts the renderer's projection | drag to rebind, deck scrubbing, any pointer measure in the world |
+| `insideFrustum`                                     | stretch vanishing's all-or-nothing clip (§9.1.5)                 |
+| render regions: device scissor and depth slice      | panes, embedded views (§11.4, §11.5)                             |
+| depth test without depth write                      | translucent pages and faded cells                                |
+| `ui::PlaneSet`                                      | cells, labels, frames and badges as individually placed planes   |
+| `PageArrangement` on `Doc`                          | every page view                                                  |
+| `ui::PaneTree`                                      | splitting the window                                             |
 
-**V11. A View switch preserves the pane's current binding state; it never snapshots and silently
-restores a per-View "own" prior binding.** Why: axis state belongs to the pane/slice, not to the
-View, and a stash-and-restore the user never asked for would hide the rebind-discard feedback
-(V-R7's honesty requirement) behind an invisible cache. Price: switching views and back does not
-"remember" what was bound before the detour, by design. Refused: per-View binding memory.
-
-**V12. Xanadoc (page) view layout algorithms are out of scope for this document; only the `PageView`
-seam is specified.** Why: the user's own request scopes xanadoc views to a follow-up; specifying a
-layout algorithm for them here would exceed that scope and risk constraining a design nobody has yet
-argued through this document's own standard (argued, priced, refused alternatives recorded). Price:
-the follow-up spec must still answer what a page's own layout computes; this document only
-guarantees it will not need to change the `View`/`LayoutSink` contract to do so. Refused: sketching
-a concrete `PageView` layout algorithm here "for completeness" — the one sketch in §9
-(`OutlinePageView`) is explicitly illustrative, not normative, and is labelled as such.
-
-**V13. A binding is an occurrence cell, so one dimension or group may be on any number of axes and
-in any number of groups.** Why: a direct `d.binds` link from slot to dimension cell spends the
-dimension's single negward slot, capping it at one axis and, by the same arithmetic on
-`d.dim-group`, one group — a ceiling classic ZigZag does not have and a user would work around by
-cloning dimensions. Occurrences ranked on `d.occurrence` under their target are the `d.clone` idiom
-(§7.1). Price: one more cell and two more links per binding or membership; resolving a slot's target
-walks to the head of a rank whose length is the number of uses; a doubled dimension places its
-radius-1 neighbours once per axis, so placement identity becomes (cell, axis). Refused: (a) the
-direct link — the ceiling; (b) an occurrence that holds its target as an `OpHandle` value
-(`ArenaManifold::handleTarget`) — O(1) to resolve, but the relation is then a number inside a cell
-rather than a link, so "which axes use this dimension" needs a scan or a side index, and a tool that
-walks the binding structure cannot see it; (c) refusing the doubled binding outright — it removes a
-standard ZigZag arrangement to save one cell.
-
-**V14. View text, chrome, focus and legibility come from the fitted UI layer; the view system adds
-none of its own.** Why: the library now fits text by grapheme and cluster, caches shaping, owns
-typography and scale, projects label legibility, and arbitrates focus, modality and GPU picks
-(§1.5), each tested across fonts, scales and backends; a second implementation inside the view
-system would diverge from it at the first font-scale change. Price: every text-bearing piece of a
-view lives in `apps/xuzz/`, because the layer is in `libgleditor` and the engine does not link it,
-so `layout()` sees text only as sizes from a measurer and as a minimum readable line height; view
-settings may not name fonts or text sizes. Refused: (a) a view-owned label size and truncation rule
-(the first draft's `view.labelSizePx` and "abbreviated" mode) — it is what
-`tools/check-ui-text-policy.py` now rejects; (b) linking `libgleditor` into the engine so `layout()`
-could call `text::fit()` directly — it would put fonts and a glyph cache under `xuzz_test` and end
-its no-graphics-device guarantee.
-
-**V15. Edge and axis labels are screen-space fitted text at projected anchors.** Why: a label's job
-is to be read, and text rasterised on a tilted world plane at ring distance is not legible at the
-sizes all-dim walk produces; the fitted UI already decides legibility from the projected plane and
-keeps the name when the label is hidden. Price: labels do not occlude or get occluded by cells, so
-depth is cued by opacity alone, and label overlap is resolved in screen space each time the layout
-changes. Refused: a face-camera flag in the glyph vertex shader (the first draft's plan) — a new
-vertex attribute across three backends to produce text that still shrinks below readability with
-distance.
+Nothing in this document needs a new shader or vertex format.
 
 ______________________________________________________________________
 
-## 17. Open questions
+## 14. Performance
 
-**VU1.** Whether a dimension group's membership should be portable across slices (a user-authored
-"contact channels" group reused everywhere) versus the per-slice `system://layout` key shape this
-document specifies. Settled by: a real UX validation pass once the feature exists, checking whether
-users actually rebuild the same group per slice; if so, an additional slice-independent
-`layout.zigzag.groups.*` key can be added without a format break.
+| Work                | When                                         | Cost                                                          |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------- |
+| toss                | each rebind, origin change, window overflow  | constant (§6.5)                                               |
+| bind, group edit    | each edit                                    | the cells edited                                              |
+| stretch placement   | cursor, binding, content, pane change        | linear in cells placed; bounded by the pane                   |
+| wheel placement     | cursor or binding change                     | the accursed cell's valence, plus its neighbours' for badges  |
+| pack derivation     | cursor step, row scrolled into view          | one link read per leaf dimension per new pack                 |
+| lane table          | with pack derivation                         | constituents in view                                          |
+| coalesce            | active link change                           | `coalesceSteps` × participants²                               |
+| deck stagger search | pane, page size, type size or setting change | candidates × `stack.nearPages`                                |
+| deck layout         | cursor or catalog change                     | pages emitted; bounded by `stack.minPagePx` plus marked pages |
+| measuring           | first sight of content at a width and role   | one `text::fit()`; cached                                     |
+| settled frame       | every frame                                  | no layout, no shaping, no upload                              |
 
-**VU2.** Whether nested embedded viewports (a slice view inside a page, inside a pack) exhaust
-depth- buffer precision under depth-range partitioning past some small nesting depth. Settled by:
-measuring against the actual depth-buffer bit depth in use on each backend once mixed-viewport
-compositing is implemented; `ViewportDesc` already carries `nearDepth`/`farDepth` so the mechanism
-exists regardless of where the limit lands.
-
-**VU3.** Exact enforcement of a plugin's declared `ViewCapabilities` — can a capability-less plugin
-still mint view-only cells, or write to the store at all. Settled by: a sandboxing/trust-model
-decision above this document's scope (the API shape has room for a future `capabilityToken` field
-but does not specify enforcement).
-
-**VU4.** Whether `VanishingTraversal`'s skyline state and `RingBuilder`'s per-dimension slot table
-should live inside `ViewManifold` (survive toss, like bindings) or inside the concrete view
-(recomputed on `attach`). Settled by: whichever the implementer of migration steps 5-6 finds
-simpler; neither choice affects any invariant in §6, so this document does not force one.
-
-**VU5.** Whether a dimension group's member order matters for anything beyond pack-step computation
-— e.g. whether it should tie-break a grid conflict if stretch vanishing and pack view are ever
-combined on the same axis. Settled by: this document assumes stretch vanishing operates on
-individually bound dimensions, not groups, since the requirement does not describe packs appearing
-inside stretch vanishing's raster; if that combination is wanted later, a tie-break rule keyed to
-`d.dim-group`'s rank order is the natural extension, not a redesign.
-
-**VU6.** Whether a `Visit` (`apps/common/xanadu/link_navigation.hpp`) should record the view kind
-and axis bindings in force, so Activity Back restores how the reader was looking and not only where.
-Today a `Visit` carries a target, an arrival and an optional link context. Settled by: a UX
-validation pass over journeys that walk back across a view switch; if it is wanted, the answer is
-more cells on the activity store's own dimensions, not a wider `Visit` struct.
+Probes, not assertions of speed: `tools/layout-latency-probe` gains a mode per view that lays out
+synthetic slices of growing valence and rank length and documents of growing page count, and reports
+percentiles, sink growth and toss time; a per-view scene modelled on `tools/ui-text-baseline.cpp`
+reports frame time and shaping counts on each backend. "No ceiling" is checked by the curves staying
+flat where this table says they are bounded by the pane.
 
 ______________________________________________________________________
 
-## 18. Traceability
+## 15. Accessibility and text
 
-| Requirement clause (from the user's request)                                                     | Satisfied by                                                      |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| "highly pluggable, highly extensible View system"                                                | V-R1, V-R2; §5 package map; §8.1 `ViewRegistry`; ruling V4        |
-| "decides how xanadocs (pages) and slices (cells) should be laid out in a given viewport"         | §8.1 `View::layout`; §8.4 `LayoutInput`/`ViewportDesc`            |
-| "view should sit on top of the store"                                                            | §6.1; §8.1 `attach(const Store&)`; §6.3 I2                        |
-| "divided into different views for xanadocs and zigzag slices so the two can be mixed freely"     | V-R11, V-R12, V-R13; §10.1-10.3; §15 step 7                       |
-| "each cell can only be connected on the two directions of all the bound dimensions"              | V-R5; §6.3 I1; §6.5 `mintViewLink`/verifier                       |
-| "any minted cells used by the view live in the view only"                                        | V-R6, V-R9; §6.3 I2, I5; ruling V1, V6                            |
-| "quickly tossed in O(1) time as dimensions are rebound"                                          | V-R7; §6.4; ruling V1; §13's probe; §15 step 1                    |
-| **Stretch vanishing** — "full content of all cells … always displayed"                           | V-R14; §9.1.2-9.1.3                                               |
-| "drawn very closely together"                                                                    | §9.1.3 skyline packing; §9.1.4                                    |
-| "only the immediate neighbors … completely aligned to the cell's dimensional axes"               | V-R15; §9.1.4                                                     |
-| "sacrificing structural clarity for raw data visibility"                                         | §9.1.3's refused-alternatives argument                            |
-| "cells to the edges … become less opaque"                                                        | V-R17; §9.1.5                                                     |
-| "partially clipped cells are completely invisible"                                               | V-R16; §9.1.6                                                     |
-| **All-dim walk** — "surrounded by every cell they are connected to on every dimension"           | V-R19; §9.2.2                                                     |
-| "ring that utilizes 3 dimensional space to keep the accursed cell visible as … connections grow" | V-R20; §9.2.3                                                     |
-| "dimension names are used as edge labels"                                                        | §9.2.4                                                            |
-| "bound dimensions' cells are aligned to the cell's dimensional axes like spokes on a wheel"      | V-R20; §9.2.3                                                     |
-| "movement between them works as expected"                                                        | §9.2.5, §9.2.8                                                    |
-| "maintaining the zigzag invariant that a cell can only have one connection in each direction"    | V-R5; §6.3 I1 (restated precisely for bound-vs-unbound in §9.2.2) |
-| "aids in visualizing the valence of each cell"                                                   | V-R23; §9.2.10                                                    |
-| "quickly rebinding dimensions by dragging an edge to the bound axis"                             | V-R22; §9.2.6                                                     |
-| **Dimensional pack view** — "dimensions can be grouped to quickly rebind an entire set at once"  | V-R24; §7.2, §7.3                                                 |
-| "dimension group can also be bound to a single dimension"                                        | §7.1 `BindTarget`; §7.2; V-R35, ruling V13                        |
-| "each real cell is represented as a pack of every cell connected along a dimension in the group" | V-R25; §9.3.2-9.3.4                                               |
-| "extending as far as there is at least one cell to pack"                                         | §9.3.4 BFS-frontier stop rule                                     |
-| "pack of cells maintain the movement invariant"                                                  | V-R26; §9.3.5                                                     |
-| "can be retrieved individually"                                                                  | V-R27; §9.3.11                                                    |
-| "nested with d.pack (the container) and d.packing (the constituents)"                            | ruling V2; §9.3.3                                                 |
-| "xanadoc views will be explored in a follow-up specification"                                    | ruling V12; §10.3                                                 |
+The rules are the same for every view, so they are stated once.
+
+- A drawn real cell is role `cell`; a drawn page is what it is today. Anything view-only — a pack,
+  an empty lane, a ghost, a tail marker, a badge, a label — has another role (`group`, `listitem`,
+  `note`, `label`) and is never announced as stored content (V-R45).
+- A name is the full text. Fitting, coarse drawing and hiding by legibility change what is painted,
+  never the name (V-R43).
+- Reading order is structural — axis order, ring order, lane order, page order — never an angle or a
+  depth.
+- A node's bounds are the projected bounds of the plane that is drawn, and change with the camera
+  without the model changing.
+- What is not drawn is not in the tree, with one exception: a label hidden only for legibility keeps
+  its node.
+- Faded content must still meet contrast at the fade floor against the pane's background; the
+  floors' defaults are chosen for that and a test checks them against the theme.
+- With `view.motion.reduced`, transitions cut and the camera does not animate.
+- Every rebind, toss message, pack entry and page transition is announced (§12.2).
 
 ______________________________________________________________________
 
-## 19. Change history
+## 16. Testing
 
-- 2026-10-07 — Initial proposal.
-- 2026-10-07 — Rehomed onto xuzz as the only application (§1.2, §5, §15): built-in views in the
-  engine, renderer and input wiring in `apps/xuzz/`, no new code under `apps/xudu/` or
-  `apps/zigzag/`, `ZigzagVisualizer` deleted by the migration. Corrected the activity store's
-  status: it is implemented (`StoreActivityLog`).
-- 2026-10-07 — Bindings and group memberships are occurrence cells (§7.1, §7.2, ruling V13), so a
-  dimension or group may be on several axes and in several groups. Closes the former VU7.
-- 2026-10-07 — Reconciled with the fitted UI layer (§1.5, rulings V14 and V15, V-R36 to V-R38): text
-  through `text::fit()` and font roles, retained layout and draws, labels in screen space, pack
-  frames as `WorldPanel`s, panes and chrome through `FocusManager` and widget scenes. Drops the
-  billboard shader addition and `view.labelSizePx`.
+### 16.1 Where tests live
+
+A test sits with the code it tests and nothing is tested twice (V-R48).
+
+| Code                                                                                       | Test binary                                                                   | Directory             | Links                             |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------- | --------------------------------- |
+| library: unprojection, regions, `PlaneSet`, `PageArrangement`, `PaneTree`, `insideFrustum` | `gleditor_test`                                                               | `tests/lib/`          | the library only                  |
+| view framework and built-in views (engine)                                                 | `xuzz_test`                                                                   | `tests/xuzz/`         | the engine; no library, no device |
+| presenter, host, chrome, commands                                                          | the binary that links `apps/common/ui/` and the library (`zigzag_test` today) | `tests/zigzag/` today | both                              |
+
+`xuzz_test` holds xuzz's own code and no more. A view test supplies a fixed measurer and asserts on
+records; it does not sweep fonts, scales or backends, because fitting, shaping, projection, focus
+and clipping are the library's and are swept in `tests/lib/`. A presenter test asserts that the
+right library calls are made with the right boxes and roles, on one font and one size; it does not
+re-prove that `text::fit()` fits. With `apps/zigzag/` gone the third binary's name and directory no
+longer describe it; renaming them is VU6.
+
+### 16.2 What is tested
+
+- **View space.** I1 to I6 as §6.4 lists; `verifyViewSpace` after random sequences of bind, group
+  edit, derive, move and toss; the toss test of §6.5.
+- **Binding.** One dimension on two axes and in two groups; nested groups; cycle and empty-group
+  refusals; undo and redo restore `shown()` for every axis; persistence round trip by name,
+  including a name that has gone.
+- **Each slice view.** Its acceptance list (§9.1.8, §9.2.10, §9.3.10).
+- **Each page view.** Its acceptance list (§10.3.4, §10.4.10), over hand-written catalogs.
+- **Purity.** `layout()` twice gives equal sinks; a layout with allocation counting on reports none
+  after the sink has reached size.
+- **No operations.** `expectNoOpsAppended(store, fn)` wraps every move, rebind, view switch and page
+  transition and compares the store's operation count and bytes before and after.
+- **Golden layouts.** For each view, a few inputs with their records dumped as numbers and as a text
+  raster (§8.7) under `tests/samples/view/`. They are regenerated when a layout rule changes on
+  purpose, and the raster makes the change reviewable.
+- **Presenter.** A settled frame reports zero layout and shaping calls in a `ShapingStatsScope` and
+  zero uploads; a shortened label's accessible name is its full text; a stale pick is dropped;
+  commands run on the owner thread.
+- **Policy.** `apps/common/ui/view/` is added to the files `tools/check-ui-text-policy.py` scans.
+- **Backends.** `tools/compare-backends.sh` gains one scene per view and one two-pane scene.
+- **Journeys.** `design/ux_workflow_real_work.md` gains journeys for: auditing a cell's connections
+  and re-axing by one; reading a table without stepping cell by cell; browsing a pack and pulling
+  one cell out; reading two linked documents in the base view; reading a long document as a deck and
+  jumping near and far; pages and cells in one scene; two panes; switching views without losing
+  place; a third-party view appearing in the palette. Each step is reachable from the interface.
+
+______________________________________________________________________
+
+## 17. Migration
+
+Each step builds and keeps `make test` green, and each can be committed alone. Step 2 is independent
+of steps 3 to 5 and can run beside them.
+
+### Step 1: empty `apps/xudu/` and `apps/zigzag/`
+
+Moves only: no behaviour changes. Include spellings, the Makefile's source lists and
+`packaging/wasm/build.sh` follow the files.
+
+- **To `apps/common/xanadu/`** — no graphics header is included: `apps/xudu/link_context.*`; and,
+  under `zigzag/`, `apps/zigzag/unified_transclusion_engine.*`.
+- **To `apps/common/ui/xanadoc/`** — they draw or take input through the library: from `apps/xudu/`,
+  `session`, `views`, `views_publication_links`, `beams`, `bridge_coordinator`,
+  `batch_orchestrator`, `satelloid`, `tenuous_tether`, `kinetic_tether_overlay`, `wireframe_hull`,
+  `world_card_presentation`, and the overlays `clasp_link_forge`, `collaborator_overlay`,
+  `link_panel_overlay`, `overview_overlay`, `page_break_overlay`, `pouch_drawer`,
+  `swarm_telescope_overlay` and `transcopyright_overlay`.
+- **To `apps/common/ui/slice/`** — the same reason: `apps/zigzag/zigzag_visualizer.*` and
+  `zigzag_commands.*`. Step 8 deletes both.
+- **Staying for now**: `apps/xuzz/view_coordinator.*`, until step 6 replaces it.
+
+`XUDU_SRCS` and `ZIGZAG_SRCS` fold into the `apps/common` source lists. One consequence needs care:
+the test binary that links `apps/common/ui/` then links the xanadoc components and their libraries
+too, where today it links only the slice ones. After this step `apps/xuzz/` holds `main.cpp`,
+`cli.*`, `xuzz_app.*` and, for now, `view_coordinator.*`.
+
+*Tests:* unchanged apart from include paths.
+
+### Step 2: the library's world-space work
+
+As [`world-space-rendering-plan.md`](world-space-rendering-plan.md) orders it: unprojection and
+`insideFrustum`; render regions with scissor, then depth slices; depth test without write;
+`ui::PlaneSet`; `PageArrangement`; `ui::PaneTree`. *Tests:* in `tests/lib/` only, with
+`compare-backends.sh` scenes for regions and planes.
+
+### Step 3: the view space and the binding model
+
+`ArenaManifold` gains the `release()` guard and `shadowCount()` (§6.5). Add `view.hpp`,
+`view_error.hpp`, `view_records.hpp`, `view_manifold.*`, `view_binding.*` and `raster.*`. No
+application change. *Tests:* `tests/xuzz/view_manifold_test.cpp`, `view_binding_test.cpp`,
+`raster_test.cpp`; the existing arena tests unchanged.
+
+### Step 4: the slice views
+
+`slice_view.hpp`, `pack_rank.*`, then stretch vanishing, all-dim walk and the pack view, each with
+its acceptance list as a test file and its golden layouts. No application change.
+
+### Step 5: the page model and the page views
+
+`page_view.hpp`, `coalesce.*`, `deck.*`, the base view and the stacked vanishing view, tested over
+hand-written catalogs. The base view is first checked for parity with today by giving the strategy
+one body per document, which reproduces `LinkBeams`' result, and then switched to pages.
+
+### Step 6: the presenter and the host
+
+`apps/common/ui/view/`: the presenter (including the `PageCatalog` over the library's documents and
+the measurer over `text::fit()`), the animation, the chrome and the host. `xuzz_app` builds a
+`ViewHost`; `ViewCoordinator` goes. `ZigzagVisualizer` and `xanadu::Views` are each wrapped as a
+legacy placement, so the unified mode is one scene with two placements and nothing regresses while
+the new views become selectable beside them. *Tests:* host tests for split, close, focus and
+persistence; presenter tests as §16.2; existing visualizer tests unchanged.
+
+### Step 7: commands, keymap and bindings
+
+`view_commands` registers every action with its default chord, absorbing `zigzag_commands`.
+`ViewAxisBinding` stops being live storage and `DimensionBundle` becomes group presets. *Tests:* the
+visualizer's navigation, swap, cycle and bundle tests are adapted to assert the same behaviour
+against `ViewAxisSet`.
+
+### Step 8: replace what was wrapped
+
+The visualizer's Cell Content and Topology modes become two more slice views, and `ZigzagVisualizer`
+is deleted. The base view takes over arrangement from `LinkBeams`, which keeps only what draws a
+beam, as the presenter's edge painter; `xanadu::Views` shrinks to opening, closing and switching
+documents. `UnifiedTransclusionEngine`'s private ephemeral slots are replaced by a `ViewManifold`,
+leaving one ephemeral-cell mechanism in the tree. *Tests:* each legacy test is re-homed against the
+view that replaced the behaviour, or retired with a line saying why.
+
+### Step 9: journeys, probes and goldens
+
+The journeys of §16.2 with their evidence, the probes of §14, and a `compare-backends.sh` scene per
+view.
+
+______________________________________________________________________
+
+## 18. Rulings
+
+**V1. A slice placement's view space is two sibling `ArenaManifold`s, and a toss is `release()` to
+the mark taken on the empty derived arena.** Why: `ArenaManifold` already has the link
+representation, the ephemeral bit and truncation; with no shadows and no trail, its `release()` is a
+fixed number of steps and frees the storage at once (§6.5). Price: a one-line guard and one accessor
+on `ArenaManifold`; a second arena per placement; refs are reused after a toss, so every held ref
+must carry its epoch. Refused: (a) a new storage type — a second copy of a tested invariant; (b) one
+arena with nested marks — a stack cannot empty the lower layer first without doing it on the rebind
+path; (c) an epoch counter that only hides old cells and reclaims them later — the earlier design;
+it was needed only because view links shadowed real cells, and V6 removes the cause.
+
+**V2. `d.pack` and `d.packing` are two dimensions.** Why: containment and the order of constituents
+are two relations; on one dimension a nested pack would need two posward neighbours (§9.3.3). Price:
+one more link per pack. Refused: one dimension read in two directions, after `d.clone`, which has
+one relation to carry.
+
+**V3. A pack step is one lane per member: the cell that many steps along each dimension.** Why: it
+is what "every cell connected along a dimension in the group" says; it reads as a table; it costs
+one link per dimension per step; and each constituent has exactly one dimension that reached it.
+Price: a cell reachable only by mixing dimensions is not in any pack of that rank — the reader
+retrieves and continues. Refused: the breadth-first frontier of the earlier draft — it mixes
+dimensions, grows as `kⁿ`, and cannot say which dimension a constituent came by.
+
+**V4. Bindings are cells; there is no fixed number of axes.** Why: three named fields and a closed
+enum are ceilings. Price: resolving an axis is two reads, not a field. Refused: a longer fixed
+array.
+
+**V5. Every view link goes through one function that refuses rather than displaces, and a verifier
+checks the whole space.** Why: an invariant each view must remember is a hope. Price: one
+indirection per link. Refused: per-view discipline.
+
+**V6. A view arena never shadows a real cell.** Why: a shadow is a stale copy the moment the store
+advances, makes `release()` proportional to the shadows, and puts view links on real cells (§6.2).
+Price: a view cell cannot be *linked* to the real cell it stands for (V13); `ensureDimension()` is
+off limits, so view dimensions are unnamed in the arena. Refused: shadowing only on view-owned
+dimensions and filtering every read — the earlier design; it is correct only while every reader
+remembers to filter.
+
+**V7. Bindings, groups and ring order persist in `system://layout`, per slice, by name.** Why: they
+are how a reader looks, not what the document says, and not a visit. Price: a group does not follow
+the reader to another slice (VU1). Refused: the slice's store; the activity store.
+
+**V8. Keeping a pack is explicit and per pack.** Why: a way of looking must not become structure
+unasked (R8). Price: the reader asks each time. Refused: keeping on edit, or after a while.
+
+**V9. A pack of one lane, and a lane with nothing in it, keep view-only chrome.** Why: a view cell
+must never pass for a stored one. Price: a little more ink. Refused: collapsing them.
+
+**V10. Walking an unbound dimension never changes a binding.** Why: the reader selects a spoke and
+walks it, and repeats; nothing needs to be bound for that, and a binding that changes because one
+moved is a surprise. Price: the axis keys do not follow an unbound dimension until it is bound,
+which is one key. Refused: the earlier draft's temporary bind — an axis that changes under the
+reader, plus a stack of bindings to restore.
+
+**V11. Switching view keeps the placement's cursor and bindings.** Why: they belong to the
+placement, not to the view. Price: no per-view memory of bindings. Refused: stash and restore.
+
+**V12. Page views are specified here.** Supersedes the earlier ruling that left them to a follow-up.
+
+**V13. A view cell stands for its target by a handle value, not a link.** Why: any link to a real
+cell shadows it (V6); a handle is one read to resolve, and it is the cell kind the engine already
+uses to name another cell. Price: "what uses this dimension" is a scan of the axes and groups, a
+handful of cells; the relation is not walkable as a rank. Refused: (a) occurrences ranked under
+their target on a dimension, after `d.clone` — the earlier ruling; it shadows every bound dimension
+cell and every packed cell; (b) a direct link from an axis to its dimension — it also caps a
+dimension at one axis.
+
+**V14. Text, chrome, focus and legibility come from the fitted UI layer.** Why: the library fits,
+shapes, scales and arbitrates focus, tested across fonts and backends; a second implementation would
+drift. Price: a layout knows text only as sizes from a measurer. Refused: linking the library into
+the engine; a view-owned label size.
+
+**V15. Cells, pages, edges and labels are all in world space.** Why: one camera then moves, turns
+and scales everything together, and rotation and depth show structure that a flat picture cannot.
+Text is kept readable by facing the camera, by the legibility test and by coarse drawing, none of
+which leaves the world. Price: a label can be hidden by something in front of it, and shrinks with
+distance until it is not drawn; the library needs placed planes, regions and unprojection. Refused:
+screen-space labels at projected anchors — the earlier ruling; they do not rotate, scale or occlude
+with what they label, so they stop being part of the structure; and a face-camera bit in the glyph
+shader — a per-plane matrix does the same with no shader change.
+
+**V16. A view prepares, then lays out; only preparing may write.** Why: the earlier `layout()` was
+called pure and also minted cells. Separating them makes the pure half testable and repeatable, and
+makes a drag preview an input instead of a rebind. Price: two entry points. Refused: one call.
+
+**V17. Generic code is the library's, xanalogical code is `apps/common/`'s, and `apps/xuzz/` only
+starts the program.** Why: the plain editor shares the library and must never meet a cell; the
+language tools share the engine and can then lay out without a window; and a test belongs with the
+code it tests, once. Price: the presenter and host are in `apps/common/ui/`, one directory further
+from `main()` than is usual. Refused: view code in `apps/xuzz/` — the earlier placement; engine
+tests that re-sweep the library's fonts and backends.
+
+**V18. Mixing is scenes and panes.** Why: "together in one world" and "side by side" are different
+needs, and today's unified mode is the first. Price: a link across scenes cannot be a beam. Refused:
+panes only, which would end beams between pages and cells; one scene only, which would end
+independent cameras.
+
+**V19. One record vocabulary for cells and pages, identified by `SubjectId`.** Why: the presenter,
+the animation and the raster then serve every view, and a tossed cell fades without being looked up
+because its epoch is part of its identity. Price: a page view's records carry fields it leaves
+unset. Refused: separate record types per subject.
+
+**V20. The base view moves pages, and coalescing is a strategy whose first form is today's tension
+engine at a fixed number of steps.** Why: it is today's behaviour, made replaceable and pure. Price:
+"best fit" is whatever the strategy reaches in its steps, as now. Refused: stepping until settled —
+not a pure function; whole documents only — it hides the rest of a long document behind one link.
+
+**V21. A deck is two parallel stacks of unrotated pages, and its direction is searched for.** Why:
+two tops are both whole; parallel lines give one vanishing point; and which strip of a hidden page
+is worth showing depends on the pane, the page and the type. Price: a search of a few hundred
+candidates when the pane changes. Refused: a fan of rotated pages — foreshortened text; a fixed
+direction — wrong for either wide or tall panes; a second vanishing line for passed pages — it
+halves the room.
+
+**V22. Riffle or split is decided by time.** Why: a riffle is one only if each page is seen to turn
+and it is over soon; two timings say that, a page count does not. Price: none. Refused: a threshold
+in pages.
+
+**V23. The wheel is compact, ordered by a rank, and fixed in the placement.** Why: its fullness is
+then the cell's valence; the order is the same everywhere and is the reader's; and orbiting shows it
+from another side. Price: a dimension's angle differs between cells that have different neighbours.
+Refused: a fixed slot per dimension; a helix or Fibonacci sphere; a camera-aligned figure.
+
+**V24. Derived cells exist only for what is in view.** Why: a long walk would otherwise grow the
+arena without bound. Price: a toss and a re-derivation when the window is full. Refused: keeping
+everything derived.
+
+**V25. Stretch vanishing places by anchored slide.** Why: it is deterministic, linear, local under
+edits, and keeps each cell against the one that reached it. Price: gaps where no slide fits.
+Refused: track tables; relaxation; a single skyline, which fills one direction and this view
+radiates in four.
+
+______________________________________________________________________
+
+## 19. Open questions
+
+**VU1.** Should a dimension group travel between slices? Settled by: use; a slice-independent key in
+`system://layout` can be added without a format change.
+
+**VU2.** What may a third-party view do — mint, read every store, register chords? Settled by: a
+trust decision above this document.
+
+**VU3.** Which member should a view other than the pack view follow when an axis shows a group? It
+is the first member now. Settled by: use.
+
+**VU4.** When a pack is kept, should its `d.pack` and `d.packing` be the slice's own named
+dimensions, shared by every kept pack? Settled by: the first design of kept packs as content.
+
+**VU5.** Should a `Visit` record the view and the bindings, so going back restores how the reader
+was looking? Settled by: journeys that go back across a view switch; if so, more cells in the
+activity store, not a wider struct.
+
+**VU6.** With `apps/xudu/` and `apps/zigzag/` gone, should `tests/xudu/`, `tests/zigzag/` and their
+binaries be renamed for what they link? Settled by: the owner; nothing here depends on it.
+
+**VU7.** `session` and `batch_orchestrator` mix engine work with library calls. Should each be split
+so its engine half reaches `apps/common/xanadu/`? Settled by: the first language tool that wants
+one.
+
+**VU8.** Is a stub enough for a link whose other end is in another scene? Settled by: journeys with
+two panes.
+
+**VU9.** Is depth as stacked planes the right reading of a third axis in stretch vanishing? Settled
+by: use on slices with a meaningful third dimension.
+
+**VU10.** Should the base view fly a passage smaller than a page, as the satelloid cards do today?
+Settled by: whether page-level coalescing leaves too much unrelated text in view.
+
+______________________________________________________________________
+
+## 20. Traceability
+
+### The first request
+
+| Clause                                                                              | Met by                |
+| ----------------------------------------------------------------------------------- | --------------------- |
+| "highly pluggable, highly extensible View system"                                   | V-R1; §8.1, §8.10     |
+| "how xanadocs (pages) and slices (cells) should be laid out in a given viewport"    | §8.4 to §8.6; §9; §10 |
+| "sit on top of the store"                                                           | §6.1; V-R12; V-R37    |
+| "different views for xanadocs and zigzag slices so the two can be mixed freely"     | V-R38 to V-R40; §11   |
+| "each cell can only be connected on the two directions of all the bound dimensions" | V-R6; I1; §6.6        |
+| "any minted cells used by the view live in the view only"                           | V-R7, V-R8; I2, I3    |
+| "quickly tossed in O(1) time as dimensions are rebound"                             | V-R9; §6.5; V1        |
+| stretch vanishing: "full content of all cells … always displayed"                   | V-R16; §9.1.3         |
+| "drawn very closely together"                                                       | §9.1.3, `stretch.gap` |
+| "only the immediate neighbors … completely aligned"                                 | V-R17; §9.1.3 step 2  |
+| "sacrificing structural clarity for raw data visibility"                            | §9.1.1, §9.1.6        |
+| "cells to the edges of the viewport become less opaque"                             | V-R19; §9.1.5         |
+| "partially clipped cells are completely invisible"                                  | V-R18; §9.1.5         |
+| all-dim walk: "surrounded by every cell they are connected to on every dimension"   | V-R21; §9.2.2         |
+| "a ring that utilizes 3 dimensional space to keep the accursed cell visible"        | V-R22; §9.2.3         |
+| "dimension names are used as edge labels"                                           | §9.2.5                |
+| "bound dimensions' cells are aligned … like spokes on a wheel"                      | V-R22; §9.2.3         |
+| "movement between them works as expected"                                           | §9.2.3, §9.2.6        |
+| "one connection in each direction along the bound dimensions"                       | V-R6, V-R23           |
+| "visualizing the valence of each cell"                                              | V-R26; §9.2.4, §9.2.5 |
+| "rebinding dimensions by dragging an edge to the bound axis"                        | V-R25; §9.2.7         |
+| pack view: "dimensions can be grouped to quickly rebind an entire set"              | V-R14; §7.2           |
+| "the dimension group can also be bound to a single dimension"                       | V-R14; §7.1           |
+| "each real cell is represented as a pack of every cell connected along a dimension" | V-R27; §9.3.2; V3     |
+| "extending as far as there is at least one cell to pack"                            | V-R27; §9.3.2         |
+| "the pack of cells maintain the movement invariant"                                 | V-R28; §9.3.5         |
+| "can be retrieved individually"                                                     | V-R29; §9.3.5         |
+| "nested with d.pack (the container) and d.packing (the constituents)"               | V-R30; §9.3.3; V2     |
+
+### The second request
+
+| Clause                                                                                      | Met by                                     |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| "reviewing the view spec for any inconsistencies, design defects, or inefficiencies"        | §21, the entry for this revision           |
+| "include the xanadoc view system"                                                           | §8.6; §10; V12                             |
+| base view: "baseline that we have today"                                                    | §10.3; V20                                 |
+| "pages flow vertically and docs horizontally when no links are shared"                      | V-R32; §10.3.1                             |
+| "pages with active links fly in together to align and coalesce for a best fit"              | V-R32, V-R33; §10.3.2                      |
+| stacked vanishing: "staggered along the z axis at an angle that maximizes the legible text" | V-R34; §10.4.2, §10.4.3                    |
+| "increase in transparency slowly into the distance … to the vanishing point"                | V-R35; §10.4.2, §10.4.4                    |
+| "punctuated by fully opaque pages … non formatting links or transclusions"                  | V-R35; §10.4.4, §10.4.5                    |
+| "a quick cycling of pages if the new page is near, or a split of the deck with a fly in"    | V-R36; §10.4.7; V22                        |
+| "free to develop your own ideas"                                                            | §10.5; the wheel's ring order; lane tables |
+| "keep labels, edges and cells in world space"                                               | V-R4; §13.1; V15                           |
+| "an implementation plan for world space improvements"                                       | `world-space-rendering-plan.md`; §13.3     |
+| "nothing should live in apps/xudu or apps/zigzag anymore"                                   | §1.2; §17 step 1; V17                      |
+| "apps/xuzz if it is truly unique … or in apps/common"                                       | §1.2; §5; V17                              |
+| "libgleditor must be kept to generic components"                                            | §1.2; §5.3 rule 4; §13.3                   |
+| "its own battery of tests that I don't want duplicated in xuzz_test"                        | V-R48; §16.1                               |
+
+______________________________________________________________________
+
+## 21. Change history
+
+- 2026-10-07 — Initial proposal: the framework, the view space and three slice views.
+- 2026-10-07 — Rehomed onto xuzz as the only application.
+- 2026-10-07 — Bindings and memberships as occurrence cells, so a dimension may be on several axes.
+- 2026-10-07 — Reconciled with the fitted UI layer.
+- 2026-10-07 — Rewritten after a full review, and extended with the page views. Corrected:
+  - the toss kept garbage and filtered reads; it is now `release()` to an empty mark, constant-time
+    with immediate reclamation, because no view arena shadows a real cell (§6.2, §6.5; V1, V6);
+  - occurrences linked to their targets, which shadowed them; they now hold handles (V13);
+  - `layout()` was called pure but minted cells; preparing and laying out are separate (V16);
+  - a pack step was a breadth-first frontier that mixed dimensions and grew exponentially; it is now
+    one lane per dimension (V3);
+  - the wheel's formula put both neighbours of a dimension on the same side of a cone, gave every
+    dimension its own ever-larger ring, and followed the camera; it is now rings of pair slots about
+    the hub, fixed in the placement (V23);
+  - walking an unbound dimension changed an axis; it no longer does (V10);
+  - the stretch fade's band was outside the range of its variable, and the packing rule described a
+    skyline for a figure that radiates; both are restated (§9.1.3, §9.1.5);
+  - the link choke point checked one end; the verifier counted something the representation cannot
+    hold; both are restated (§6.6);
+  - the registry was a singleton holding non-owning callables; it is an owned object (§8.1);
+  - labels were in screen space; everything is in world space (V15);
+  - view code was planned for `apps/xuzz/`, and view tests re-swept the library; placement and
+    testing follow §1.2 (V17).

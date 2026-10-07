@@ -6,23 +6,33 @@ zero naked magic numbers, and data-backed performance across the `gleditor` libr
 
 ## 1. Architectural Layering & Dependency Hierarchy
 
-- **Library Purity**: `include/gleditor/` and `src/` must **never** include or depend on any code in
-  `apps/`.
+- **A Generic Library**: `libgleditor` (`include/gleditor/`, `src/`) holds generic components only:
+  the backbone that `xuzz` and others specialise. `apps/gleditor` uses it and has no Xanadu
+  reference by design, so no library type, file or test is named for a cell, a link, a xanadoc, a
+  slice or a view kind, and the library must **never** include or depend on any code in `apps/`.
 - **One Xanadu/ZigZag Application**: `xuzz` is the only program for xanadocs and ZigZag slices.
   `xudu` and `zigzag` are retired as applications (`build/xudu` and `build/zigzag` are symlinks to
-  `xuzz`). `apps/xudu/` and `apps/zigzag/` hold components that `xuzz` links; they are not
-  separately buildable units, and no rule keeps them apart from each other.
-- **Where New Code Goes**: logic that needs no graphics device goes in the engine,
-  `apps/common/xanadu/` (namespace `xanadu`), where `xuzz_test` can test it. Rendering, input and
-  window wiring go in `apps/xuzz/`. Do not add files to `apps/xudu/` or `apps/zigzag/`; work that
-  touches them should move code out, toward deleting them.
-- **Engine Purity**: `apps/common/xanadu/` must **never** include `apps/xuzz/`, `apps/xudu/`,
-  `apps/zigzag/` or `apps/common/ui/`. `vquery`, `vqueryc`, `vpl`, `vplc` and `vprolog` consume the
-  engine only.
+  `xuzz`).
+- **Where Code Goes**:
+  - Everything xanalogical goes in `apps/common/`: `apps/common/xanadu/` (namespace `xanadu`) for
+    code that needs no graphics device, so `vquery`, `vqueryc`, `vpl`, `vplc` and `vprolog` can
+    share it; `apps/common/ui/` for code that draws or takes input through the library.
+  - `apps/xuzz/` holds only what is truly unique to the xuzz program — `main.cpp`, the command line,
+    the application wiring. That should be rare.
+  - **Nothing lives in `apps/xudu/` or `apps/zigzag/`.** Add no file there. The code still in them
+    is to be moved to the places above (`design/view-system.md` §17 step 1 has the table); any
+    change that touches one of those files should move it.
+- **Engine Purity**: `apps/common/xanadu/` must **never** include `apps/xuzz/`, `apps/common/ui/` or
+  a library header that needs a graphics device. Header-only, device-free library headers
+  (`<gleditor/cpp26*.hpp>`, `<gleditor/spatial.hpp>`, `<gleditor/draw_budget.hpp>`) are allowed.
 - **Plain Editor Isolation**: `apps/gleditor` consumes the core library only and must share no code
   or dependency with Xanadu, ZigZag or Xuzz.
+- **Tests Sit With Their Code, Once**: the library has its own battery in `tests/lib/`
+  (`gleditor_test`). `xuzz_test` is kept to xuzz's own code and links no library: it must not repeat
+  a library test, and a test of xanalogical code takes library behaviour (text fitting, focus,
+  projection, clipping) as given instead of sweeping it again.
 - **Promotion Discipline**: Reusable utilities, data structures, or algorithms must be moved down
-  (to the engine, or to `src/` when they are not xanalogical) rather than copied.
+  (to the engine, or to the library when they are generic) rather than copied.
 
 ## 2. Dynamic Configuration & Magic Number Elimination
 
