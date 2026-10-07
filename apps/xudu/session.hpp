@@ -65,9 +65,7 @@
 class Caret;
 class Doc;
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 class Session;
 
 /**
@@ -1013,6 +1011,6 @@ private:
   std::vector<Placement> placements;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_SESSION_H

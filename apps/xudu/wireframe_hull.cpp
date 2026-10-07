@@ -14,7 +14,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 WireframeHullOverlay::WireframeHullOverlay(RendererRef renderer,
                                            std::string fontName)
@@ -183,4 +183,4 @@ void WireframeHullOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, ortho);
 }
 
-} // namespace xudu
+} // namespace xanadu

@@ -18,7 +18,7 @@
 
 #include "session.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 CollaboratorCaretOverlay::CollaboratorCaretOverlay(Session &session,
                                                    RendererRef renderer,
@@ -222,4 +222,4 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
   }
 }
 
-} // namespace xudu
+} // namespace xanadu

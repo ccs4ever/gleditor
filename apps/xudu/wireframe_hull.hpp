@@ -17,9 +17,7 @@
 
 #include "common/xanadu/transcopyright_logic.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class WireframeHullOverlay
  * @brief FrameContributor that renders an ethereal pulsing wireframe hull and
@@ -73,6 +71,6 @@ private:
   float shimmerPhase_{0.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_WIREFRAME_HULL_HPP

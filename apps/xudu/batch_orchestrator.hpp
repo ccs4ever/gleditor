@@ -19,21 +19,19 @@
 #include "common/xanadu/spool.hpp"
 #include "xudu/session.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 class BatchOrchestrator {
 public:
-  static xudu::LinkType parseLinkType(std::string_view str);
-  static xudu::ProminenceTier parseProminenceTier(std::string_view str);
-  static xudu::FormatAttribute parseFormatAttribute(std::string_view str);
+  static xanadu::LinkType parseLinkType(std::string_view str);
+  static xanadu::ProminenceTier parseProminenceTier(std::string_view str);
+  static xanadu::FormatAttribute parseFormatAttribute(std::string_view str);
 
-  static std::vector<xudu::PrimediaSpan> resolveSingleSpanToken(
-      const xudu::Session &session, const std::string &token,
+  static std::vector<xanadu::PrimediaSpan> resolveSingleSpanToken(
+      const xanadu::Session &session, const std::string &token,
       std::optional<std::uint32_t> defaultDocIdx = std::nullopt);
 
-  static std::vector<xudu::PrimediaSpan>
-  resolveSpans(const xudu::Session &session, const std::string &spec);
+  static std::vector<xanadu::PrimediaSpan>
+  resolveSpans(const xanadu::Session &session, const std::string &spec);
 
   struct ExecutionResult {
     bool shouldExit = false;
@@ -47,6 +45,6 @@ public:
                                  bool quiet = false);
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_BATCH_ORCHESTRATOR_HPP

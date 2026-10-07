@@ -11,9 +11,7 @@
 #include "common/xanadu/swarm_catalog.hpp"
 #include "common/xanadu/swarm_catalog_index.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -163,7 +161,7 @@ TEST(SwarmCatalogIndexTest, SwarmHealthUpdate) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu
 
 TEST(SwarmCatalogTest, aFreshCatalogContainsNoDemonstrationPublications) {
   xanadu::SwarmCatalog catalog;

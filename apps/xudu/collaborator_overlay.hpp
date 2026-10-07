@@ -18,7 +18,7 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 class Session;
 
@@ -66,6 +66,6 @@ private:
   bool lastCaretActive_{false};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_COLLABORATOR_OVERLAY_HPP

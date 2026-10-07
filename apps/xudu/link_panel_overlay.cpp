@@ -17,7 +17,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 void LinkPanelOverlay::setConfig(const xanadu::LinkPanelConfig &next) {
   if (next == config) {
@@ -297,4 +297,4 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas->draw(ctx.state, ortho);
 }
 
-} // namespace xudu
+} // namespace xanadu

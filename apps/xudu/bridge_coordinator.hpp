@@ -18,9 +18,7 @@
 #include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "satelloid.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @brief Connects a presentation surface to Xudu's renderer and LinkBeams.
  *
@@ -101,6 +99,6 @@ private:
   DocumentFocusHandler documentFocusHandler_;
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_BRIDGE_COORDINATOR_HPP

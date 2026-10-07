@@ -10,8 +10,8 @@
 namespace xuzz {
 
 ViewCoordinator::ViewCoordinator(
-    xudu::Views &views, std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
-    xudu::BridgeCoordinator &bridgeCoordinator, RendererRef renderer,
+    xanadu::Views &views, std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
+    xanadu::BridgeCoordinator &bridgeCoordinator, RendererRef renderer,
     AppStateRef state)
     : views_(views), visualizer_(std::move(visualizer)),
       bridgeCoordinator_(bridgeCoordinator), renderer_(std::move(renderer)),

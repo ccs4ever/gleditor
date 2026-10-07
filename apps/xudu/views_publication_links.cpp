@@ -2,7 +2,7 @@
 
 #include <gleditor/logging.hpp>
 
-namespace xudu {
+namespace xanadu {
 namespace {
 using Field = gleditor::Form::Field;
 Field choice(std::string label, std::vector<std::string> labels,
@@ -424,4 +424,4 @@ void Views::inspectIndependentLinkKeys(const std::string &id,
     }
   });
 }
-} // namespace xudu
+} // namespace xanadu

@@ -10,7 +10,7 @@
 
 #include <gleditor/render/types.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 LinkForgeWidget::LinkForgeWidget() = default;
 
@@ -314,4 +314,4 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   }
 }
 
-} // namespace xudu
+} // namespace xanadu

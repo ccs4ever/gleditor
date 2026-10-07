@@ -80,7 +80,7 @@ namespace {
 constexpr float kBackgroundDepthZ = -500.0F;
 
 void applyKeymap(
-    gleditor::CommandTable &commands, const xudu::Store &store,
+    gleditor::CommandTable &commands, const xanadu::Store &store,
     const std::shared_ptr<zigzag::ZigzagVisualizer> &zigzagPresentation =
         nullptr,
     const std::shared_ptr<zigzag::vortex::VortexHost> &vHost = nullptr) {
@@ -100,7 +100,7 @@ void applyKeymap(
   }
 
   for (const auto &[act, comboStr] :
-       xudu::KeymapConfig::fromStore(store).bindings) {
+       xanadu::KeymapConfig::fromStore(store).bindings) {
     const auto combo = gleditor::parseKeyCombo(comboStr);
     if (!combo) {
       GLEDITOR_LOG_WARN("xuzz.keymap", "{}: \"{}\" is not a key combination",
@@ -221,7 +221,7 @@ XuzzApp::~XuzzApp() = default;
 int XuzzApp::executeCheckAuthorship(const std::string &where) {
   const fs::path given(where);
   const auto record =
-      fs::is_directory(given) ? given / xudu::provenanceFileName : given;
+      fs::is_directory(given) ? given / xanadu::provenanceFileName : given;
   const auto sig = fs::path(record.string() + ".asc");
 
   const auto slurp = [](const fs::path &path) {
@@ -229,13 +229,14 @@ int XuzzApp::executeCheckAuthorship(const std::string &where) {
     return std::string{std::istreambuf_iterator<char>(in),
                        std::istreambuf_iterator<char>()};
   };
-  xudu::SignedProvenance sealed{.tsv = slurp(record), .signature = slurp(sig)};
+  xanadu::SignedProvenance sealed{.tsv       = slurp(record),
+                                  .signature = slurp(sig)};
   if (sealed.tsv.empty()) {
     std::cerr << "no authorship record at " << record << "\n";
     return 1;
   }
 
-  const auto check = xudu::verifyProvenance(sealed);
+  const auto check = xanadu::verifyProvenance(sealed);
   std::cout << sealed.tsv;
   if (!check.signatureValid) {
     std::cout << "\nxuzz: this record is NOT vouched for -- " << check.detail
@@ -252,10 +253,10 @@ int XuzzApp::executeCheckAuthorship(const std::string &where) {
                       "only their say-so")
             << "\n";
 
-  if (const auto said = xudu::parseProvenance(sealed.tsv); said) {
-    const auto content = record.parent_path() / xudu::sealedContentName;
+  if (const auto said = xanadu::parseProvenance(sealed.tsv); said) {
+    const auto content = record.parent_path() / xanadu::sealedContentName;
     if (const auto bytes = slurp(content); !bytes.empty()) {
-      const auto matches = xudu::sha256Hex(bytes) == said->contentDigest &&
+      const auto matches = xanadu::sha256Hex(bytes) == said->contentDigest &&
                            bytes.size() == said->contentLength;
       std::cout << "      "
                 << (matches ? "and it is about the content sealed with it"
@@ -266,14 +267,14 @@ int XuzzApp::executeCheckAuthorship(const std::string &where) {
         return 1;
       }
     }
-    const auto ops = record.parent_path() / xudu::sealedOpsName;
+    const auto ops = record.parent_path() / xanadu::sealedOpsName;
     if (said->opsDigest.empty() && 0 == said->opsLength) {
       std::cout
           << "      but it says nothing about the history sealed beside it\n";
       return 0;
     }
     const auto opsBytes  = slurp(ops);
-    const auto opsAgrees = xudu::sha256Hex(opsBytes) == said->opsDigest &&
+    const auto opsAgrees = xanadu::sha256Hex(opsBytes) == said->opsDigest &&
                            opsBytes.size() == said->opsLength;
     std::cout << "      "
               << (opsAgrees
@@ -329,8 +330,8 @@ int XuzzApp::run(const int argc, char **argv) {
   auto opts = *maybeOpts;
 
   if (opts.showConfig) {
-    std::cout << "# " << xudu::configPath() << "\n"
-              << xudu::loadConfig().toTsv();
+    std::cout << "# " << xanadu::configPath() << "\n"
+              << xanadu::loadConfig().toTsv();
     return 0;
   }
 
@@ -343,19 +344,19 @@ int XuzzApp::run(const int argc, char **argv) {
   }
 
   // 1. Initialize sovereign Permascroll
-  std::shared_ptr<xudu::UserPermascroll> userPermascroll;
+  std::shared_ptr<xanadu::UserPermascroll> userPermascroll;
   if (!opts.permascrollPath.empty()) {
-    xudu::UserPermascroll::Config config;
+    xanadu::UserPermascroll::Config config;
     config.storageDir = opts.permascrollPath;
     userPermascroll =
-        std::make_shared<xudu::UserPermascroll>(std::move(config));
+        std::make_shared<xanadu::UserPermascroll>(std::move(config));
   } else {
-    userPermascroll = xudu::PermascrollRegistry::instance().defaultUser();
+    userPermascroll = xanadu::PermascrollRegistry::instance().defaultUser();
   }
 
   // 2. Initialize Session
   auto session =
-      std::make_unique<xudu::Session>(opts.storePath, userPermascroll);
+      std::make_unique<xanadu::Session>(opts.storePath, userPermascroll);
   if (!opts.testPublicationSwarm.empty()) {
     std::vector<std::pair<std::string, std::uint16_t>> nodes;
     for (const auto &node :
@@ -381,7 +382,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // 3. Batch Orchestration
   const auto batchRes =
-      xudu::BatchOrchestrator::execute(*session, parser, opts.quiet);
+      xanadu::BatchOrchestrator::execute(*session, parser, opts.quiet);
   if (batchRes.shouldExit) {
     return batchRes.exitCode;
   }
@@ -413,11 +414,11 @@ int XuzzApp::run(const int argc, char **argv) {
   if (!opts.publishAs.empty()) {
     const auto manifest = session->publishDocument(
         opening,
-        xudu::Session::PublishRequest{.salt       = opts.publishAs,
-                                      .title      = opts.publishAs,
-                                      .author     = {},
-                                      .extra      = {},
-                                      .passphrase = {}},
+        xanadu::Session::PublishRequest{.salt       = opts.publishAs,
+                                        .title      = opts.publishAs,
+                                        .author     = {},
+                                        .extra      = {},
+                                        .passphrase = {}},
         openingStore);
     if (!opts.quiet) {
       std::cout << "xudu: prepared " << opening.str() << " as " << manifest
@@ -448,7 +449,7 @@ int XuzzApp::run(const int argc, char **argv) {
       [&session] { return session->generation(); });
   map.setVisible(opts.mapVisible);
 
-  xudu::PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
+  xanadu::PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
   pouchDrawer.setOpen(opts.pouchOpen, false);
 
   if (!opts.aliases.empty()) {
@@ -491,14 +492,14 @@ int XuzzApp::run(const int argc, char **argv) {
     }
   }
 
-  xudu::ImageOverlay images("Sans 11");
+  xanadu::ImageOverlay images("Sans 11");
   auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
   gleditor::Form publishForm("Sans 11");
 
-  xudu::Views views(*session, renderer, map, images, publishForm, state,
-                    docSwitcher);
+  xanadu::Views views(*session, renderer, map, images, publishForm, state,
+                      docSwitcher);
 
-  xudu::SwarmCatalog swarmCatalog;
+  xanadu::SwarmCatalog swarmCatalog;
   views.setPublicationCatalog(&swarmCatalog);
   try {
     (void)session->publicationSubscriptions();
@@ -515,8 +516,9 @@ int XuzzApp::run(const int argc, char **argv) {
     GLEDITOR_LOG_DEBUG("xudu.discovery", "Cached catalog refused: {}",
                        error.what());
   }
-  xudu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "Sans 10");
-  swarmTelescope.setOnSummon([&views](const xudu::PublicationEntry &entry) {
+  xanadu::SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer,
+                                               "Sans 10");
+  swarmTelescope.setOnSummon([&views](const xanadu::PublicationEntry &entry) {
     views.summonPublication(entry);
   });
   swarmTelescope.setOnDiscover([&views](const std::string &query) {
@@ -635,11 +637,11 @@ int XuzzApp::run(const int argc, char **argv) {
   };
 
   pouchDrawer.setSwingBackHandler(
-      [&views](const xudu::PouchItem &item) { views.swingBackToSpan(item); });
+      [&views](const xanadu::PouchItem &item) { views.swingBackToSpan(item); });
 
-  xudu::KineticTetherEngine kineticTetherEngine;
+  xanadu::KineticTetherEngine kineticTetherEngine;
   kineticTetherEngine.setVoidSpawnHandler(
-      [&views](const xudu::TetherPayload &payload, const float sx,
+      [&views](const xanadu::TetherPayload &payload, const float sx,
                const float sy) {
         views.spawnTranscludedDocument(payload, sx, sy);
       });
@@ -698,7 +700,7 @@ int XuzzApp::run(const int argc, char **argv) {
         }
       });
 
-  xudu::LinkBeams links(*session, renderer);
+  xanadu::LinkBeams links(*session, renderer);
   links.setVisible(!opts.noBeams);
   links.setSworph(!opts.noSworph);
   views.setComparisonCameraReady([&links] {
@@ -709,19 +711,19 @@ int XuzzApp::run(const int argc, char **argv) {
   if (opts.physicsEnabled) {
     links.setPhysicsEnabled(true);
   }
-  xudu::TenuousTetherOverlay tenuousTetherOverlay(renderer, nullptr);
+  xanadu::TenuousTetherOverlay tenuousTetherOverlay(renderer, nullptr);
   links.setTetherOverlay(&tenuousTetherOverlay);
-  xudu::SatelloidOverlay satelloidOverlay(renderer);
+  xanadu::SatelloidOverlay satelloidOverlay(renderer);
   links.setSatelloidOverlay(&satelloidOverlay);
 
   const auto readablePx = [wholePages =
                                opts.wholePages](const float configured) {
     return wholePages ? 0.0F : configured;
   };
-  views.setReadableTextPx(readablePx(xudu::LayoutConfig{}.readableTextPx));
-  links.setReadableTextPx(readablePx(xudu::LayoutConfig{}.readableTextPx));
+  views.setReadableTextPx(readablePx(xanadu::LayoutConfig{}.readableTextPx));
+  links.setReadableTextPx(readablePx(xanadu::LayoutConfig{}.readableTextPx));
 
-  xudu::LinkContext linkContext(*session);
+  xanadu::LinkContext linkContext(*session);
   KeyboardPane keyboardPane(state);
   renderer->addPickObserver(&keyboardPane);
 
@@ -732,12 +734,12 @@ int XuzzApp::run(const int argc, char **argv) {
         views.focusSpan(viewIndex, range.start, range.end);
       });
   linkContext.setCaretQuery(
-      [&renderer]() -> std::optional<xudu::LinkContext::CaretPosition> {
+      [&renderer]() -> std::optional<xanadu::LinkContext::CaretPosition> {
         const auto *const caret = renderer->editCaret();
         if (nullptr == caret || !caret->active()) {
           return std::nullopt;
         }
-        return xudu::LinkContext::CaretPosition{
+        return xanadu::LinkContext::CaretPosition{
             .view   = caret->documentIndex(),
             .offset = caret->byteOffset(),
             .selection =
@@ -748,13 +750,13 @@ int XuzzApp::run(const int argc, char **argv) {
       });
   links.setLinkContext(&linkContext);
 
-  xudu::LinkPanelOverlay linkPanel(linkContext, *session);
+  xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
-      -> std::optional<xudu::LinkPanelOverlay::AnchorPair> {
+      -> std::optional<xanadu::LinkPanelOverlay::AnchorPair> {
     const auto selected = linkContext.selection();
     if (!selected || !selected->occurrences) return std::nullopt;
-    xudu::LinkPanelOverlay::AnchorPair points;
+    xanadu::LinkPanelOverlay::AnchorPair points;
     for (const auto side : {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
       const auto &cursor = selected->cursor(side);
       if (!cursor.member || !cursor.occurrence) return std::nullopt;
@@ -801,7 +803,7 @@ int XuzzApp::run(const int argc, char **argv) {
         });
   });
   linkPanel.setFramingHandler(
-      [&links, &state](const xudu::LinkPanelOverlay::AnchorPair &points,
+      [&links, &state](const xanadu::LinkPanelOverlay::AnchorPair &points,
                        ch::Timeline &timeline) {
         const auto midpoint = 0.5F * (points[0] + points[1]);
         glm::vec3 target;
@@ -823,7 +825,7 @@ int XuzzApp::run(const int argc, char **argv) {
         links.sworphCameraTo(target, timeline);
       });
 
-  xudu::OverviewOverlay overview(state);
+  xanadu::OverviewOverlay overview(state);
   const auto chosenPlaces = [&linkContext](const RenderState &rState,
                                            std::vector<glm::vec3> &out) {
     const auto selected = linkContext.selection();
@@ -862,20 +864,20 @@ int XuzzApp::run(const int argc, char **argv) {
   auto &bridgeStore = session->store(0);
   zigzagPresentation->bindXuduStore(bridgeStore,
                                     bridgeStore.primaryCurrentVersion());
-  const auto initialLayout = xudu::LayoutConfig::fromStore(
-      session->systemStore(xudu::SystemDocKind::Layout));
+  const auto initialLayout = xanadu::LayoutConfig::fromStore(
+      session->systemStore(xanadu::SystemDocKind::Layout));
   zigzagPresentation->setPresentationConfig(initialLayout.zigzag);
   if (auto vHost = zigzagPresentation->vortexHost()) {
     vHost->loadConfigFromStore(
-        session->systemStore(xudu::SystemDocKind::Settings));
+        session->systemStore(xanadu::SystemDocKind::Settings));
     vHost->loadMacrosFromStore(
-        session->systemStore(xudu::SystemDocKind::Keymap));
+        session->systemStore(xanadu::SystemDocKind::Keymap));
   }
   zigzagPresentation->setPresentationTransformResolver(
       [&views] { return views.presentationTransform(); });
 
-  xudu::BridgeCoordinator bridgeCoordinator(links, renderer,
-                                            *state->accessibility);
+  xanadu::BridgeCoordinator bridgeCoordinator(links, renderer,
+                                              *state->accessibility);
   bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
   bridgeCoordinator.setDocumentFocusHandler(
       [&views, &linkContext, &renderer,
@@ -958,7 +960,7 @@ int XuzzApp::run(const int argc, char **argv) {
       });
   satelloidOverlay.setNeighborhoodResolver([zigzagPresentation](
                                                const zigzag::CellRef root) {
-    std::vector<xudu::SatelloidNeighbor> out;
+    std::vector<xanadu::SatelloidNeighbor> out;
     const auto &manifold = zigzagPresentation->manifold();
     const auto *store    = zigzagPresentation->store();
     if (!store || !manifold.contains(root)) return out;
@@ -1227,7 +1229,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                             changedCell != zigzag::noCell;
+                            changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -1390,7 +1392,7 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto screenX = static_cast<float>(mx);
     const auto screenY = static_cast<float>(state->view.screenHeight - my);
     kineticTetherEngine.startDrag(
-        xudu::TetherPayload{
+        xanadu::TetherPayload{
             .span = spans.front(),
             .previewText =
                 selStart < text.size()
@@ -1438,7 +1440,7 @@ int XuzzApp::run(const int argc, char **argv) {
       }
       const auto &bridgeStore = session->store(0);
       kineticTetherEngine.startDrag(
-          xudu::TetherPayload{
+          xanadu::TetherPayload{
               .span            = spans.front(),
               .previewText     = manifold.textOf(cellRef, bridgeStore),
               .originVersion   = bridgeStore.primaryCurrentVersion(),
@@ -2021,7 +2023,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-    };
+        };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,
@@ -2201,7 +2203,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                      &session](const bool isLeft) {
     views.withCaret(
         [&pouchDrawer, &session,
-         isLeft](RenderState &, const xudu::Views::Where &where, Caret *) {
+         isLeft](RenderState &, const xanadu::Views::Where &where, Caret *) {
           if (!where.hasRange) {
             std::cout << "xuzz: select text to drop onto bench first\n";
             return;
@@ -2217,7 +2219,7 @@ int XuzzApp::run(const int argc, char **argv) {
           const auto text    = session->store(storeIdx).textOf(ver);
           const auto preview = text.substr(
               where.start, std::min<std::size_t>(where.end - where.start, 64));
-          xudu::PouchItem item;
+          xanadu::PouchItem item;
           item.itemId          = 0;
           item.span            = spans.front();
           item.previewText     = preview;
@@ -2240,7 +2242,7 @@ int XuzzApp::run(const int argc, char **argv) {
   const auto dropSelectionToZone = [&views, &pouchDrawer,
                                     &session](const std::string_view zoneId) {
     views.withCaret([&pouchDrawer, &session,
-                     zoneId](RenderState &, const xudu::Views::Where &where,
+                     zoneId](RenderState &, const xanadu::Views::Where &where,
                              Caret *) {
       if (!where.hasRange) {
         std::cout << "xuzz: select text to drop into pouch first\n";
@@ -2443,12 +2445,12 @@ int XuzzApp::run(const int argc, char **argv) {
       std::string(xanadu::settings::kKeymapNewSliceInStore),
       "add a ZigZag slice to the current document's store",
       [&views, &session, startSlice] {
-        views.withCaret([&session, startSlice](RenderState &rState,
-                                               const xudu::Views::Where &where,
-                                               Caret *) {
-          startSlice(rState, session->storeIndexOf(where.doc),
-                     session->versionOf(where.doc));
-        });
+        views.withCaret(
+            [&session, startSlice](RenderState &rState,
+                                   const xanadu::Views::Where &where, Caret *) {
+              startSlice(rState, session->storeIndexOf(where.doc),
+                         session->versionOf(where.doc));
+            });
       });
 
   app.commands().registerAction(
@@ -2733,49 +2735,49 @@ int XuzzApp::run(const int argc, char **argv) {
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
        &views, &overview, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints](const xudu::SystemDocKind kind,
-                                          const xudu::Store &store) {
-        std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
+       &bridgeCoordinator, &showKeyHints](const xanadu::SystemDocKind kind,
+                                          const xanadu::Store &store) {
+        std::cout << "xuzz: system doc updated (" << xanadu::systemDocUri(kind)
                   << ")\n";
-        const auto model = xudu::SystemStoreModel::fromStore(store);
+        const auto model = xanadu::SystemStoreModel::fromStore(store);
         if (!model.isValid()) {
           std::cerr << "xuzz: rejecting invalid system store "
-                    << xudu::systemDocUri(kind) << ": "
+                    << xanadu::systemDocUri(kind) << ": "
                     << model.validationError() << "\n";
           return;
         }
         switch (kind) {
-        case xudu::SystemDocKind::Keymap: {
+        case xanadu::SystemDocKind::Keymap: {
           const auto vHost =
               zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
           applyKeymap(app.commands(), store, zigzagPresentation, vHost);
           showKeyHints();
           break;
         }
-        case xudu::SystemDocKind::Settings: {
+        case xanadu::SystemDocKind::Settings: {
           session->setAutoSave(std::chrono::seconds(
-              xudu::SettingsConfig::fromStore(store).autoSaveSeconds));
+              xanadu::SettingsConfig::fromStore(store).autoSaveSeconds));
           if (auto vHost = zigzagPresentation->vortexHost()) {
             vHost->loadConfigFromStore(store);
           }
           break;
         }
-        case xudu::SystemDocKind::Layout: {
-          const auto layout = xudu::LayoutConfig::fromStore(store);
+        case xanadu::SystemDocKind::Layout: {
+          const auto layout = xanadu::LayoutConfig::fromStore(store);
           views.setReadableTextPx(readablePx(layout.readableTextPx));
           links.setReadableTextPx(readablePx(layout.readableTextPx));
           links.setVisible(layout.xanalinkRibbons);
           links.setBeamConfig(layout.beams);
           links.tensionEngine().setParams(layout.physics.toTensionParams());
-          pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
-                                      ? xudu::PouchDrawer::DockSide::Left
-                                      : xudu::PouchDrawer::DockSide::Right);
+          pouchDrawer.setDockSide(layout.pouchDock == xanadu::PouchDock::Left
+                                      ? xanadu::PouchDrawer::DockSide::Left
+                                      : xanadu::PouchDrawer::DockSide::Right);
           zigzagPresentation->setPresentationConfig(layout.zigzag);
           bridgeCoordinator.applyConfig(layout.bridge);
           break;
         }
-        case xudu::SystemDocKind::UI: {
-          const auto uiCfg = xudu::UIConfig::fromStore(store);
+        case xanadu::SystemDocKind::UI: {
+          const auto uiCfg = xanadu::UIConfig::fromStore(store);
           radialMenu->setConfig(uiCfg.radialMenu);
           linkPanel.setConfig(uiCfg.linkPanel);
           overview.setConfig(uiCfg.overview);
@@ -2783,8 +2785,8 @@ int XuzzApp::run(const int argc, char **argv) {
           map.setVisible(uiCfg.hypertimeMapVisible);
           break;
         }
-        case xudu::SystemDocKind::Pouches:
-        case xudu::SystemDocKind::Count:
+        case xanadu::SystemDocKind::Pouches:
+        case xanadu::SystemDocKind::Count:
           break;
         }
       });
@@ -2792,10 +2794,10 @@ int XuzzApp::run(const int argc, char **argv) {
   // Apply active system doc configurations at launch
   {
     session->setAutoSave(std::chrono::seconds(
-        xudu::SettingsConfig::fromStore(
-            session->systemStore(xudu::SystemDocKind::Settings))
+        xanadu::SettingsConfig::fromStore(
+            session->systemStore(xanadu::SystemDocKind::Settings))
             .autoSaveSeconds));
-    const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
+    const auto kmIdx = session->systemStoreIndex(xanadu::SystemDocKind::Keymap);
     const auto &kmStore = session->store(kmIdx);
     if (kmStore.opCount() > 0) {
       const auto vHost =
@@ -2803,28 +2805,28 @@ int XuzzApp::run(const int argc, char **argv) {
       applyKeymap(app.commands(), kmStore, zigzagPresentation, vHost);
     }
     showKeyHints();
-    const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
+    const auto uiIdx    = session->systemStoreIndex(xanadu::SystemDocKind::UI);
     const auto &uiStore = session->store(uiIdx);
     if (uiStore.opCount() > 0) {
-      const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
+      const auto uiCfg = xanadu::UIConfig::fromStore(uiStore);
       radialMenu->setConfig(uiCfg.radialMenu);
       linkPanel.setConfig(uiCfg.linkPanel);
       overview.setConfig(uiCfg.overview);
       docSwitcher->setVisible(uiCfg.tabBarVisible);
       map.setVisible(uiCfg.hypertimeMapVisible);
     }
-    const auto loIdx = session->systemStoreIndex(xudu::SystemDocKind::Layout);
+    const auto loIdx = session->systemStoreIndex(xanadu::SystemDocKind::Layout);
     const auto &loStore = session->store(loIdx);
     if (loStore.opCount() > 0) {
-      const auto loCfg = xudu::LayoutConfig::fromStore(loStore);
+      const auto loCfg = xanadu::LayoutConfig::fromStore(loStore);
       views.setReadableTextPx(readablePx(loCfg.readableTextPx));
       links.setReadableTextPx(readablePx(loCfg.readableTextPx));
       links.setVisible(loCfg.xanalinkRibbons);
       links.setBeamConfig(loCfg.beams);
       links.tensionEngine().setParams(loCfg.physics.toTensionParams());
-      pouchDrawer.setDockSide(loCfg.pouchDock == xudu::PouchDock::Left
-                                  ? xudu::PouchDrawer::DockSide::Left
-                                  : xudu::PouchDrawer::DockSide::Right);
+      pouchDrawer.setDockSide(loCfg.pouchDock == xanadu::PouchDock::Left
+                                  ? xanadu::PouchDrawer::DockSide::Left
+                                  : xanadu::PouchDrawer::DockSide::Right);
       zigzagPresentation->setPresentationConfig(loCfg.zigzag);
       bridgeCoordinator.applyConfig(loCfg.bridge);
     }

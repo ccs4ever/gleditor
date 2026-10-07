@@ -16,7 +16,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/spatial.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 KineticTetherOverlay::KineticTetherOverlay(KineticTetherEngine &engine,
                                            std::string fontName)
@@ -154,4 +154,4 @@ void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, ortho);
 }
 
-} // namespace xudu
+} // namespace xanadu

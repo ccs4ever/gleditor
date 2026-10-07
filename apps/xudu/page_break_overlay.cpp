@@ -16,7 +16,7 @@
 
 #include "session.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 PageBreakOverlay::PageBreakOverlay(Session &session, RendererRef renderer,
                                    std::string fontName)
@@ -198,4 +198,4 @@ bool PageBreakOverlay::picked(const render::PickingResult &pick,
   return false;
 }
 
-} // namespace xudu
+} // namespace xanadu

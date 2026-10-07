@@ -30,7 +30,7 @@
 #include "common/xanadu/framing.hpp"
 #include "common/xanadu/system_docs.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 class OverviewOverlay : public gleditor::FrameContributor,
                         public gleditor::PickObserver {
@@ -100,6 +100,6 @@ private:
   int screenHeight{};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_OVERVIEW_OVERLAY_HPP

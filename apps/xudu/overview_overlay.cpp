@@ -16,7 +16,7 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -207,4 +207,4 @@ bool OverviewOverlay::picked(const render::PickingResult &pick,
   return true;
 }
 
-} // namespace xudu
+} // namespace xanadu

@@ -14,7 +14,7 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render_state.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 TranscopyrightOverlay::TranscopyrightOverlay(Session &session,
                                              RendererRef renderer,
@@ -215,4 +215,4 @@ bool TranscopyrightOverlay::picked(const render::PickingResult &pick,
   });
 }
 
-} // namespace xudu
+} // namespace xanadu

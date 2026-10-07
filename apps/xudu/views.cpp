@@ -50,7 +50,7 @@
 #include "xudu/session.hpp"
 #include "xudu/wireframe_hull.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 Views::Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
              ImageOverlay &aImages, gleditor::Form &aForm, AppStateRef aState,
@@ -128,9 +128,9 @@ void Views::frameForReading(const gleditor::FrameContext &ctx) {
                           glm::vec4(frame->leftPx, frame->topPx, 0.0F, 1.0F));
   const glm::vec3 topRight(frame->localToWorld *
                            glm::vec4(frame->rightPx, frame->topPx, 0.0F, 1.0F));
-  const float halfH       = *distance * std::tan(glm::radians(view.fov) * 0.5F);
-  const float halfW       = halfH * static_cast<float>(view.screenWidth) /
-                            static_cast<float>(view.screenHeight);
+  const float halfH = *distance * std::tan(glm::radians(view.fov) * 0.5F);
+  const float halfW = halfH * static_cast<float>(view.screenWidth) /
+                      static_cast<float>(view.screenHeight);
   const float x           = topRight.x - topLeft.x <= 2.0F * halfW
                                 ? 0.5F * (topLeft.x + topRight.x)
                                 : topLeft.x + halfW;
@@ -258,10 +258,10 @@ void Views::syncMediaWidgets(RenderState &rState) {
     const auto &st    = session.store(vInfo.storeIndex);
     const auto spans  = session.mediaSpansFor(vInfo.version, vInfo.storeIndex);
     for (const auto &mSpan : spans) {
-      const auto bytes = st.read(
-          xudu::PrimediaSpan{.scroll = mSpan.span.scroll,
-                             .start  = mSpan.span.start - mSpan.containerOffset,
-                             .length = mSpan.containerLength});
+      const auto bytes = st.read(xanadu::PrimediaSpan{
+          .scroll = mSpan.span.scroll,
+          .start  = mSpan.span.start - mSpan.containerOffset,
+          .length = mSpan.containerLength});
       if (mSpan.isImage) {
         const auto id = std::format("{}:{}:{}", mSpan.span.scroll,
                                     mSpan.span.start - mSpan.containerOffset,
@@ -630,8 +630,8 @@ void Views::linkSelection() {
       return;
     }
 
-    xudu::Link link;
-    link.type        = xudu::LinkType::Comment;
+    xanadu::Link link;
+    link.type        = xanadu::LinkType::Comment;
     link.owner       = "you";
     link.left        = std::move(pending->spans);
     link.right       = std::move(spans);
@@ -676,8 +676,8 @@ void Views::finishCellLink() {
     std::cout << "xudu: select a passage and add at least one cell first\n";
     return;
   }
-  xudu::Link link;
-  link.type        = xudu::LinkType::Comment;
+  xanadu::Link link;
+  link.type        = xanadu::LinkType::Comment;
   link.owner       = "you";
   link.left        = std::move(pending->spans);
   link.right       = std::move(pending->right);
@@ -697,12 +697,12 @@ void Views::publishCurrent(const std::string &salt) {
                         "the caret is what gets published.");
       return;
     }
-    auto *const caret  = renderer->editCaret();
-    const auto which   = nullptr != caret && caret->active() &&
-                                 caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : 0U;
-    const auto version = session.versionOf(which);
+    auto *const caret   = renderer->editCaret();
+    const auto which    = nullptr != caret && caret->active() &&
+                               caret->documentIndex() < session.views().size()
+                              ? caret->documentIndex()
+                              : 0U;
+    const auto version  = session.versionOf(which);
     const auto storeIdx = session.storeIndexOf(which);
     const auto who      = session.author();
 
@@ -734,7 +734,7 @@ void Views::publishCurrent(const std::string &salt) {
           "The keyring has no secret key to sign an authorship record with, "
           "and a document is signed before it is sealed. Make one with `gpg "
           "--quick-generate-key`, or point gpg_home in " +
-              xudu::configPath() + " at the keyring that holds yours.");
+              xanadu::configPath() + " at the keyring that holds yours.");
       return;
     }
 
@@ -1170,11 +1170,11 @@ void Views::spawnTranscludedDocument(const TetherPayload &payload,
   if (payload.originCharEnd <= payload.originCharStart) {
     return;
   }
-  const auto len  = payload.originCharEnd - payload.originCharStart;
-  const auto sIdx = PouchOriginKind::Document == payload.originKind &&
+  const auto len        = payload.originCharEnd - payload.originCharStart;
+  const auto sIdx       = PouchOriginKind::Document == payload.originKind &&
                             payload.originDocIndex < session.views().size()
-                        ? session.storeIndexOf(payload.originDocIndex)
-                        : std::size_t{0};
+                              ? session.storeIndexOf(payload.originDocIndex)
+                              : std::size_t{0};
   const auto spawnedVer = session.store(sIdx).transclude(
       MicroversionId{}, 0, payload.originVersion, payload.originCharStart, len);
   showAlongside(spawnedVer, 0.0F, sIdx);
@@ -1614,7 +1614,7 @@ void Views::exportOsmic() {
     }
     auto *const caret   = renderer->editCaret();
     const auto which    = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                        caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto storeIdx = session.storeIndexOf(which);
@@ -1638,11 +1638,11 @@ void Views::importFile(const std::string &filePath) {
                             std::istreambuf_iterator<char>());
     auto *const caret   = renderer->editCaret();
     const auto docIdx   = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() < session.views().size())
+                         caret->documentIndex() < session.views().size())
                               ? caret->documentIndex()
                               : 0U;
     const auto at       = (nullptr != caret && caret->active() &&
-                           caret->documentIndex() == docIdx)
+                     caret->documentIndex() == docIdx)
                               ? caret->byteOffset()
                               : 0U;
     const auto detected = gleditor::MimeDetector::detectFile(filePath);
@@ -1723,24 +1723,24 @@ void Views::openDocumentPalette() {
   choiceField.kind  = Kind::Choice;
 
   for (std::uint8_t k = 0;
-       k < static_cast<std::uint8_t>(xudu::SystemDocKind::Count); ++k) {
-    const auto kind = static_cast<xudu::SystemDocKind>(k);
-    const auto uri  = std::string(xudu::systemDocUri(kind));
+       k < static_cast<std::uint8_t>(xanadu::SystemDocKind::Count); ++k) {
+    const auto kind = static_cast<xanadu::SystemDocKind>(k);
+    const auto uri  = std::string(xanadu::systemDocUri(kind));
     std::string desc;
     switch (kind) {
-    case xudu::SystemDocKind::Keymap:
+    case xanadu::SystemDocKind::Keymap:
       desc = "Keyboard shortcuts and bindings";
       break;
-    case xudu::SystemDocKind::Settings:
+    case xanadu::SystemDocKind::Settings:
       desc = "Typography and editor preferences";
       break;
-    case xudu::SystemDocKind::Layout:
+    case xanadu::SystemDocKind::Layout:
       desc = "Multi-column layout and ribbons";
       break;
-    case xudu::SystemDocKind::UI:
+    case xanadu::SystemDocKind::UI:
       desc = "Chrome, status bar, and notifications";
       break;
-    case xudu::SystemDocKind::Pouches:
+    case xanadu::SystemDocKind::Pouches:
       desc = "Drop zones and persistent span storage";
       break;
     default:
@@ -1844,7 +1844,7 @@ void Views::openDocumentFromPath(const std::string &chosen) {
     }
     return;
   }
-  if (const auto kind = xudu::systemDocKindFromUri(chosen)) {
+  if (const auto kind = xanadu::systemDocKindFromUri(chosen)) {
     const auto sIdx = session.systemStoreIndex(*kind);
     auto &sysStore  = session.store(sIdx);
     const auto head = sysStore.primaryCurrentVersion();
@@ -1940,7 +1940,8 @@ void Views::printHistory() {
     for (const auto &id : st.allVersions()) {
       const auto op = st.getOp(id);
       std::cout << (id == here ? "  * " : "    ") << id.str() << "  "
-                << (op.has_value() ? xudu::opKindName(op->kind) : "?") << "\n";
+                << (op.has_value() ? xanadu::opKindName(op->kind) : "?")
+                << "\n";
     }
   });
 }
@@ -2040,4 +2041,4 @@ void Views::cycleOnionSkin(const int delta) {
   });
 }
 
-} // namespace xudu
+} // namespace xanadu

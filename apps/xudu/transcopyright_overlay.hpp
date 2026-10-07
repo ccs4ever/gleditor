@@ -21,9 +21,7 @@
 #include "common/xanadu/transcopyright_logic.hpp"
 #include "session.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class TranscopyrightOverlay
  * @brief Renders interactive Transcopyright paywalls, withheld redactions, and
@@ -101,6 +99,6 @@ private:
   std::optional<std::uint32_t> hoveredTag_{std::nullopt};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_TRANSCOPYRIGHT_OVERLAY_HPP

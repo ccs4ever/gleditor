@@ -35,7 +35,7 @@ void CliParser::buildParser(argparse::ArgumentParser &parser,
       .help("directory the primary spools live in or slice to load; created if "
             "it is not there. Defaults to \"default\" in the xanadocs folder, "
             "$XDG_DATA_HOME/xudu/xanadocs")
-      .default_value((xudu::xanadocsDirectory() / "default").string());
+      .default_value((xanadu::xanadocsDirectory() / "default").string());
 
   parser.add_argument("--view")
       .help("initial presentation mode: unified (default), xanadoc, or zigzag")
@@ -315,7 +315,7 @@ std::optional<CliOptions> CliParser::parse(argparse::ArgumentParser &parser,
   opts.hasExplicitStore = parser.is_used("store");
   opts.storePath        = parser.get<std::string>("store");
   if (opts.storePath.empty()) {
-    opts.storePath = (xudu::xanadocsDirectory() / "default").string();
+    opts.storePath = (xanadu::xanadocsDirectory() / "default").string();
   }
   if (const auto xuduPath = parser.get<std::string>("--xudu");
       !xuduPath.empty()) {

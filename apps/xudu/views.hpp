@@ -39,7 +39,7 @@
 #include "xudu/session.hpp"
 #include "xudu/wireframe_hull.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 using HypertimeMap = xanadu::ui::HypertimeGraph;
 
@@ -224,8 +224,8 @@ private:
     std::uint32_t doc{};
     std::uint32_t start{};
     std::uint32_t end{};
-    std::vector<xudu::PrimediaSpan> spans;
-    std::vector<xudu::PrimediaSpan> right;
+    std::vector<xanadu::PrimediaSpan> spans;
+    std::vector<xanadu::PrimediaSpan> right;
     std::size_t rightCells{};
   };
 
@@ -239,7 +239,7 @@ private:
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::weak_ptr<Doc> primaryDocument_;
-  float readableTextPx_{xudu::LayoutConfig{}.readableTextPx};
+  float readableTextPx_{xanadu::LayoutConfig{}.readableTextPx};
   float chromeTopPx_{};
   bool readingFramed_{false};
   std::weak_ptr<Doc> frameTarget_;
@@ -258,6 +258,6 @@ private:
   SwarmCatalog *publicationCatalog_{};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_VIEWS_HPP

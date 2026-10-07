@@ -12,7 +12,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -651,4 +651,4 @@ bool SwarmTelescopeOverlay::performAction(const std::uint64_t nodeId,
   return false;
 }
 
-} // namespace xudu
+} // namespace xanadu

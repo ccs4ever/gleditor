@@ -12,9 +12,7 @@
 
 #include "common/xanadu/publication_ledger.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -166,4 +164,4 @@ TEST(PublicationLedgerTest, TsvSerializationRoundTrip) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

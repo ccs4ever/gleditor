@@ -3,9 +3,7 @@
 #include <gtest/gtest.h>
 #include <string>
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 class LMDBContentCacheTest : public ::testing::Test {
 protected:
   std::filesystem::path cache_dir = "test_cache";
@@ -174,4 +172,4 @@ TEST_F(LMDBContentCacheTest, GetNonExistentAndEmpty) {
   EXPECT_FALSE(cache.get(span, cached_text));
 }
 
-} // namespace xudu
+} // namespace xanadu

@@ -24,9 +24,7 @@
 
 #include "common/xanadu/swarm_catalog.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 /**
  * @class SwarmTelescopeOverlay
  * @brief 3-column discovery deck and search engine for swarm publications.
@@ -110,6 +108,6 @@ private:
   float height_{560.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_SWARM_TELESCOPE_OVERLAY_HPP

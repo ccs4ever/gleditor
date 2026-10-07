@@ -17,9 +17,7 @@
 #include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 namespace {
 
 using ::testing::DoubleNear;
@@ -317,4 +315,4 @@ TEST(SatelloidPhysicsTest, EquilibriumAnalyticalSolverAlignsSatelloids) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

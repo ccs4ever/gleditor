@@ -18,7 +18,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
-namespace xudu {
+namespace xanadu {
 
 class Session;
 
@@ -81,6 +81,6 @@ private:
   glm::vec2 buttonMax_{0.0F, 0.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_PAGE_BREAK_OVERLAY_HPP

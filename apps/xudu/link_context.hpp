@@ -34,7 +34,7 @@ namespace zigzag {
 class Manifold;
 } // namespace zigzag
 
-namespace xudu {
+namespace xanadu {
 
 class LinkContext {
 public:
@@ -163,6 +163,6 @@ private:
   std::uint64_t changes{};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_LINK_CONTEXT_HPP

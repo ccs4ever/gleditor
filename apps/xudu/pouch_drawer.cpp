@@ -15,7 +15,7 @@
 
 #include "common/xanadu/system_docs.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 PouchDrawer::PouchDrawer(Session &session, RendererRef renderer,
                          std::string fontName, const DockSide side)
@@ -543,4 +543,4 @@ bool PouchDrawer::performAction(const std::uint64_t nodeId,
   return true;
 }
 
-} // namespace xudu
+} // namespace xanadu

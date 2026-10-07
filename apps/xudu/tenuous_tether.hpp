@@ -27,9 +27,7 @@
 
 #include "common/xanadu/universal_link_endpoint.hpp"
 
-namespace xudu {
-using namespace ::xanadu;
-
+namespace xanadu {
 using xanadu::LinkTargetKind;
 
 /**
@@ -143,6 +141,6 @@ private:
   float controlDepth_{18.0F};
 };
 
-} // namespace xudu
+} // namespace xanadu
 
 #endif // XUDU_TENUOUS_TETHER_HPP

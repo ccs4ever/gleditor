@@ -38,7 +38,7 @@
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/provenance.hpp"
 
-namespace xudu {
+namespace xanadu {
 
 namespace {
 
@@ -1087,8 +1087,8 @@ void Session::loadRetainedScrolls(const Store &store,
                                   const std::string &storePath) {
   for (const auto &scroll : store.scrolls()) {
     for (const auto &segment : scroll.segments) {
-      const auto root     = std::filesystem::path(storePath) / "published" /
-                            segment.torrent.hex();
+      const auto root = std::filesystem::path(storePath) / "published" /
+                        segment.torrent.hex();
       const auto metainfo = root / "metainfo.torrent";
       if (!std::filesystem::exists(metainfo)) continue;
       std::ifstream in(metainfo, std::ios::binary);
@@ -2453,7 +2453,7 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     if (!gleditor::hasDecoration(mask, decoration)) {
       continue;
     }
-    const auto attribute = xudu::formatAttributeFromDecoration(decoration);
+    const auto attribute = xanadu::formatAttributeFromDecoration(decoration);
     if (!attribute) {
       continue;
     }
@@ -2461,10 +2461,10 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     link.type  = LinkType::Format;
     link.owner = "--type";
     link.left  = content;
-    link.right.push_back(xudu::vocabularySpanFor(*attribute));
+    link.right.push_back(xanadu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
     GLEDITOR_LOG_DEBUG("xudu.edit", "{} format {} [{}, {})", version.str(),
-                       xudu::formatAttributeName(*attribute), start,
+                       xanadu::formatAttributeName(*attribute), start,
                        start + effLen);
   }
   save(sIdx);
@@ -2511,7 +2511,7 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   if (content.empty()) {
     return;
   }
-  const auto attribute = xudu::formatAttributeFromTextAlign(align);
+  const auto attribute = xanadu::formatAttributeFromTextAlign(align);
   if (!attribute) {
     return;
   }
@@ -2519,10 +2519,10 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
   link.type  = LinkType::Format;
   link.owner = "--type";
   link.left  = content;
-  link.right.push_back(xudu::vocabularySpanFor(*attribute));
+  link.right.push_back(xanadu::vocabularySpanFor(*attribute));
   auto version = st.addLink(open[docIndex].version, link);
   GLEDITOR_LOG_DEBUG("xudu.edit", "{} align {} [{}, {})", version.str(),
-                     xudu::formatAttributeName(*attribute), start,
+                     xanadu::formatAttributeName(*attribute), start,
                      start + effLen);
   save(sIdx);
   refresh(docIndex, version);
@@ -2757,11 +2757,11 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       continue;
     }
     for (const auto &[id, link] : entry.store->links()) {
-      if (xudu::LinkType::Format == link.type) {
+      if (xanadu::LinkType::Format == link.type) {
         continue;
       }
       const auto colour =
-          xudu::linkColourWithInstanceShift(id, link.type, link.tier);
+          xanadu::linkColourWithInstanceShift(id, link.type, link.tier);
       for (const auto *const ends : {&link.left, &link.right}) {
         for (const auto &span : *ends) {
           for (const auto &extent : mine.occurrencesOf(span)) {
@@ -2784,7 +2784,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
         continue;
       }
       const auto res = st.resolve(piece);
-      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+      if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
         const auto colour = res.holeRecord
                                 ? colourForHole(res.holeRecord->reason)
                                 : Session::redactionColour;
@@ -2792,7 +2792,7 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
           found.push_back(gleditor::SpanStyle{
               .start = extent.start, .end = extent.end, .colour = colour});
         }
-      } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+      } else if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
         for (const auto &extent : mine.occurrencesOf(piece)) {
           found.push_back(gleditor::SpanStyle{
               .start  = extent.start,
@@ -2930,4 +2930,4 @@ ImageOverlay::rectFor(const Doc &doc, const std::uint32_t docOffset) const {
   return std::nullopt;
 }
 
-} // namespace xudu
+} // namespace xanadu
