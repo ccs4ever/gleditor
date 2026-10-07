@@ -1197,7 +1197,8 @@ TEST(E2EBinaryOrchestrationTest,
       (root / "data").string() + " timeout 120 " + binary.string() +
       permascrollFlag(scroll) + " --backend " + activeBackend() +
       " --profile --do pouch-toggle --click-label \"Resize pouch drawer\"" +
-      " --dump-a11y --key escape --do save-document " + path.string());
+      " --key right --dump-a11y --key escape --do save-document " +
+      path.string());
   ASSERT_EQ(result.exitCode, 0) << result.output;
   EXPECT_THAT(result.output,
               testing::HasSubstr("click-label \"Resize pouch drawer\""));

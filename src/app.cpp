@@ -1464,9 +1464,8 @@ int Application::run() {
     // Motion with the left button held is a drag, which extends the
     // selection rather than moving the caret on its own.
     if (0 != (held & SDL_BUTTON_LMASK) && !state->focusManager.modalActive()) {
-      state->dragX       = x;
-      state->dragY       = y;
-      state->dragPending = true;
+      state->queuePointerPick(
+          {x, y, 1, state->focusManager.pointerPickTarget()}, true);
     }
   };
   const auto onButtonDown = [&](const int x, const int y,
@@ -1476,18 +1475,18 @@ int Application::run() {
     // (the radial menu) reads it from here.
     state->mouseX = x;
     state->mouseY = y;
+    state->clickX = x;
+    state->clickY = y;
     // Held while a modal is up, along with the drag above: the caret is not
     // what is being moved when there is a question on screen.
-    if (state->focusManager.dispatchPointer({.phase  = ui::PointerPhase::Press,
-                                             .button = button,
-                                             .x      = static_cast<float>(x),
-                                             .y = static_cast<float>(y)})) {
-      if (state->focusManager.modalActive()) {
-        state->clickX       = x;
-        state->clickY       = y;
-        state->clickButton  = button;
-        state->clickPending = true;
-      }
+    const auto delivery = state->focusManager.dispatchPointerWithPick(
+        {.phase  = ui::PointerPhase::Press,
+         .button = button,
+         .x      = static_cast<float>(x),
+         .y      = static_cast<float>(y)});
+    if (delivery.consumed) {
+      if (delivery.gpuPick)
+        state->queuePointerPick({x, y, button, *delivery.gpuPick});
       return;
     }
     if (state->mouseDownHandler && state->mouseDownHandler(x, y, button)) {
@@ -1496,10 +1495,8 @@ int Application::run() {
     // The render thread answers this: where a click lands in the text is a
     // question only the picking attachment can answer, and that read is
     // asynchronous.
-    state->clickX       = x;
-    state->clickY       = y;
-    state->clickButton  = button;
-    state->clickPending = true;
+    state->queuePointerPick(
+        {x, y, button, state->focusManager.pointerPickTarget()});
   };
   const auto onButtonUp = [&](const int x, const int y,
                               const std::uint8_t button) {
@@ -1553,12 +1550,16 @@ int Application::run() {
       x = event.tfinger.x * static_cast<float>(state->view.screenWidth);
       y = event.tfinger.y * static_cast<float>(state->view.screenHeight);
     }
-    return state->focusManager.dispatchPointer(
+    const auto delivery = state->focusManager.dispatchPointerWithPick(
         {.phase     = phase,
          .button    = 1,
          .x         = x,
          .y         = y,
          .pointerId = static_cast<std::uint32_t>(sdl::fingerId(event))});
+    if (delivery.gpuPick)
+      state->queuePointerPick(
+          {static_cast<int>(x), static_cast<int>(y), 1, *delivery.gpuPick});
+    return delivery.consumed;
   };
   const auto onText = [&](std::string_view text) {
     if (state->focusManager.dispatchText(text)) return;
@@ -1572,8 +1573,7 @@ int Application::run() {
     state->focusManager.focusLost();
     state->focusLossEpoch.fetch_add(1);
     SDL_SetModState(SDL_KMOD_NONE);
-    state->clickPending = false;
-    state->dragPending  = false;
+    state->clearPointerPicks();
     fingerAId.reset();
     fingerBId.reset();
     pinchSpreadPixels.reset();
@@ -1841,9 +1841,8 @@ int Application::run() {
                 if (static_cast<float>((travelX * travelX) +
                                        (travelY * travelY)) <=
                     tapSlopPixels * tapSlopPixels) {
-                  state->clickX       = nowX;
-                  state->clickY       = nowY;
-                  state->clickPending = true;
+                  state->queuePointerPick(
+                      {nowX, nowY, 1, state->focusManager.pointerPickTarget()});
                 }
               }
               fingerAId.reset();

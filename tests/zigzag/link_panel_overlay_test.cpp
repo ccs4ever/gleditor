@@ -364,4 +364,37 @@ TEST_F(LinkPanelOverlayTest,
   ASSERT_TRUE(navigation.selection());
   EXPECT_EQ(navigation.selection()->key.id, links[0]);
 }
+
+TEST(LinkPanelPresentationTest,
+     NamedFontRolesFollowLiveThemeAndLegacyFontsRemainExplicit) {
+  const auto lines = contextLines();
+  gleditor::text::ShapingCache cache;
+  const ui::UiMetrics metrics{.screenWidth = 1280, .screenHeight = 800};
+  ui::Theme theme;
+  auto &caption = theme.fonts[static_cast<std::size_t>(ui::FontRole::Caption)];
+  caption       = {"Serif", 14};
+  xanadu::LinkPanelConfig config;
+  config.font      = "caption";
+  const auto named = common_ui::linkPanelPresentation(lines, {}, {}, metrics,
+                                                      theme, config, {}, cache);
+  EXPECT_EQ(named.theme.font(ui::FontRole::Label), caption);
+  caption            = {"Monospace", 18};
+  const auto changed = common_ui::linkPanelPresentation(
+      lines, {}, {}, metrics, theme, config, {}, cache);
+  EXPECT_EQ(changed.theme.font(ui::FontRole::Label), caption);
+  config.font       = "Serif Bold 13";
+  const auto legacy = common_ui::linkPanelPresentation(
+      lines, {}, {}, metrics, theme, config, {}, cache);
+  EXPECT_EQ(legacy.theme.font(ui::FontRole::Label).family, "Serif Bold");
+  EXPECT_FLOAT_EQ(legacy.theme.font(ui::FontRole::Label).points, 13);
+  config.font.clear();
+  const auto empty = common_ui::linkPanelPresentation(lines, {}, {}, metrics,
+                                                      theme, config, {}, cache);
+  EXPECT_EQ(empty.theme.font(ui::FontRole::Label),
+            theme.font(ui::FontRole::Label));
+  for (std::size_t i = 0; i < ui::kFontRoleCount; ++i)
+    EXPECT_EQ(ui::fontRoleNamed(ui::kFontRoleNames[i]),
+              static_cast<ui::FontRole>(i));
+  EXPECT_FALSE(ui::fontRoleNamed("unknown").has_value());
+}
 } // namespace

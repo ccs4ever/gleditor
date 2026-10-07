@@ -19,6 +19,7 @@
 #include "common/xanadu/tension_layout.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
 #include <gleditor/radial_menu.hpp>
+#include <gleditor/ui/theme.hpp>
 
 #include <gleditor/cpp26.hpp>
 
@@ -123,6 +124,14 @@ inline constexpr std::string_view kDimAlternates     = "d.alternates";
 inline constexpr std::string_view kDimDefault        = "d.default";
 
 namespace settings {
+inline constexpr std::string_view kUiScale           = "ui.scale";
+inline constexpr std::string_view kUiFontScale       = "ui.fontScale";
+inline constexpr std::string_view kUiSafeMarginShare = "ui.safeMarginShare";
+inline constexpr std::string_view kUiMinFontPx       = "ui.minFontPx";
+inline constexpr std::string_view kUiMinTouchPx      = "ui.minTouchPx";
+[[nodiscard]] std::string uiFontFamilyKey(gleditor::ui::FontRole);
+[[nodiscard]] std::string uiFontPointsKey(gleditor::ui::FontRole);
+
 // Layout
 inline constexpr std::string_view kColumns      = "columns";
 inline constexpr std::string_view kPageWidthPx  = "pageWidthPx";
@@ -1089,7 +1098,8 @@ struct OverviewConfig {
  * with, so the two cannot drift.
  */
 struct LinkPanelConfig {
-  std::string font;
+  /// Named typography role, empty for label, or a legacy font description.
+  std::string font{"label"};
   std::uint16_t maxLines{3};
   float maxWidthShare{0.9F};
   float maxHeightShare{1.0F};
@@ -1149,6 +1159,9 @@ struct WorldCardConfig {
 };
 
 struct UIConfig {
+  float uiScale{1.0F}, uiFontScale{1.0F};
+  float uiSafeMarginShare{gleditor::ui::kSafeMarginShare};
+  gleditor::ui::Theme uiTheme;
   bool tabBarVisible{true};
   bool statusBarVisible{true};
   bool hypertimeMapVisible{false};

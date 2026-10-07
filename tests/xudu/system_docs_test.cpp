@@ -826,3 +826,81 @@ TEST(SystemDocsTest, WithheldSpanConsolidationLogic) {
 }
 
 } // namespace
+
+TEST(SystemDocsTest, UiTypographyDefaultsHaveNativeSchemaAndNotes) {
+  Store store;
+  xanadu::initializeSystemStore(store, SystemDocKind::UI);
+  const auto config = UIConfig::fromStore(store);
+  const UIConfig defaults;
+  EXPECT_FLOAT_EQ(config.uiScale, defaults.uiScale);
+  EXPECT_FLOAT_EQ(config.uiFontScale, defaults.uiFontScale);
+  EXPECT_FLOAT_EQ(config.uiSafeMarginShare, defaults.uiSafeMarginShare);
+  EXPECT_EQ(config.uiTheme, defaults.uiTheme);
+  EXPECT_EQ(config.linkPanel.font, "label");
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  EXPECT_TRUE(model.isValid());
+  for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
+    const auto role = static_cast<gleditor::ui::FontRole>(i);
+    for (const auto &key : {xanadu::settings::uiFontFamilyKey(role),
+                            xanadu::settings::uiFontPointsKey(role)}) {
+      const auto entry = model.find(key);
+      ASSERT_TRUE(entry.has_value()) << key;
+      EXPECT_FALSE(entry->notes.empty());
+      EXPECT_FALSE(entry->schema.alternatives.empty());
+      EXPECT_FALSE(entry->schema.alternatives.front().defaultValues.empty());
+    }
+  }
+  const auto fullText = store.textOf(store.primaryCurrentVersion());
+  EXPECT_NE(fullText.find("ui.font.caption"), std::string::npos);
+  EXPECT_NE(fullText.find("Document fonts remain in system://settings"),
+            std::string::npos);
+}
+
+TEST(SystemDocsTest,
+     UiTypographyReadsNativeEditsAndRejectsInvalidRuntimeSizes) {
+  Store store;
+  xanadu::initializeSystemStore(store, SystemDocKind::UI);
+  const auto edit = [&](std::string_view key, auto value) {
+    store.repointCurrentVersion(
+        xanadu::setSetting(store, store.primaryCurrentVersion(), key, value));
+  };
+  edit(xanadu::settings::kUiScale, 1.25);
+  edit(xanadu::settings::kUiFontScale, 1.5);
+  edit(xanadu::settings::kUiSafeMarginShare, .1);
+  edit(xanadu::settings::kUiMinFontPx, 11.0);
+  edit(xanadu::settings::kUiMinTouchPx, 48.0);
+  edit(xanadu::settings::uiFontFamilyKey(gleditor::ui::FontRole::Caption),
+       std::string{"Serif"});
+  edit(xanadu::settings::uiFontPointsKey(gleditor::ui::FontRole::Caption),
+       14.0);
+  auto config = UIConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(config.uiScale, 1.25F);
+  EXPECT_FLOAT_EQ(config.uiFontScale, 1.5F);
+  EXPECT_FLOAT_EQ(config.uiSafeMarginShare, .1F);
+  EXPECT_FLOAT_EQ(config.uiTheme.type.minFontPx, 11);
+  EXPECT_FLOAT_EQ(config.uiTheme.type.minTouchPx, 48);
+  EXPECT_EQ(config.uiTheme.font(gleditor::ui::FontRole::Caption).family,
+            "Serif");
+  EXPECT_FLOAT_EQ(config.uiTheme.font(gleditor::ui::FontRole::Caption).points,
+                  14);
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  EXPECT_TRUE(manifold.dimensionNamed(xanadu::kDimSchemas, store).has_value());
+  EXPECT_TRUE(manifold.dimensionNamed(xanadu::kDimNotes, store).has_value());
+  edit(xanadu::settings::kUiScale, -1.0);
+  edit(xanadu::settings::kUiFontScale, 0.0);
+  edit(xanadu::settings::kUiSafeMarginShare, .6);
+  edit(xanadu::settings::kUiMinFontPx, -2.0);
+  edit(xanadu::settings::kUiMinTouchPx, 0.0);
+  edit(xanadu::settings::uiFontFamilyKey(gleditor::ui::FontRole::Caption),
+       std::string{"  "});
+  edit(xanadu::settings::uiFontPointsKey(gleditor::ui::FontRole::Caption),
+       1e300);
+  config = UIConfig::fromStore(store);
+  const UIConfig defaults;
+  EXPECT_EQ(config.uiTheme, defaults.uiTheme);
+  EXPECT_FLOAT_EQ(config.uiScale, defaults.uiScale);
+  EXPECT_FLOAT_EQ(config.uiFontScale, defaults.uiFontScale);
+  EXPECT_FLOAT_EQ(config.uiSafeMarginShare, defaults.uiSafeMarginShare);
+  EXPECT_THROW(edit(xanadu::settings::kUiScale, std::string{"invalid"}),
+               std::invalid_argument);
+}

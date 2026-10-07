@@ -357,6 +357,7 @@ private:
   /// asynchronous, so the click cannot be answered in the frame that saw it.
   std::optional<std::pair<int, int>> awaitingClick;
   std::uint8_t awaitingClickButton{1};
+  std::optional<std::uint64_t> awaitingClickRequest;
   /// Whether that pending answer extends the selection rather than replacing
   /// the caret.
   bool awaitingDrag{};
@@ -401,7 +402,11 @@ private:
   std::vector<std::shared_ptr<Doc>> fadingDocs;
 
   std::uint64_t nextPickRequestId{1};
-  std::unordered_map<std::uint64_t, render::PickScene> pickScenes;
+  struct PickRequest {
+    render::PickScene scene;
+    std::optional<gleditor::ui::PointerPickTarget> origin;
+  };
+  std::unordered_map<std::uint64_t, PickRequest> pickScenes;
   /// Last tag reported to the log, so that hovering over one object does not
   /// print a line per frame.
   render::PickingTag reportedPick{};
@@ -458,7 +463,12 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
-  void requestPick(RenderState &state, int x, int y);
+  std::optional<std::uint64_t> requestPick(
+      RenderState &state, int x, int y,
+      std::optional<gleditor::ui::PointerPickTarget> origin = std::nullopt);
+  bool requestClick(RenderState &, const AppState::PendingPointerPick &,
+                    bool drag = false);
+  void clickAt(RenderState &, int x, int y);
 
 public:
   void pickThen(int x, int y, PickAnswer then) override;
@@ -479,8 +489,8 @@ private:
   /// Insert anything typed since the last frame at the caret.
   void applyTypedText(RenderState &state);
   /// Place the caret from a picking result that answered a click.
-  void placeCaretFromPick(RenderState &state,
-                          const render::PickingResult &pick);
+  void placeCaretFromPick(RenderState &state, const render::PickingResult &pick,
+                          const gleditor::ui::PointerPickTarget &origin);
   /// Turn driver diagnostics recorded since the last frame into notifications.
   /// The device has already logged them; this is what puts them on screen.
   void collectDiagnostics(RenderState &state);

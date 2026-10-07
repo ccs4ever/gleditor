@@ -30,6 +30,19 @@
 
 namespace xanadu {
 
+std::string settings::uiFontFamilyKey(gleditor::ui::FontRole role) {
+  return "ui.font." +
+         std::string(
+             gleditor::ui::kFontRoleNames.at(static_cast<std::size_t>(role))) +
+         ".family";
+}
+std::string settings::uiFontPointsKey(gleditor::ui::FontRole role) {
+  return "ui.font." +
+         std::string(
+             gleditor::ui::kFontRoleNames.at(static_cast<std::size_t>(role))) +
+         ".points";
+}
+
 std::string defaultSystemDocSchema(const SystemDocKind kind) {
   switch (kind) {
   case SystemDocKind::Keymap:
@@ -193,6 +206,16 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "visible. Default is true.\n"
            "hypertimeMapVisible: Flag indicating whether hypertime graph "
            "overlay is open. Default is false.\n"
+           "ui.scale and ui.fontScale: Positive finite geometry and typography "
+           "multipliers; both default to 1. ui.safeMarginShare: Safe-area "
+           "margin fraction, 0 to 0.5, default 0.05. ui.minFontPx and "
+           "ui.minTouchPx: Positive finite minimum font and touch sizes in "
+           "pixels, defaults 9 and 44.\n"
+           "ui.font.caption, ui.font.label, ui.font.body, ui.font.title and "
+           "ui.font.mono: Each role has family and points settings. Defaults "
+           "are Sans 10, Sans 12, Sans 12, Sans Bold 18 and Monospace 12. "
+           "Family must be nonempty; point size must be positive and finite. "
+           "Document fonts remain in system://settings.\n"
            "Input and text presentation: FocusManager owns scope registration, "
            "activation order and modal isolation. Each modal blocks background "
            "input and permits only configured global commands. Labels use "
@@ -230,8 +253,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "storePanel.maxWidthShare and storePanel.maxHeightShare: Maximum "
            "shares of safe width and height, range 0.1 to 1. Width defaults "
            "are 0.9 and height defaults are 1.\n"
-           "linkPanel.font: Font override of the selected-link panel. An empty "
-           "default follows the label typography role. Explicit fonts follow "
+           "linkPanel.font: Caption, label, body, title or mono role name "
+           "(lowercase); default is label. Empty also follows label. Legacy "
+           "explicit font descriptions remain accepted and follow "
            "display and font scales.\n"
            "linkPanel.maxLines: Maximum wrapped description lines; default 3, "
            "range 1 to 20. linkPanel.maxWidthShare and "
@@ -286,6 +310,13 @@ std::string defaultSystemDocNotes(const SystemDocKind kind) {
   case SystemDocKind::UI:
     return "Notes\n\n"
            "User Annotations and Customization Record:\n"
+           "Edit ui.scale or ui.fontScale to resize chrome independently of "
+           "documents. Set ui.font.<role>.family and ui.font.<role>.points "
+           "to customize caption, label, body, title or mono. Each setting's "
+           "native d.schemas and d.notes ranks describe its value and "
+           "defaults. "
+           "Choose a role in linkPanel.font to keep that panel following live "
+           "typography; existing explicit font descriptions still work.\n\n"
            "Labels grow with UI and font scales. Increase pouchPanel.widthPx "
            "or "
            "drag the pouch drawer edge to give labels more room. World cards "
@@ -748,6 +779,19 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                                       .defaultValues = {double{px}}}}};
     };
     specs = {
+        lengthSpec(settings::kUiScale, "Positive finite UI geometry scale",
+                   modals.uiScale),
+        lengthSpec(settings::kUiFontScale, "Positive finite UI font scale",
+                   modals.uiFontScale),
+        lengthSpec(settings::kUiSafeMarginShare,
+                   "Safe-area margin fraction, range 0 to 0.5",
+                   modals.uiSafeMarginShare),
+        lengthSpec(settings::kUiMinFontPx,
+                   "Positive finite minimum readable font size in pixels",
+                   modals.uiTheme.type.minFontPx),
+        lengthSpec(settings::kUiMinTouchPx,
+                   "Positive finite minimum touch target in logical pixels",
+                   modals.uiTheme.type.minTouchPx),
         lengthSpec(settings::kSatelloidCardWidthPx,
                    "SatelloidCard preferred width in logical pixels",
                    modals.satelloidCard.widthPx),
@@ -910,9 +954,9 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
-        {.name  = std::string(settings::kLinkPanelFont),
-         .notes = "Font override of the selected-link panel; empty follows the "
-                  "label role",
+        {.name    = std::string(settings::kLinkPanelFont),
+         .notes   = "Typography role name (caption, label, body, title, mono); "
+                    "empty follows label; legacy font descriptions are accepted",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {panel.font}}}},
         {.name    = std::string(settings::kLinkPanelMaxLines),
@@ -971,6 +1015,17 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                       .defaultValues = {std::int64_t{
                           panel.memberHighlightColour}}}}},
     };
+    for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
+      const auto role  = static_cast<gleditor::ui::FontRole>(i);
+      const auto &font = modals.uiTheme.font(role);
+      specs.push_back({.name    = settings::uiFontFamilyKey(role),
+                       .notes   = "Nonempty typography font family and style",
+                       .schemas = {{.expectedTypes = {"string"},
+                                    .defaultValues = {font.family}}}});
+      specs.push_back(lengthSpec(
+          settings::uiFontPointsKey(role),
+          "Positive finite typography font size in points", font.points));
+    }
     break;
   }
 
@@ -3083,7 +3138,31 @@ UIConfig UIConfig::fromStore(const Store &store) {
   if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
     return cfg;
   }
-  const auto model = SystemStoreModel::fromStore(store);
+  const auto model    = SystemStoreModel::fromStore(store);
+  const auto positive = [&model](std::string_view key, float fallback) {
+    const auto value =
+        static_cast<float>(model.getDouble(key, double{fallback}));
+    return std::isfinite(value) && value > 0 ? value : fallback;
+  };
+  cfg.uiScale       = positive(settings::kUiScale, cfg.uiScale);
+  cfg.uiFontScale   = positive(settings::kUiFontScale, cfg.uiFontScale);
+  const auto margin = static_cast<float>(model.getDouble(
+      settings::kUiSafeMarginShare, double{cfg.uiSafeMarginShare}));
+  if (std::isfinite(margin) && margin >= 0 && margin <= .5F)
+    cfg.uiSafeMarginShare = margin;
+  cfg.uiTheme.type.minFontPx =
+      positive(settings::kUiMinFontPx, cfg.uiTheme.type.minFontPx);
+  cfg.uiTheme.type.minTouchPx =
+      positive(settings::kUiMinTouchPx, cfg.uiTheme.type.minTouchPx);
+  for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
+    const auto role = static_cast<gleditor::ui::FontRole>(i);
+    auto &font      = cfg.uiTheme.fonts[i];
+    const auto family =
+        model.getString(settings::uiFontFamilyKey(role), font.family);
+    if (family.find_first_not_of(" \t\r\n") != std::string::npos)
+      font.family = family;
+    font.points = positive(settings::uiFontPointsKey(role), font.points);
+  }
   cfg.tabBarVisible =
       model.getBool(settings::kTabBarVisible, cfg.tabBarVisible);
   cfg.statusBarVisible =

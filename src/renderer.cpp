@@ -94,6 +94,7 @@ void Renderer::createPipeline(RenderState &state) const {
 void Renderer::newDoc(RenderState &state) {
   const auto docPtr = Doc::create(getPtr(), device.get(), glm::mat4(1.0));
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
+  this->state->focusManager.invalidatePointerPicks();
   state.docs.push_back(docPtr->getPtr());
   state.pickTargets.push_back({});
 }
@@ -186,6 +187,7 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   // Off the open list first, so that a pick or a keystroke arriving during the
   // fade cannot land on a document that is on its way out.
   auto departing = state.docs[which];
+  this->state->focusManager.invalidatePointerPicks();
   state.docs.erase(state.docs.begin() + static_cast<std::ptrdiff_t>(which));
   state.pickTargets.erase(state.pickTargets.begin() +
                           static_cast<std::ptrdiff_t>(which));
@@ -321,6 +323,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
           return std::unexpected{refused.error()};
         }
       }));
+  this->state->focusManager.invalidatePointerPicks();
   state.docs.push_back(docPtr->getPtr());
   state.pickTargets.push_back(source.pickSemanticTarget());
 }
@@ -512,21 +515,12 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // taking the next step.
   if (settled) {
     const auto serviceClickOrDrag = [&]() {
-      if (this->state->clickPending.exchange(false)) {
-        const auto clickX   = this->state->clickX.load();
-        const auto clickY   = this->state->clickY.load();
-        awaitingClick       = std::pair{clickX, clickY};
-        awaitingClickButton = this->state->clickButton.load();
-        awaitingDrag        = false;
-        requestPick(state, clickX, clickY);
+      if (const auto click = this->state->takePointerPick()) {
+        requestClick(state, *click);
         return true;
       }
-      if (this->state->dragPending.exchange(false)) {
-        const auto dragX = this->state->dragX.load();
-        const auto dragY = this->state->dragY.load();
-        awaitingClick    = std::pair{dragX, dragY};
-        awaitingDrag     = true;
-        requestPick(state, dragX, dragY);
+      if (const auto drag = this->state->takePointerPick(true)) {
+        requestClick(state, *drag, true);
         return true;
       }
       return false;
@@ -558,25 +552,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
     } else if (awaitingStep) {
       // Waiting on a readback: nothing else may issue one, or the answer this
       // step is waiting for would be lost among the others.
-    } else if (this->state->clickPending.exchange(false)) {
-      // A click takes priority over the hover query: only one read is issued
-      // per frame, and the click is the one somebody is waiting on.
-      const auto clickX   = this->state->clickX.load();
-      const auto clickY   = this->state->clickY.load();
-      awaitingClick       = std::pair{clickX, clickY};
-      awaitingClickButton = this->state->clickButton.load();
-      awaitingDrag        = false;
-      requestPick(state, clickX, clickY);
-    } else if (this->state->dragPending.exchange(false)) {
-      // A drag reuses the click machinery; only what happens with the answer
-      // differs, so the pending pixel is remembered as a drag. The initial
-      // click is deliberately serviced first so extendTo() always has the
-      // press location as its anchor.
-      const auto dragX = this->state->dragX.load();
-      const auto dragY = this->state->dragY.load();
-      awaitingClick    = std::pair{dragX, dragY};
-      awaitingDrag     = true;
-      requestPick(state, dragX, dragY);
+    } else if (const auto click = this->state->takePointerPick()) {
+      requestClick(state, *click);
+    } else if (const auto drag = this->state->takePointerPick(true)) {
+      requestClick(state, *drag, true);
     } else if (!this->state->scriptReportsPicks()) {
       requestPick(state, this->state->mouseX, this->state->mouseY);
     }
@@ -716,15 +695,15 @@ void Renderer::reportBenchmark() const {
       fallback.first, fallback.second, inputBytes.first, inputBytes.second);
 }
 
-void Renderer::placeCaretFromPick(RenderState &state,
-                                  const render::PickingResult &pick) {
-  if (this->state->focusManager.modalActive()) {
+void Renderer::placeCaretFromPick(
+    RenderState &state, const render::PickingResult &pick,
+    const gleditor::ui::PointerPickTarget &origin) {
+  if (!this->state->focusManager.acceptsPointerPick(origin)) return;
+  if (origin.modal) {
     draggingSelection = false;
-    if (!awaitingDrag) {
-      if (auto *scope = this->state->focusManager.focusedScope()) {
-        std::ignore = scope->pointerPick(pick, state);
-      }
-    }
+    if (!awaitingDrag)
+      std::ignore =
+          this->state->focusManager.dispatchPointerPick(origin, pick, state);
     return;
   }
   // Every outcome is reported, including the ones that place no caret. The
@@ -817,20 +796,21 @@ void Renderer::collectPickingResults(RenderState &state) {
     }
     auto resolvedPick = *pick;
     resolvedPick.overlayWidgetId =
-        render::resolveOverlayWidget(scene.mapped(), resolvedPick.tag);
+        render::resolveOverlayWidget(scene.mapped().scene, resolvedPick.tag);
     if (render::tagKindOverlay == resolvedPick.tag.kind) {
       const std::uint64_t key =
           (static_cast<std::uint64_t>(resolvedPick.tag.kind) << 60U) |
           (static_cast<std::uint64_t>(resolvedPick.tag.docIndex) << 46U) |
           (static_cast<std::uint64_t>(resolvedPick.tag.pageIndex) << 32U) |
           resolvedPick.tag.clusterIndex;
-      if (const auto found = scene.mapped().overlays.find(key);
-          found != scene.mapped().overlays.end()) {
+      if (const auto found = scene.mapped().scene.overlays.find(key);
+          found != scene.mapped().scene.overlays.end()) {
         resolvedPick.semanticTarget = found->second;
       }
-    } else if (resolvedPick.tag.docIndex < scene.mapped().documents.size()) {
+    } else if (resolvedPick.tag.docIndex <
+               scene.mapped().scene.documents.size()) {
       resolvedPick.semanticTarget =
-          scene.mapped().documents[resolvedPick.tag.docIndex];
+          scene.mapped().scene.documents[resolvedPick.tag.docIndex];
     }
     lastPick = resolvedPick;
     if (const auto asked = std::ranges::find_if(pickAnswers,
@@ -843,12 +823,13 @@ void Renderer::collectPickingResults(RenderState &state) {
       pickAnswers.erase(asked);
       then(state, resolvedPick);
     }
-    if (awaitingClick && awaitingClick->first == pick->x &&
-        awaitingClick->second == pick->y) {
+    if (awaitingClickRequest == pick->requestId) {
       awaitingClick.reset();
+      awaitingClickRequest.reset();
       auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
-      placeCaretFromPick(state, pickWithButton);
+      if (scene.mapped().origin)
+        placeCaretFromPick(state, pickWithButton, *scene.mapped().origin);
       // An Input step finishes through the settle check instead, once the
       // frame after this answer is settled.
       if (awaitingStep && !awaitingInput) {
@@ -887,14 +868,50 @@ void Renderer::collectPickingResults(RenderState &state) {
   }
 }
 
-void Renderer::requestPick(RenderState &state, const int x, const int y) {
+std::optional<std::uint64_t>
+Renderer::requestPick(RenderState &state, const int x, const int y,
+                      std::optional<gleditor::ui::PointerPickTarget> origin) {
   const auto requestId = nextPickRequestId++;
-  if (!device->requestPickingTag(x, y, requestId)) {
-    return;
-  }
+  if (!device->requestPickingTag(x, y, requestId)) return std::nullopt;
   render::PickScene scene = state.overlayPickScene;
   scene.documents         = state.pickTargets;
-  pickScenes.emplace(requestId, std::move(scene));
+  pickScenes.emplace(requestId,
+                     PickRequest{std::move(scene), std::move(origin)});
+  return requestId;
+}
+bool Renderer::requestClick(RenderState &state,
+                            const AppState::PendingPointerPick &click,
+                            bool drag) {
+  if (!this->state->focusManager.acceptsPointerPick(click.origin)) return false;
+  const auto request = requestPick(state, click.x, click.y, click.origin);
+  if (!request) return false;
+  awaitingClick        = std::pair{click.x, click.y};
+  awaitingClickButton  = click.button;
+  awaitingClickRequest = request;
+  awaitingDrag         = drag;
+  return true;
+}
+void Renderer::clickAt(RenderState &state, int x, int y) {
+  const auto delivery = this->state->focusManager.dispatchPointerWithPick(
+      {.phase  = gleditor::ui::PointerPhase::Press,
+       .button = 1,
+       .x      = static_cast<float>(x),
+       .y      = static_cast<float>(y)});
+  if (delivery.consumed) {
+    std::ignore = this->state->focusManager.dispatchPointer(
+        {.phase  = gleditor::ui::PointerPhase::Release,
+         .button = 1,
+         .x      = static_cast<float>(x),
+         .y      = static_cast<float>(y)});
+    if (!delivery.gpuPick) {
+      finishStepWhenSettled();
+      return;
+    }
+  }
+  awaitingStep = true;
+  const auto origin =
+      delivery.gpuPick.value_or(this->state->focusManager.pointerPickTarget());
+  if (!requestClick(state, {x, y, 1, origin})) finishStepWhenSettled();
 }
 
 /// Carry out the next step of the automation script, if the one before it has
@@ -966,18 +983,11 @@ void Renderer::advanceScript(RenderState &state) {
     const int x     = static_cast<int>((box.left + box.right) / 2);
     const int y     = static_cast<int>((box.top + box.bottom) / 2);
     std::cout << std::format("click-label \"{}\": {},{}\n", step.text, x, y);
-    awaitingClickButton = 1;
-    awaitingClick       = std::pair{x, y};
-    awaitingDrag        = false;
-    awaitingStep        = true;
-    requestPick(state, x, y);
+    clickAt(state, x, y);
     return;
   }
   case Kind::Click:
-    awaitingClick = std::pair{step.x, step.y};
-    awaitingDrag  = false;
-    awaitingStep  = true;
-    requestPick(state, step.x, step.y);
+    clickAt(state, step.x, step.y);
     return;
   case Kind::Command:
     // By name, so a script says what it means. The command queues its own
@@ -1287,6 +1297,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       awaitingDrag      = false;
       if (awaitingClick) {
         awaitingClick.reset();
+        awaitingClickRequest.reset();
         if (awaitingStep && !awaitingInput) {
           finishStepWhenSettled();
         }

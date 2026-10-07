@@ -2700,14 +2700,22 @@ int XuzzApp::run(const int argc, char **argv) {
     });
   };
 
+  const auto applyTypography = [state](const xudu::UIConfig &config) {
+    state->uiScale           = config.uiScale;
+    state->fontScale         = config.uiFontScale;
+    state->uiSafeMarginShare = config.uiSafeMarginShare;
+    state->uiTheme.store(
+        std::make_shared<const gleditor::ui::Theme>(config.uiTheme));
+  };
+
   // 8. System Store Change Watcher Callback
   session->setSystemDocChangedCallback(
       [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map, &linkPanel,
        &views, &overview, &storeObjectManager, &quotationOverlay,
        &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
        &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints,
-       state](const xudu::SystemDocKind kind, const xudu::Store &store) {
+       &bridgeCoordinator, &showKeyHints, state, applyTypography](
+          const xudu::SystemDocKind kind, const xudu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xudu::systemDocUri(kind)
                   << ")\n";
         const auto model = xudu::SystemStoreModel::fromStore(store);
@@ -2751,6 +2759,7 @@ int XuzzApp::run(const int argc, char **argv) {
         }
         case xudu::SystemDocKind::UI: {
           const auto uiCfg = xudu::UIConfig::fromStore(store);
+          applyTypography(uiCfg);
           radialMenu->setConfig(uiCfg.radialMenu);
           linkPanel.setConfig(uiCfg.linkPanel);
           overview.setConfig(uiCfg.overview);
@@ -2792,6 +2801,7 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto &uiStore = session->store(uiIdx);
     if (uiStore.opCount() > 0) {
       const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
+      applyTypography(uiCfg);
       radialMenu->setConfig(uiCfg.radialMenu);
       linkPanel.setConfig(uiCfg.linkPanel);
       overview.setConfig(uiCfg.overview);

@@ -278,3 +278,34 @@ TEST(ScreenOverlayFocusTest,
   EXPECT_EQ(manager.focusedNode(), 20U);
 }
 } // namespace
+
+TEST(ScreenOverlayFocusTest, cpuPressReleaseNeverAlsoRequestsGpuActivation) {
+  ScreenOverlay overlay(focusPanel());
+  const UiMetrics metrics{.screenWidth = 960, .screenHeight = 720};
+  const auto scene = overlay.prepare(metrics, Theme{});
+  FocusManager manager;
+  auto registration = manager.registerScope(overlay);
+  int actions       = 0;
+  overlay.setActionHandler([&](const auto &) { ++actions; });
+  const auto *box = scene->layout.find(10);
+  ASSERT_NE(box, nullptr);
+  const float x = box->rect.left + box->rect.width * .5F;
+  const float y =
+      metrics.screenHeight - box->rect.bottom - box->rect.height * .5F;
+  const auto down = manager.dispatchPointerWithPick(
+      {.phase = PointerPhase::Press, .button = 1, .x = x, .y = y});
+  EXPECT_TRUE(down.consumed);
+  EXPECT_FALSE(down.gpuPick);
+  EXPECT_EQ(actions, 0);
+  EXPECT_TRUE(manager.dispatchPointer(
+      {.phase = PointerPhase::Release, .button = 1, .x = x, .y = y}));
+  EXPECT_EQ(actions, 1);
+  // Releasing away cancels a button press instead of activating it on GPU
+  // press.
+  const auto again = manager.dispatchPointerWithPick(
+      {.phase = PointerPhase::Press, .button = 1, .x = x, .y = y});
+  EXPECT_FALSE(again.gpuPick);
+  EXPECT_TRUE(manager.dispatchPointer(
+      {.phase = PointerPhase::Release, .button = 1, .x = 0, .y = 0}));
+  EXPECT_EQ(actions, 1);
+}

@@ -124,6 +124,7 @@ public:
     return keyPressed(event.key, event.mods);
   }
 
+  [[nodiscard]] bool usesGpuPointerPicking() const override { return true; }
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);

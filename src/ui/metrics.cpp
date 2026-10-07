@@ -110,6 +110,11 @@ Rect placeNear(Rect anchor, float width, float height, Rect safeArea,
   }
   return clampToSafeArea(placed, safe);
 }
+std::optional<FontRole> fontRoleNamed(std::string_view name) {
+  const auto found = std::ranges::find(kFontRoleNames, name);
+  if (found == kFontRoleNames.end()) return {};
+  return static_cast<FontRole>(found - kFontRoleNames.begin());
+}
 Theme withFontOverride(Theme resolved, FontRole role,
                        std::string_view override) {
   if (override.empty()) return resolved;

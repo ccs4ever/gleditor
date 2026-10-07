@@ -203,18 +203,34 @@ struct AppState {
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
   std::atomic_int mouseY;
-  /// Pixel of a click the render thread has not yet answered. Held as one
-  /// pending position rather than a queue: a second click before the first is
-  /// resolved supersedes it, which is what a user clicking twice means.
-  std::atomic_int clickX{-1};
-  std::atomic_int clickY{-1};
-  std::atomic<std::uint8_t> clickButton{1};
-  std::atomic_bool clickPending{false};
-  /// Pixel a drag has reached with the button still down. Answered like a
-  /// click, but it extends the selection instead of replacing it.
-  std::atomic_int dragX{-1};
-  std::atomic_int dragY{-1};
-  std::atomic_bool dragPending{false};
+  /// Most recent press anchor for application commands; not a pending pick.
+  std::atomic_int clickX{-1}, clickY{-1};
+  struct PendingPointerPick {
+    int x{}, y{};
+    std::uint8_t button{1};
+    gleditor::ui::PointerPickTarget origin;
+  };
+  // A position and its originating opening must be transferred together.
+  std::mutex pointerPickMutex;
+  std::optional<PendingPointerPick> pendingClick, pendingDrag;
+  void queuePointerPick(PendingPointerPick pick, bool drag = false) {
+    const std::scoped_lock lock(pointerPickMutex);
+    if (!drag) {
+      clickX = pick.x;
+      clickY = pick.y;
+    }
+    (drag ? pendingDrag : pendingClick) = std::move(pick);
+  }
+  [[nodiscard]] std::optional<PendingPointerPick>
+  takePointerPick(bool drag = false) {
+    const std::scoped_lock lock(pointerPickMutex);
+    return std::exchange(drag ? pendingDrag : pendingClick, std::nullopt);
+  }
+  void clearPointerPicks() {
+    const std::scoped_lock lock(pointerPickMutex);
+    pendingClick.reset();
+    pendingDrag.reset();
+  }
   /// Text typed since the render thread last drained it, in UTF-8. Guarded by
   /// its own mutex: SDL delivers it on the event thread and the edit is
   /// applied on the render thread.

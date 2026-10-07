@@ -43,6 +43,9 @@ public:
   [[nodiscard]] std::uint64_t openedSequence() const;
   virtual bool keyPressed(const KeyEvent &) { return false; }
   virtual void textTyped(std::string_view) {}
+  /// Retained screen controls handle press/release through pointerEvent.
+  /// World-space scopes can opt into asynchronous GPU picking instead.
+  [[nodiscard]] virtual bool usesGpuPointerPicking() const { return false; }
   /// GPU picks arrive on the render thread, separately from pointer capture.
   virtual bool pointerPick(const render::PickingResult &, RenderState &) {
     return false;
@@ -77,6 +80,17 @@ private:
   std::atomic<std::uint64_t> requestedNode_{0};
   std::atomic<bool> active_{false};
   std::atomic<std::uint64_t> opened_{0};
+};
+
+/// No raw scope pointer survives an asynchronous GPU readback.
+struct PointerPickTarget {
+  std::uint64_t registration{}, sequence{}, revision{};
+  bool modal{};
+  bool operator==(const PointerPickTarget &) const = default;
+};
+struct PointerDispatch {
+  bool consumed{};
+  std::optional<PointerPickTarget> gpuPick;
 };
 
 struct FocusSnapshot {
@@ -131,6 +145,13 @@ public:
   bool dispatchKey(const KeyEvent &);
   bool dispatchText(std::string_view);
   bool dispatchPointer(const PointerEvent &);
+  [[nodiscard]] PointerDispatch dispatchPointerWithPick(const PointerEvent &);
+  [[nodiscard]] PointerPickTarget pointerPickTarget();
+  [[nodiscard]] bool acceptsPointerPick(const PointerPickTarget &);
+  /// Invalidate delayed clicks when the rendered document membership changes.
+  void invalidatePointerPicks();
+  bool dispatchPointerPick(const PointerPickTarget &,
+                           const render::PickingResult &, RenderState &);
   [[nodiscard]] bool permitsCommand(std::string_view);
   void setGlobalCommandAllowList(std::vector<std::string>);
   void focusLost();

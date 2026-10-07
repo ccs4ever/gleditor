@@ -20,6 +20,56 @@
 
 namespace xudu {
 
+const CollaboratorNameplatePresentation &CollaboratorNameplate::prepare(
+    std::string_view name, std::string_view identity, glm::vec2 anchor,
+    const gleditor::ui::UiMetrics &metrics, const gleditor::ui::Theme &theme,
+    std::string_view fontOverride) {
+  namespace ui           = gleditor::ui;
+  const bool textChanged = name_ != name || identity_ != identity;
+  if (textChanged) {
+    name_                         = name;
+    identity_                     = identity;
+    presentation_.accessibleLabel = name_ + " ✦ " + identity_;
+  }
+  const auto description = ui::scaledFontDescription(
+      fontOverride, ui::FontRole::Caption, metrics, theme);
+  const bool fontChanged =
+      !font_ || presentation_.fontDescription != description;
+  if (fontChanged) {
+    presentation_.fontDescription = description;
+    font_ = gleditor::text::FontManager::instance().getFont(description);
+  }
+  if (textChanged || fontChanged) constraints_.reset();
+  const auto safe = metrics.pixelSafeArea();
+  if (!std::isfinite(anchor.x) || !std::isfinite(anchor.y) || safe.width <= 0 ||
+      safe.height <= 0) {
+    presentation_.bounds = presentation_.content = {};
+    return presentation_;
+  }
+  const float padding =
+      std::min(std::max(2.F, font_->metrics().lineHeight * .25F),
+               std::min(safe.width, safe.height) * .25F);
+  const float height =
+      std::min(safe.height, font_->metrics().lineHeight + 2 * padding);
+  const gleditor::text::TextFit fit{.maxWidthPx  = safe.width - 2 * padding,
+                                    .maxHeightPx = height - 2 * padding,
+                                    .at = gleditor::text::EllipsisAt::Middle};
+  if (textChanged || fontChanged || !constraints_ || *constraints_ != fit) {
+    presentation_.fitted =
+        shaping_.fitted(presentation_.accessibleLabel, font_, fit);
+    constraints_ = fit;
+  }
+  const float width =
+      std::min(safe.width, presentation_.fitted.widthPx + 2 * padding);
+  presentation_.bounds = ui::clampToSafeArea(
+      {anchor.x - padding, anchor.y + padding, width, height}, safe);
+  const auto &box       = presentation_.bounds;
+  presentation_.content = {box.left + padding, box.bottom + padding,
+                           std::max(0.F, box.width - 2 * padding),
+                           std::max(0.F, box.height - 2 * padding)};
+  return presentation_;
+}
+
 CollaboratorCaretOverlay::CollaboratorCaretOverlay(Session &session,
                                                    RendererRef renderer,
                                                    std::string fontName)
@@ -40,8 +90,11 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
   if (!enabled_ || !canvas_) {
     return;
   }
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
   canvas_->setFontDescription(gleditor::ui::scaledFontDescription(
-      fontName_, gleditor::ui::FontRole::Caption, ctx.metrics, ctx.theme));
+      fontName_, gleditor::ui::FontRole::Caption, metrics, ctx.theme));
   canvas_->clear();
 
   // 1. Drain pending live operations arriving over BEP 10 swarm wire
@@ -88,8 +141,14 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
     return;
   }
 
+  const auto &collaborators = session_.collaborators();
+  std::erase_if(visuals_, [&](const auto &entry) {
+    const auto found = collaborators.find(entry.first);
+    return found == collaborators.end() ||
+           now - found->second.lastSeen >= std::chrono::seconds{15};
+  });
   std::size_t renderedCount = 0;
-  for (const auto &[key, collab] : session_.collaborators()) {
+  for (const auto &[key, collab] : collaborators) {
     if (renderedCount >= 16) {
       break;
     }
@@ -186,39 +245,38 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
     canvas_->addLine(vis.bottom.x, vis.bottom.y, vis.top.x, vis.top.y, 2.5F,
                      coreCol);
 
-    // Floating Author Nameplate badge: [Name ✦ fp]
-    std::string fpShort = "anon";
-    if (!collab.fingerprint.empty()) {
-      fpShort = collab.fingerprint.substr(
-          0, std::min<std::size_t>(8, collab.fingerprint.size()));
-    } else if (!collab.authorScrollKey.empty()) {
-      fpShort = collab.authorScrollKey.substr(
-          0, std::min<std::size_t>(8, collab.authorScrollKey.size()));
-    }
-    const std::string badgeText = collab.name + " \u2726 " + fpShort;
-    const float badgeW = static_cast<float>(badgeText.size()) * 7.5F + 16.0F;
-    constexpr float badgeH = 18.0F;
-    const float badgeX     = vis.top.x - 4.0F;
-    const float badgeY     = vis.top.y + 4.0F;
-
+    const auto identity   = !collab.fingerprint.empty()
+                                ? std::string_view{collab.fingerprint}
+                            : !collab.authorScrollKey.empty()
+                                ? std::string_view{collab.authorScrollKey}
+                                : std::string_view{"anon"};
+    const auto &nameplate = vis.nameplate.prepare(
+        collab.name, identity, vis.top, metrics, ctx.theme, fontName_);
+    const auto &box           = nameplate.bounds;
     const auto bgA            = static_cast<std::uint8_t>(220.0F * vis.alpha);
     const std::uint32_t bgCol = 0x0F172A00 | bgA;
-    canvas_->addRect(badgeX, badgeY, badgeW, badgeH, bgCol);
-    canvas_->addLine(badgeX, badgeY, badgeX + badgeW, badgeY, 1.0F, coreCol);
-    canvas_->addLine(badgeX, badgeY + badgeH, badgeX + badgeW, badgeY + badgeH,
-                     1.0F, coreCol);
-    canvas_->addLine(badgeX, badgeY, badgeX, badgeY + badgeH, 1.0F, coreCol);
-    canvas_->addLine(badgeX + badgeW, badgeY, badgeX + badgeW, badgeY + badgeH,
-                     1.0F, coreCol);
-
-    canvas_->addText(ctx.state, badgeX + 6.0F, badgeY + badgeH - 4.0F,
-                     badgeText, coreCol, bgCol);
+    if (box.width > 0 && box.height > 0) {
+      canvas_->pushClip(box);
+      canvas_->addRect(box.left, box.bottom, box.width, box.height, bgCol);
+      canvas_->addLine(box.left, box.bottom, box.left + box.width, box.bottom,
+                       1.F, coreCol);
+      canvas_->addLine(box.left, box.bottom + box.height, box.left + box.width,
+                       box.bottom + box.height, 1.F, coreCol);
+      canvas_->addLine(box.left, box.bottom, box.left, box.bottom + box.height,
+                       1.F, coreCol);
+      canvas_->addLine(box.left + box.width, box.bottom, box.left + box.width,
+                       box.bottom + box.height, 1.F, coreCol);
+      canvas_->addText(ctx.state, nameplate.content, nameplate.fitted, coreCol,
+                       bgCol);
+      canvas_->popClip();
+    }
 
     renderedCount++;
   }
 
   if (renderedCount > 0) {
     const auto ortho = glm::ortho(0.0F, screenW, 0.0F, screenH, -1.0F, 1.0F);
+    ctx.state.glyphCache.flush();
     canvas_->commit();
     canvas_->draw(ctx.state, ortho);
   }

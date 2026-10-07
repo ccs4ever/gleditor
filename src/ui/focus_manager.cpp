@@ -482,6 +482,10 @@ bool FocusManager::dispatchText(std::string_view text) {
   return true;
 }
 bool FocusManager::dispatchPointer(const PointerEvent &event) {
+  return dispatchPointerWithPick(event).consumed;
+}
+PointerDispatch
+FocusManager::dispatchPointerWithPick(const PointerEvent &event) {
   auto entry = state_->refresh();
   {
     const std::lock_guard lock(state_->mutex);
@@ -491,7 +495,7 @@ bool FocusManager::dispatchPointer(const PointerEvent &event) {
     }
   }
   if (!entry.scope) {
-    return false;
+    return {};
   }
   if (event.phase == PointerPhase::Press) {
     const auto area    = entry.scope->pointerArea();
@@ -500,7 +504,7 @@ bool FocusManager::dispatchPointer(const PointerEvent &event) {
                                   event.y >= area->y + area->height);
     if (outside && entry.policy.modal) {
       if (entry.policy.outside == OutsidePointer::Block) {
-        return true;
+        return {.consumed = true};
       }
       entry.scope->cancel();
       {
@@ -512,13 +516,13 @@ bool FocusManager::dispatchPointer(const PointerEvent &event) {
         }
       }
       if (entry.policy.outside == OutsidePointer::Dismiss) {
-        return true;
+        return {.consumed = true};
       }
       const auto next = state_->refresh();
       if (next.id == entry.id) {
-        return true;
+        return {.consumed = true};
       }
-      return dispatchPointer(event);
+      return dispatchPointerWithPick(event);
     }
   }
   const bool handled = entry.scope->pointerEvent(event);
@@ -533,8 +537,39 @@ bool FocusManager::dispatchPointer(const PointerEvent &event) {
     }
   }
   state_->refresh();
-  return handled || entry.policy.modal;
+  PointerDispatch result{.consumed = handled || entry.policy.modal};
+  if (!handled && entry.policy.modal && event.phase == PointerPhase::Press &&
+      event.button == 1 && entry.scope->usesGpuPointerPicking()) {
+    const auto origin = pointerPickTarget();
+    if (origin.registration == entry.id && origin.sequence == entry.sequence)
+      result.gpuPick = origin;
+  }
+  return result;
 }
+PointerPickTarget FocusManager::pointerPickTarget() {
+  state_->refresh();
+  const std::lock_guard lock(state_->mutex);
+  const auto entry = state_->find(state_->focused);
+  return {entry.id, entry.sequence, state_->revision,
+          entry.id != 0 && entry.policy.modal};
+}
+bool FocusManager::acceptsPointerPick(const PointerPickTarget &target) {
+  return pointerPickTarget() == target;
+}
+void FocusManager::invalidatePointerPicks() {
+  const std::lock_guard lock(state_->mutex);
+  ++state_->revision;
+}
+bool FocusManager::dispatchPointerPick(const PointerPickTarget &target,
+                                       const render::PickingResult &pick,
+                                       RenderState &renderState) {
+  const auto entry = state_->refresh();
+  if (!target.modal || !acceptsPointerPick(target) || !entry.scope ||
+      !entry.scope->usesGpuPointerPicking())
+    return false;
+  return entry.scope->pointerPick(pick, renderState);
+}
+
 bool FocusManager::dispatch(const InputEvent &event) {
   return std::visit(
       [this](const auto &value) {
@@ -583,6 +618,7 @@ void FocusManager::focusLost() {
       }
     }
     state_->captures.clear();
+    ++state_->revision;
     state_->mods = KeyMods::None;
   }
   for (const auto &[scope, pointer] : scopes) {

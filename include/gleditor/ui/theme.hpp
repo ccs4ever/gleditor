@@ -7,6 +7,7 @@
 #include <glm/ext/vector_float4.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace gleditor::ui {
 [[nodiscard]] inline std::uint32_t rgba(const glm::vec4 &colour) {
@@ -17,6 +18,8 @@ inline constexpr float kSafeMarginShare = 0.05F;
 enum class FontRole : unsigned char { Caption, Label, Body, Title, Mono };
 inline constexpr std::size_t kFontRoleCount =
     static_cast<std::size_t>(FontRole::Mono) + 1;
+inline constexpr std::array<std::string_view, kFontRoleCount> kFontRoleNames{
+    "caption", "label", "body", "title", "mono"};
 struct FontSpec {
   std::string family{"Sans"};
   float points{12.0F};

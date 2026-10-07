@@ -5,6 +5,7 @@
 #include <gleditor/a11y/publisher.hpp> // IWYU pragma: associated
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <sstream>
 #include <tuple>
@@ -13,6 +14,8 @@
 
 #include <gleditor/a11y/platform.hpp>
 #include <gleditor/ui/focus_manager.hpp>
+
+#include "../text/unicode_breaks.hpp"
 
 namespace gleditor::a11y {
 
@@ -56,6 +59,32 @@ const char *roleName(const Role role) {
   return "?";
 }
 
+// Diagnostics must remain bounded even when a document node owns megabytes.
+// A prefix longer than the output budget supplies the next character needed to
+// distinguish a genuine grapheme boundary from libunibreak's end-of-input mark.
+constexpr std::size_t diagnosticValueBytes = 256;
+constexpr std::size_t diagnosticScanBytes  = diagnosticValueBytes * 2;
+
+std::size_t diagnosticValueEnd(std::string_view value) {
+  if (value.size() <= diagnosticValueBytes) return value.size();
+  auto scanSize = std::min(value.size(), diagnosticScanBytes);
+  while (scanSize < value.size() && scanSize > 0 &&
+         (static_cast<unsigned char>(value[scanSize]) & 0xc0U) == 0x80U)
+    --scanSize;
+  std::array<char, diagnosticScanBytes> boundaries{};
+  text::detail::initializeUnicodeBreaks();
+  set_graphemebreaks_utf8(reinterpret_cast<const utf8_t *>(value.data()),
+                          scanSize, nullptr, boundaries.data());
+  const auto characters =
+      text::detail::decodeCharacters<text::detail::UnicodeCharacter>(
+          value.substr(0, scanSize));
+  text::detail::retainConjuncts(characters,
+                                std::span<char>(boundaries.data(), scanSize));
+  auto end = std::min(diagnosticValueBytes, scanSize - 1);
+  while (end > 0 && boundaries[end - 1] != GRAPHEMEBREAK_BREAK) --end;
+  return end;
+}
+
 /// One line of describe(), without the children.
 void describeNode(std::ostringstream &out, const Node &node,
                   const std::size_t depth) {
@@ -64,7 +93,10 @@ void describeNode(std::ostringstream &out, const Node &node,
     out << " \"" << node.label << "\"";
   }
   if (!node.value.empty()) {
-    out << " = \"" << node.value << "\"";
+    const auto end = diagnosticValueEnd(node.value);
+    out << " = \"" << std::string_view(node.value).substr(0, end);
+    if (end < node.value.size()) out << "…";
+    out << "\"";
   }
   if (!node.placeholder.empty()) {
     out << " (" << node.placeholder << ")";

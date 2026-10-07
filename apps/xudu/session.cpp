@@ -1,6 +1,7 @@
 #include "xudu/session.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1315,6 +1316,33 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
   if (opened) {
     if (sysStore->currentVersions().empty() && !sysStore->latest().isZero()) {
       sysStore->repointCurrentVersion(sysStore->latest());
+    }
+    if (kind == SystemDocKind::UI) {
+      const auto before   = sysStore->primaryCurrentVersion();
+      const auto manifold = sysStore->rebuildManifold(before);
+      // An explicit document permascroll may differ from the one that wrote
+      // these settings. Never mint replacements for names we cannot resolve.
+      const auto groups = manifold.dimensionNamed(kDimGroups, *sysStore);
+      const bool readable =
+          groups &&
+          manifold.linked(sysStore->homeCell(), *groups) != zigzag::noCell &&
+          std::ranges::all_of(
+              std::array{kDimVars, kDimValues, kDimSubgroups, kDimClone,
+                         kDimNotes, kDimSchemas, kDimAlternates, kDimDefault},
+              [&](std::string_view name) {
+                return manifold.dimensionNamed(name, *sysStore).has_value();
+              });
+      if (readable) {
+        const auto updated = ensureAllSettings(*sysStore, before, kind);
+        if (updated != before) {
+          sysStore->repointCurrentVersion(updated);
+          sysStore->save(dir.string());
+        }
+      } else {
+        GLEDITOR_LOG_WARN("xudu.settings",
+                          "UI settings structure cannot be resolved with the "
+                          "active permascroll; leaving the store unchanged");
+      }
     }
   } else {
     // Fresh system store: initialize 3-page store with schema, notes, and

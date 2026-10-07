@@ -17,10 +17,35 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/metrics.hpp>
 
 namespace xudu {
 
 class Session;
+
+struct CollaboratorNameplatePresentation {
+  gleditor::ui::Rect bounds, content;
+  std::string accessibleLabel, fontDescription;
+  gleditor::text::FittedText fitted;
+};
+
+/// Pointer movement changes placement, while unchanged text constraints retain
+/// shaping. The complete author identity remains separate from visual fitting.
+class CollaboratorNameplate {
+public:
+  [[nodiscard]] const CollaboratorNameplatePresentation &
+  prepare(std::string_view name, std::string_view identity, glm::vec2 anchor,
+          const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &,
+          std::string_view fontOverride = {});
+
+private:
+  CollaboratorNameplatePresentation presentation_;
+  std::string name_, identity_;
+  gleditor::text::FontFacePtr font_;
+  std::optional<gleditor::text::TextFit> constraints_;
+  gleditor::text::ShapingCache shaping_{2};
+};
 
 /**
  * @class CollaboratorCaretOverlay
@@ -48,6 +73,7 @@ private:
     glm::vec2 top{0.0F, 0.0F};
     float alpha{1.0F};
     bool initialized{false};
+    CollaboratorNameplate nameplate;
   };
 
   Session &session_;

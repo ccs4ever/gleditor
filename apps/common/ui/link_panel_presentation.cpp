@@ -23,8 +23,14 @@ LinkPanelPresentation linkPanelPresentation(
   if (buttons.size() != actionIds.size())
     throw std::invalid_argument("Link panel action identity count mismatch");
   LinkPanelPresentation result;
-  result.theme =
-      ui::withFontOverride(sourceTheme, ui::FontRole::Label, config.font);
+  result.theme = sourceTheme;
+  if (const auto role = ui::fontRoleNamed(config.font)) {
+    result.theme.fonts[static_cast<std::size_t>(ui::FontRole::Label)] =
+        sourceTheme.font(*role);
+  } else {
+    result.theme =
+        ui::withFontOverride(sourceTheme, ui::FontRole::Label, config.font);
+  }
   const auto description =
       metrics.fontDescription(ui::FontRole::Label, result.theme);
   const auto font =

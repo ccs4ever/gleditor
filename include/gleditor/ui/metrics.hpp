@@ -40,6 +40,7 @@ struct UiMetrics {
 [[nodiscard]] Rect clampToSafeArea(Rect pixels, Rect safeArea);
 [[nodiscard]] Rect placeNear(Rect anchor, float width, float height,
                              Rect safeArea, float gap = 0.0F);
+[[nodiscard]] std::optional<FontRole> fontRoleNamed(std::string_view);
 /// Empty overrides use the live role. Explicit legacy descriptions keep their
 /// family, style and point size while following UI and font scale changes.
 [[nodiscard]] Theme withFontOverride(Theme, FontRole, std::string_view);

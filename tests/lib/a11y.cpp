@@ -283,6 +283,74 @@ TEST(A11yPublisherTest, aTreeCanBeReadAsText) {
   EXPECT_TRUE(text.contains("focus: Xudu")) << text;
 }
 
+TEST(A11yPublisherTest, diagnosticValuesAreBoundedWithoutChangingAtValues) {
+  class ValueSource : public a11y::Source {
+  public:
+    std::string value;
+    void describe(a11y::Builder &into) override {
+      auto &node = into.add(0, a11y::Role::TextInput);
+      node.label = "value";
+      node.value = value;
+      into.contribute(into.id(0));
+    }
+    std::uint64_t accessibilityRevision() const override { return 1; }
+    bool performAction(std::uint64_t, a11y::Action, std::string_view) override {
+      return false;
+    }
+  };
+  const std::string combining = "e\u0301";
+  const std::string family    = "👨‍👩‍👧‍👦";
+  const std::string flag      = "🇨🇦";
+  const std::vector<std::pair<std::string, std::string>> cases{
+      {"short " + family, "short " + family},
+      {std::string(1024 * 1024, 'x'), std::string(256, 'x') + "…"},
+      {std::string(255, 'a') + combining + std::string(300, 'b'),
+       std::string(255, 'a') + "…"},
+      {std::string(250, 'a') + family + std::string(300, 'b'),
+       std::string(250, 'a') + "…"},
+      {std::string(250, 'a') + "क्ष" + std::string(300, 'b'),
+       std::string(250, 'a') + "…"},
+      {std::string(252, 'a') + flag + std::string(300, 'b'),
+       std::string(252, 'a') + "…"},
+      {std::string(255, 'a') + "漢" + std::string(300, 'b'),
+       std::string(255, 'a') + "…"},
+  };
+  for (const auto &[value, preview] : cases) {
+    ValueSource source;
+    source.value = value;
+    a11y::Publisher publisher("test", "gleditor", "0");
+    publisher.addSource(&source, 16);
+    publisher.rebuild(800, 600);
+    const auto tree = publisher.snapshot();
+    ASSERT_EQ(tree.find(a11y::Ids::of(16, 0))->value, value);
+    const auto diagnostic = a11y::Publisher::describe(tree);
+    EXPECT_TRUE(diagnostic.contains(" = \"" + preview + "\""));
+    EXPECT_LT(diagnostic.size(), 512U);
+    EXPECT_EQ(publisher.snapshot().find(a11y::Ids::of(16, 0))->value, value);
+  }
+}
+
+TEST(A11yPublisherTest, diagnosticPreviewDoesNotSplitAnOversizedGrapheme) {
+  class ValueSource : public a11y::Source {
+  public:
+    void describe(a11y::Builder &into) override {
+      auto &node = into.add(0, a11y::Role::TextInput);
+      node.value = "e";
+      for (int index = 0; index < 1000; ++index) node.value += "\u0301";
+      into.contribute(into.id(0));
+    }
+    std::uint64_t accessibilityRevision() const override { return 1; }
+    bool performAction(std::uint64_t, a11y::Action, std::string_view) override {
+      return false;
+    }
+  } source;
+  a11y::Publisher publisher("test", "gleditor", "0");
+  publisher.addSource(&source);
+  publisher.rebuild(800, 600);
+  EXPECT_TRUE(
+      a11y::Publisher::describe(publisher.snapshot()).contains(" = \"…\""));
+}
+
 TEST(A11yPublisherTest, withNoPlatformThereIsNothingToDoAndNothingBreaks) {
   // A build without AccessKit, and a machine with no assistive technology
   // running, are the same case here: the tree is still built, and everything

@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
+#include "mocks/device.hpp"
 #include <gleditor/app.hpp>
 #include <gleditor/form.hpp>
+#include <gleditor/render_state.hpp>
 #include <gleditor/ui/focus_manager.hpp>
 
 #include <atomic>
@@ -663,3 +665,107 @@ TEST(FocusTraversalTest, DelayedScopeGainDoesNotLeaveTheBackgroundFocused) {
 }
 
 } // namespace
+
+namespace {
+struct GpuScope : Scope {
+  int picks{};
+  bool usesGpuPointerPicking() const override { return true; }
+  bool pointerPick(const render::PickingResult &, RenderState &) override {
+    ++picks;
+    return true;
+  }
+};
+} // namespace
+
+TEST(FocusManagerTest, blockedOutsidePressNeverRequestsGpuPicking) {
+  FocusManager manager;
+  GpuScope scope;
+  scope.area  = InputArea{10, 20, 100, 100};
+  auto handle = manager.registerScope(scope);
+  scope.activate();
+  const auto blocked = manager.dispatchPointerWithPick(
+      {.phase = PointerPhase::Press, .button = 1, .x = 500, .y = 500});
+  EXPECT_TRUE(blocked.consumed);
+  EXPECT_FALSE(blocked.gpuPick);
+  EXPECT_TRUE(scope.pointers.empty());
+  const auto inside = manager.dispatchPointerWithPick(
+      {.phase = PointerPhase::Press, .button = 1, .x = 50, .y = 50});
+  ASSERT_TRUE(inside.gpuPick);
+  EXPECT_TRUE(manager.acceptsPointerPick(*inside.gpuPick));
+}
+
+TEST(FocusManagerTest, delayedGpuPressIsBoundToRegistrationAndOpening) {
+  testing::NiceMock<MockRenderDevice> device;
+  ON_CALL(device, textureLimits())
+      .WillByDefault(testing::Return(render::TextureLimits{2048, 10}));
+  ON_CALL(device, createTextureArray)
+      .WillByDefault(testing::Return(render::TextureHandle{1}));
+  RenderState renderState{&device};
+  AppState state;
+  auto &manager = state.focusManager;
+  GpuScope scope, other;
+  auto handle      = manager.registerScope(scope);
+  auto otherHandle = manager.registerScope(other);
+  scope.activate();
+  const auto press = [&] {
+    return manager.dispatchPointerWithPick(
+        {.phase = PointerPhase::Press, .button = 1, .x = 50, .y = 50});
+  };
+  auto delivery = press();
+  ASSERT_TRUE(delivery.gpuPick);
+  EXPECT_TRUE(manager.dispatchPointerPick(*delivery.gpuPick, {}, renderState));
+  EXPECT_EQ(scope.picks, 1);
+  // Closure before submission must discard the pending press.
+  state.queuePointerPick({50, 50, 1, *delivery.gpuPick});
+  scope.deactivate();
+  const auto pending = state.takePointerPick();
+  ASSERT_TRUE(pending);
+  EXPECT_FALSE(manager.acceptsPointerPick(pending->origin));
+  EXPECT_FALSE(manager.dispatchPointerPick(pending->origin, {}, renderState));
+  // Reopening before polling must also invalidate the original opening.
+  scope.activate();
+  EXPECT_FALSE(manager.dispatchPointerPick(*delivery.gpuPick, {}, renderState));
+  delivery = press();
+  ASSERT_TRUE(delivery.gpuPick);
+  other.activate();
+  EXPECT_FALSE(manager.dispatchPointerPick(*delivery.gpuPick, {}, renderState));
+  EXPECT_EQ(other.picks, 0);
+  other.deactivate();
+  delivery = press();
+  ASSERT_TRUE(delivery.gpuPick);
+  manager.focusLost();
+  EXPECT_FALSE(manager.dispatchPointerPick(*delivery.gpuPick, {}, renderState));
+  delivery = press();
+  ASSERT_TRUE(delivery.gpuPick);
+  handle.reset();
+  auto replacement = manager.registerScope(scope);
+  EXPECT_FALSE(manager.dispatchPointerPick(*delivery.gpuPick, {}, renderState));
+  EXPECT_EQ(scope.picks, 1);
+}
+
+TEST(FocusManagerTest, queuedPressSupersedesPositionAndOriginTogether) {
+  AppState state;
+  const PointerPickTarget first{1, 2, 3, true};
+  const PointerPickTarget second{4, 5, 6, false};
+  state.queuePointerPick({10, 20, 1, first});
+  state.queuePointerPick({30, 40, 2, second});
+  const auto pending = state.takePointerPick();
+  ASSERT_TRUE(pending);
+  EXPECT_EQ(pending->x, 30);
+  EXPECT_EQ(pending->y, 40);
+  EXPECT_EQ(pending->button, 2);
+  EXPECT_EQ(pending->origin, second);
+  EXPECT_FALSE(state.takePointerPick());
+}
+
+TEST(FocusManagerTest, changedDocumentMembershipInvalidatesBackgroundPick) {
+  FocusManager manager;
+  Scope pane;
+  auto registration          = manager.addPane(pane);
+  const auto clickedDocument = manager.pointerPickTarget();
+  EXPECT_FALSE(clickedDocument.modal);
+  EXPECT_TRUE(manager.acceptsPointerPick(clickedDocument));
+  manager.invalidatePointerPicks();
+  EXPECT_FALSE(manager.acceptsPointerPick(clickedDocument));
+  EXPECT_TRUE(manager.acceptsPointerPick(manager.pointerPickTarget()));
+}

@@ -83,6 +83,7 @@ public:
   void focusedNodeChanged(std::uint32_t) override;
   bool activateNode(std::uint32_t) override;
   void textTyped(std::string_view) override {}
+  [[nodiscard]] bool usesGpuPointerPicking() const override { return true; }
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
     return picked(pick, state);
