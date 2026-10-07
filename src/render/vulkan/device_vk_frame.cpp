@@ -638,14 +638,14 @@ void DeviceVK::endFrame() {
   submit.commandBufferCount   = 1;
   submit.pCommandBuffers      = &frame.commands;
   submit.signalSemaphoreCount = 1;
-  submit.pSignalSemaphores    = &frame.renderFinished;
+  submit.pSignalSemaphores    = &presentationReady[acquiredImage];
   check(vkQueueSubmit(graphicsQueue, 1, &submit, frame.inFlight),
         "vkQueueSubmit");
 
   VkPresentInfoKHR present{};
   present.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
   present.waitSemaphoreCount = 1;
-  present.pWaitSemaphores    = &frame.renderFinished;
+  present.pWaitSemaphores    = &presentationReady[acquiredImage];
   present.swapchainCount     = 1;
   present.pSwapchains        = &swapchain;
   present.pImageIndices      = &acquiredImage;

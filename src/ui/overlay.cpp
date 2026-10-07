@@ -14,9 +14,6 @@
 namespace gleditor::ui {
 namespace {
 std::atomic<std::uint32_t> identities{1};
-std::uint32_t rgba(const glm::vec4 &colour) {
-  return color::packRgba(colour.r, colour.g, colour.b, colour.a);
-}
 Widget *findWidget(Widget &widget, WidgetId id) {
   if (widget.id == id) return &widget;
   for (auto &child : widget.children)

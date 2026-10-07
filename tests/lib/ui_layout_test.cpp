@@ -290,3 +290,21 @@ TEST(UiLayoutTest, ResponsivePropertyMatrixKeepsEveryBoxInsideSafeArea) {
   }
 }
 } // namespace
+
+TEST(UiMetricsTest, LegacyFontOverridesScaleWithoutLosingFamilyOrStyle) {
+  using namespace gleditor::ui;
+  const UiMetrics metrics{
+      .contentScale = 1.25F, .userScale = 2, .fontScale = 1.5F};
+  Theme theme;
+  EXPECT_EQ(scaledFontDescription({}, FontRole::Label, metrics, theme),
+            "Sans 45");
+  EXPECT_EQ(
+      scaledFontDescription("Serif Bold 10", FontRole::Label, metrics, theme),
+      "Serif Bold 37.5");
+  EXPECT_EQ(scaledFontDescription("Serif", FontRole::Label, metrics, theme),
+            "Serif 60");
+  EXPECT_EQ(
+      scaledFontDescription("Sans 0.1", FontRole::Caption, UiMetrics{}, theme),
+      "Sans 6.75");
+  EXPECT_EQ(theme.font(FontRole::Label).points, 12);
+}

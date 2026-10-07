@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <thread>
 
 #include <gleditor/text/font.hpp>
 #include <gleditor/text/layout.hpp>
@@ -805,4 +806,22 @@ TEST(TextLayoutTest, TrailingSpacesDoNotShiftARightAlignedLinesInk) {
   // The visible ink ("Hi") sits at the same right-aligned x regardless of
   // how many trailing spaces follow it before the newline.
   EXPECT_FLOAT_EQ(plain.lines.front().left, trailed.lines.front().left);
+}
+
+TEST(TextLayoutTest, RetainedFontSurvivesItsCreatingThread) {
+  gleditor::text::FontFacePtr retained;
+  std::thread creator([&] {
+    retained = gleditor::text::FontManager::instance().getFont("Sans 12");
+  });
+  creator.join();
+  ASSERT_TRUE(retained);
+  EXPECT_EQ(FT_Load_Char(retained->face(), 'A', FT_LOAD_DEFAULT), 0);
+  EXPECT_GT(retained->face()->glyph->advance.x, 0);
+  auto *buffer = hb_buffer_create();
+  hb_buffer_add_utf8(buffer, "retained", -1, 0, -1);
+  hb_buffer_guess_segment_properties(buffer);
+  hb_shape(retained->hbFont(), buffer, nullptr, 0);
+  EXPECT_GT(hb_buffer_get_length(buffer), 0U);
+  hb_buffer_destroy(buffer);
+  retained.reset();
 }

@@ -6,6 +6,7 @@
 #define GLEDITOR_EDITOR_CONFIG_HPP
 
 #include <cstdint>
+#include <gleditor/ui/theme.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -31,6 +32,10 @@ struct EditorSettings {
 struct EditorConfig {
   EditorSettings settings;
   SpatialConfig spatial;
+  float uiScale{1.0F};
+  float uiFontScale{1.0F};
+  float uiSafeMarginShare{ui::kSafeMarginShare};
+  ui::Theme uiTheme;
   std::vector<std::string> modalGlobalCommands{"quit"};
   std::vector<std::pair<std::string, std::string>> keymap;
   std::string userNotes;

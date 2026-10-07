@@ -29,8 +29,13 @@
 
 #include <gleditor/canvas.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/doc_switcher.hpp>
+#include <gleditor/floating_toolbar_3d.hpp>
+#include <gleditor/form.hpp>
 #include <gleditor/logging.hpp>
+#include <gleditor/media_widget.hpp>
 #include <gleditor/paths.hpp>
+#include <gleditor/radial_menu.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/shader_source.hpp>
 #include <gleditor/render/types.hpp>
@@ -38,6 +43,8 @@
 #include <gleditor/sdl_wrap.hpp>
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text/font.hpp>
+#include <gleditor/text_source.hpp>
+#include <gleditor/toast.hpp>
 #include <gleditor/ui/overlay.hpp>
 
 namespace {
@@ -475,6 +482,130 @@ void runOverlayScenario(const Options &options,
             << heightOverflow << '\t' << ink << '\n';
 }
 
+void runCoreScenarios(const Options &options,
+                      const std::vector<std::string> &labels,
+                      render::RenderDevice &device, RenderState &state) {
+  ch::Timeline timeline;
+  const glm::mat4 projection{1};
+  gleditor::ui::UiMetrics metrics{.screenWidth  = screenWidth,
+                                  .screenHeight = screenHeight};
+  const gleditor::ui::Theme theme;
+  const auto measure = [&](std::string_view mode, auto &&contribute) {
+    const auto draw = [&] {
+      if (!device.beginFrame()) throw std::runtime_error("core frame skipped");
+      state.beginPickScene();
+      gleditor::FrameContext frame{.state          = state,
+                                   .viewProjection = projection,
+                                   .screenWidth    = screenWidth,
+                                   .screenHeight   = screenHeight,
+                                   .timeline       = timeline,
+                                   .metrics        = metrics,
+                                   .theme          = theme};
+      contribute(frame);
+      state.glyphCache.flush();
+      device.endFrame();
+      device.waitIdle();
+    };
+    draw();
+    Samples samples;
+    for (int index = 0; index < options.frames + options.warmup; ++index) {
+      gleditor::text::ShapingStatsScope shaping;
+      const auto start = Clock::now();
+      draw();
+      const auto elapsed =
+          std::chrono::duration<double, std::milli>(Clock::now() - start)
+              .count();
+      if (index < options.warmup) continue;
+      const auto stats = shaping.stats();
+      samples.frameMs.push_back(elapsed);
+      samples.layouts.push_back(stats.layoutCalls);
+      samples.harfbuzz.push_back(stats.harfbuzzCalls);
+      samples.fallbacks.push_back(stats.fallbackCalls);
+      samples.bytes.push_back(stats.inputBytes);
+    }
+    if (!options.screenshotPrefix.empty())
+      writeScreenshot(device.captureColorTarget(), options.screenshotPrefix +
+                                                       "." + std::string(mode) +
+                                                       ".ppm");
+    // Mixed controls have no single label count; overflow is checked by their
+    // geometry tests rather than the standalone label-box detector.
+    std::cout << render::backendName(options.backend) << '\t' << mode << '\t'
+              << "theme-default" << '\t' << labels.size() << "\t0\t"
+              << options.frames << '\t' << std::fixed
+              << percentile(samples.frameMs, .50) << '\t'
+              << percentile(samples.frameMs, .95) << '\t'
+              << percentile(samples.layouts, .50) << '\t'
+              << percentile(samples.layouts, .95) << '\t'
+              << percentile(samples.harfbuzz, .50) << '\t'
+              << percentile(samples.harfbuzz, .95) << '\t'
+              << percentile(samples.fallbacks, .50) << '\t'
+              << percentile(samples.fallbacks, .95) << '\t'
+              << percentile(samples.bytes, .50) << "\t-1\t-1\t0\n";
+  };
+  const auto pipeline = glyphPipeline();
+  {
+    ToastOverlay toast(&device, {});
+    toast.createPipeline(pipeline);
+    toast.setPresentation(metrics, theme);
+    toast.post(render::DiagnosticSeverity::Warning, labels.front(), state);
+    measure("core-toast",
+            [&](auto &) { toast.draw(state, screenWidth, screenHeight); });
+  }
+  {
+    gleditor::Form form;
+    form.open(
+        "Publish a document with a long title and complete author identity",
+        labels.at(1 % labels.size()),
+        {{.label = "Title", .value = labels.front()},
+         {.label = "Author", .value = labels.at(3 % labels.size())},
+         {.label = "Passphrase",
+          .value = "private",
+          .kind  = gleditor::Form::Kind::Secret}},
+        [](const auto &) {});
+    form.deviceReady(device, pipeline);
+    measure("core-form", [&](auto &frame) { form.drawFrame(frame); });
+  }
+  {
+    for (std::size_t index = 0; index < 3; ++index)
+      state.docs.push_back(Doc::create(
+          {}, &device, glm::mat4{1},
+          gleditor::MemoryTextSource({}, labels.at(index % labels.size()))));
+    gleditor::DocumentSwitcher switcher;
+    switcher.deviceReady(device, pipeline);
+    measure("core-switcher", [&](auto &frame) { switcher.drawFrame(frame); });
+  }
+  {
+    gleditor::FloatingToolbar3D toolbar;
+    toolbar.deviceReady(device, pipeline);
+    measure("core-toolbar", [&](auto &frame) { toolbar.drawFrame(frame); });
+    state.docs.clear();
+  }
+  {
+    gleditor::RadialMenu radial;
+    auto config = gleditor::RadialConfig::createDefault();
+    for (std::size_t index = 0; index < config.actions.size(); ++index) {
+      config.actions[index].label = labels.at(index % labels.size());
+      config.actions[index].desc  = labels.at((index + 1) % labels.size());
+    }
+    radial.setConfig(std::move(config));
+    radial.open(screenWidth * .5F, screenHeight * .5F);
+    radial.deviceReady(device, pipeline);
+    measure("core-radial", [&](auto &frame) { radial.drawFrame(frame); });
+  }
+  {
+    auto player = std::make_shared<gleditor::MediaPlayer>(true);
+    auto stream = std::make_shared<gleditor::MemoryMediaStream>("DUMMY_AUDIO");
+    if (!player->load(gleditor::MediaResource::fromStream(stream, "Baseline")))
+      throw std::runtime_error("baseline media load failed");
+    gleditor::MediaWidget media{std::string{}, player};
+    media.setTitle(labels.front());
+    media.setScreenPosition(50, 150);
+    media.setSize(500, 280);
+    media.deviceReady(device, pipeline);
+    measure("core-media", [&](auto &frame) { media.drawFrame(frame); });
+  }
+}
+
 int run(const Options &options) {
   if (!render::backendCompiledIn(options.backend)) {
     std::cout << "unavailable backend=" << render::backendName(options.backend)
@@ -529,6 +660,7 @@ int run(const Options &options) {
                 state, canvas, projection, lineHeight,
                 gleditor::text::Overflow::Clip);
     runOverlayScenario(options, labels, *device, state);
+    runCoreScenarios(options, labels, *device, state);
     device->waitIdle();
   }
   device->shutdown();

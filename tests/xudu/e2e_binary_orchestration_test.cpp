@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +21,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <set>
 #include <string>
@@ -219,6 +221,37 @@ std::size_t countInkOnPaper(const fs::path &path) {
     }
   }
   return ink;
+}
+
+// The only saturated blue on this fixture is the selected text. Read its
+// drawn rectangle so changing chrome height cannot turn the drag into a tab
+// click.
+std::optional<std::array<int, 4>> selectionBounds(const fs::path &path) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width{}, height{}, maximum{};
+  in >> magic >> width >> height >> maximum;
+  in.get();
+  if (magic != "P6" || width <= 0 || height <= 0 || maximum != 255)
+    return std::nullopt;
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) * height * 3);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if (!in) return std::nullopt;
+  std::array bounds{width, height, -1, -1};
+  for (int y = 0; y < height; ++y)
+    for (int x = 0; x < width; ++x) {
+      const auto at = (static_cast<std::size_t>(y) * width + x) * 3;
+      const int r = rgb[at], g = rgb[at + 1], b = rgb[at + 2];
+      if (r > 100 && g > 100 && b - r > 40 && b - g > 30) {
+        bounds[0] = std::min(bounds[0], x);
+        bounds[1] = std::min(bounds[1], y);
+        bounds[2] = std::max(bounds[2], x);
+        bounds[3] = std::max(bounds[3], y);
+      }
+    }
+  if (bounds[2] < bounds[0]) return std::nullopt;
+  return bounds;
 }
 
 /**
@@ -1067,7 +1100,9 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
   const auto testRoot =
       fs::current_path() / "build" / "integration_workspace_selection_drag";
-  const auto dragTo = [&](const std::string &drop) {
+  std::string start;
+  const auto capture = testRoot / "selection.ppm";
+  const auto dragTo  = [&](const std::string &drop) {
     fs::remove_all(testRoot);
     fs::create_directories(testRoot);
     return executeProcess(
@@ -1076,8 +1111,9 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
-        " --chord Ctrl+Left --chord Ctrl+Shift+Right --drag 140,145:" +
-        drop);
+         " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
+        (drop.empty() ? " --capture " + capture.string()
+                       : " --drag " + start + ":" + drop));
   };
   const auto untitledOps = [&] {
     for (const auto &entry :
@@ -1093,11 +1129,19 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
     return std::string{};
   };
 
-  // Onto the page, just past "gamma".
-  const auto onPage = dragTo("196,145");
+  const auto calibration = dragTo("");
+  ASSERT_EQ(calibration.exitCode, 0) << calibration.output;
+  const auto selected = selectionBounds(capture);
+  ASSERT_TRUE(selected);
+  const auto [left, top, right, bottom] = *selected;
+  const auto y                          = (top + bottom) / 2;
+  start = std::to_string((left + right) / 2) + "," + std::to_string(y);
+  // Onto the same line, past the final word, using the drawn selection's size.
+  const auto onPage = dragTo(std::to_string(right + right - left + 2) + "," +
+                             std::to_string(y));
   ASSERT_EQ(onPage.exitCode, 0) << onPage.output;
   EXPECT_THAT(onPage.output,
-              ::testing::HasSubstr("drag 140,145: doc 1 [6,11)"));
+              ::testing::HasSubstr("drag " + start + ": doc 1 [6,11)"));
   const auto ops = untitledOps();
   // Spliced in at the end, and quoting the very bytes "beta " was typed as:
   // six bytes into the first insert's span.

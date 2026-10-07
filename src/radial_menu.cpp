@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <limits>
 #include <numbers>
+#include <stdexcept>
 #include <utility>
 
 #include <glm/ext/matrix_clip_space.hpp>
@@ -18,24 +20,15 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/font.hpp>
 
 namespace gleditor {
 
 namespace {
 
-constexpr std::uint32_t colRadialBg     = 0x0F172AF0U; // Frosted dark plate
-constexpr std::uint32_t colRadialBorder = 0x334155FFU; // Slate border
-constexpr std::uint32_t colRadialAccent = 0x38BDF8FFU; // Sky cyan
-constexpr std::uint32_t colPodBg        = 0x1E293BE0U; // Pod background
-constexpr std::uint32_t colPodActiveBg  = 0x0C4A6EE8U; // Active pod fill
-constexpr std::uint32_t colPodBorder    = 0x475569FFU; // Pod border
-constexpr std::uint32_t colPodText      = 0xF8FAFCFFU; // Bright glyph text
-constexpr std::uint32_t colHubBg        = 0x0284C7E8U; // Hub plate fill
-constexpr std::uint32_t colHubText      = 0xFFFFFFFFU; // Hub text
-
-constexpr float kPodWidth  = 36.0F;
-constexpr float kPodHeight = 30.0F;
-constexpr float kHubSize   = 44.0F;
+constexpr std::uint32_t menuNode        = 0x8000U;
+constexpr std::uint32_t hubNode         = menuNode + 99U;
+constexpr std::uint32_t firstActionNode = menuNode + 100U;
 
 } // namespace
 
@@ -155,12 +148,15 @@ RadialMenu::RadialMenu(std::string aFontName)
 RadialMenu::~RadialMenu() = default;
 
 void RadialMenu::setConfig(RadialConfig aConfig) {
+  const std::scoped_lock lock(guard_);
   config_     = std::move(aConfig);
   inSubWheel_ = false;
   revision_++;
+  ++pickingRevision_;
 }
 
 void RadialMenu::setRadius(const float outer, const float inner) {
+  const std::scoped_lock lock(guard_);
   config_.radius      = std::max(outer, 40.0F);
   config_.innerRadius = std::clamp(inner, 10.0F, config_.radius - 20.0F);
   revision_++;
@@ -170,12 +166,20 @@ void RadialMenu::open(const float screenX, const float screenY,
                       const std::uint32_t aDocIndex,
                       const std::uint32_t aCharOffset,
                       const std::uint32_t aCharLength) {
+  const std::scoped_lock lock(guard_);
+  openLocked(screenX, screenY, aDocIndex, aCharOffset, aCharLength);
+}
+
+void RadialMenu::openLocked(float screenX, float screenY,
+                            std::uint32_t aDocIndex, std::uint32_t aCharOffset,
+                            std::uint32_t aCharLength) {
   centerX_          = screenX;
   centerY_          = screenY;
   targetDocIndex_   = aDocIndex;
   targetCharOffset_ = aCharOffset;
   targetCharLength_ = aCharLength;
   open_             = true;
+  ++pickingRevision_;
   activate();
   inSubWheel_ = false;
   rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
@@ -187,6 +191,7 @@ void RadialMenu::openAtWindowCoords(const float windowX, const float windowY,
                                     const std::uint32_t aDocIndex,
                                     const std::uint32_t aCharOffset,
                                     const std::uint32_t aCharLength) {
+  const std::scoped_lock lock(guard_);
   const float fallbackW = lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F;
   const float fallbackH =
       lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F;
@@ -194,10 +199,14 @@ void RadialMenu::openAtWindowCoords(const float windowX, const float windowY,
   const float wy = (windowY <= 0.0F) ? (fallbackH * 0.5F) : windowY;
   const float canvasY =
       (lastScreenHeight_ > 0.0F) ? (lastScreenHeight_ - wy) : (fallbackH - wy);
-  open(wx, canvasY, aDocIndex, aCharOffset, aCharLength);
+  openLocked(wx, canvasY, aDocIndex, aCharOffset, aCharLength);
 }
 
 void RadialMenu::close() {
+  const std::scoped_lock lock(guard_);
+  closeLocked();
+}
+void RadialMenu::closeLocked() {
   if (open_) {
     open_ = false;
     deactivate();
@@ -210,18 +219,24 @@ void RadialMenu::toggle(const float screenX, const float screenY,
                         const std::uint32_t aDocIndex,
                         const std::uint32_t aCharOffset,
                         const std::uint32_t aCharLength) {
+  const std::scoped_lock lock(guard_);
   if (open_) {
-    close();
+    closeLocked();
   } else {
-    open(screenX, screenY, aDocIndex, aCharOffset, aCharLength);
+    openLocked(screenX, screenY, aDocIndex, aCharOffset, aCharLength);
   }
 }
 
 void RadialMenu::enterSubRadial(const std::size_t actionIndex) {
+  const std::scoped_lock lock(guard_);
+  enterSubRadialLocked(actionIndex);
+}
+void RadialMenu::enterSubRadialLocked(const std::size_t actionIndex) {
   if (actionIndex < config_.actions.size() &&
       !config_.actions[actionIndex].subActions.empty()) {
     inSubWheel_         = true;
     activeParentAction_ = actionIndex;
+    ++pickingRevision_;
     rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
                   lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
     revision_++;
@@ -229,8 +244,13 @@ void RadialMenu::enterSubRadial(const std::size_t actionIndex) {
 }
 
 void RadialMenu::exitSubRadial() {
+  const std::scoped_lock lock(guard_);
+  exitSubRadialLocked();
+}
+void RadialMenu::exitSubRadialLocked() {
   if (inSubWheel_) {
     inSubWheel_ = false;
+    ++pickingRevision_;
     rebuildLayout(lastScreenWidth_ > 0.0F ? lastScreenWidth_ : 1920.0F,
                   lastScreenHeight_ > 0.0F ? lastScreenHeight_ : 1080.0F);
     revision_++;
@@ -265,51 +285,73 @@ RadialMenu::resolveSector(const float dx, const float dy,
 
 void RadialMenu::deviceReady(render::RenderDevice &device,
                              const render::PipelineDesc &documentPipeline) {
-  canvas_ = std::make_unique<Canvas>(&device, fontName_);
-  canvas_->createPipeline(documentPipeline, false);
+  const std::scoped_lock lock(guard_);
+  device_   = &device;
+  pipeline_ = documentPipeline;
+  canvas_.reset();
+  drawnRevision_ = 0;
+  pickScope_     = 0;
 }
 
 bool RadialMenu::busy() const { return false; }
 
 void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   currentPods_.clear();
+  auto metrics         = metrics_;
+  metrics.screenWidth  = static_cast<int>(screenW);
+  metrics.screenHeight = static_cast<int>(screenH);
+  const auto safe      = metrics.pixelSafeArea();
+  const auto line      = font_ ? font_->metrics().lineHeight
+                               : metrics.fontPixels(ui::FontRole::Label, theme_);
+  const auto padding   = line * theme_.paddingEm;
+  const auto border    = std::max(1.0F, metrics.px(1));
+  const auto available =
+      std::max(0.0F, std::min(safe.width, safe.height) * .5F);
+  const auto plateRadius = std::min(
+      available, std::max(metrics.px(config_.radius), line + padding) + border);
+  outerRadiusPx_         = std::max(0.0F, plateRadius - border);
+  const auto touchRadius = metrics.px(theme_.type.minTouchPx) * .5F;
+  innerRadiusPx_         = std::clamp(
+      std::max({metrics.px(config_.innerRadius), line * .9F, touchRadius}),
+      0.0F, outerRadiusPx_ * .55F);
+  hubRadius_ = innerRadiusPx_ * .85F;
+  const auto placed =
+      ui::clampToSafeArea({centerX_ - plateRadius, centerY_ - plateRadius,
+                           plateRadius * 2, plateRadius * 2},
+                          safe);
+  const auto cX = placed.left + placed.width * .5F;
+  const auto cY = placed.bottom + placed.height * .5F;
+  hubSize_      = hubRadius_ * 2;
+  hubX_         = cX - hubRadius_;
+  hubY_         = cY - hubRadius_;
+  auto next     = std::make_shared<ui::LayoutResult>();
+  next->bounds  = placed;
+  next->boxes.push_back({menuNode, 0, placed, placed});
+  const ui::Rect hubRect{hubX_, hubY_, hubSize_, hubSize_};
+  const auto hubContent =
+      ui::clampToSafeArea({cX - hubRadius_ * .7F, cY - hubRadius_ * .7F,
+                           hubRadius_ * 1.4F, hubRadius_ * 1.4F},
+                          hubRect);
+  next->boxes.push_back({hubNode, menuNode, hubRect, hubContent, true});
+  next->focusOrder.push_back(hubNode);
 
-  // Convert SDL coords (0,0 top-left) to Canvas coords (0,0 bottom-left) if
-  // needed
-  float cX = centerX_;
-  float cY = centerY_;
-  if (cY < 0.0F || cY > screenH) {
-    cY = screenH * 0.5F;
-  }
-  if (cX < 0.0F || cX > screenW) {
-    cX = screenW * 0.5F;
-  }
-
-  // Ensure menu stays within screen viewport
-  const float r = config_.radius + kPodWidth * 0.5F + 8.0F;
-  cX            = std::clamp(cX, r, std::max(r, screenW - r));
-  cY            = std::clamp(cY, r, std::max(r, screenH - r));
-
-  hubX_    = cX - kHubSize * 0.5F;
-  hubY_    = cY - kHubSize * 0.5F;
-  hubSize_ = kHubSize;
-
-  const auto &actionList = inSubRadial()
+  const auto &actionList = inSubRadialLocked()
                                ? config_.actions[activeParentAction_].subActions
                                : config_.actions;
   const auto count       = actionList.size();
   if (count == 0) {
+    layout_ = std::move(next);
     return;
   }
 
-  const float rMid       = (config_.innerRadius + config_.radius) * 0.5F;
+  const float rMid       = (innerRadiusPx_ + outerRadiusPx_) * 0.5F;
   constexpr float twoPi  = 2.0F * std::numbers::pi_v<float>;
   constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
 
   const float sectorWidth  = twoPi / static_cast<float>(count);
   constexpr float gapAngle = 0.035F; // ~2 deg angular gap between wedge buttons
-  const float wedgeRIn     = config_.innerRadius + 4.0F;
-  const float wedgeROut    = config_.radius + 8.0F;
+  const float wedgeRIn     = innerRadiusPx_;
+  const float wedgeROut    = outerRadiusPx_;
 
   for (std::size_t i = 0; i < count; ++i) {
     const float angle =
@@ -319,10 +361,6 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
 
     PodLayout pod;
     pod.actionIndex = i;
-    pod.x           = podCenterX - kPodWidth * 0.5F;
-    pod.y           = podCenterY - kPodHeight * 0.5F;
-    pod.width       = kPodWidth;
-    pod.height      = kPodHeight;
     pod.angle       = angle;
     pod.startAngle  = angle - sectorWidth * 0.5F + gapAngle * 0.5F;
     pod.endAngle    = angle + sectorWidth * 0.5F - gapAngle * 0.5F;
@@ -332,9 +370,115 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
     pod.label =
         !actionList[i].icon.empty() ? actionList[i].icon : actionList[i].label;
     pod.desc =
-        !actionList[i].label.empty() ? actionList[i].label : actionList[i].desc;
+        !actionList[i].desc.empty() ? actionList[i].desc : actionList[i].label;
+    float left = cX, right = cX, bottom = cY, top = cY;
+    bool first         = true;
+    const auto include = [&](float at, float radius) {
+      const auto x = cX + radius * std::cos(at);
+      const auto y = cY + radius * std::sin(at);
+      if (first) {
+        left = right = x;
+        bottom = top = y;
+        first        = false;
+      } else {
+        left   = std::min(left, x);
+        right  = std::max(right, x);
+        bottom = std::min(bottom, y);
+        top    = std::max(top, y);
+      }
+    };
+    for (const auto radius : {wedgeRIn, wedgeROut}) {
+      include(pod.startAngle, radius);
+      include(pod.endAngle, radius);
+      for (int quarter = 0; quarter < 4; ++quarter) {
+        const auto at = static_cast<float>(quarter) * halfPi;
+        auto delta    = std::fmod(at - pod.startAngle + twoPi, twoPi);
+        if (delta <= pod.endAngle - pod.startAngle) include(at, radius);
+      }
+    }
+    const auto wedge =
+        ui::clampToSafeArea({left, bottom, right - left, top - bottom}, placed);
+    const auto textWidth = std::min(
+        wedge.width,
+        2 * rMid * std::sin(std::min(sectorWidth * .5F, halfPi)) * .8F);
+    const auto textHeight =
+        std::min(wedge.height, (wedgeROut - wedgeRIn) * .8F);
+    const auto content = ui::clampToSafeArea({podCenterX - textWidth * .5F,
+                                              podCenterY - textHeight * .5F,
+                                              textWidth, textHeight},
+                                             wedge);
+    pod.x              = wedge.left;
+    pod.y              = wedge.bottom;
+    pod.width          = wedge.width;
+    pod.height         = wedge.height;
+    const auto id      = firstActionNode + static_cast<std::uint32_t>(i);
+    next->boxes.push_back(
+        {id, menuNode, wedge, content, true, actionList[i].enabled, menuNode});
+    if (actionList[i].enabled) next->focusOrder.push_back(id);
     currentPods_.push_back(std::move(pod));
   }
+  layout_ = std::move(next);
+}
+
+std::shared_ptr<const ui::LayoutResult>
+RadialMenu::prepareLayout(const ui::UiMetrics &metrics,
+                          const ui::Theme &theme) {
+  const std::scoped_lock lock(guard_);
+  return prepareLayoutLocked(metrics, theme);
+}
+std::shared_ptr<const ui::LayoutResult>
+RadialMenu::prepareLayoutLocked(const ui::UiMetrics &metrics,
+                                const ui::Theme &theme) {
+  if (!layout_ || preparedRevision_ != revision_ || metrics_ != metrics ||
+      theme_ != theme) {
+    metrics_          = metrics;
+    theme_            = theme;
+    lastScreenWidth_  = static_cast<float>(metrics.screenWidth);
+    lastScreenHeight_ = static_cast<float>(metrics.screenHeight);
+    resolvedFont_ = ui::scaledFontDescription(fontName_, ui::FontRole::Label,
+                                              metrics_, theme_);
+    font_         = text::FontManager::instance().getFont(resolvedFont_);
+    rebuildLayout(static_cast<float>(metrics_.screenWidth),
+                  static_cast<float>(metrics_.screenHeight));
+    for (auto &pod : currentPods_) {
+      const auto *box = layout_->find(
+          firstActionNode + static_cast<std::uint32_t>(pod.actionIndex));
+      if (box && box->contentRect.width > 0 && box->contentRect.height > 0)
+        pod.fitted = shaping_.fitted(pod.label, font_,
+                                     {.maxWidthPx  = box->contentRect.width,
+                                      .maxHeightPx = box->contentRect.height,
+                                      .align       = TextAlign::Centre});
+    }
+    const auto *hub = layout_->find(hubNode);
+    hubFitted_      = {};
+    if (hub && hub->contentRect.width > 0 && hub->contentRect.height > 0)
+      hubFitted_ = shaping_.fitted(inSubRadialLocked() ? "BACK" : "XUDU", font_,
+                                   {.maxWidthPx  = hub->contentRect.width,
+                                    .maxHeightPx = hub->contentRect.height,
+                                    .align       = TextAlign::Centre});
+    if (!pickingTargets_ || builtPickingRevision_ != pickingRevision_) {
+      // A raw wedge index can mean a different action after configuration or
+      // submenu changes while an asynchronous readback is still outstanding.
+      const auto lastTag =
+          currentPods_.empty()
+              ? kRadialTagBack
+              : std::max(kRadialTagBack, currentPods_.back().tag);
+      auto targets = std::make_shared<std::vector<std::uint32_t>>(lastTag, 0);
+      const auto token = [&] {
+        if (nextPickingTarget_ == std::numeric_limits<std::uint32_t>::max())
+          throw std::length_error("Radial action picking identities exhausted");
+        return ++nextPickingTarget_;
+      };
+      for (const auto &pod : currentPods_) (*targets)[pod.tag - 1] = token();
+      (*targets)[(inSubRadialLocked() ? kRadialTagBack : kRadialTagHub) - 1] =
+          token();
+      pickingTargets_       = std::move(targets);
+      builtPickingRevision_ = pickingRevision_;
+    }
+    ++revision_;
+    preparedRevision_ = revision_;
+  }
+  return layout_;
 }
 
 void RadialMenu::drawDisc(Canvas &canvas, const float cX, const float cY,
@@ -547,71 +691,165 @@ void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
 }
 
 void RadialMenu::drawFrame(FrameContext &ctx) {
-  if (!open_ || !canvas_) {
-    return;
+  const std::scoped_lock lock(guard_);
+  lastScreenWidth_  = static_cast<float>(ctx.screenWidth);
+  lastScreenHeight_ = static_cast<float>(ctx.screenHeight);
+  if (!open_ || !device_ || !pipeline_) return;
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  static_cast<void>(prepareLayoutLocked(metrics, ctx.theme));
+  if (pickScope_ == 0)
+    pickScope_ = ctx.state.allocatePersistentOverlayPickScope();
+  ctx.state.bindOverlayWidgets(
+      render::packTagIdentity(render::tagKindOverlay, pickScope_, 0),
+      pickingTargets_);
+  const auto ortho =
+      glm::ortho(0.0F, lastScreenWidth_, 0.0F, lastScreenHeight_, -1.0F, 1.0F);
+  if (!canvas_ || canvasFont_ != resolvedFont_) {
+    canvas_ = std::make_unique<Canvas>(device_, resolvedFont_);
+    canvas_->createPipeline(*pipeline_, false);
+    canvas_->setIdentity(pickScope_, 0);
+    canvasFont_    = resolvedFont_;
+    drawnRevision_ = 0;
   }
-
-  const auto screenW = static_cast<float>(ctx.screenWidth);
-  const auto screenH = static_cast<float>(ctx.screenHeight);
-  lastScreenWidth_   = screenW;
-  lastScreenHeight_  = screenH;
-  const auto ortho   = glm::ortho(0.0F, screenW, 0.0F, screenH, -1.0F, 1.0F);
-
-  canvas_->clear();
-  rebuildLayout(screenW, screenH);
-
-  // 1. Draw circular frosted plate backdrop and outer circular plate bounds
-  const float cX = hubX_ + hubSize_ * 0.5F;
-  const float cY = hubY_ + hubSize_ * 0.5F;
-  drawDisc(*canvas_, cX, cY, config_.radius + 12.0F, colRadialBg,
-           colRadialBorder, 1.5F, 128);
-
-  // 2. Draw radial action wedges (true pie wedges of the circle)
-  const auto &actionList = inSubRadial()
-                               ? config_.actions[activeParentAction_].subActions
-                               : config_.actions;
-
-  const float rMid =
-      (config_.innerRadius + 4.0F + config_.radius + 8.0F) * 0.5F;
-
-  for (std::size_t i = 0; i < currentPods_.size() && i < actionList.size();
-       ++i) {
-    const auto &pod = currentPods_[i];
-    const auto &act = actionList[i];
-
-    canvas_->setTag(render::tagKindOverlay, pod.tag);
-    const std::uint32_t bgCol     = act.active ? colPodActiveBg : colPodBg;
-    const std::uint32_t borderCol = act.active ? colRadialAccent : colPodBorder;
-
-    drawWedge(*canvas_, cX, cY, pod.innerRadius, pod.outerRadius,
-              pod.startAngle, pod.endAngle, bgCol, borderCol, 1.2F);
-
-    // Label text / icon centered inside the wedge
-    const auto metrics         = canvas_->measureText(pod.label);
-    const float podCenterX     = cX + rMid * std::cos(pod.angle);
-    const float podCenterY     = cY + rMid * std::sin(pod.angle);
-    const float tX             = podCenterX - metrics.width * 0.5F;
-    const float tY             = podCenterY + metrics.height * 0.5F - 2.0F;
-    const std::uint32_t txtCol = act.active ? colRadialAccent : colPodText;
-    canvas_->addText(ctx.state, tX, tY, pod.label, txtCol, bgCol);
+  if (drawnRevision_ != preparedRevision_) {
+    canvas_->clear();
+    canvas_->pushClip(layout_->bounds);
+    const auto cX      = hubX_ + hubSize_ * .5F;
+    const auto cY      = hubY_ + hubSize_ * .5F;
+    const auto surface = ui::rgba(theme_.colours.surface);
+    const auto border  = ui::rgba(theme_.colours.border);
+    const auto accent  = ui::rgba(theme_.colours.accent);
+    canvas_->setTag(render::tagKindOverlay, 0);
+    drawDisc(*canvas_, cX, cY, layout_->bounds.width * .5F, surface, border,
+             std::max(1.0F, metrics_.px(1)), 128);
+    const auto &actions = inSubRadialLocked()
+                              ? config_.actions[activeParentAction_].subActions
+                              : config_.actions;
+    for (const auto &pod : currentPods_) {
+      const auto *box = layout_->find(
+          firstActionNode + static_cast<std::uint32_t>(pod.actionIndex));
+      if (!box) continue;
+      const auto &action = actions[pod.actionIndex];
+      const bool active  = action.active || focusedNode_ == box->id;
+      const auto fill    = active ? accent : surface;
+      canvas_->setTag(render::tagKindOverlay, pod.tag);
+      drawWedge(*canvas_, cX, cY, pod.innerRadius, pod.outerRadius,
+                pod.startAngle, pod.endAngle, fill, border,
+                std::max(1.0F, metrics_.px(1)));
+      auto textBox = box->contentRect;
+      textBox.bottom += (textBox.height - pod.fitted.heightPx) * .5F;
+      textBox.height = pod.fitted.heightPx;
+      canvas_->addText(ctx.state, textBox, pod.fitted,
+                       ui::rgba(action.enabled ? theme_.colours.text
+                                               : theme_.colours.disabled),
+                       fill);
+    }
+    canvas_->setTag(render::tagKindOverlay,
+                    inSubRadialLocked() ? kRadialTagBack : kRadialTagHub);
+    drawDisc(*canvas_, cX, cY, hubRadius_, accent, border,
+             std::max(1.0F, metrics_.px(1)), 32);
+    if (const auto *hub = layout_->find(hubNode)) {
+      auto textBox = hub->contentRect;
+      textBox.bottom += (textBox.height - hubFitted_.heightPx) * .5F;
+      textBox.height = hubFitted_.heightPx;
+      canvas_->addText(ctx.state, textBox, hubFitted_,
+                       ui::rgba(theme_.colours.text), accent);
+    }
+    canvas_->popClip();
+    ctx.state.glyphCache.flush();
+    canvas_->commit();
+    drawnRevision_ = preparedRevision_;
   }
-
-  // 3. Central Circular Hub Button
-  const std::uint32_t hubTag = inSubRadial() ? kRadialTagBack : kRadialTagHub;
-  canvas_->setTag(render::tagKindOverlay, hubTag);
-  drawDisc(*canvas_, cX, cY, hubRadius_, colHubBg, colRadialAccent, 1.5F, 32);
-
-  const std::string hubText = inSubRadial() ? "BACK" : "XUDU";
-  const auto hubMetrics     = canvas_->measureText(hubText);
-  const float htX           = cX - hubMetrics.width * 0.5F;
-  const float htY           = cY + hubMetrics.height * 0.5F - 2.0F;
-  canvas_->addText(ctx.state, htX, htY, hubText, colHubText, colHubBg);
-
-  canvas_->commit();
   canvas_->draw(ctx.state, ortho, 0.98F);
 }
 
+bool RadialMenu::finishDispatch(ActionDispatch dispatch) {
+  if (dispatch.callback) dispatch.callback();
+  return dispatch.handled;
+}
+
+RadialMenu::ActionDispatch RadialMenu::selectActionLocked(std::size_t index) {
+  if (!open_) return false;
+  const auto &actions = inSubRadialLocked()
+                            ? config_.actions[activeParentAction_].subActions
+                            : config_.actions;
+  if (index >= actions.size()) return false;
+  const auto action = actions[index];
+  if (!action.enabled) return true;
+  if (!action.subActions.empty()) {
+    enterSubRadialLocked(index);
+    return true;
+  }
+  const auto handler = actionHandler_;
+  const auto doc = targetDocIndex_, offset = targetCharOffset_,
+             length = targetCharLength_;
+  closeLocked();
+  return {true, [action, handler, doc, offset, length] {
+            if (action.onSelect) action.onSelect();
+            if (handler) handler(action.id, action.action, doc, offset, length);
+          }};
+}
+
+bool RadialMenu::keyPressed(Key key, KeyMods) {
+  ActionDispatch dispatch;
+  {
+    const std::scoped_lock lock(guard_);
+    if (!open_) return false;
+    if (key == Key::Escape) {
+      closeLocked();
+      return true;
+    }
+    if (key != Key::Return && key != Key::Space) return false;
+    dispatch = activateNodeLocked(focusedNode_);
+  }
+  return finishDispatch(std::move(dispatch));
+}
+
+std::shared_ptr<const ui::LayoutResult> RadialMenu::focusLayout() const {
+  const std::scoped_lock lock(guard_);
+  return open_ ? layout_ : nullptr;
+}
+void RadialMenu::focusedNodeChanged(std::uint32_t id) {
+  const std::scoped_lock lock(guard_);
+  if (focusedNode_ != id) {
+    focusedNode_ = id;
+    ++revision_;
+  }
+}
+bool RadialMenu::activateNode(std::uint32_t id) {
+  ActionDispatch dispatch;
+  {
+    const std::scoped_lock lock(guard_);
+    dispatch = activateNodeLocked(id);
+  }
+  return finishDispatch(std::move(dispatch));
+}
+RadialMenu::ActionDispatch RadialMenu::activateNodeLocked(std::uint32_t id) {
+  if (!open_) return false;
+  if (id == hubNode) {
+    if (inSubRadialLocked())
+      exitSubRadialLocked();
+    else
+      closeLocked();
+    return true;
+  }
+  return id >= firstActionNode ? selectActionLocked(id - firstActionNode)
+                               : ActionDispatch{};
+}
+
 bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
+  ActionDispatch dispatch;
+  {
+    const std::scoped_lock lock(guard_);
+    dispatch = pickedLocked(pick, state);
+  }
+  return finishDispatch(std::move(dispatch));
+}
+RadialMenu::ActionDispatch
+RadialMenu::pickedLocked(const render::PickingResult &pick,
+                         RenderState &state) {
   if (!open_) {
     if (openOnRightClick_ && pick.button == 3) {
       std::uint32_t targetDoc =
@@ -632,50 +870,38 @@ bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
           (lastScreenHeight_ > 0.0F)
               ? (lastScreenHeight_ - static_cast<float>(pick.y))
               : static_cast<float>(pick.y);
-      open(static_cast<float>(pick.x), pickCanvasY, targetDoc, targetAt,
-           targetLen);
+      openLocked(static_cast<float>(pick.x), pickCanvasY, targetDoc, targetAt,
+                 targetLen);
       return true;
     }
     return false;
   }
 
   // Check tagKindOverlay hits
-  if (pick.tag.kind == render::tagKindOverlay) {
+  const bool ownTag = pick.requestId == 0 ||
+                      (pickScope_ != 0 && pick.tag.docIndex == pickScope_ &&
+                       pick.tag.pageIndex == 0);
+  if (pick.tag.kind == render::tagKindOverlay && ownTag) {
     const auto cluster = pick.tag.clusterIndex;
+    if (pick.requestId != 0 &&
+        (!pickingTargets_ || builtPickingRevision_ != pickingRevision_ ||
+         !pick.overlayWidgetId || cluster == 0 ||
+         cluster > pickingTargets_->size() || *pick.overlayWidgetId == 0 ||
+         (*pickingTargets_)[cluster - 1] != *pick.overlayWidgetId))
+      return true;
 
     // Hub or Back button
     if (cluster == kRadialTagBack) {
-      exitSubRadial();
+      exitSubRadialLocked();
       return true;
     }
     if (cluster == kRadialTagHub) {
-      close();
+      closeLocked();
       return true;
     }
 
-    // Pod tag hits
     for (const auto &pod : currentPods_) {
-      if (cluster == pod.tag) {
-        const auto &actionList =
-            inSubRadial() ? config_.actions[activeParentAction_].subActions
-                          : config_.actions;
-        if (pod.actionIndex < actionList.size()) {
-          const auto &act = actionList[pod.actionIndex];
-          if (!act.subActions.empty()) {
-            enterSubRadial(pod.actionIndex);
-            return true;
-          }
-          if (act.onSelect) {
-            act.onSelect();
-          }
-          if (actionHandler_) {
-            actionHandler_(act.id, act.action, targetDocIndex_,
-                           targetCharOffset_, targetCharLength_);
-          }
-          close();
-          return true;
-        }
-      }
+      if (cluster == pod.tag) return selectActionLocked(pod.actionIndex);
     }
   }
 
@@ -691,74 +917,92 @@ bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
   const float dy   = pickCanvasY - cY;
   const float dist = std::hypot(dx, dy);
 
-  if (dist >= config_.innerRadius && dist <= config_.radius * 1.35F) {
+  if (dist >= innerRadiusPx_ && dist <= outerRadiusPx_ * 1.35F) {
     if (const auto sector = resolveSector(dx, dy, currentPods_.size())) {
-      const auto &pod = currentPods_[*sector];
-      const auto &actionList =
-          inSubRadial() ? config_.actions[activeParentAction_].subActions
-                        : config_.actions;
-      if (pod.actionIndex < actionList.size()) {
-        const auto &act = actionList[pod.actionIndex];
-        if (!act.subActions.empty()) {
-          enterSubRadial(pod.actionIndex);
-          return true;
-        }
-        if (act.onSelect) {
-          act.onSelect();
-        }
-        if (actionHandler_) {
-          actionHandler_(act.id, act.action, targetDocIndex_, targetCharOffset_,
-                         targetCharLength_);
-        }
-        close();
-        return true;
-      }
+      return selectActionLocked(currentPods_[*sector].actionIndex);
     }
-  } else if (dist < config_.innerRadius || dist <= hubRadius_) {
+  } else if (dist < innerRadiusPx_ || dist <= hubRadius_) {
     // Inside center hub
-    if (inSubRadial()) {
-      exitSubRadial();
+    if (inSubRadialLocked()) {
+      exitSubRadialLocked();
     } else {
-      close();
+      closeLocked();
     }
     return true;
   }
 
   // Clicking outside radial menu dismisses it
-  close();
+  closeLocked();
   return false;
 }
 
 void RadialMenu::describe(a11y::Builder &into) {
-  if (!open_) {
-    return;
+  const std::scoped_lock lock(guard_);
+  if (!open_) return;
+  std::vector<std::uint64_t> children;
+  const auto bounds = [&](std::uint32_t id) -> std::optional<a11y::Rect> {
+    if (!layout_) return std::nullopt;
+    const auto *box = layout_->find(id);
+    if (!box) return std::nullopt;
+    const auto &rect = box->rect;
+    const auto height =
+        static_cast<double>(metrics_.screenHeight > 0 ? metrics_.screenHeight
+                            : lastScreenHeight_ > 0   ? lastScreenHeight_
+                                                      : 1080);
+    return a11y::Rect{rect.left, height - rect.bottom - rect.height,
+                      rect.left + rect.width, height - rect.bottom};
+  };
+  const auto &actions = inSubRadialLocked()
+                            ? config_.actions[activeParentAction_].subActions
+                            : config_.actions;
+  for (std::size_t i = 0; i < actions.size(); ++i) {
+    const auto &action = actions[i];
+    const auto id      = firstActionNode + static_cast<std::uint32_t>(i);
+    auto &node         = into.add(id, a11y::Role::Button);
+    node.label         = action.desc.empty() ? action.label : action.desc;
+    node.bounds        = bounds(id);
+    node.focusable     = action.enabled;
+    node.toggled       = action.active;
+    if (action.enabled)
+      node.actions =
+          a11y::bit(a11y::Action::Click) | a11y::bit(a11y::Action::Focus);
+    children.push_back(into.id(id));
   }
+  auto &hub = into.add(hubNode, a11y::Role::Button);
+  hub.label =
+      inSubRadialLocked() ? "Back to Main Radial Menu" : "Close Radial Menu";
+  hub.bounds  = bounds(hubNode);
+  hub.actions = a11y::bit(a11y::Action::Click) | a11y::bit(a11y::Action::Focus);
+  children.push_back(into.id(hubNode));
+  auto &bar = into.add(menuNode, a11y::Role::Group);
+  bar.label =
+      inSubRadialLocked() ? "Alignment Sub-Menu" : "3D Radial Marking Menu";
+  bar.bounds   = bounds(menuNode);
+  bar.children = std::move(children);
+  into.contribute(into.id(menuNode));
+}
 
-  constexpr std::uint64_t barId = 0x8000;
-  auto &bar                     = into.add(barId, a11y::Role::Group);
-  bar.label = inSubRadial() ? "Alignment Sub-Menu" : "3D Radial Marking Menu";
-
-  const auto &actionList = inSubRadial()
-                               ? config_.actions[activeParentAction_].subActions
-                               : config_.actions;
-
-  for (std::size_t i = 0; i < actionList.size(); ++i) {
-    const auto &act   = actionList[i];
-    const auto nodeId = 0x8000U + 100U + static_cast<std::uint64_t>(i);
-    auto &node        = into.add(nodeId, a11y::Role::Button);
-    node.label        = act.desc.empty() ? act.label : act.desc;
-    node.actions      = a11y::bit(a11y::Action::Click);
-    bar.children.push_back(into.id(nodeId));
+bool RadialMenu::performAction(std::uint64_t id, a11y::Action action,
+                               std::string_view) {
+  ActionDispatch dispatch;
+  {
+    const std::scoped_lock lock(guard_);
+    id = a11y::Ids::localOf(id);
+    if (id > std::numeric_limits<std::uint32_t>::max() || !open_ || !layout_)
+      return false;
+    const auto node = static_cast<std::uint32_t>(id);
+    const auto *box = layout_->find(node);
+    if (!box || !box->focusable || !box->enabled) return false;
+    if (action == a11y::Action::Click) dispatch = activateNodeLocked(node);
+    if (action == a11y::Action::Focus) {
+      if (focusedNode_ != node) {
+        focusedNode_ = node;
+        ++revision_;
+      }
+      return true;
+    }
   }
-
-  const auto hubId = 0x8000U + 99U;
-  auto &hubNode    = into.add(hubId, a11y::Role::Button);
-  hubNode.label =
-      inSubRadial() ? "Back to Main Radial Menu" : "Close Radial Menu";
-  hubNode.actions = a11y::bit(a11y::Action::Click);
-  bar.children.push_back(into.id(hubId));
-
-  into.contribute(into.id(barId));
+  return finishDispatch(std::move(dispatch));
 }
 
 } // namespace gleditor

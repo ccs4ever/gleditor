@@ -70,7 +70,7 @@ std::expected<std::string, FontError> resolveFontPath(const std::string &spec) {
 
 /// A FontFace for @p fontPath, or LoadFailed. The constructor throws because it
 /// is a constructor; this is where that becomes a value.
-FontResult openFace(FT_Library lib, const std::string &fontPath,
+FontResult openFace(const FontLibraryPtr &lib, const std::string &fontPath,
                     const double pointSize) {
   try {
     return std::make_shared<FontFace>(lib, fontPath, pointSize);
@@ -128,6 +128,12 @@ FontFace::FontFace(FT_Library ftLib, const std::string &fontPath,
   }
 }
 
+FontFace::FontFace(FontLibraryPtr library, const std::string &fontPath,
+                   double pointSize, unsigned int dpi)
+    : FontFace(library.get(), fontPath, pointSize, dpi) {
+  library_ = std::move(library);
+}
+
 FontFace::~FontFace() {
   if (hbFont_) {
     hb_font_destroy(hbFont_);
@@ -140,7 +146,8 @@ FontFace::~FontFace() {
 }
 
 FontFace::FontFace(FontFace &&oth) noexcept
-    : face_(std::exchange(oth.face_, nullptr)),
+    : library_(std::move(oth.library_)),
+      face_(std::exchange(oth.face_, nullptr)),
       hbFont_(std::exchange(oth.hbFont_, nullptr)), metrics_(oth.metrics_),
       family_(std::move(oth.family_)), pointSize_(oth.pointSize_),
       key_(std::move(oth.key_)) {}
@@ -153,6 +160,7 @@ FontFace &FontFace::operator=(FontFace &&oth) noexcept {
     if (face_) {
       FT_Done_Face(face_);
     }
+    library_   = std::move(oth.library_);
     face_      = std::exchange(oth.face_, nullptr);
     hbFont_    = std::exchange(oth.hbFont_, nullptr);
     metrics_   = oth.metrics_;
@@ -171,21 +179,21 @@ FontManager &FontManager::instance() {
 #include FT_LCD_FILTER_H
 
 FontManager::FontManager() {
-  if (FT_Init_FreeType(&ftLib_) != 0) {
+  FT_Library library{};
+  if (FT_Init_FreeType(&library) != 0) {
     throw std::runtime_error("FreeType initialization failed");
   }
+  ftLib_ = FontLibraryPtr(library,
+                          [](FT_Library owned) { FT_Done_FreeType(owned); });
   // Initialize standard LCD subpixel decimation filters on the FreeType library
   // instance for subpixel font rendering and hinting compatibility.
-  FT_Library_SetLcdFilter(ftLib_, FT_LCD_FILTER_DEFAULT);
+  FT_Library_SetLcdFilter(ftLib_.get(), FT_LCD_FILTER_DEFAULT);
 }
 
 FontManager::~FontManager() {
   cache_.clear();
   fallbackCache_.clear();
-  if (ftLib_) {
-    FT_Done_FreeType(ftLib_);
-    ftLib_ = nullptr;
-  }
+  ftLib_.reset();
 }
 
 FontResult FontManager::findFont(const std::string &fontSpec) {

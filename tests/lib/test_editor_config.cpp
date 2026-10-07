@@ -104,3 +104,33 @@ TEST(EditorConfigTest, ModalCommandsDefaultToQuitAndCanBeDisabled) {
 }
 
 } // namespace
+
+TEST(EditorConfigTest, UiFontsAndScalesAreIndependentFromDocumentTypography) {
+  const auto config = gleditor::parseEditorConfig(
+      "settings.fontSize\t24\nui.scale\t1.25\nui.fontScale\t1.5\n"
+      "ui.safeMarginShare\t0.1\nui.minTouchPx\t48\nui.minFontPx\t11\n"
+      "ui.font.label.family\tSerif Bold\nui.font.label.points\t14\n");
+  EXPECT_FLOAT_EQ(config.settings.fontSize, 24);
+  EXPECT_FLOAT_EQ(config.uiScale, 1.25F);
+  EXPECT_FLOAT_EQ(config.uiFontScale, 1.5F);
+  EXPECT_FLOAT_EQ(config.uiSafeMarginShare, .1F);
+  EXPECT_FLOAT_EQ(config.uiTheme.type.minTouchPx, 48);
+  EXPECT_FLOAT_EQ(config.uiTheme.type.minFontPx, 11);
+  EXPECT_EQ(config.uiTheme.font(gleditor::ui::FontRole::Label).family,
+            "Serif Bold");
+  EXPECT_FLOAT_EQ(config.uiTheme.font(gleditor::ui::FontRole::Label).points,
+                  14);
+  EXPECT_EQ(config.uiTheme.font(gleditor::ui::FontRole::Mono).family,
+            "Monospace");
+}
+
+TEST(EditorConfigTest, InvalidUiScalesAndFontsRetainTypedDefaults) {
+  const auto config = gleditor::parseEditorConfig(
+      "ui.scale\t-1\nui.fontScale\tnan\nui.safeMarginShare\t0.6\n"
+      "ui.minTouchPx\t0\nui.minFontPx\tinf\nui.font.title.points\t-2\n"
+      "ui.font.label.family\t\n");
+  EXPECT_FLOAT_EQ(config.uiScale, 1);
+  EXPECT_FLOAT_EQ(config.uiFontScale, 1);
+  EXPECT_FLOAT_EQ(config.uiSafeMarginShare, gleditor::ui::kSafeMarginShare);
+  EXPECT_EQ(config.uiTheme, gleditor::ui::defaultTheme());
+}

@@ -6,12 +6,14 @@
 #include <gleditor/media_widget.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <charconv>
 #include <cmath>
 #include <cstddef>
 #include <format>
 #include <iomanip>
-#include <iostream>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
@@ -26,6 +28,8 @@
 #include <gleditor/media.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/fit.hpp>
+#include <glm/ext/vector_float4.hpp>
 
 namespace gleditor {
 
@@ -36,18 +40,14 @@ constexpr std::uint32_t cardBorder   = 0x2E3442FFU; // Subtle border
 constexpr std::uint32_t cardAccent   = 0x5C8DFFFFU; // Active top highlight
 constexpr std::uint32_t buttonBg     = 0x242A36FFU; // Button background
 constexpr std::uint32_t buttonBorder = 0x3E475CFFU; // Button border
-constexpr std::uint32_t buttonText   = 0xFFFFFFFFU; // Button label
 constexpr std::uint32_t textDim      = 0x9AA3B2FFU; // Secondary text
 constexpr std::uint32_t textAccent   = 0x5C8DFFFFU; // Playing text
 constexpr std::uint32_t textWarn     = 0xF5A623FFU; // Paused text
 constexpr std::uint32_t progressBg   = 0x2A313FFFU; // Progress bar track
-constexpr std::uint32_t progressBar  = 0x5C8DFFFFU; // Elapsed progress
 constexpr std::uint32_t videoAreaBg  = 0x0E1116FFU; // Video frame background
 
-// The low twelve picking bits are fixed media-control IDs. Starting widget
-// identity at 1 keeps its packed 16-bit namespace (0x1000, 0x2000...) clear
-// of zero and the radial menu's legacy 0x8000 tags while fitting in VBORow's
-// 16-bit cluster field.
+// Full semantic IDs retain a card's namespace; GPU cluster tags hold only
+// child offsets and resolve through the captured scene's private scope.
 constexpr std::uint32_t firstMediaWidgetId = 1U;
 std::atomic<std::uint32_t> nextMediaWidgetId{firstMediaWidgetId};
 
@@ -56,13 +56,22 @@ std::string formatTime(const float totalSeconds) {
       std::isinf(totalSeconds)) {
     return "00:00";
   }
-  const auto secs = static_cast<int>(totalSeconds);
-  const int mins  = secs / 60;
-  const int rem   = secs % 60;
+  const auto secs = static_cast<int>(
+      std::min(static_cast<double>(totalSeconds),
+               static_cast<double>(std::numeric_limits<int>::max())));
+  const int mins = secs / 60;
+  const int rem  = secs % 60;
   std::ostringstream oss;
   oss << std::setfill('0') << std::setw(2) << mins << ":" << std::setw(2)
       << rem;
   return oss.str();
+}
+
+int displayedSeconds(const float value) {
+  if (!std::isfinite(value) || value < 0.0F) return 0;
+  return static_cast<int>(
+      std::min(static_cast<double>(value),
+               static_cast<double>(std::numeric_limits<int>::max())));
 }
 
 } // namespace
@@ -174,6 +183,7 @@ float MediaWidget::playbackRate() const {
 void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   player_ = std::move(aPlayer);
   initClickables();
+  geometryRevision_++;
   revision_++;
 }
 
@@ -188,6 +198,7 @@ MediaLoad MediaWidget::load(const MediaResourcePtr &resource) {
     title_ = resource->name();
   }
   revision_++;
+  geometryRevision_++;
   return player_->load(resource);
 }
 
@@ -274,6 +285,7 @@ void MediaWidget::setScreenPosition(const float x, const float y) {
 void MediaWidget::setSize(const float width, const float height) {
   width_  = std::max(120.0F, width);
   height_ = std::max(60.0F, height);
+  geometryRevision_++;
   revision_++;
 }
 
@@ -284,15 +296,26 @@ void MediaWidget::setVisible(const bool visible) {
 
 void MediaWidget::setTitle(std::string title) {
   title_ = std::move(title);
+  geometryRevision_++;
   revision_++;
 }
 
 void MediaWidget::deviceReady(render::RenderDevice &device,
                               const render::PipelineDesc &documentPipeline) {
-  device_ = &device;
-  canvas_ = std::make_unique<Canvas>(&device, fontName_);
+  device_       = &device;
+  pipelineDesc_ = documentPipeline;
+  drawnFont_    = ui::scaledFontDescription(fontName_, ui::FontRole::Caption,
+                                            ui::UiMetrics{}, ui::defaultTheme());
+  canvas_       = std::make_unique<Canvas>(&device, drawnFont_);
+  liveCanvas_   = std::make_unique<Canvas>(&device, drawnFont_);
+  drawnScreenSpace_ = screenSpace_;
   // Embedded in 3D world space uses depth testing; screen overlay turns it off
   canvas_->createPipeline(documentPipeline, !screenSpace_);
+  liveCanvas_->createPipeline(documentPipeline, !screenSpace_);
+  font_         = text::FontManager::instance().getFont(drawnFont_);
+  chromeBuilds_ = 0;
+  liveBuiltFor_ = 0;
+  pickState_    = nullptr;
 }
 
 void MediaWidget::updateVideoTexture() {
@@ -450,7 +473,6 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
         glm::scale(glm::mat4(1.0F),
                    glm::vec3{Doc::pixelsToWorld, Doc::pixelsToWorld, 1.0F});
     transform = ctx.viewProjection * widgetModel;
-    canvas_->setIdentity(doc_->documentIndex(), pageIdx);
   } else {
     // Standalone world-space position
     const auto worldModel =
@@ -460,184 +482,388 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     transform = ctx.viewProjection * worldModel;
   }
 
-  canvas_->clear();
-
-  // 1. Background Card Frame & Borders
-  canvas_->setTag(render::tagKindOverlay, tagBase_);
-  canvas_->addRect(0.0F, 0.0F, width_, height_, cardBg);
-  canvas_->addLine(0.0F, 0.0F, width_, 0.0F, 1.0F, cardBorder);
-  canvas_->addLine(0.0F, height_, width_, height_, 1.0F, cardBorder);
-  canvas_->addLine(0.0F, 0.0F, 0.0F, height_, 1.0F, cardBorder);
-  canvas_->addLine(width_, 0.0F, width_, height_, 1.0F, cardBorder);
-  canvas_->addLine(0.0F, height_ - 1.0F, width_, height_ - 1.0F, 2.0F,
-                   cardAccent);
-
-  // 2. Header: Title & Playback State Badge
-  std::string displayTitle = title_.empty() ? "Media Player" : title_;
-  canvas_->setTextWidthLimit(static_cast<int>(width_ - 110.0F));
-  canvas_->addText(ctx.state, 12.0F, height_ - 10.0F, displayTitle, 0xFFFFFFFFU,
-                   cardBg);
-  canvas_->setTextWidthLimit(0);
-
-  const auto state = player_->state();
-  std::string stateBadge;
-  std::uint32_t stateColor = textDim;
-
-  switch (state) {
-  case PlaybackState::Playing:
-    stateBadge = "▶ Playing";
-    stateColor = textAccent;
-    break;
-  case PlaybackState::Paused:
-    stateBadge = "⏸ Paused";
-    stateColor = textWarn;
-    break;
-  case PlaybackState::Buffering:
-  case PlaybackState::Opening:
-    stateBadge = "⟳ Loading";
-    stateColor = textAccent;
-    break;
-  case PlaybackState::Ended:
-    stateBadge = "⏹ Ended";
-    stateColor = textDim;
-    break;
-  case PlaybackState::Error:
-    stateBadge = "⚠ Error";
-    stateColor = 0xFF5555FFU;
-    break;
-  case PlaybackState::Stopped:
-  default:
-    stateBadge = "⏹ Stopped";
-    stateColor = textDim;
-    break;
+  if (player_->hasVideo()) updateVideoTexture();
+  const auto progress = player_->progressFraction();
+  scrubber_.setFraction(std::isfinite(progress) ? progress : 0.0F);
+  const auto progressStep = static_cast<int>(scrubber_.fraction() * 1000.0);
+  const ChromeState next{
+      .geometry = geometryRevision_,
+      .playback = player_->state(),
+      .muted    = player_->isMuted(),
+      .video    = player_->hasVideo(),
+      .frame    = videoTexture_.valid(),
+      .rate     = playbackRate(),
+      .seconds  = displayedSeconds(player_->positionSeconds()),
+      .duration = displayedSeconds(player_->durationSeconds()),
+  };
+  const bool presentationChanged =
+      metrics_ != ctx.metrics || theme_ != ctx.theme;
+  if (chromeBuilds_ == 0 || presentationChanged ||
+      drawnScreenSpace_ != screenSpace_) {
+    const auto requestedFont = ui::scaledFontDescription(
+        fontName_, ui::FontRole::Caption, ctx.metrics, ctx.theme);
+    if (requestedFont != drawnFont_ || drawnScreenSpace_ != screenSpace_) {
+      drawnFont_        = requestedFont;
+      drawnScreenSpace_ = screenSpace_;
+      canvas_           = std::make_unique<Canvas>(device_, drawnFont_);
+      liveCanvas_       = std::make_unique<Canvas>(device_, drawnFont_);
+      canvas_->createPipeline(pipelineDesc_, !screenSpace_);
+      liveCanvas_->createPipeline(pipelineDesc_, !screenSpace_);
+      font_         = text::FontManager::instance().getFont(drawnFont_);
+      liveBuiltFor_ = 0;
+    }
+    metrics_ = ctx.metrics;
+    theme_   = ctx.theme;
   }
+  if (pickState_ != &ctx.state) {
+    pickState_ = &ctx.state;
+    pickScope_ = ctx.state.allocatePersistentOverlayPickScope();
+  }
+  if (!pickTargets_) {
+    auto targets = std::make_shared<std::vector<std::uint32_t>>(tagSeekMax);
+    for (std::uint32_t offset = 1; offset <= tagSeekMax; offset++)
+      (*targets)[offset - 1] = tagBase_ + offset;
+    pickTargets_ = std::move(targets);
+  }
+  canvas_->setIdentity(pickScope_, 0);
+  liveCanvas_->setIdentity(pickScope_, 0);
+  ctx.state.bindOverlayWidgets(
+      render::packTagIdentity(render::tagKindOverlay, pickScope_, 0),
+      pickTargets_);
+  if (chromeBuilds_ == 0 || presentationChanged || next != chromeState_ ||
+      liveBuiltFor_ == 0) {
+    chromeState_ = next;
+    canvas_->clear();
+    canvas_->pushClip({0.0F, 0.0F, width_, height_});
+    layout_ = {.bounds = {0.0F, 0.0F, width_, height_}};
+    layout_.boxes.push_back({.id          = tagBase_,
+                             .rect        = layout_.bounds,
+                             .contentRect = layout_.bounds});
+    const float lineHeight = font_->metrics().lineHeight;
+    const float padding =
+        std::min(std::max(0.0F, theme_.paddingEm * lineHeight),
+                 std::min(width_, height_) * 0.1F);
+    const float gap =
+        std::min(std::max(0.0F, theme_.gapEm * lineHeight), padding);
+    const float available = std::max(0.0F, width_ - 2.0F * padding);
+    const auto textBox    = [&](ui::Rect box, std::string_view label,
+                             std::uint32_t foreground, std::uint32_t background,
+                             text::EllipsisAt at = text::EllipsisAt::End) {
+      if (box.width <= 0.0F || box.height < lineHeight) return;
+      box.bottom += (box.height - lineHeight) * 0.5F;
+      box.height         = lineHeight;
+      const auto &fitted = shaping_.fitted(
+          label, font_,
+          {.maxWidthPx = box.width, .maxHeightPx = box.height, .at = at});
+      canvas_->addText(ctx.state, box, fitted, foreground, background);
+    };
 
-  canvas_->addText(ctx.state, width_ - 95.0F, height_ - 10.0F, stateBadge,
-                   stateColor, cardBg);
+    // 1. Background Card Frame & Borders
+    canvas_->setTag(render::tagKindOverlay, 0);
+    canvas_->addRect(0.0F, 0.0F, width_, height_, cardBg);
+    canvas_->addLine(0.0F, 0.0F, width_, 0.0F, 1.0F, cardBorder);
+    canvas_->addLine(0.0F, height_, width_, height_, 1.0F, cardBorder);
+    canvas_->addLine(0.0F, 0.0F, 0.0F, height_, 1.0F, cardBorder);
+    canvas_->addLine(width_, 0.0F, width_, height_, 1.0F, cardBorder);
+    canvas_->addLine(0.0F, height_ - 1.0F, width_, height_ - 1.0F, 2.0F,
+                     cardAccent);
 
-  // 3. Video Viewport / Audio Badge Area
-  const float mediaAreaLeft   = 12.0F;
-  const float mediaAreaBottom = 54.0F;
-  const float mediaAreaWidth  = width_ - chromeWidthPx;
-  const float mediaAreaHeight = height_ - chromeHeightPx;
+    // 2. Header: Title & Playback State Badge
+    const auto state = chromeState_.playback;
+    std::string stateBadge;
+    std::uint32_t stateColor = textDim;
 
-  if (mediaAreaHeight > 10.0F) {
-    if (player_->hasVideo()) {
-      canvas_->addRect(mediaAreaLeft, mediaAreaBottom, mediaAreaWidth,
-                       mediaAreaHeight, videoAreaBg);
-      updateVideoTexture();
-      if (videoTexture_.valid() && videoFrameWidth_ > 0 &&
-          videoFrameHeight_ > 0) {
-        // Letterboxed within the viewport rather than stretched: a frame
-        // whose aspect does not match the card would otherwise distort.
-        const auto texSize =
-            static_cast<float>(std::max(videoFrameWidth_, videoFrameHeight_));
-        const float frameAspect = static_cast<float>(videoFrameWidth_) /
-                                  static_cast<float>(videoFrameHeight_);
-        const float areaAspect = mediaAreaWidth / mediaAreaHeight;
-        float drawW            = mediaAreaWidth;
-        float drawH            = mediaAreaHeight;
-        if (frameAspect > areaAspect) {
-          drawH = mediaAreaWidth / frameAspect;
-        } else {
-          drawW = mediaAreaHeight * frameAspect;
-        }
-        const float drawX = mediaAreaLeft + ((mediaAreaWidth - drawW) / 2.0F);
-        const float drawY =
-            mediaAreaBottom + ((mediaAreaHeight - drawH) / 2.0F);
+    switch (state) {
+    case PlaybackState::Playing:
+      stateBadge = "▶ Playing";
+      stateColor = textAccent;
+      break;
+    case PlaybackState::Paused:
+      stateBadge = "⏸ Paused";
+      stateColor = textWarn;
+      break;
+    case PlaybackState::Buffering:
+    case PlaybackState::Opening:
+      stateBadge = "⟳ Loading";
+      stateColor = textAccent;
+      break;
+    case PlaybackState::Ended:
+      stateBadge = "⏹ Ended";
+      stateColor = textDim;
+      break;
+    case PlaybackState::Error:
+      stateBadge = "⚠ Error";
+      stateColor = 0xFF5555FFU;
+      break;
+    case PlaybackState::Stopped:
+    default:
+      stateBadge = "⏹ Stopped";
+      stateColor = textDim;
+      break;
+    }
 
-        ImageResource frameResource;
-        frameResource.width   = videoFrameWidth_;
-        frameResource.height  = videoFrameHeight_;
-        frameResource.layer   = 0;
-        frameResource.u0      = 0.0F;
-        frameResource.v0      = 0.0F;
-        frameResource.u1      = static_cast<float>(videoFrameWidth_) / texSize;
-        frameResource.v1      = static_cast<float>(videoFrameHeight_) / texSize;
-        frameResource.texture = videoTexture_;
-        canvas_->addImage(drawX, drawY, drawW, drawH, frameResource,
-                          0xFFFFFFFFU);
-      } else {
-        canvas_->addText(ctx.state, mediaAreaLeft + 8.0F,
-                         mediaAreaBottom + (mediaAreaHeight / 2.0F) + 6.0F,
-                         "🎬 Video Surface", textDim, videoAreaBg);
+    const auto badgeWidth    = shaping_.fitted(stateBadge, font_, {}).widthPx;
+    const float headerHeight = std::min(
+        std::ceil(lineHeight) + 2, std::max(0.0F, height_ - 2.0F * padding));
+    const std::array<ui::LayoutItem, 2> headerItems{{
+        {.id        = tagBase_ + tagSeekMax + 1U,
+         .intrinsic = {available, lineHeight},
+         .grow      = 1.0F},
+        {.id        = tagBase_ + tagSeekMax + 2U,
+         .intrinsic = {badgeWidth, lineHeight},
+         .minimum   = {badgeWidth, lineHeight}},
+    }};
+    const auto header = ui::flow(
+        {padding, height_ - padding - headerHeight, available, headerHeight},
+        headerItems, {.wrap = false, .gap = gap, .align = ui::Align::Stretch});
+    layout_.append(header);
+    textBox(header.boxes[0].rect, title_.empty() ? "Media Player" : title_,
+            ui::rgba(theme_.colours.text), cardBg);
+    textBox(header.boxes[1].rect, stateBadge, stateColor, cardBg);
+
+    const float buttonHeight = std::min(
+        std::max(lineHeight + 2.0F * gap, metrics_.px(theme_.type.minTouchPx)),
+        std::max(0.0F, height_ - 2.0F * padding - headerHeight - gap));
+    const std::string timeStr = formatTime(chromeState_.seconds) + " / " +
+                                formatTime(chromeState_.duration);
+    const auto timeWidth = shaping_.fitted(timeStr, font_, {}).widthPx;
+    std::vector<ui::LayoutItem> controls;
+    controls.reserve(clickables_.controls().size() + 1);
+    for (const auto &ctrl : clickables_.controls()) {
+      controls.push_back(
+          {.id        = tagBase_ + ctrl.tagOffset,
+           .intrinsic = {std::max(metrics_.px(ctrl.width),
+                                  metrics_.px(theme_.type.minTouchPx)),
+                         buttonHeight},
+           .focusable = true,
+           .paddingPx = gap * 0.5F});
+    }
+    controls.push_back({.id        = tagBase_ + tagSeekBase,
+                        .intrinsic = {timeWidth, buttonHeight},
+                        .grow      = 1.0F,
+                        .focusable = true});
+    const auto footer =
+        ui::flow({padding, padding, available, buttonHeight}, controls,
+                 {.wrap = false, .gap = gap, .align = ui::Align::Stretch});
+    layout_.append(footer);
+    const auto &seekBox = footer.boxes.back().rect;
+    seekRect_ = {seekBox.left, seekBox.bottom + lineHeight + gap * 0.5F,
+                 seekBox.width,
+                 std::max(0.0F, seekBox.height - lineHeight - gap * 0.5F)};
+    viewport_ = {padding, padding + buttonHeight + gap, available,
+                 std::max(0.0F, height_ - 2.0F * padding - buttonHeight -
+                                    headerHeight - 2.0F * gap)};
+
+    // 3. Video Viewport / Audio Badge Area
+    if (viewport_.height > 0.0F) {
+      const auto background = chromeState_.video ? videoAreaBg : cardBg;
+      canvas_->addRect(viewport_.left, viewport_.bottom, viewport_.width,
+                       viewport_.height, background);
+      if (!chromeState_.video || !chromeState_.frame) {
+        textBox(viewport_,
+                chromeState_.video ? "🎬 Video Surface" : "♪ Audio Media Track",
+                ui::rgba(theme_.colours.muted), background);
       }
-    } else {
-      canvas_->addRect(mediaAreaLeft, mediaAreaBottom, mediaAreaWidth,
-                       mediaAreaHeight, 0x1A202BF0U);
-      canvas_->addText(ctx.state, mediaAreaLeft + 8.0F,
-                       mediaAreaBottom + (mediaAreaHeight / 2.0F) + 6.0F,
-                       "♪ Audio Media Track", textDim, 0x1A202BF0U);
     }
-  }
 
-  // 4. Interactive Control Buttons: Play, Pause, Stop, Volume (and registered
-  // controls)
-  const float btnY = 12.0F;
-  const float btnH = 26.0F;
-  float btnX       = 12.0F;
-
-  for (const auto &ctrl : clickables_.controls()) {
-    const float btnW = ctrl.width;
-    canvas_->setTag(render::tagKindOverlay, tagBase_ + ctrl.tagOffset);
-    canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
-    canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
-    canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
-                     buttonBorder);
-    const std::string label = ctrl.getLabel ? ctrl.getLabel() : ctrl.id;
-    float textOffset        = 10.0F;
-    if (ctrl.tagOffset == tagVolume || ctrl.tagOffset == tagPlay) {
-      textOffset = 7.0F;
-    } else if (ctrl.tagOffset == tagSpeed) {
-      textOffset = 4.0F;
+    // 4. Interactive Control Buttons: Play, Pause, Stop, Volume (and registered
+    // controls)
+    for (const auto &ctrl : clickables_.controls()) {
+      const auto *box = layout_.find(tagBase_ + ctrl.tagOffset);
+      if (!box) continue;
+      const float btnX = box->rect.left;
+      const float btnY = box->rect.bottom;
+      const float btnW = box->rect.width;
+      const float btnH = box->rect.height;
+      canvas_->setTag(render::tagKindOverlay, ctrl.tagOffset);
+      canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
+      canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
+      canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
+                       buttonBorder);
+      const std::string label = ctrl.getLabel ? ctrl.getLabel() : ctrl.id;
+      textBox(box->contentRect, label, ui::rgba(theme_.colours.text), buttonBg);
     }
-    canvas_->addText(ctx.state, btnX + textOffset, btnY + btnH - 6.0F, label,
-                     buttonText, buttonBg);
-    btnX += btnW + 6.0F;
+
+    // 5. Progress & Seek Bar
+    // Pick tags belong to the horizontal location, allowing a click to seek to
+    // that location. The track is retained; progress does not rebuild its tags.
+    const auto segments = static_cast<unsigned int>(
+        std::clamp(std::floor(seekRect_.width), 1.0F, 1001.0F));
+    for (unsigned int i = 0; i < segments; i++) {
+      const auto start = static_cast<float>(
+          std::floor(static_cast<double>(i) * seekRect_.width / segments));
+      const auto end = static_cast<float>(
+          std::floor(static_cast<double>(i + 1) * seekRect_.width / segments));
+      const auto fraction =
+          segments > 1
+              ? static_cast<unsigned int>(
+                    (static_cast<float>(i) / static_cast<float>(segments - 1)) *
+                    1000.0F)
+              : 0U;
+      canvas_->setTag(render::tagKindOverlay, tagSeekBase + fraction);
+      canvas_->addRect(seekRect_.left + start, seekRect_.bottom, end - start,
+                       seekRect_.height, progressBg);
+    }
+    canvas_->setTag(render::tagKindOverlay, tagSeekBase);
+    textBox({seekBox.left, seekBox.bottom, seekBox.width,
+             std::min(lineHeight, seekBox.height)},
+            timeStr, ui::rgba(theme_.colours.muted), cardBg);
+    canvas_->popClip();
+    canvas_->commit();
+    controlBounds_.resize(clickables_.controls().size());
+    ++chromeBuilds_;
+    ++revision_;
   }
-  btnX += 6.0F;
-
-  // 5. Progress & Seek Bar
-  const float barLeft   = btnX;
-  const float barRight  = width_ - 12.0F;
-  const float barWidth  = std::max(20.0F, barRight - barLeft);
-  const float barBottom = 26.0F;
-  const float barHeight = 8.0F;
-
-  const float progress = player_->progressFraction();
-  const auto curSecs   = player_->positionSeconds();
-  const auto durSecs   = player_->durationSeconds();
-
-  // Draw seek bar with interactive picking segments
-  canvas_->setTag(render::tagKindOverlay,
-                  tagBase_ + tagSeekBase +
-                      static_cast<std::uint32_t>(progress * 1000.0F));
-  canvas_->addRect(barLeft, barBottom, barWidth, barHeight, progressBg);
-
-  if (progress > 0.0F) {
-    const float fillW = barWidth * progress;
-    canvas_->addRect(barLeft, barBottom, fillW, barHeight, progressBar);
-    // Playhead knob
-    canvas_->addRect(barLeft + fillW - 2.0F, barBottom - 2.0F, 4.0F,
-                     barHeight + 4.0F, 0xFFFFFFFFU);
+  if (liveBuiltFor_ != chromeBuilds_ || liveProgress_ != progressStep ||
+      liveVideoWidth_ != videoFrameWidth_ ||
+      liveVideoHeight_ != videoFrameHeight_) {
+    liveProgress_ = progressStep;
+    rebuildLive();
   }
-
-  // Time readout label: "00:15 / 01:30"
-  const std::string timeStr = formatTime(curSecs) + " / " + formatTime(durSecs);
-  canvas_->addText(ctx.state, barLeft, barBottom - 2.0F, timeStr, textDim,
-                   cardBg);
-
-  canvas_->commit();
+  updateAccessibilityBounds(transform, ctx.screenWidth, ctx.screenHeight);
   canvas_->draw(ctx.state, transform);
+  liveCanvas_->draw(ctx.state, transform);
+}
+
+void MediaWidget::rebuildLive() {
+  liveCanvas_->clear();
+  liveCanvas_->pushClip({0.0F, 0.0F, width_, height_});
+  liveCanvas_->setTag(render::tagKindOverlay, 0);
+  if (chromeState_.video && videoTexture_.valid() && videoFrameWidth_ > 0 &&
+      videoFrameHeight_ > 0 && viewport_.width > 0.0F &&
+      viewport_.height > 0.0F) {
+    const auto texSize =
+        static_cast<float>(std::max(videoFrameWidth_, videoFrameHeight_));
+    const float aspect = static_cast<float>(videoFrameWidth_) /
+                         static_cast<float>(videoFrameHeight_);
+    const float drawWidth =
+        std::min(viewport_.width, viewport_.height * aspect);
+    const float drawHeight = drawWidth / aspect;
+    ImageResource frame;
+    frame.width   = videoFrameWidth_;
+    frame.height  = videoFrameHeight_;
+    frame.layer   = 0;
+    frame.u1      = static_cast<float>(videoFrameWidth_) / texSize;
+    frame.v1      = static_cast<float>(videoFrameHeight_) / texSize;
+    frame.texture = videoTexture_;
+    liveCanvas_->addImage(viewport_.left + (viewport_.width - drawWidth) * 0.5F,
+                          viewport_.bottom +
+                              (viewport_.height - drawHeight) * 0.5F,
+                          drawWidth, drawHeight, frame, 0xFFFFFFFFU);
+  }
+  if (seekRect_.width > 0.0F && seekRect_.height > 0.0F) {
+    const float fraction = static_cast<float>(liveProgress_) / 1000.0F;
+    const float fill     = seekRect_.width * fraction;
+    const auto segments  = static_cast<unsigned int>(
+        std::clamp(std::floor(seekRect_.width), 1.0F, 1001.0F));
+    for (unsigned int i = 0; i < segments; i++) {
+      const auto left = static_cast<float>(
+          std::floor(static_cast<double>(i) * seekRect_.width / segments));
+      const float right =
+          std::min(static_cast<float>(std::floor(static_cast<double>(i + 1) *
+                                                 seekRect_.width / segments)),
+                   fill);
+      if (left >= right) break;
+      const auto pickFraction =
+          segments > 1
+              ? static_cast<unsigned int>(
+                    (static_cast<float>(i) / static_cast<float>(segments - 1)) *
+                    1000.0F)
+              : 0U;
+      liveCanvas_->setTag(render::tagKindOverlay, tagSeekBase + pickFraction);
+      liveCanvas_->addRect(seekRect_.left + left, seekRect_.bottom,
+                           right - left, seekRect_.height,
+                           ui::rgba(theme_.colours.accent));
+    }
+    if (fraction > 0.0F) {
+      liveCanvas_->setTag(render::tagKindOverlay,
+                          tagSeekBase +
+                              static_cast<std::uint32_t>(liveProgress_));
+      const float knobWidth = std::min(4.0F, seekRect_.width);
+      liveCanvas_->addRect(
+          std::clamp(seekRect_.left + fill - knobWidth * 0.5F, seekRect_.left,
+                     seekRect_.left + seekRect_.width - knobWidth),
+          seekRect_.bottom, knobWidth, seekRect_.height,
+          ui::rgba(theme_.colours.text));
+    }
+  }
+  liveCanvas_->popClip();
+  liveCanvas_->commit();
+  liveBuiltFor_    = chromeBuilds_;
+  liveVideoWidth_  = videoFrameWidth_;
+  liveVideoHeight_ = videoFrameHeight_;
+}
+
+void MediaWidget::updateAccessibilityBounds(const glm::mat4 &transform,
+                                            const int width, const int height) {
+  const auto project = [&](const ui::Rect rect) -> std::optional<a11y::Rect> {
+    std::optional<a11y::Rect> bounds;
+    for (const float x : {rect.left, rect.left + rect.width}) {
+      for (const float y : {rect.bottom, rect.bottom + rect.height}) {
+        const auto point = transform * glm::vec4{x, y, 0.0F, 1.0F};
+        if (point.w <= 0.0F || !std::isfinite(point.w)) return std::nullopt;
+        const double screenX = (point.x / point.w + 1.0) * width * 0.5;
+        const double screenY = (1.0 - point.y / point.w) * height * 0.5;
+        if (!std::isfinite(screenX) || !std::isfinite(screenY))
+          return std::nullopt;
+        if (!bounds) {
+          bounds = a11y::Rect{screenX, screenY, screenX, screenY};
+        } else {
+          bounds->left   = std::min(bounds->left, screenX);
+          bounds->right  = std::max(bounds->right, screenX);
+          bounds->top    = std::min(bounds->top, screenY);
+          bounds->bottom = std::max(bounds->bottom, screenY);
+        }
+      }
+    }
+    return bounds;
+  };
+  bool changed      = false;
+  const auto assign = [&](std::optional<a11y::Rect> &held,
+                          const ui::Rect rect) {
+    const auto next = project(rect);
+    if (held != next) {
+      held    = next;
+      changed = true;
+    }
+  };
+  assign(rootBounds_, layout_.bounds);
+  if (const auto *seek = layout_.find(tagBase_ + tagSeekBase))
+    assign(seekBounds_, seek->rect);
+  std::size_t index = 0;
+  for (const auto &ctrl : clickables_.controls()) {
+    if (const auto *box = layout_.find(tagBase_ + ctrl.tagOffset))
+      assign(controlBounds_[index], box->rect);
+    ++index;
+  }
+  if (changed) ++revision_;
 }
 
 bool MediaWidget::picked(const render::PickingResult &pick,
                          [[maybe_unused]] RenderState &state) {
-  if (!visible_ || pick.tag.kind != render::tagKindOverlay) {
+  if (!visible_ || pick.tag.kind != render::tagKindOverlay || !player_) {
     return false;
   }
 
-  const auto tag = pick.tag.clusterIndex;
+  std::uint32_t tag{};
+  if (pick.tag.docIndex == pickScope_ && pick.tag.pageIndex == 0 &&
+      pickScope_ != 0) {
+    if (pick.tag.clusterIndex == 0) return true;
+    if (pick.requestId != 0) {
+      if (!pick.overlayWidgetId) return false;
+      tag = *pick.overlayWidgetId;
+    } else {
+      if (pick.tag.clusterIndex > tagSeekMax || !pickTargets_) return false;
+      tag = (*pickTargets_)[pick.tag.clusterIndex - 1];
+    }
+  } else {
+    // Direct synthetic calls predate captured scenes and use full semantic
+    // tags. A real asynchronous result must always match this card's scope.
+    if (pick.requestId != 0 || pick.tag.docIndex != 0 ||
+        pick.tag.pageIndex != 0 || pick.overlayWidgetId)
+      return false;
+    tag = pick.tag.clusterIndex;
+  }
   if (tag < tagBase_ || tag > tagBase_ + tagSeekMax || nullptr == player_) {
     return false;
   }
@@ -650,7 +876,8 @@ bool MediaWidget::picked(const render::PickingResult &pick,
   }
   if (offset >= tagSeekBase && offset <= tagSeekMax) {
     const auto fraction = static_cast<float>(offset - tagSeekBase) / 1000.0F;
-    player_->seekFraction(fraction);
+    scrubber_.setFraction(fraction);
+    player_->seekFraction(static_cast<float>(scrubber_.fraction()));
     revision_++;
     return true;
   }
@@ -665,15 +892,18 @@ void MediaWidget::describe(a11y::Builder &into) {
   }
 
   const auto rootId = static_cast<std::uint64_t>(tagBase_);
-  auto &mediaNode   = into.add(rootId, a11y::Role::Group);
-  mediaNode.label   = title_.empty() ? "Media Player" : title_;
+  std::vector<std::uint64_t> children;
+  children.reserve(clickables_.controls().size() + 1);
 
+  std::size_t index = 0;
   for (const auto &ctrl : clickables_.controls()) {
     const auto ctrlId = rootId + ctrl.tagOffset;
     auto &ctrlNode    = into.add(ctrlId, ctrl.role);
     ctrlNode.label    = ctrl.getA11yLabel ? ctrl.getA11yLabel() : ctrl.id;
     ctrlNode.actions  = a11y::bit(a11y::Action::Click);
-    mediaNode.children.push_back(into.id(ctrlId));
+    if (index < controlBounds_.size()) ctrlNode.bounds = controlBounds_[index];
+    ++index;
+    children.push_back(into.id(ctrlId));
   }
 
   // Seek / Position Info
@@ -682,21 +912,44 @@ void MediaWidget::describe(a11y::Builder &into) {
   seekNode.label    = "Playback Position";
   seekNode.value    = formatTime(player_->positionSeconds()) + " of " +
                    formatTime(player_->durationSeconds());
-  seekNode.actions = a11y::bit(a11y::Action::Click);
-  mediaNode.children.push_back(into.id(seekId));
+  seekNode.actions =
+      a11y::bit(a11y::Action::Click) | a11y::bit(a11y::Action::SetValue);
+  seekNode.bounds = seekBounds_;
+  children.push_back(into.id(seekId));
+
+  auto &mediaNode    = into.add(rootId, a11y::Role::Group);
+  mediaNode.label    = title_.empty() ? "Media Player" : title_;
+  mediaNode.bounds   = rootBounds_;
+  mediaNode.children = std::move(children);
 
   into.contribute(into.id(rootId));
 }
 
 bool MediaWidget::performAction(const std::uint64_t nodeId,
                                 const a11y::Action action,
-                                [[maybe_unused]] const std::string_view value) {
-  if (action != a11y::Action::Click || nullptr == player_) {
+                                const std::string_view value) {
+  if (nullptr == player_) {
     return false;
   }
   const auto rootId = static_cast<std::uint64_t>(tagBase_);
-  if (nodeId >= rootId) {
-    const auto offset = static_cast<std::uint32_t>(nodeId - rootId);
+  const auto local  = a11y::Ids::localOf(nodeId);
+  if (local == rootId + tagSeekBase && action == a11y::Action::SetValue) {
+    if (value.empty()) return false;
+    double fraction{};
+    const auto parsed =
+        std::from_chars(value.data(), value.data() + value.size(), fraction);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        !std::isfinite(fraction))
+      return false;
+    ui::Scrubber control;
+    control.setFraction(fraction);
+    player_->seekFraction(static_cast<float>(control.fraction()));
+    ++revision_;
+    return true;
+  }
+  if (action != a11y::Action::Click) return false;
+  if (local >= rootId && local <= rootId + tagSubElementMask) {
+    const auto offset = static_cast<std::uint32_t>(local - rootId);
     if (clickables_.dispatch(offset)) {
       revision_++;
       return true;

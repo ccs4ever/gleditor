@@ -1,278 +1,385 @@
 /**
  * @file doc_switcher.cpp
- * @brief Implementation of the document switcher top tab bar.
+ * @brief Retained document tabs sharing text fitting, metrics and layout.
  */
 #include <gleditor/doc_switcher.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
+#include <limits>
+#include <stdexcept>
 #include <utility>
 
+#include <gleditor/doc.hpp>
+#include <gleditor/render_state.hpp>
+#include <gleditor/text/fit.hpp>
+#include <gleditor/text/font.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 
-#include <gleditor/canvas.hpp>
-#include <gleditor/caret.hpp>
-#include <gleditor/doc.hpp>
-#include <gleditor/render/device.hpp>
-#include <gleditor/render_state.hpp>
-
 namespace gleditor {
-
 namespace {
+constexpr std::uint32_t barId     = std::numeric_limits<std::uint32_t>::max();
+constexpr std::uint32_t tabsId    = barId - 1;
+constexpr std::uint32_t actionsId = barId - 2;
 
-constexpr float barHeight    = 32.0F;
-constexpr float tabPaddingX  = 12.0F;
-constexpr float closeButtonW = 20.0F;
-constexpr float minTabWidth  = 90.0F;
-constexpr float maxTabWidth  = 220.0F;
-
-constexpr std::uint32_t barBackground = 0x14171DFAU; // Dark translucent
-constexpr std::uint32_t barBorder     = 0x282D38FFU; // Bottom edge border
-constexpr std::uint32_t tabActiveBg   = 0x2A3242FFU; // Active tab background
-constexpr std::uint32_t tabInactiveBg = 0x1A1E26D0U; // Inactive tab background
-constexpr std::uint32_t tabActiveBorder =
-    0x5C8DFFFFU; // Active tab highlight line
-constexpr std::uint32_t tabTextActive   = 0xFFFFFFFFU; // White text
-constexpr std::uint32_t tabTextInactive = 0x9AA3B2FFU; // Muted text
-constexpr std::uint32_t closeTextColour = 0x7E889BFFU; // Close button text
-
-std::string formatDocTitle(const std::string &rawName,
-                           const std::size_t index) {
-  if (rawName.empty() || rawName == "0") {
+std::string formatDocTitle(const std::string &rawName, std::size_t index) {
+  if (rawName.empty() || rawName == "0")
     return "Doc " + std::to_string(index + 1);
-  }
-  if (rawName.starts_with("system://")) {
-    return "⚙ " + rawName;
-  }
-  std::filesystem::path p(rawName);
-  return p.filename().string();
+  if (rawName.starts_with("system://")) return "⚙ " + rawName;
+  return std::filesystem::path(rawName).filename().string();
 }
-
+ui::Rect textBox(ui::Rect parent, float padding, float lineHeight) {
+  const float inset  = std::min(std::max(0.0F, padding), parent.width * 0.5F);
+  const float height = std::min(lineHeight, parent.height);
+  return {parent.left + inset, parent.bottom + (parent.height - height) * 0.5F,
+          std::max(0.0F, parent.width - 2 * inset), height};
+}
+a11y::Rect accessibleBounds(ui::Rect box, int screenHeight) {
+  return {box.left, static_cast<double>(screenHeight) - box.bottom - box.height,
+          box.left + box.width, static_cast<double>(screenHeight) - box.bottom};
+}
 } // namespace
 
 DocumentSwitcher::DocumentSwitcher(std::string aFontName)
     : fontName(std::move(aFontName)) {}
-
 DocumentSwitcher::~DocumentSwitcher() = default;
 
 void DocumentSwitcher::deviceReady(
-    render::RenderDevice &device,
+    render::RenderDevice &nextDevice,
     const render::PipelineDesc &documentPipeline) {
-  canvas = std::make_unique<Canvas>(&device, fontName);
-  canvas->createPipeline(documentPipeline, false);
+  const std::scoped_lock lock(guard);
+  device   = &nextDevice;
+  pipeline = documentPipeline;
+  canvas.reset();
+  builtRevision = 0;
+}
+
+std::uint32_t
+DocumentSwitcher::bindDocument(const std::shared_ptr<Doc> &document,
+                               PickAction action) {
+  const auto found =
+      std::ranges::find_if(documentPickBindings, [&](const auto &b) {
+        return b.second.action == action &&
+               b.second.document.lock() == document;
+      });
+  if (found != documentPickBindings.end()) return found->first;
+  if (nextPickBindingId == std::numeric_limits<std::uint32_t>::max())
+    throw std::length_error("Document switcher picking bindings exhausted");
+  const auto id = nextPickBindingId++;
+  documentPickBindings.emplace(id, DocumentPickBinding{document, action});
+  return id;
+}
+
+void DocumentSwitcher::releasePickSnapshots() {
+  const auto removed = std::erase_if(pickSnapshots, [&](const auto &snapshot) {
+    return snapshot != pickTargets && snapshot.use_count() == 1;
+  });
+  if (removed == 0) return;
+  std::erase_if(documentPickBindings, [&](const auto &binding) {
+    return std::ranges::none_of(pickSnapshots, [&](const auto &snapshot) {
+      return std::ranges::find(*snapshot, binding.first) != snapshot->end();
+    });
+  });
+}
+
+void DocumentSwitcher::rebuild(FrameContext &ctx,
+                               const ui::UiMetrics &nextMetrics) {
+  metrics                = nextMetrics;
+  theme                  = ctx.theme;
+  const auto description = ui::scaledFontDescription(
+      fontName, ui::FontRole::Caption, metrics, theme);
+  if (!canvas || resolvedFontName != description) {
+    canvas = std::make_unique<Canvas>(device, description);
+    canvas->createPipeline(*pipeline, false);
+    canvas->setIdentity(pickScope, 0);
+    resolvedFontName = description;
+  }
+  canvas->clear();
+  auto targets = std::make_shared<std::vector<std::uint32_t>>();
+  documents.clear();
+  currentTabs.clear();
+  for (std::uint32_t index = 0; index < ctx.state.docs.size(); ++index) {
+    const auto &doc = ctx.state.docs[index];
+    documents.push_back(doc.get());
+    if (!doc || doc->isClosing()) continue;
+    currentTabs.push_back(
+        {.docIndex      = index,
+         .name          = formatDocTitle(doc->name(), index),
+         .active        = index == activeIndex,
+         .sourceName    = doc->name(),
+         .selectBinding = bindDocument(doc, PickAction::Select),
+         .closeBinding  = bindDocument(doc, PickAction::Close)});
+  }
+  const auto font    = text::FontManager::instance().getFont(description);
+  const auto em      = font->metrics().lineHeight;
+  const auto padding = std::max(0.0F, theme.paddingEm * em);
+  const auto gap     = std::max(0.0F, theme.gapEm * em);
+  const auto touch   = std::max(em, metrics.px(theme.type.minTouchPx));
+  const auto safe    = metrics.pixelSafeArea();
+  const auto height  = std::min(safe.height, std::max(touch, em + 2 * padding));
+  const ui::Rect bar{safe.left, safe.bottom + safe.height - height, safe.width,
+                     height};
+  const auto actionWidth = std::min(bar.width, touch * 2 + gap);
+  const auto available   = std::max(0.0F, bar.width - gap);
+  layoutResult           = ui::split(
+      bar, {.id = tabsId}, {.id = actionsId},
+      {.firstShare = available > 0
+                                   ? std::max(0.0F, available - actionWidth) / available
+                                   : 0.0F,
+                 .gap        = gap,
+                 .parentId   = barId});
+  layoutResult.boxes.push_back({barId, 0, bar, bar});
+  const auto tabsBounds    = layoutResult.find(tabsId)->rect;
+  const auto actionsBounds = layoutResult.find(actionsId)->rect;
+  std::vector<ui::LayoutItem> items;
+  for (const auto &tab : currentTabs) {
+    const auto &intrinsic = shaping.fitted(tab.name, font, {});
+    items.push_back(
+        {.id        = (tab.docIndex << 1U) + 1U,
+         .intrinsic = {intrinsic.widthPx + 2 * padding + touch, height},
+         .minimum   = {touch * 2, height},
+         .maximum   = {std::max(touch, em * 12), height},
+         .grow      = 1,
+         .focusable = true});
+  }
+  layoutResult.append(ui::flow(
+      tabsBounds, items, {.wrap = false, .gap = gap, .parentId = tabsId}));
+  const std::array<ui::LayoutItem, 2> actions{{{.id        = kManagerTag + 1U,
+                                                .intrinsic = {touch, height},
+                                                .grow      = 1,
+                                                .focusable = true},
+                                               {.id        = kNewDocTag + 1U,
+                                                .intrinsic = {touch, height},
+                                                .grow      = 1,
+                                                .focusable = true}}};
+  layoutResult.append(
+      ui::flow(actionsBounds, actions,
+               {.wrap = false, .gap = gap, .parentId = actionsId}));
+  layoutResult.focusOrder.clear();
+  canvas->pushClip(bar);
+  const auto surface = ui::rgba(theme.colours.surface);
+  const auto text    = ui::rgba(theme.colours.text);
+  const auto muted   = ui::rgba(theme.colours.muted);
+  const auto accent  = ui::rgba(theme.colours.accent);
+  canvas->setTag(render::tagKindOverlay, 0);
+  canvas->addRect(bar.left, bar.bottom, bar.width, bar.height, surface);
+  for (auto &tab : currentTabs) {
+    const auto id = (tab.docIndex << 1U) + 1U;
+    auto *box = &*std::ranges::find(layoutResult.boxes, id, &ui::LayoutBox::id);
+    const auto rect       = box->rect;
+    const auto closeWidth = std::min(touch, rect.width * 0.5F);
+    const ui::Rect close{rect.left + rect.width - closeWidth, rect.bottom,
+                         closeWidth, rect.height};
+    const ui::Rect label{rect.left, rect.bottom,
+                         std::max(0.0F, rect.width - closeWidth), rect.height};
+    box->contentRect       = textBox(label, padding, em);
+    const auto labelBounds = box->contentRect;
+    tab.x                  = rect.left;
+    tab.y                  = rect.bottom;
+    tab.width              = rect.width;
+    tab.height             = rect.height;
+    targets->push_back(tab.selectBinding);
+    canvas->setTag(render::tagKindOverlay,
+                   static_cast<std::uint32_t>(targets->size()));
+    canvas->addRect(rect.left, rect.bottom, rect.width, rect.height, surface);
+    canvas->addText(ctx.state, labelBounds, tab.name, tab.active ? text : muted,
+                    surface, {}, &shaping);
+    if (tab.active) {
+      canvas->pushClip(rect);
+      canvas->addLine(rect.left, rect.bottom + rect.height - 1,
+                      rect.left + rect.width, rect.bottom + rect.height - 1,
+                      metrics.px(2), accent);
+      canvas->popClip();
+    }
+    const auto closeContent = textBox(close, 0, em);
+    layoutResult.boxes.push_back({id + 1U, id, close, closeContent, true});
+    if (rect.width > 0 && rect.height > 0)
+      layoutResult.focusOrder.push_back(id);
+    if (close.width > 0 && close.height > 0)
+      layoutResult.focusOrder.push_back(id + 1U);
+    targets->push_back(tab.closeBinding);
+    canvas->setTag(render::tagKindOverlay,
+                   static_cast<std::uint32_t>(targets->size()));
+    canvas->addRect(close.left, close.bottom, close.width, close.height,
+                    surface);
+    canvas->addText(ctx.state, closeContent, "×", muted, surface,
+                    {.align = TextAlign::Centre}, &shaping);
+  }
+  for (const auto tag : {kManagerTag, kNewDocTag}) {
+    auto *box =
+        &*std::ranges::find(layoutResult.boxes, tag + 1U, &ui::LayoutBox::id);
+    box->contentRect = textBox(box->rect, 0, em);
+    const auto rect  = box->rect;
+    if (rect.width > 0 && rect.height > 0)
+      layoutResult.focusOrder.push_back(tag + 1U);
+    targets->push_back(bindDocument({}, tag == kManagerTag
+                                            ? PickAction::Manager
+                                            : PickAction::NewDocument));
+    canvas->setTag(render::tagKindOverlay,
+                   static_cast<std::uint32_t>(targets->size()));
+    canvas->addRect(rect.left, rect.bottom, rect.width, rect.height, surface);
+    canvas->addText(ctx.state, box->contentRect, tag == kManagerTag ? "=" : "+",
+                    text, surface, {.align = TextAlign::Centre}, &shaping);
+  }
+  canvas->popClip();
+  canvas->commit();
+  ctx.state.glyphCache.flush();
+  knownDocCount = ctx.state.docs.size();
+  pickTargets   = std::move(targets);
+  pickSnapshots.push_back(pickTargets);
+  ++revision;
+  builtRevision = revision;
 }
 
 void DocumentSwitcher::drawFrame(FrameContext &ctx) {
-  if (!visible || nullptr == canvas || ctx.state.docs.empty()) {
+  const std::scoped_lock lock(guard);
+  if (!visible || !device || !pipeline) return;
+  if (pickScope == 0)
+    pickScope = ctx.state.allocatePersistentOverlayPickScope();
+  auto nextMetrics         = ctx.metrics;
+  nextMetrics.screenWidth  = ctx.screenWidth;
+  nextMetrics.screenHeight = ctx.screenHeight;
+  nextMetrics.chrome       = ctx.chrome;
+  bool changed             = documents.size() != ctx.state.docs.size();
+  std::size_t live{};
+  for (std::size_t index = 0; index < ctx.state.docs.size(); ++index) {
+    const auto &doc = ctx.state.docs[index];
+    changed |= index >= documents.size() || documents[index] != doc.get();
+    if (!doc || doc->isClosing()) continue;
+    changed |= live >= currentTabs.size() ||
+               currentTabs[live].docIndex != index ||
+               currentTabs[live].sourceName != doc->name();
+    ++live;
+  }
+  changed |= live != currentTabs.size();
+  if (live == 0) {
+    if (!layoutResult.boxes.empty()) ++revision;
+    layoutResult = {};
     currentTabs.clear();
+    pickTargets.reset();
+    releasePickSnapshots();
+    builtRevision = 0;
     return;
   }
-
-  // Count active non-closing documents
-  std::size_t activeCount = 0;
-  for (const auto &doc : ctx.state.docs) {
-    if (doc && !doc->isClosing()) {
-      activeCount++;
-    }
-  }
-  if (0 == activeCount) {
-    currentTabs.clear();
-    return;
-  }
-
-  const auto width  = static_cast<float>(ctx.screenWidth);
-  const auto height = static_cast<float>(ctx.screenHeight);
-  // Correct left,right,bottom,top order for a screen-space projection.
-  const auto ortho = glm::ortho( // NOLINT(readability-suspicious-call-argument)
-      0.0F, width, 0.0F, height, -1.0F, 1.0F);
-
-  canvas->clear();
-  currentTabs.clear();
-
-  // Background bar across the top of the viewport, under any chrome already
-  // there.
-  const float top  = height - ctx.chrome.top;
-  const float barY = top - barHeight;
-  ctx.chrome.top += barHeight;
-  canvas->addRect(0.0F, barY, width, barHeight, barBackground);
-  canvas->addLine(0.0F, barY, width, barY, 1.0F, barBorder);
-
-  float curX = 4.0F;
-
-  for (std::uint32_t i = 0; i < ctx.state.docs.size(); ++i) {
-    const auto &doc = ctx.state.docs[i];
-    if (!doc || doc->isClosing()) {
-      continue;
-    }
-
-    const std::string title = formatDocTitle(doc->name(), i);
-    const auto textMetrics  = canvas->measureText(title);
-
-    const float tabW =
-        std::clamp(textMetrics.width + (2.0F * tabPaddingX) + closeButtonW,
-                   minTabWidth, maxTabWidth);
-
-    if (curX + tabW > width) {
-      break; // Avoid overflowing the screen width
-    }
-
-    const bool isActive = (i == activeIndex);
-    const float tabH    = barHeight - 2.0F;
-    const float tabY    = barY + 2.0F;
-    const auto tabBg    = isActive ? tabActiveBg : tabInactiveBg;
-
-    TabInfo info;
-    info.docIndex = i;
-    info.name     = title;
-    info.x        = curX;
-    info.y        = tabY;
-    info.width    = tabW;
-    info.height   = tabH;
-    info.active   = isActive;
-    currentTabs.push_back(info);
-
-    // Tab body: cluster tag has bit 0 = 0 (select)
-    canvas->setTag(render::tagKindOverlay, (i << 1U) | 0U);
-    canvas->addRect(curX, tabY, tabW, tabH, tabBg);
-
-    if (isActive) {
-      // Top accent line for active tab
-      canvas->addLine(curX, top - 1.0F, curX + tabW, top - 1.0F, 2.0F,
-                      tabActiveBorder);
-    }
-
-    // Tab label text
-    canvas->setTextWidthLimit(
-        static_cast<int>(tabW - closeButtonW - (2.0F * tabPaddingX)));
-    canvas->setTextBounds(
-        ui::TextBounds{.left   = curX + tabPaddingX,
-                       .bottom = tabY,
-                       .width  = tabW - closeButtonW - (2.0F * tabPaddingX),
-                       .height = tabH});
-    canvas->addText(ctx.state, curX + tabPaddingX, top - 8.0F, title,
-                    isActive ? tabTextActive : tabTextInactive, tabBg);
-
-    // Close button [×]: cluster tag has bit 0 = 1 (close)
-    const float closeX = curX + tabW - closeButtonW;
-    canvas->setTag(render::tagKindOverlay, (i << 1U) | 1U);
-    canvas->setTextBounds(ui::TextBounds{
-        .left = closeX, .bottom = tabY, .width = closeButtonW, .height = tabH});
-    canvas->addText(ctx.state, closeX, top - 7.0F, "×", closeTextColour, tabBg);
-
-    curX += tabW + 2.0F;
-  }
-
-  // [= Store Objects] button
-  constexpr float mgrButtonW = 28.0F;
-  if (curX + mgrButtonW <= width) {
-    const float tabH = barHeight - 2.0F;
-    const float tabY = barY + 2.0F;
-    canvas->setTag(render::tagKindOverlay, kManagerTag);
-    canvas->addRect(curX, tabY, mgrButtonW, tabH, tabInactiveBg);
-    canvas->setTextBounds(ui::TextBounds{
-        .left = curX, .bottom = tabY, .width = mgrButtonW, .height = tabH});
-    canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "=", tabTextInactive,
-                    tabInactiveBg);
-    curX += mgrButtonW + 2.0F;
-  }
-
-  // [+ New Document] button
-  constexpr float newButtonW = 28.0F;
-  if (curX + newButtonW <= width) {
-    const float tabH = barHeight - 2.0F;
-    const float tabY = barY + 2.0F;
-    canvas->setTag(render::tagKindOverlay, kNewDocTag);
-    canvas->addRect(curX, tabY, newButtonW, tabH, tabInactiveBg);
-    canvas->setTextBounds(ui::TextBounds{
-        .left = curX, .bottom = tabY, .width = newButtonW, .height = tabH});
-    canvas->addText(ctx.state, curX + 9.0F, top - 7.0F, "+", tabTextInactive,
-                    tabInactiveBg);
-  }
-
-  canvas->setTextBounds(std::nullopt);
-  canvas->commit();
-  canvas->draw(ctx.state, ortho);
+  if (!canvas || changed || builtRevision != revision ||
+      metrics != nextMetrics || theme != ctx.theme)
+    rebuild(ctx, nextMetrics);
+  // Retired bindings live until request snapshots release their target vectors.
+  releasePickSnapshots();
+  ctx.state.bindOverlayWidgets(
+      render::packTagIdentity(render::tagKindOverlay, pickScope, 0),
+      pickTargets);
+  const auto bar = layoutResult.bounds;
+  ctx.chrome.top = std::max(ctx.chrome.top,
+                            static_cast<float>(ctx.screenHeight) - bar.bottom);
+  const auto projection =
+      glm::ortho(0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
+                 static_cast<float>(ctx.screenHeight), -1.0F, 1.0F);
+  canvas->draw(ctx.state, projection);
 }
 
+bool DocumentSwitcher::dispatch(std::uint32_t tag, std::size_t documentCount) {
+  std::function<void()> callback;
+  {
+    const std::scoped_lock lock(guard);
+    if (!visible) return false;
+    if (tag == kManagerTag)
+      callback = managerHandler;
+    else if (tag == kNewDocTag)
+      callback = newDocHandler;
+    else {
+      const auto index = tag >> 1U;
+      if (tag == kNewDocTag + 1U || index >= documentCount) return false;
+      if ((tag & 1U) != 0) {
+        if (closeHandler)
+          callback = [handler = closeHandler, index] { handler(index); };
+      } else {
+        activeIndex = index;
+        ++revision;
+        if (selectHandler)
+          callback = [handler = selectHandler, index] { handler(index); };
+      }
+    }
+  }
+  if (callback) callback();
+  return true;
+}
 bool DocumentSwitcher::picked(const render::PickingResult &pick,
                               RenderState &state) {
-  if (!visible || pick.tag.kind != render::tagKindOverlay) {
-    return false;
-  }
-
-  const auto rawTag = pick.tag.clusterIndex;
-  if (rawTag == kManagerTag) {
-    if (managerHandler) {
-      managerHandler();
+  if (pick.tag.kind != render::tagKindOverlay) return false;
+  auto tag = pick.tag.clusterIndex;
+  if (pick.requestId != 0) {
+    const std::scoped_lock lock(guard);
+    if (pickScope == 0 || pick.tag.docIndex != pickScope ||
+        pick.tag.pageIndex != 0)
+      return false;
+    if (!pick.overlayWidgetId) return false;
+    const auto binding = documentPickBindings.find(*pick.overlayWidgetId);
+    if (binding == documentPickBindings.end()) return false;
+    if (binding->second.action == PickAction::Manager)
+      tag = kManagerTag;
+    else if (binding->second.action == PickAction::NewDocument)
+      tag = kNewDocTag;
+    else {
+      const auto document = binding->second.document.lock();
+      if (!document || document->isClosing()) return false;
+      const auto current = std::ranges::find(state.docs, document);
+      if (current == state.docs.end()) return false;
+      tag = (static_cast<std::uint32_t>(current - state.docs.begin()) << 1U) |
+            (binding->second.action == PickAction::Close ? 1U : 0U);
     }
-    return true;
   }
-  if (rawTag == kNewDocTag) {
-    if (newDocHandler) {
-      newDocHandler();
-    }
-    return true;
-  }
-
-  const auto docIndex = rawTag >> 1U;
-  const bool isClose  = (rawTag & 1U) != 0U;
-
-  if (docIndex >= state.docs.size()) {
-    return false;
-  }
-
-  if (isClose) {
-    if (closeHandler) {
-      closeHandler(docIndex);
-    }
-    return true;
-  }
-
-  // Select tab
-  activeIndex = docIndex;
-  revision++;
-  if (selectHandler) {
-    selectHandler(docIndex);
-  }
-  return true;
+  return dispatch(tag, state.docs.size());
 }
 
 void DocumentSwitcher::describe(a11y::Builder &into) {
-  if (!visible || currentTabs.empty()) {
-    return;
-  }
-  // The bar is added after its entries: add() may move every node already
-  // added, and the bar's children were once pushed through a reference that
-  // the next add() had left dangling.
+  const std::scoped_lock lock(guard);
+  if (!visible || currentTabs.empty()) return;
   std::vector<std::uint64_t> entries;
-  for (std::size_t i = 0; i < currentTabs.size(); ++i) {
-    const auto &tab      = currentTabs[i];
-    const auto tabNodeId = 100U + i;
-    auto &node           = into.add(tabNodeId, a11y::Role::ListItem);
-    node.label           = tab.name;
-    node.value           = tab.active ? "selected" : "";
-    node.toggled         = tab.active;
-    node.actions         = a11y::bit(a11y::Action::Click);
-    entries.push_back(into.id(tabNodeId));
+  const auto add = [&](std::uint32_t id, a11y::Role role,
+                       const std::string &label) -> a11y::Node * {
+    const auto *box = layoutResult.find(id);
+    if (!box || box->rect.width <= 0 || box->rect.height <= 0) return nullptr;
+    auto &node     = into.add(id, role);
+    node.label     = label;
+    node.bounds    = accessibleBounds(box->rect, metrics.screenHeight);
+    node.actions   = a11y::bit(a11y::Action::Click);
+    node.focusable = true;
+    entries.push_back(into.id(id));
+    return &node;
+  };
+  for (const auto &tab : currentTabs) {
+    const auto id = (tab.docIndex << 1U) + 1U;
+    if (auto *node = add(id, a11y::Role::ListItem, tab.name)) {
+      node->toggled     = tab.active;
+      node->value       = tab.active ? "selected" : "";
+      node->description = tab.sourceName;
+    }
+    add(id + 1U, a11y::Role::Button, "Close " + tab.name);
   }
-
-  const auto mgrNodeId = 98U;
-  auto &mgrNode        = into.add(mgrNodeId, a11y::Role::Button);
-  mgrNode.label        = "Store Object Manager";
-  mgrNode.actions      = a11y::bit(a11y::Action::Click);
-  entries.push_back(into.id(mgrNodeId));
-
-  const auto newDocNodeId = 99U;
-  auto &newNode           = into.add(newDocNodeId, a11y::Role::Button);
-  newNode.label           = "New Document";
-  newNode.actions         = a11y::bit(a11y::Action::Click);
-  entries.push_back(into.id(newDocNodeId));
-
-  constexpr std::uint64_t barId = 1;
-  auto &bar                     = into.add(barId, a11y::Role::List);
-  bar.label                     = "Open Documents";
-  bar.children                  = std::move(entries);
+  add(kManagerTag + 1U, a11y::Role::Button, "Store Object Manager");
+  add(kNewDocTag + 1U, a11y::Role::Button, "New Document");
+  auto &bar    = into.add(barId, a11y::Role::List);
+  bar.label    = "Open Documents";
+  bar.bounds   = accessibleBounds(layoutResult.bounds, metrics.screenHeight);
+  bar.children = std::move(entries);
   into.contribute(into.id(barId));
 }
-
+bool DocumentSwitcher::performAction(std::uint64_t nodeId, a11y::Action action,
+                                     std::string_view) {
+  const auto id = a11y::Ids::localOf(nodeId);
+  std::size_t count{};
+  {
+    const std::scoped_lock lock(guard);
+    if (!visible || action != a11y::Action::Click || id == 0 || id >= barId)
+      return false;
+    const auto *box = layoutResult.find(static_cast<std::uint32_t>(id));
+    if (!box || !box->focusable || box->rect.width <= 0 ||
+        box->rect.height <= 0)
+      return false;
+    count = knownDocCount;
+  }
+  return dispatch(static_cast<std::uint32_t>(id - 1U), count);
+}
 } // namespace gleditor

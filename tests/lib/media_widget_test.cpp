@@ -6,6 +6,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -16,6 +18,7 @@
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/diagnostics.hpp>
 
 using gleditor::MediaPlayer;
 using gleditor::MediaResource;
@@ -41,6 +44,9 @@ protected:
         .WillByDefault(Return(render::TextureHandle{1}));
     ON_CALL(*device, createBuffer(testing::_, testing::_))
         .WillByDefault(Return(render::BufferHandle{1}));
+
+    ON_CALL(*device, createPipeline)
+        .WillByDefault(Return(render::PipelineHandle{1}));
 
     state  = std::make_unique<RenderState>(device.get());
     player = std::make_shared<MediaPlayer>(true); // Dummy audio mode
@@ -251,4 +257,229 @@ TEST_F(MediaWidgetTest, BusyAndLoadResource) {
   auto newPlayer = std::make_shared<MediaPlayer>(true);
   widget->setPlayer(newPlayer);
   EXPECT_EQ(widget->player(), newPlayer);
+}
+
+TEST_F(MediaWidgetTest, SettledChromeShapesAndUploadsNothing) {
+  widget->setScreenPosition(50.0F, 50.0F);
+  widget->deviceReady(*device, {});
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  gleditor::FrameContext context{*state, projection, 1280, 720, timeline};
+  widget->drawFrame(context);
+  const auto built = widget->chromeRevision();
+  const auto cache = widget->shapingStats();
+  EXPECT_GT(built, 0U);
+  EXPECT_GT(cache.entries, 0U);
+  EXPECT_CALL(*device, updateBuffer).Times(0);
+  EXPECT_CALL(*device, createPipeline).Times(0);
+  gleditor::text::ShapingStatsScope shaping;
+  for (int frame = 0; frame < 50; frame++) {
+    state->beginPickScene();
+    widget->drawFrame(context);
+  }
+  EXPECT_EQ(widget->chromeRevision(), built);
+  EXPECT_EQ(widget->shapingStats().misses, cache.misses);
+  EXPECT_EQ(shaping.stats().layoutCalls, 0U);
+  EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
+}
+
+TEST_F(MediaWidgetTest, PlayerChangesInvalidateChromeAndPositionOnlyMovesIt) {
+  widget->setScreenPosition(50.0F, 50.0F);
+  widget->deviceReady(*device, {});
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  gleditor::FrameContext context{*state, projection, 1280, 720, timeline};
+  widget->drawFrame(context);
+  auto built = widget->chromeRevision();
+  player->setMuted(true);
+  widget->drawFrame(context);
+  EXPECT_GT(widget->chromeRevision(), built);
+  built = widget->chromeRevision();
+  player->setPlaybackRate(1.5F);
+  widget->drawFrame(context);
+  EXPECT_GT(widget->chromeRevision(), built);
+  built = widget->chromeRevision();
+  widget->setScreenPosition(150.0F, 175.0F);
+  gleditor::text::ShapingStatsScope shaping;
+  widget->drawFrame(context);
+  EXPECT_EQ(widget->chromeRevision(), built);
+  EXPECT_EQ(shaping.stats().harfbuzzCalls, 0U);
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 1);
+  widget->describe(builder);
+  const auto root = tree.find(builder.id(widget->tagBase()));
+  ASSERT_TRUE(root.has_value());
+  ASSERT_TRUE(root->bounds.has_value());
+  EXPECT_NEAR(root->bounds->left, 150.0, 0.001);
+  EXPECT_NEAR(root->bounds->bottom, 720.0 - 175.0, 0.001);
+}
+
+TEST_F(MediaWidgetTest,
+       ResponsiveChromeStaysWithinTheCardAndKeepsFullA11yTitle) {
+  widget = std::make_unique<MediaWidget>(std::string{}, player);
+  const std::string title =
+      "A long media title with العربية é and 👩‍💻 "
+      "that needs fitting";
+  widget->setTitle(title);
+  widget->setScreenPosition(10.0F, 20.0F);
+  widget->deviceReady(*device, {});
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  for (const auto dimensions :
+       {gleditor::ui::Size{120, 60}, gleditor::ui::Size{360, 140},
+        gleditor::ui::Size{700, 400}}) {
+    widget->setSize(dimensions.width, dimensions.height);
+    for (const float scale : {0.8F, 1.0F, 1.5F, 2.0F}) {
+      SCOPED_TRACE(testing::Message()
+                   << dimensions.width << 'x' << dimensions.height << " scale "
+                   << scale);
+      gleditor::FrameContext context{.state          = *state,
+                                     .viewProjection = projection,
+                                     .screenWidth    = 1280,
+                                     .screenHeight   = 720,
+                                     .timeline       = timeline,
+                                     .metrics        = {.fontScale = scale}};
+      widget->drawFrame(context);
+      const auto &layout = widget->layout();
+      for (const auto &box : layout.boxes) {
+        EXPECT_GE(box.rect.left, 0.0F);
+        EXPECT_GE(box.rect.bottom, 0.0F);
+        EXPECT_LE(box.rect.left + box.rect.width, widget->width() + 0.01F);
+        EXPECT_LE(box.rect.bottom + box.rect.height, widget->height() + 0.01F);
+      }
+      for (const auto tag : {MediaWidget::tagPlay, MediaWidget::tagPause,
+                             MediaWidget::tagStop, MediaWidget::tagVolume,
+                             MediaWidget::tagSpeed, MediaWidget::tagSeekBase})
+        EXPECT_NE(layout.find(widget->tagBase() + tag), nullptr);
+      gleditor::a11y::Tree tree;
+      gleditor::a11y::Builder builder(tree, 1);
+      widget->describe(builder);
+      const auto root = tree.find(builder.id(widget->tagBase()));
+      ASSERT_TRUE(root.has_value());
+      EXPECT_EQ(root->label, title);
+      EXPECT_TRUE(root->bounds.has_value());
+    }
+  }
+}
+
+TEST_F(MediaWidgetTest, AccessibleSeekUsesTheSharedScrubberClamp) {
+  const auto seek = widget->tagBase() + MediaWidget::tagSeekBase;
+  EXPECT_TRUE(
+      widget->performAction(seek, gleditor::a11y::Action::SetValue, "0.25"));
+  EXPECT_FLOAT_EQ(player->progressFraction(), 0.25F);
+  EXPECT_TRUE(
+      widget->performAction(seek, gleditor::a11y::Action::SetValue, "2.0"));
+  EXPECT_FLOAT_EQ(player->progressFraction(), 1.0F);
+  EXPECT_FALSE(widget->performAction(seek, gleditor::a11y::Action::SetValue,
+                                     "not a number"));
+  EXPECT_TRUE(widget->performAction(gleditor::a11y::Ids::of(16, seek),
+                                    gleditor::a11y::Action::SetValue, "0.5"));
+  EXPECT_FLOAT_EQ(player->progressFraction(), 0.5F);
+}
+
+TEST_F(MediaWidgetTest, MoreThanSixteenCardsKeepCapturedPickingIdentities) {
+  std::vector<std::unique_ptr<MediaWidget>> cards;
+  for (int index = 0; index < 24; index++) {
+    auto card = std::make_unique<MediaWidget>("Monospace 10", player);
+    card->setScreenPosition(0.0F, 0.0F);
+    card->deviceReady(*device, {});
+    cards.push_back(std::move(card));
+  }
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  gleditor::FrameContext context{*state, projection, 1280, 720, timeline};
+  state->beginPickScene();
+  for (const auto &card : cards) card->drawFrame(context);
+  const auto captured = state->overlayPickScene;
+  ASSERT_EQ(captured.widgetOverlays.size(), cards.size());
+  for (std::size_t index = 0; index < cards.size(); index++) {
+    render::PickingResult pick{
+        .requestId = 1,
+        .tag = render::unpackPickingTag(captured.widgetOverlays[index].identity,
+                                        MediaWidget::tagPlay, 0)};
+    pick.overlayWidgetId = render::resolveOverlayWidget(captured, pick.tag);
+    ASSERT_TRUE(pick.overlayWidgetId.has_value());
+    EXPECT_EQ(*pick.overlayWidgetId,
+              cards[index]->tagBase() + MediaWidget::tagPlay);
+    for (std::size_t other = 0; other < cards.size(); other++)
+      EXPECT_EQ(cards[other]->picked(pick, *state), other == index);
+    if (index != 0)
+      EXPECT_NE(captured.widgetOverlays[index].identity,
+                captured.widgetOverlays[index - 1].identity);
+  }
+  // An unrelated radial-menu-looking tag cannot be interpreted as a card
+  // control without this card's captured scope and full semantic target.
+  render::PickingResult unrelated{
+      .requestId = 2,
+      .tag       = {.kind = render::tagKindOverlay, .clusterIndex = 0x8001U}};
+  for (const auto &card : cards) EXPECT_FALSE(card->picked(unrelated, *state));
+}
+
+TEST_F(MediaWidgetTest, CapturedCardMeaningSurvivesPresentationChanges) {
+  widget->setScreenPosition(50.0F, 50.0F);
+  widget->deviceReady(*device, {});
+  ch::Timeline timeline;
+  const glm::mat4 projection{1.0F};
+  gleditor::FrameContext context{*state, projection, 1280, 720, timeline};
+  state->beginPickScene();
+  widget->drawFrame(context);
+  const auto captured = state->overlayPickScene;
+  ASSERT_EQ(captured.widgetOverlays.size(), 1U);
+  render::PickingResult pick{
+      .requestId = 1,
+      .tag       = render::unpackPickingTag(captured.widgetOverlays[0].identity,
+                                            MediaWidget::tagSeekBase + 750U, 0)};
+  pick.overlayWidgetId = render::resolveOverlayWidget(captured, pick.tag);
+  widget->setTitle("Changed after the click was requested");
+  context.metrics.fontScale = 2.0F;
+  state->beginPickScene();
+  widget->drawFrame(context);
+  EXPECT_TRUE(widget->picked(pick, *state));
+  EXPECT_FLOAT_EQ(player->progressFraction(), 0.75F);
+  pick.overlayWidgetId.reset();
+  EXPECT_FALSE(widget->picked(pick, *state));
+}
+
+TEST_F(MediaWidgetTest, normalCardDrawsItsTitleAndPlaybackBadge) {
+  std::map<std::uint32_t, std::vector<std::byte>> buffers;
+  std::uint32_t next = 1;
+  ON_CALL(*device, createBuffer)
+      .WillByDefault([&](render::BufferKind, std::size_t) {
+        return render::BufferHandle{next++};
+      });
+  ON_CALL(*device, resizeBuffer)
+      .WillByDefault(
+          [](render::BufferHandle handle, std::size_t) { return handle; });
+  ON_CALL(*device, updateBuffer)
+      .WillByDefault([&](render::BufferHandle handle, std::size_t offset,
+                         std::span<const std::byte> bytes) {
+        auto &storage = buffers[handle.id];
+        storage.resize(std::max(storage.size(), offset + bytes.size()));
+        std::memcpy(storage.data() + offset, bytes.data(), bytes.size());
+      });
+  std::size_t headerInk = 0;
+  ON_CALL(*device, drawGlyphs)
+      .WillByDefault([&](const render::DrawUniforms &,
+                         render::BufferHandle handle, std::size_t offset,
+                         std::uint32_t count) {
+        const auto &storage = buffers.at(handle.id);
+        for (std::uint32_t i = 0; i < count; ++i) {
+          Doc::VBORow row{};
+          std::memcpy(&row, storage.data() + offset + i * sizeof(row),
+                      sizeof(row));
+          if ((row.foreground & Doc::VBORow::solidFlag) == 0 &&
+              row.pos[1] > 240)
+            ++headerInk;
+        }
+      });
+  widget = std::make_unique<MediaWidget>(std::string{}, player);
+  widget->setTitle("Visible media title");
+  widget->setSize(500, 280);
+  widget->setScreenPosition(50, 150);
+  widget->deviceReady(*device, {});
+  ch::Timeline timeline;
+  const glm::mat4 projection{1};
+  gleditor::FrameContext context{*state, projection, 1280, 800, timeline};
+  widget->drawFrame(context);
+  EXPECT_GT(headerInk, 10U);
 }

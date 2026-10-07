@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -26,11 +27,17 @@
 #include <glm/ext/matrix_float4x4.hpp>
 
 #include <gleditor/a11y/tree.hpp>
-#include <gleditor/buffer_pool.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/ui/layout.hpp>
 
 struct RenderState;
+namespace gleditor {
+class Canvas;
+namespace text {
+class ShapingCache;
+}
+} // namespace gleditor
 
 namespace render {
 class RenderDevice;
@@ -65,7 +72,7 @@ public:
    *        the overlay.
    * @param aFontName Pango font description the text is laid out with.
    */
-  ToastOverlay(render::RenderDevice *aDevice, std::string aFontName);
+  ToastOverlay(render::RenderDevice *aDevice, std::string aFontName = {});
   ~ToastOverlay() override;
 
   ToastOverlay(const ToastOverlay &)            = delete;
@@ -80,9 +87,8 @@ public:
   /**
    * @brief Show a message.
    *
-   * The text is laid out and uploaded here rather than at draw time, so a
-   * message arriving during a frame costs nothing on the frames that display
-   * it.
+   * Geometry is retained after the next draw; resizing or changing the UI
+   * presentation fits existing messages again without changing their lifetime.
    */
   void post(render::DiagnosticSeverity severity, std::string_view message,
             RenderState &state);
@@ -101,18 +107,24 @@ public:
    */
   void draw(RenderState &state, int screenWidth, int screenHeight);
 
+  /// The application supplies live UI configuration; defaults are generic
+  /// fallbacks. Explicit constructor fonts remain a scaled override.
+  void setPresentation(const gleditor::ui::UiMetrics &metrics,
+                       const gleditor::ui::Theme &theme,
+                       std::uint16_t maxLines = 3, float maxWidthShare = 0.75F);
+  [[nodiscard]] const gleditor::ui::LayoutResult &layout() const {
+    return layoutResult;
+  }
+
   // -- gleditor::a11y::Source ------------------------------------------------
   void describe(gleditor::a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
 
 private:
-  /// One notification: its rows in the shared pool, and when it dies.
+  /// One notification and its retained geometry, independent of its fade.
   struct Toast {
-    BufferPool::Allocation backing{};
-    std::uint32_t instanceCount{};
-    /// Size of the panel in pixels, needed to stack the next one above it.
-    float width{};
-    float height{};
+    std::unique_ptr<gleditor::Canvas> canvas;
+    gleditor::ui::Rect bounds;
     Clock::time_point postedAt;
     Clock::time_point expiresAt;
     /// What it says, and how much it matters. Kept because the drawn form is
@@ -155,22 +167,20 @@ public:
   [[nodiscard]] bool fadingIn(Clock::time_point now) const;
 
 private:
-  /// Pixels between the panel edge and the text, and between stacked panels.
-  static constexpr float padding = 8.0F;
-  static constexpr float gap     = 6.0F;
-  /// Pixels from the bottom left corner of the window to the first panel.
-  static constexpr float marginX = 12.0F;
-  static constexpr float marginY = 12.0F;
-
-  /// Rows the pool starts with. A handful of short messages fit without a grow.
-  static constexpr std::uint32_t initialPoolRows = 1U << 12U;
-
   void dropOldest();
+  void rebuild(RenderState &state);
 
   render::RenderDevice *device;
   std::string fontName;
-  std::unique_ptr<BufferPool> pool;
-  render::PipelineHandle pipeline{};
+  std::optional<render::PipelineDesc> pipeline;
+  gleditor::ui::UiMetrics metrics;
+  gleditor::ui::Theme theme;
+  gleditor::ui::LayoutResult layoutResult;
+  std::unique_ptr<gleditor::text::ShapingCache> shaping;
+  std::uint16_t maxLines{3};
+  float maxWidthShare{0.75F};
+  bool dirty{true};
+  std::uint64_t geometryRevision{};
   std::vector<Toast> toasts;
   /// How many have been posted, ever. Both the serial a toast is given and,
   /// with the number still on screen, what tells the accessibility tree that

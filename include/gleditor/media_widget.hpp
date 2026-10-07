@@ -10,6 +10,7 @@
 #ifndef GLEDITOR_MEDIA_WIDGET_H
 #define GLEDITOR_MEDIA_WIDGET_H
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,9 @@
 #include <gleditor/media.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/layout.hpp>
+#include <gleditor/ui/widgets.hpp>
 
 struct RenderState;
 
@@ -43,7 +47,7 @@ class MediaWidget : public FrameContributor,
                     public PickObserver,
                     public a11y::Source {
 public:
-  explicit MediaWidget(std::string aFontName                = "Sans 10",
+  explicit MediaWidget(std::string aFontName                = {},
                        std::shared_ptr<MediaPlayer> aPlayer = nullptr);
   ~MediaWidget() override;
 
@@ -132,12 +136,19 @@ public:
   /// Identity of this card in the picking and accessibility namespaces.
   [[nodiscard]] std::uint32_t widgetId() const { return widgetId_; }
 
-  /// The packed picking/accessibility root for this card.
+  /// The full semantic picking/accessibility root for this card.
   ///
   /// Its high bits are @ref widgetId(); its low 12 bits are fixed child IDs
-  /// such as @ref tagPlay and @ref tagSeekBase. This keeps every control's
-  /// local identity stable while preserving a distinct namespace per card.
+  /// such as @ref tagPlay and @ref tagSeekBase. GPU tags contain compact child
+  /// offsets; a captured scene resolves them back to this full identity.
   [[nodiscard]] std::uint32_t tagBase() const { return tagBase_; }
+
+  /// Retained local-pixel chrome geometry, shared by drawing and a11y bounds.
+  [[nodiscard]] const ui::LayoutResult &layout() const { return layout_; }
+  [[nodiscard]] std::uint64_t chromeRevision() const { return chromeBuilds_; }
+  [[nodiscard]] text::ShapingCache::Stats shapingStats() const {
+    return shaping_.stats();
+  }
 
   // -- FrameContributor -------------------------------------------------------
   void deviceReady(render::RenderDevice &device,
@@ -152,7 +163,7 @@ public:
   // -- a11y::Source -----------------------------------------------------------
   void describe(a11y::Builder &into) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return revision_;
+    return revision_.load(std::memory_order_relaxed);
   }
   bool performAction(std::uint64_t nodeId, a11y::Action action,
                      std::string_view value) override;
@@ -170,10 +181,9 @@ public:
    * @brief Chrome around the video viewport: the title bar, transport
    *        buttons, seek bar and margins drawFrame() draws outside it.
    *
-   * Exposed so a caller sizing a widget from a desired video *viewport*
-   * size -- fitting a decoded frame's aspect ratio to a page's text width,
-   * say -- can compute the whole card's setSize() from it without
-   * duplicating drawFrame()'s own layout numbers and drifting from them.
+   * Fallback reservations for sizing a card before its presentation metrics
+   * are known. Retained chrome derives its actual geometry from the live font
+   * and theme; larger typography may reserve more of the caller's card.
    */
   static constexpr float chromeWidthPx  = 24.0F;
   static constexpr float chromeHeightPx = 88.0F;
@@ -230,11 +240,40 @@ private:
   /// comment for why the flag exists at all.
   void startPlayback();
   void initClickables();
+  void rebuildLive();
+  void updateAccessibilityBounds(const glm::mat4 &, int width, int height);
 
   std::string fontName_;
   std::shared_ptr<MediaPlayer> player_;
   std::unique_ptr<Canvas> canvas_;
+  std::unique_ptr<Canvas> liveCanvas_;
   ClickableRegistry clickables_;
+  text::ShapingCache shaping_;
+  text::FontFacePtr font_;
+  render::PipelineDesc pipelineDesc_;
+  std::string drawnFont_;
+  bool drawnScreenSpace_{};
+  ui::UiMetrics metrics_;
+  ui::Theme theme_;
+  ui::LayoutResult layout_;
+  ui::Rect viewport_, seekRect_;
+  ui::Scrubber scrubber_{.label = "Playback Position"};
+  struct ChromeState {
+    std::uint64_t geometry{};
+    PlaybackState playback{PlaybackState::Stopped};
+    bool muted{}, video{}, frame{};
+    float rate{1.0F};
+    int seconds{}, duration{};
+    bool operator==(const ChromeState &) const = default;
+  };
+  ChromeState chromeState_;
+  std::uint64_t geometryRevision_{1}, chromeBuilds_{}, liveBuiltFor_{};
+  int liveProgress_{-1}, liveVideoWidth_{}, liveVideoHeight_{};
+  std::optional<a11y::Rect> rootBounds_, seekBounds_;
+  std::vector<std::optional<a11y::Rect>> controlBounds_;
+  RenderState *pickState_{};
+  std::uint32_t pickScope_{};
+  std::shared_ptr<const std::vector<std::uint32_t>> pickTargets_;
 
   /// Set by loadFragment() when its fragment is a real sub-range of the
   /// container, cleared once applyPendingFragment() has translated it into a
@@ -286,7 +325,7 @@ private:
   float height_{140.0F};
   bool visible_{true};
   std::string title_;
-  std::uint64_t revision_{1};
+  std::atomic<std::uint64_t> revision_{1};
   std::uint32_t widgetId_{0};
   std::uint32_t tagBase_{0};
 };

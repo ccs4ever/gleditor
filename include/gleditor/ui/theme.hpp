@@ -3,10 +3,14 @@
 
 #include <array>
 #include <cstddef>
+#include <gleditor/color.hpp>
 #include <glm/ext/vector_float4.hpp>
 #include <string>
 
 namespace gleditor::ui {
+[[nodiscard]] inline std::uint32_t rgba(const glm::vec4 &colour) {
+  return color::packRgba(colour.r, colour.g, colour.b, colour.a);
+}
 inline constexpr float kSafeMarginShare = 0.05F;
 
 enum class FontRole : unsigned char { Caption, Label, Body, Title, Mono };

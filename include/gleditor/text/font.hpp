@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include FT_FREETYPE_H
 #include <hb.h>
@@ -31,10 +32,14 @@ struct FontMetrics {
  * @brief Represents a loaded FreeType font face paired with a HarfBuzz font
  * object.
  */
+using FontLibraryPtr = std::shared_ptr<std::remove_pointer_t<FT_Library>>;
+
 class FontFace {
 public:
   FontFace(FT_Library ftLib, const std::string &fontPath, double pointSize,
            unsigned int dpi = 96);
+  FontFace(FontLibraryPtr library, const std::string &fontPath,
+           double pointSize, unsigned int dpi = 96);
   ~FontFace();
 
   FontFace(const FontFace &)            = delete;
@@ -50,6 +55,8 @@ public:
   [[nodiscard]] const std::string &key() const { return key_; }
 
 private:
+  // Retained layouts can outlive the thread-local manager that opened them.
+  FontLibraryPtr library_;
   FT_Face face_{};
   hb_font_t *hbFont_{};
   FontMetrics metrics_{};
@@ -109,7 +116,7 @@ private:
   FontManager();
   ~FontManager();
 
-  FT_Library ftLib_{};
+  FontLibraryPtr ftLib_;
   std::unordered_map<std::string, FontResult> cache_;
   std::unordered_map<std::string, FontResult> fallbackCache_;
 };

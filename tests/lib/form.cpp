@@ -385,3 +385,66 @@ TEST_F(ChoiceFormTest, anEmptyChoiceAnswersWithNothing) {
   EXPECT_TRUE(form.grabbing());
   EXPECT_TRUE(form.complaint().contains("Signing key"));
 }
+
+TEST_F(FormTest, editingRemovesWholeGraphemes) {
+  form.open("Graphemes", "",
+            {{.label = "Name", .value = "e\u0301👩‍👩‍👧‍👦"}},
+            [](const auto &) {});
+  form.keyPressed(Key::Backspace, KeyMods::None);
+  EXPECT_EQ(form.current()[0].value, "e\u0301");
+  form.keyPressed(Key::Home, KeyMods::None);
+  form.keyPressed(Key::Delete, KeyMods::None);
+  EXPECT_TRUE(form.current()[0].value.empty());
+}
+
+TEST_F(FormTest, emptyFormsStillAcceptAndCancelWithoutInventingAField) {
+  form.open("Confirmation", "", {}, [this](const auto &) { ++accepted; });
+  EXPECT_FALSE(form.keyPressed(Key::Space, KeyMods::None));
+  EXPECT_FALSE(form.keyPressed(Key::Home, KeyMods::None));
+  EXPECT_TRUE(form.keyPressed(Key::Return, KeyMods::None));
+  EXPECT_EQ(accepted, 1);
+  EXPECT_FALSE(form.isOpen());
+}
+
+TEST_F(FormTest, accessibilityFocusSettlesThePreviousChoice) {
+  Form::Field choice{.label   = "Choice",
+                     .kind    = Form::Kind::Choice,
+                     .options = {"First", "Second"}};
+  form.open("Choices", "", {choice, {.label = "Name", .value = "Ada"}},
+            [this](const auto &values) {
+              answered = values;
+              ++accepted;
+            });
+  form.keyPressed(Key::Space, KeyMods::None);
+  form.keyPressed(Key::Down, KeyMods::None);
+  EXPECT_TRUE(form.performAction(80, gleditor::a11y::Action::Focus, {}));
+  EXPECT_FALSE(form.listOpen());
+  form.keyPressed(Key::Return, KeyMods::None);
+  ASSERT_EQ(accepted, 1);
+  EXPECT_EQ(answered[0].chosen, 1U);
+  EXPECT_EQ(answered[1].value, "Ada");
+}
+TEST_F(FormTest, horizontalWheelLeavesChoiceHighlightUnchanged) {
+  Form::Field choice{.label   = "Choice",
+                     .kind    = Form::Kind::Choice,
+                     .options = {"First", "Second"}};
+  form.open("Choices", "", {choice}, [](const auto &) {});
+  form.keyPressed(Key::Space, KeyMods::None);
+  EXPECT_TRUE(form.pointerEvent(
+      {.phase = gleditor::ui::PointerPhase::Wheel, .deltaX = 1, .deltaY = 0}));
+  form.keyPressed(Key::Return, KeyMods::None);
+  EXPECT_EQ(form.current()[0].chosen, 0U);
+}
+TEST_F(FormTest, longChoiceListsDoNotAliasTheNextField) {
+  Form::Field choice{.label = "Choice", .kind = Form::Kind::Choice};
+  for (int i = 0; i < 100; ++i) choice.options.push_back(std::to_string(i));
+  form.open("Choices", "", {choice, {.label = "Name", .value = "Ada"}},
+            [](const auto &) {});
+  EXPECT_TRUE(
+      form.performAction(1ULL << 31, gleditor::a11y::Action::Click, {}));
+  EXPECT_EQ(form.current()[0].chosen, 63U);
+  EXPECT_EQ(form.current()[1].value, "Ada");
+  EXPECT_TRUE(
+      form.performAction(80, gleditor::a11y::Action::SetValue, "Grace"));
+  EXPECT_EQ(form.current()[1].value, "Grace");
+}

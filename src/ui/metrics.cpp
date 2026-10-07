@@ -1,6 +1,7 @@
 #include <gleditor/ui/metrics.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <iomanip>
 #include <locale>
@@ -108,5 +109,28 @@ Rect placeNear(Rect anchor, float width, float height, Rect safeArea,
     placed.bottom = at.bottom + at.height + spacing;
   }
   return clampToSafeArea(placed, safe);
+}
+std::string scaledFontDescription(std::string_view override, FontRole role,
+                                  const UiMetrics &metrics,
+                                  const Theme &theme) {
+  if (override.empty()) return metrics.fontDescription(role, theme);
+  auto resolved = theme;
+  auto &font    = resolved.fonts.at(static_cast<std::size_t>(role));
+  font.family   = override;
+  // Match FontManager's size-less description default; keep the original
+  // family/style spelling because resolving to a face name loses style hints.
+  font.points = 16;
+  if (const auto space = override.rfind(' '); space != std::string_view::npos) {
+    const auto size = override.substr(space + 1);
+    float points{};
+    const auto parsed =
+        std::from_chars(size.data(), size.data() + size.size(), points);
+    if (parsed.ec == std::errc{} && parsed.ptr == size.data() + size.size() &&
+        std::isfinite(points) && points > 0) {
+      font.family = override.substr(0, space);
+      font.points = points;
+    }
+  }
+  return metrics.fontDescription(role, resolved);
 }
 } // namespace gleditor::ui

@@ -2,7 +2,6 @@
  * @file toast.cpp
  * @brief Implementation of the transient notification overlay.
  */
-#include <gleditor/logging.hpp>
 #include <gleditor/toast.hpp> // IWYU pragma: associated
 
 #include <choreograph/Choreograph.h> // for easeInOutQuad
@@ -10,171 +9,149 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <ranges>
-#include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <gleditor/doc.hpp>
-#include <gleditor/glyphcache/cache.hpp>
-#include <gleditor/render/device.hpp>
+#include <gleditor/canvas.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/fit.hpp>
 #include <gleditor/text/font.hpp>
-#include <gleditor/text/layout.hpp>
+#include <gleditor/text/shaping_cache.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
 namespace {
-
-/// Widest a toast is allowed to get. Longer text is ellipsised rather than
-/// running off the window, which also bounds the panel dimensions written into
-/// the 14-bit width field of Doc::VBORow::layerWidthHeight.
-constexpr int maxTextWidthPx = 720;
 
 /// Panel colour per severity. The text stays near-white on all three; the
 /// panel is what says how much the message matters, which reads at a glance
 /// where a colour difference in eight-point text does not.
-unsigned int panelColour(const render::DiagnosticSeverity severity) {
+std::uint32_t panelColour(const render::DiagnosticSeverity severity,
+                          const gleditor::ui::Theme &theme) {
   switch (severity) {
   case render::DiagnosticSeverity::Info:
-    return Doc::VBORow::color3(38, 42, 54);
+    return gleditor::ui::rgba(theme.colours.surface);
   case render::DiagnosticSeverity::Warning:
-    return Doc::VBORow::color3(122, 86, 16);
+    return 0x7A5610FFU;
   case render::DiagnosticSeverity::Error:
-    return Doc::VBORow::color3(122, 32, 32);
+    return 0x7A2020FFU;
   }
-  return Doc::VBORow::color3(38, 42, 54);
-}
-
-/// View a row vector as the raw bytes the buffer pool wants.
-std::span<const std::byte> asBytes(const std::vector<Doc::VBORow> &rows) {
-  return {reinterpret_cast<const std::byte *>(rows.data()),
-          rows.size() * sizeof(Doc::VBORow)};
-}
-
-/// Copy a matrix into the flat array the device uniform structs carry.
-std::array<float, 16> toArray(const glm::mat4 &mat) {
-  std::array<float, 16> out{};
-  const auto *src = glm::value_ptr(mat);
-  std::copy_n(src, out.size(), out.begin());
-  return out;
+  return gleditor::ui::rgba(theme.colours.surface);
 }
 
 } // namespace
 
 ToastOverlay::ToastOverlay(render::RenderDevice *aDevice, std::string aFontName)
     : device(aDevice), fontName(std::move(aFontName)),
-      pool(std::make_unique<BufferPool>(aDevice, sizeof(Doc::VBORow),
-                                        initialPoolRows)) {}
+      shaping(std::make_unique<gleditor::text::ShapingCache>()) {}
 
 ToastOverlay::~ToastOverlay() = default;
 
 void ToastOverlay::createPipeline(const render::PipelineDesc &documentDesc) {
-  render::PipelineDesc desc = documentDesc;
-  desc.name                 = "toast";
-  // The overlay is drawn last and must land on top of whatever the documents
-  // put in the depth buffer. See PipelineDesc::depthTest.
-  desc.depthTest = false;
-  pipeline       = device->createPipeline(desc);
+  pipeline = documentDesc;
+  dirty    = true;
 }
 
 void ToastOverlay::dropOldest() {
   if (toasts.empty()) {
     return;
   }
-  pool->release(toasts.front().backing);
   toasts.erase(toasts.begin());
+  if (toasts.empty()) layoutResult = {};
+  dirty = true;
+  ++geometryRevision;
 }
 
 void ToastOverlay::post(const render::DiagnosticSeverity severity,
-                        const std::string_view message, RenderState &state) {
-  auto font = gleditor::text::FontManager::instance().getFont(fontName);
-  if (!font) {
-    return;
-  }
-
-  gleditor::text::LayoutOptions opts{
-      .maxWidthPx      = static_cast<float>(maxTextWidthPx),
-      .maxHeightPx     = 0.0F,
-      .singleParagraph = true,
-      .ellipsize       = true,
-  };
-  auto shaping =
-      gleditor::text::TextLayout::layoutSingleLine(message, font, opts);
-  if (shaping.textWidthPx <= 0 || shaping.textHeightPx <= 0) {
-    return;
-  }
-
-  const auto textWidth   = shaping.textWidthPx;
-  const auto textHeight  = shaping.textHeightPx;
-  const auto panelWidth  = static_cast<float>(textWidth) + (2 * padding);
-  const auto panelHeight = static_cast<float>(textHeight) + (2 * padding);
-
-  const auto panel = panelColour(severity);
-  const auto text  = Doc::VBORow::color(236);
-
-  std::vector<Doc::VBORow> rows;
-  rows.push_back(Doc::VBORow{
-      .pos        = {panelWidth / 2.0F, panelHeight / 2.0F},
-      .foreground = Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
-      .atlas      = 0,
-      .quad       = Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
-                                     static_cast<unsigned int>(panelHeight),
-                                     render::tagKindOverlay),
-      .paper      = Doc::VBORow::paperAt(panel, 0)});
-
-  rows.reserve(shaping.glyphs.size() + 1);
-  for (const auto &g : shaping.glyphs) {
-    const auto glyphPlaced = state.glyphCache.put(g.chr, font);
-    if (!glyphPlaced) {
-      // One glyph the atlas cannot take is one glyph not drawn; the rest of
-      // the toast still is.
-      GLEDITOR_LOG_DEBUG("render.glyphs", "skipping a glyph: {}",
-                         toString(glyphPlaced.error()));
-      continue;
-    }
-    const auto &glyph = *glyphPlaced;
-    const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
-    const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
-    if (0.0F == width || 0.0F == height) {
-      continue;
-    }
-
-    const auto left = padding + g.clusterLeft;
-    const auto top  = padding + static_cast<float>(textHeight) - g.clusterTop;
-
-    rows.push_back(Doc::VBORow{
-        .pos        = {left + (width / 2.0F), top - (height / 2.0F)},
-        .foreground = Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
-        .atlas      = Doc::VBORow::atlasAt(
-            static_cast<unsigned int>(glyph.texCoords.topLeft.x),
-            static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
-        .quad  = Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
-                                  static_cast<unsigned int>(width),
-                                  static_cast<unsigned int>(height),
-                                  render::tagKindOverlay),
-        .paper = Doc::VBORow::paperAt(panel, 0)});
-  }
-
+                        const std::string_view message, RenderState &) {
+  if (message.empty()) return;
   while (toasts.size() >= maxVisible) {
     dropOldest();
   }
 
   Toast toast;
-  toast.instanceCount = static_cast<std::uint32_t>(rows.size());
-  toast.backing       = pool->reserve(toast.instanceCount);
-  toast.width         = panelWidth;
-  toast.height        = panelHeight;
-  toast.postedAt      = Clock::now();
-  toast.expiresAt     = toast.postedAt + lifetime;
-  toast.message       = message;
-  toast.severity      = severity;
-  toast.serial        = ++posted;
-  pool->write(toast.backing, 0, asBytes(rows));
-  toasts.push_back(toast);
+  toast.postedAt  = Clock::now();
+  toast.expiresAt = toast.postedAt + lifetime;
+  toast.message   = message;
+  toast.severity  = severity;
+  toast.serial    = ++posted;
+  toasts.push_back(std::move(toast));
+  dirty = true;
+  ++geometryRevision;
+}
+
+void ToastOverlay::setPresentation(const gleditor::ui::UiMetrics &nextMetrics,
+                                   const gleditor::ui::Theme &nextTheme,
+                                   const std::uint16_t nextMaxLines,
+                                   const float nextMaxWidthShare) {
+  const auto lines = std::max<std::uint16_t>(1, nextMaxLines);
+  const auto share = std::isfinite(nextMaxWidthShare)
+                         ? std::clamp(nextMaxWidthShare, 0.0F, 1.0F)
+                         : 0.75F;
+  if (metrics != nextMetrics || theme != nextTheme || maxLines != lines ||
+      maxWidthShare != share) {
+    metrics       = nextMetrics;
+    theme         = nextTheme;
+    maxLines      = lines;
+    maxWidthShare = share;
+    dirty         = true;
+  }
+}
+
+void ToastOverlay::rebuild(RenderState &state) {
+  using namespace gleditor;
+  const auto safe        = metrics.pixelSafeArea();
+  const auto description = ui::scaledFontDescription(
+      fontName, ui::FontRole::Caption, metrics, theme);
+  const auto font  = text::FontManager::instance().getFont(description);
+  const auto em    = font->metrics().lineHeight;
+  const auto gap   = std::max(0.0F, theme.gapEm * em);
+  const auto count = static_cast<float>(toasts.size());
+  const auto rowHeight =
+      count > 0.0F ? std::max(0.0F, safe.height - gap * (count - 1)) / count
+                   : 0.0F;
+  const auto padding    = std::min({std::max(0.0F, theme.paddingEm * em),
+                                    rowHeight * 0.5F, safe.width * 0.5F});
+  const auto width      = safe.width * maxWidthShare;
+  const auto textWidth  = std::max(0.0F, width - 2.0F * padding);
+  const auto textHeight = std::max(0.0F, rowHeight - 2.0F * padding);
+  std::vector<ui::LayoutItem> items;
+  std::vector<text::FittedText> labels;
+  for (std::size_t index = 0; index < toasts.size(); ++index) {
+    auto fitted = text::fit(toasts[index].message, font,
+                            {.maxWidthPx  = std::max(1.0F, textWidth),
+                             .maxHeightPx = std::max(1.0F, textHeight),
+                             .maxLines    = maxLines,
+                             .overflow    = text::Overflow::Wrap},
+                            shaping.get());
+    items.push_back(
+        {.id        = static_cast<std::uint32_t>(index + 1),
+         .intrinsic = {std::min(width, fitted.widthPx + 2 * padding),
+                       std::min(rowHeight, fitted.heightPx + 2 * padding)},
+         .paddingPx = padding});
+    labels.push_back(std::move(fitted));
+  }
+  layoutResult = ui::stack(
+      safe, items,
+      {.gap = gap, .align = ui::Align::Start, .justify = ui::Justify::End});
+  for (std::size_t index = 0; index < toasts.size(); ++index) {
+    auto &toast     = toasts[index];
+    const auto &box = layoutResult.boxes[index];
+    toast.bounds    = box.rect;
+    toast.canvas    = std::make_unique<Canvas>(device, description);
+    toast.canvas->createPipeline(*pipeline, false);
+    toast.canvas->pushClip(safe);
+    const auto panel = panelColour(toast.severity, theme);
+    toast.canvas->addRect(box.rect.left, box.rect.bottom, box.rect.width,
+                          box.rect.height, panel);
+    toast.canvas->addText(state, box.contentRect, labels[index],
+                          ui::rgba(theme.colours.text), panel);
+    toast.canvas->popClip();
+    toast.canvas->commit();
+  }
+  state.glyphCache.flush();
+  dirty = false;
+  ++geometryRevision;
 }
 
 void ToastOverlay::describe(gleditor::a11y::Builder &into) {
@@ -202,18 +179,25 @@ void ToastOverlay::describe(gleditor::a11y::Builder &into) {
   into.contribute(into.id(0));
 
   for (const auto &toast : toasts) {
-    auto &node = into.add(toast.serial, a11y::Role::Label);
-    node.value = toast.message;
-    node.live  = render::DiagnosticSeverity::Error == toast.severity
-                     ? a11y::Live::Assertive
-                     : a11y::Live::Polite;
+    auto &node         = into.add(toast.serial, a11y::Role::Label);
+    node.label         = toast.message;
+    node.value         = toast.message;
+    const auto &bounds = toast.bounds;
+    node.bounds =
+        a11y::Rect{bounds.left,
+                   static_cast<double>(metrics.screenHeight) - bounds.bottom -
+                       bounds.height,
+                   bounds.left + bounds.width,
+                   static_cast<double>(metrics.screenHeight) - bounds.bottom};
+    node.live = render::DiagnosticSeverity::Error == toast.severity
+                    ? a11y::Live::Assertive
+                    : a11y::Live::Polite;
   }
 }
 
 std::uint64_t ToastOverlay::accessibilityRevision() const {
-  // What has been said, and what is still saying it: posting bumps the first
-  // and expiring changes the second, and nothing else about a toast moves.
-  return (posted * 1000U) + toasts.size();
+  // Posting, expiry and responsive re-layout all change the accessible tree.
+  return geometryRevision;
 }
 
 float ToastOverlay::fadeFactor(const Clock::time_point postedAt,
@@ -259,9 +243,16 @@ void ToastOverlay::expire(const Clock::time_point now) {
 
 void ToastOverlay::draw(RenderState &state, const int screenWidth,
                         const int screenHeight) {
-  if (toasts.empty() || !pipeline.valid()) {
+  if (toasts.empty() || !pipeline) {
     return;
   }
+  if (metrics.screenWidth != screenWidth ||
+      metrics.screenHeight != screenHeight) {
+    metrics.screenWidth  = screenWidth;
+    metrics.screenHeight = screenHeight;
+    dirty                = true;
+  }
+  if (dirty) rebuild(state);
 
   // Pixel coordinates with Y running up, so the corner offsets the vertex
   // stage derives point the same way they do in document space and the
@@ -270,21 +261,10 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
       glm::ortho(0.0F, static_cast<float>(screenWidth), 0.0F,
                  static_cast<float>(screenHeight));
 
-  state.device->bindPipeline(pipeline);
-  state.device->bindAtlasTexture(state.glyphCache.textureHandle());
-
   // Newest nearest the corner, older ones stacked above it.
   const auto now = Clock::now();
-  float penY     = marginY;
   for (const auto &toast : std::ranges::reverse_view(toasts)) {
-    const glm::mat4 model =
-        glm::translate(glm::mat4(1.0F), glm::vec3(marginX, penY, 0.0F));
-    const render::DrawUniforms uniforms{
-        .mvp     = toArray(projection * model),
-        .opacity = fadeFactor(toast.postedAt, toast.expiresAt, now)};
-    state.device->drawGlyphs(uniforms, pool->buffer(),
-                             pool->byteOffset(toast.backing),
-                             toast.instanceCount);
-    penY += toast.height + gap;
+    toast.canvas->draw(state, projection,
+                       fadeFactor(toast.postedAt, toast.expiresAt, now));
   }
 }

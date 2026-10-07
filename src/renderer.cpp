@@ -432,9 +432,9 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   // Whatever the program draws for itself: after the documents, so it can sit
   // over them, and before the notifications, which must be over everything.
+  const auto theme = this->state->uiTheme.load();
   if (!frameContributors.empty()) {
     state.beginPickScene();
-    const auto theme = this->state->uiTheme.load();
     gleditor::FrameContext ctx{
         .state          = state,
         .viewProjection = viewProjection,
@@ -459,6 +459,15 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Last, so that the overlay is on top: its pipeline does not depth test, so
   // submission order is what decides.
   toasts->expire(ToastOverlay::Clock::now());
+  toasts->setPresentation(
+      {.contentScale = this->state->contentScale.load(),
+       .userScale    = this->state->uiScale.load(),
+       .fontScale    = this->state->fontScale.load(),
+       .screenWidth  = screenWidth,
+       .screenHeight = screenHeight,
+       .chrome       = lastChrome,
+       .marginShare  = this->state->uiSafeMarginShare.load()},
+      theme ? *theme : gleditor::ui::defaultTheme());
   toasts->draw(state, screenWidth, screenHeight);
 
   // What was just drawn, said. Here rather than anywhere else because this is
@@ -1219,8 +1228,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   }
 
   RenderState state(device.get());
-  toasts      = std::make_unique<ToastOverlay>(device.get(),
-                                               std::string(defaultFontName()));
+  toasts      = std::make_unique<ToastOverlay>(device.get(), std::string{});
   caret       = std::make_unique<Caret>(device.get());
   state.caret = caret.get();
 

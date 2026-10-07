@@ -4,6 +4,7 @@
 #include <gleditor/ui/input_event.hpp>
 #include <gleditor/ui/rect.hpp>
 #include <gleditor/ui/theme.hpp>
+#include <string_view>
 
 namespace gleditor {
 /// Window-pixel bands occupied by scene chrome.
@@ -39,6 +40,11 @@ struct UiMetrics {
 [[nodiscard]] Rect clampToSafeArea(Rect pixels, Rect safeArea);
 [[nodiscard]] Rect placeNear(Rect anchor, float width, float height,
                              Rect safeArea, float gap = 0.0F);
+/// Empty overrides use the live role. Explicit legacy descriptions keep their
+/// family, style and point size while following UI and font scale changes.
+[[nodiscard]] std::string scaledFontDescription(std::string_view override,
+                                                FontRole, const UiMetrics &,
+                                                const Theme &);
 } // namespace ui
 } // namespace gleditor
 #endif

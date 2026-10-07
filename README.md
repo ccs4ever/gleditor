@@ -76,7 +76,7 @@ language tools also offer `--help` and headless execution.
 
 `libgleditor` owns text layout, pagination, the glyph cache, rendering, SDL integration, input,
 accessibility data, and the application loop. It names no xanadoc, cell, link, or document format.
-The plain editor keeps its own YAML configuration and shares no Xanadu code.
+The plain editor keeps its own TSV configuration and shares no Xanadu code.
 
 ### One pipeline, three backends
 
@@ -231,8 +231,13 @@ repaired prerequisites and remaining network/UI work.
 Xudu and Xuzz keep keymaps, settings, layout, UI state, and pouches in five sovereign system
 xanadocs (`system://keymap|settings|layout|ui|pouches`). They are validated structure, with
 defaults, rather than hardcoded application keymaps. ZigZag uses sovereign-store-backed system
-slices. `gleditor` remains separate and uses its own YAML configuration. See the
+slices. `gleditor` remains separate and uses its own TSV configuration. See the
 [system xanadocs design](design/system-xanadocs-customization-and-metasystem.md).
+
+The plain editor's chrome typography is independent of its document font. Its configuration accepts
+`ui.scale`, `ui.fontScale`, `ui.safeMarginShare`, `ui.minTouchPx`, `ui.minFontPx`, and
+`ui.font.<caption|label|body|title|mono>.<family|points>`. UI and font scales multiply the display
+scale; safe margin share is between 0 and 0.5. Font sizes and scales must be positive and finite.
 
 The Vortex VM operates over manifolds. VQL queries and VPL array expressions compile to Vortex;
 `vquery`/`vqueryc` and `vpl`/`vplc` expose their runners and compilers. `vprolog` runs a Prolog

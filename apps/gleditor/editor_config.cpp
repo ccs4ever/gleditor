@@ -4,6 +4,9 @@
  */
 #include "editor_config.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -20,6 +23,11 @@ std::string defaultEditorConfigTsv() {
          "settings.lineHeight\t1.4\n"
          "settings.autoSaveSeconds\t5\n"
          "settings.theme\tsystem\n"
+         "ui.scale\t1\n"
+         "ui.fontScale\t1\n"
+         "ui.safeMarginShare\t0.05\n"
+         "ui.minTouchPx\t44\n"
+         "ui.minFontPx\t9\n"
          "spatial.documentSpacingX\t70.0\n"
          "spatial.depthZ\t-45.0\n"
          "spatial.docArrivalSeconds\t0.22\n"
@@ -45,7 +53,26 @@ EditorConfig parseEditorConfig(const std::string_view tsv) {
     return config;
   }
   constexpr std::string_view keymapPrefix = "keymap.";
+  const auto positive = [](const std::string &value, float fallback) {
+    const auto parsed = common::tsv::parseFloat(value, fallback);
+    return std::isfinite(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  constexpr std::array<std::string_view, ui::kFontRoleCount> roles{
+      "caption", "label", "body", "title", "mono"};
   for (const auto &[key, value] : *entries) {
+    bool fontSetting = false;
+    for (std::size_t i = 0; i < roles.size(); ++i) {
+      const auto prefix = "ui.font." + std::string(roles[i]);
+      if (key == prefix + ".family" && !value.empty()) {
+        config.uiTheme.fonts[i].family = value;
+        fontSetting                    = true;
+      } else if (key == prefix + ".points") {
+        config.uiTheme.fonts[i].points =
+            positive(value, config.uiTheme.fonts[i].points);
+        fontSetting = true;
+      }
+    }
+    if (fontSetting) continue;
     if ("settings.fontSize" == key) {
       config.settings.fontSize =
           common::tsv::parseFloat(value, config.settings.fontSize);
@@ -59,6 +86,21 @@ EditorConfig parseEditorConfig(const std::string_view tsv) {
           common::tsv::parseUint(value, config.settings.autoSaveSeconds);
     } else if ("settings.theme" == key) {
       config.settings.theme = value;
+    } else if ("ui.scale" == key) {
+      config.uiScale = positive(value, config.uiScale);
+    } else if ("ui.fontScale" == key) {
+      config.uiFontScale = positive(value, config.uiFontScale);
+    } else if ("ui.safeMarginShare" == key) {
+      const auto parsed =
+          common::tsv::parseFloat(value, config.uiSafeMarginShare);
+      if (std::isfinite(parsed) && parsed >= 0 && parsed <= .5F)
+        config.uiSafeMarginShare = parsed;
+    } else if ("ui.minTouchPx" == key) {
+      config.uiTheme.type.minTouchPx =
+          positive(value, config.uiTheme.type.minTouchPx);
+    } else if ("ui.minFontPx" == key) {
+      config.uiTheme.type.minFontPx =
+          positive(value, config.uiTheme.type.minFontPx);
     } else if ("spatial.documentSpacingX" == key) {
       config.spatial.documentSpacingX =
           common::tsv::parseFloat(value, config.spatial.documentSpacingX);

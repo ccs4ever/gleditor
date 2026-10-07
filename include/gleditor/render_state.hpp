@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <memory>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +47,7 @@ struct RenderState {
   std::vector<std::shared_ptr<const render::PickSemanticTarget>> pickTargets;
   render::PickScene overlayPickScene;
   std::uint32_t nextOverlayPickScope{1};
+  std::uint32_t persistentOverlayPickScopes{};
 
   void beginPickScene() {
     overlayPickScene.overlays.clear();
@@ -57,9 +59,18 @@ struct RenderState {
     overlayPickScene.widgetOverlays.push_back({identity, std::move(targets)});
   }
   [[nodiscard]] std::uint32_t allocateOverlayPickScope() {
-    constexpr auto scopeCount = (1U << render::tagDocBits) - 1U;
+    constexpr auto scopeCount = (1U << (render::tagDocBits - 1)) - 1U;
     const auto scope          = nextOverlayPickScope++;
     return ((scope - 1U) % scopeCount) + 1U;
+  }
+  /// Retained controls keep their identity while frame-local scene scopes
+  /// cycle through a disjoint lower half of the range. Never wrap a persistent
+  /// identity.
+  [[nodiscard]] std::uint32_t allocatePersistentOverlayPickScope() {
+    constexpr auto scopeCount = (1U << render::tagDocBits) - 1U;
+    if (persistentOverlayPickScopes == (1U << (render::tagDocBits - 1)))
+      throw std::length_error("Overlay picking scopes exhausted");
+    return scopeCount - persistentOverlayPickScopes++;
   }
   void
   bindOverlayPick(const render::PickingTag &tag,

@@ -463,6 +463,12 @@ void DeviceVK::createSwapchain(const int width, const int height) {
   vkGetSwapchainImagesKHR(device, swapchain, &actual, nullptr);
   swapchainImages.resize(actual);
   vkGetSwapchainImagesKHR(device, swapchain, &actual, swapchainImages.data());
+  presentationReady.resize(actual, VK_NULL_HANDLE);
+  VkSemaphoreCreateInfo semaphoreInfo{};
+  semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  for (auto &semaphore : presentationReady)
+    check(vkCreateSemaphore(device, &semaphoreInfo, nullptr, &semaphore),
+          "vkCreateSemaphore");
 }
 
 void DeviceVK::destroySwapchain() {
@@ -471,6 +477,10 @@ void DeviceVK::destroySwapchain() {
     swapchain = VK_NULL_HANDLE;
   }
   swapchainImages.clear();
+  for (const auto semaphore : presentationReady)
+    if (semaphore != VK_NULL_HANDLE)
+      vkDestroySemaphore(device, semaphore, nullptr);
+  presentationReady.clear();
 }
 
 namespace {
@@ -700,9 +710,6 @@ void DeviceVK::createCommandResources() {
     check(
         vkCreateSemaphore(device, &semInfo, nullptr, &frames[i].imageAvailable),
         "vkCreateSemaphore");
-    check(
-        vkCreateSemaphore(device, &semInfo, nullptr, &frames[i].renderFinished),
-        "vkCreateSemaphore");
     check(vkCreateFence(device, &fenceInfo, nullptr, &frames[i].inFlight),
           "vkCreateFence");
     // Destination for this slot's picking read: four unsigned integers, the
@@ -839,9 +846,6 @@ void DeviceVK::shutdown() {
   for (auto &frame : frames) {
     if (VK_NULL_HANDLE != frame.imageAvailable) {
       vkDestroySemaphore(device, frame.imageAvailable, nullptr);
-    }
-    if (VK_NULL_HANDLE != frame.renderFinished) {
-      vkDestroySemaphore(device, frame.renderFinished, nullptr);
     }
     if (VK_NULL_HANDLE != frame.inFlight) {
       vkDestroyFence(device, frame.inFlight, nullptr);

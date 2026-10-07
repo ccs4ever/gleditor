@@ -302,7 +302,6 @@ private:
   struct FrameContext {
     VkCommandBuffer commands{VK_NULL_HANDLE};
     VkSemaphore imageAvailable{VK_NULL_HANDLE};
-    VkSemaphore renderFinished{VK_NULL_HANDLE};
     VkFence inFlight{VK_NULL_HANDLE};
     /// Destination of this frame's picking read, if one was requested. The
     /// frame's own fence already says when the copy has completed, so no extra
@@ -398,6 +397,9 @@ private:
   VkFormat swapchainFormat{VK_FORMAT_UNDEFINED};
   VkExtent2D swapchainExtent{};
   std::vector<VkImage> swapchainImages;
+  // A frame fence ends submission, not presentation. Reacquiring an image
+  // guarantees its previous presentation has consumed this semaphore.
+  std::vector<VkSemaphore> presentationReady;
 
   /// Offscreen colour target the glyphs are drawn into, mirroring the OpenGL
   /// backend's renderbuffer.

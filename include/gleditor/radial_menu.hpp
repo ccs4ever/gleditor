@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,8 @@
 #include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/layout.hpp>
 
 struct RenderState;
 
@@ -65,12 +68,12 @@ class RadialMenu : public FrameContributor,
                    public ModalInput,
                    public a11y::Source {
 public:
-  [[nodiscard]] bool grabbing() const override { return open_; }
-  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override {
-    if (key != gleditor::Key::Escape || !grabbing()) return false;
-    close();
-    return true;
-  }
+  [[nodiscard]] bool grabbing() const override { return isOpen(); }
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods) override;
+  [[nodiscard]] std::shared_ptr<const ui::LayoutResult>
+  focusLayout() const override;
+  void focusedNodeChanged(std::uint32_t) override;
+  bool activateNode(std::uint32_t) override;
   void textTyped(const std::string &) override {}
   bool pointerPick(const render::PickingResult &pick,
                    RenderState &state) override {
@@ -81,7 +84,7 @@ public:
   static constexpr std::uint32_t kRadialTagHub  = 0x8050U;
   static constexpr std::uint32_t kRadialTagBack = 0x8051U;
 
-  explicit RadialMenu(std::string aFontName = "Sans 10");
+  explicit RadialMenu(std::string aFontName = {});
   ~RadialMenu() override;
 
   RadialMenu(const RadialMenu &)            = delete;
@@ -91,11 +94,18 @@ public:
 
   // -- Configuration & Navigation ---------------------------------------------
   void setConfig(RadialConfig aConfig);
-  [[nodiscard]] const RadialConfig &config() const noexcept { return config_; }
+  [[nodiscard]] RadialConfig config() const {
+    const std::scoped_lock lock(guard_);
+    return config_;
+  }
 
   void setRadius(float outer, float inner);
-  [[nodiscard]] float radius() const noexcept { return config_.radius; }
+  [[nodiscard]] float radius() const noexcept {
+    const std::scoped_lock lock(guard_);
+    return config_.radius;
+  }
   [[nodiscard]] float innerRadius() const noexcept {
+    const std::scoped_lock lock(guard_);
     return config_.innerRadius;
   }
 
@@ -108,30 +118,45 @@ public:
   void close();
   void toggle(float screenX, float screenY, std::uint32_t aDocIndex = 0,
               std::uint32_t aCharOffset = 0, std::uint32_t aCharLength = 0);
-  [[nodiscard]] bool isOpen() const noexcept { return open_; }
+  [[nodiscard]] bool isOpen() const noexcept {
+    const std::scoped_lock lock(guard_);
+    return open_;
+  }
   [[nodiscard]] float lastScreenWidth() const noexcept {
+    const std::scoped_lock lock(guard_);
     return lastScreenWidth_;
   }
   [[nodiscard]] float lastScreenHeight() const noexcept {
+    const std::scoped_lock lock(guard_);
     return lastScreenHeight_;
   }
 
-  [[nodiscard]] float centerX() const noexcept { return centerX_; }
-  [[nodiscard]] float centerY() const noexcept { return centerY_; }
+  [[nodiscard]] float centerX() const noexcept {
+    const std::scoped_lock lock(guard_);
+    return centerX_;
+  }
+  [[nodiscard]] float centerY() const noexcept {
+    const std::scoped_lock lock(guard_);
+    return centerY_;
+  }
   [[nodiscard]] std::uint32_t targetDocIndex() const noexcept {
+    const std::scoped_lock lock(guard_);
     return targetDocIndex_;
   }
   [[nodiscard]] std::uint32_t targetCharOffset() const noexcept {
+    const std::scoped_lock lock(guard_);
     return targetCharOffset_;
   }
   [[nodiscard]] std::uint32_t targetCharLength() const noexcept {
+    const std::scoped_lock lock(guard_);
     return targetCharLength_;
   }
 
   void enterSubRadial(std::size_t actionIndex);
   void exitSubRadial();
   [[nodiscard]] bool inSubRadial() const noexcept {
-    return inSubWheel_ && activeParentAction_ < config_.actions.size();
+    const std::scoped_lock lock(guard_);
+    return inSubRadialLocked();
   }
 
   void setActionHandler(
@@ -139,11 +164,16 @@ public:
                          std::uint32_t docIndex, std::uint32_t charOffset,
                          std::uint32_t charLength)>
           handler) {
+    const std::scoped_lock lock(guard_);
     actionHandler_ = std::move(handler);
   }
 
-  void setOpenOnRightClick(bool enable) noexcept { openOnRightClick_ = enable; }
+  void setOpenOnRightClick(bool enable) noexcept {
+    const std::scoped_lock lock(guard_);
+    openOnRightClick_ = enable;
+  }
   [[nodiscard]] bool openOnRightClick() const noexcept {
+    const std::scoped_lock lock(guard_);
     return openOnRightClick_;
   }
 
@@ -159,7 +189,9 @@ public:
 
   // -- a11y::Source -----------------------------------------------------------
   void describe(a11y::Builder &into) override;
+  bool performAction(std::uint64_t, a11y::Action, std::string_view) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override {
+    const std::scoped_lock lock(guard_);
     return revision_;
   }
 
@@ -169,7 +201,33 @@ public:
   [[nodiscard]] static std::optional<std::size_t>
   resolveSector(float dx, float dy, std::size_t count) noexcept;
 
+  /// Retained pixel geometry, also inspectable without a graphics device.
+  [[nodiscard]] std::shared_ptr<const ui::LayoutResult>
+  prepareLayout(const ui::UiMetrics &, const ui::Theme &);
+  [[nodiscard]] text::ShapingCache::Stats shapingStats() const {
+    const std::scoped_lock lock(guard_);
+    return shaping_.stats();
+  }
+
 private:
+  struct ActionDispatch {
+    bool handled{};
+    std::function<void()> callback;
+    ActionDispatch(bool handled = false, std::function<void()> callback = {})
+        : handled(handled), callback(std::move(callback)) {}
+  };
+  static bool finishDispatch(ActionDispatch);
+  [[nodiscard]] bool inSubRadialLocked() const noexcept {
+    return inSubWheel_ && activeParentAction_ < config_.actions.size();
+  }
+  void openLocked(float, float, std::uint32_t, std::uint32_t, std::uint32_t);
+  void closeLocked();
+  void enterSubRadialLocked(std::size_t);
+  void exitSubRadialLocked();
+  std::shared_ptr<const ui::LayoutResult>
+  prepareLayoutLocked(const ui::UiMetrics &, const ui::Theme &);
+  ActionDispatch activateNodeLocked(std::uint32_t);
+  ActionDispatch pickedLocked(const render::PickingResult &, RenderState &);
   struct PodLayout {
     std::size_t actionIndex{0};
     float x{0.0F};
@@ -184,9 +242,11 @@ private:
     std::uint32_t tag{0};
     std::string label;
     std::string desc;
+    text::FittedText fitted;
   };
 
   void rebuildLayout(float screenW, float screenH);
+  ActionDispatch selectActionLocked(std::size_t);
   static void drawDisc(Canvas &canvas, float cX, float cY, float radius,
                        std::uint32_t fillCol, std::uint32_t borderCol = 0,
                        float borderWidth = 0.0F, std::size_t slices = 24);
@@ -195,8 +255,26 @@ private:
                         std::uint32_t fillCol, std::uint32_t borderCol = 0,
                         float borderWidth = 0.0F);
 
+  mutable std::mutex guard_;
   std::string fontName_;
   std::unique_ptr<Canvas> canvas_;
+  render::RenderDevice *device_{};
+  std::optional<render::PipelineDesc> pipeline_;
+  ui::UiMetrics metrics_;
+  ui::Theme theme_;
+  std::shared_ptr<const ui::LayoutResult> layout_;
+  text::ShapingCache shaping_;
+  text::FontFacePtr font_;
+  std::string resolvedFont_;
+  std::string canvasFont_;
+  text::FittedText hubFitted_;
+  float outerRadiusPx_{84.0F}, innerRadiusPx_{26.0F};
+  std::uint64_t preparedRevision_{}, drawnRevision_{};
+  std::uint32_t focusedNode_{};
+  std::uint32_t pickScope_{};
+  std::shared_ptr<const std::vector<std::uint32_t>> pickingTargets_;
+  std::uint64_t pickingRevision_{1}, builtPickingRevision_{};
+  std::uint32_t nextPickingTarget_{};
   RadialConfig config_;
 
   bool open_{false};

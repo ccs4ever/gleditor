@@ -273,18 +273,21 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    const auto configPath   = parser.get<std::string>("--config");
-    const auto editorConfig = gleditor::loadEditorConfig(configPath);
+    const auto configPath    = parser.get<std::string>("--config");
+    const auto editorConfig  = gleditor::loadEditorConfig(configPath);
+    state->uiScale           = editorConfig.uiScale;
+    state->fontScale         = editorConfig.uiFontScale;
+    state->uiSafeMarginShare = editorConfig.uiSafeMarginShare;
+    state->uiTheme.store(
+        std::make_shared<const gleditor::ui::Theme>(editorConfig.uiTheme));
     if (!parser.is_used("--font") &&
         !editorConfig.settings.fontFamily.empty()) {
       state->defaultFontName =
           editorConfig.settings.fontFamily + " " +
           std::to_string(static_cast<int>(editorConfig.settings.fontSize));
     }
-    auto docSwitcher =
-        std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
-    auto floatingToolbar =
-        std::make_shared<gleditor::FloatingToolbar3D>(state->defaultFontName);
+    auto docSwitcher     = std::make_shared<gleditor::DocumentSwitcher>();
+    auto floatingToolbar = std::make_shared<gleditor::FloatingToolbar3D>();
 
     docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
       renderer->push(RenderItemCloseDoc(docIndex));

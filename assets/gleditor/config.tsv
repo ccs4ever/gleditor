@@ -3,6 +3,11 @@ settings.fontFamily	Monospace
 settings.lineHeight	1.4
 settings.autoSaveSeconds	5
 settings.theme	system
+ui.scale	1
+ui.fontScale	1
+ui.safeMarginShare	0.05
+ui.minTouchPx	44
+ui.minFontPx	9
 spatial.documentSpacingX	70.0
 spatial.depthZ	-45.0
 spatial.docArrivalSeconds	0.22

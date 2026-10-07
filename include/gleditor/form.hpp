@@ -10,9 +10,8 @@
  *
  * Everything is drawn with a Canvas, which is to say with rectangles and text,
  * and driven with the keys a form has always been driven with: tab between
- * fields, type into one, enter to accept, escape to abandon. No mouse, because
- * a pointer would need hit testing and focus and a caret that follows a click,
- * and none of that would make the question any clearer.
+ * fields, type into one, enter to accept, escape to abandon. Pointer actions
+ * use the same retained field and option boxes as drawing and accessibility.
  *
  * A form takes the keyboard while it is up -- see ModalInput -- so the text
  * being typed into it cannot land in the document behind it.
@@ -31,6 +30,8 @@
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/modal_input.hpp>
+#include <gleditor/text/shaping_cache.hpp>
+#include <gleditor/ui/metrics.hpp>
 
 namespace gleditor {
 
@@ -113,11 +114,11 @@ public:
   using Cancelled = std::function<void()>;
 
   /**
-   * @param aFontName Pango description the panel is drawn in. Deliberately not
-   *        the document's font: this is chrome, and has to stay legible
-   *        whatever the document is being read at.
+   * @param aFontName Legacy font description the panel is drawn in.
+   * Deliberately not the document's font: this is chrome, and has to stay
+   * legible whatever the document is being read at.
    */
-  explicit Form(std::string aFontName);
+  explicit Form(std::string aFontName = {});
   ~Form() override;
 
   void deviceReady(render::RenderDevice &device,
@@ -141,6 +142,7 @@ public:
   focusLayout() const override;
   void focusedNodeChanged(std::uint32_t) override;
   bool activateNode(std::uint32_t) override;
+  bool pointerEvent(const ui::PointerEvent &) override;
 
   /**
    * @brief Put the form up.
@@ -221,6 +223,14 @@ private:
   std::shared_ptr<const ui::LayoutResult> focusLayout_;
 
   std::unique_ptr<Canvas> canvas;
+  std::unique_ptr<Canvas> headingCanvas;
+  render::RenderDevice *device_{};
+  render::PipelineDesc pipeline_;
+  ui::UiMetrics builtMetrics_;
+  ui::Theme builtTheme_;
+  std::string drawnFont_, drawnHeadingFont_;
+  text::ShapingCache shaping_;
+  std::size_t firstVisible_{};
   std::uint64_t builtFor{};
   int builtWidth{};
   int builtHeight{};

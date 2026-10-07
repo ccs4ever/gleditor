@@ -5,45 +5,23 @@
 #include <gleditor/form.hpp> // IWYU pragma: associated
 
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 #include <glm/ext/matrix_clip_space.hpp>
 
+#include <array>
+#include <cmath>
 #include <gleditor/canvas.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/ui/widgets.hpp>
 #include <gleditor/utf8.hpp>
 
 namespace gleditor {
 
 namespace {
-
-/// Pixel geometry of the panel. One place, so nothing drifts out of line with
-/// anything else.
-constexpr float panelWidth = 620.0F;
-constexpr float padding    = 18.0F;
-constexpr float rowHeight  = 30.0F;
-constexpr float labelWidth = 150.0F;
-constexpr float boxHeight  = 24.0F;
-constexpr float lineGap    = 8.0F;
-constexpr float caretWidth = 2.0F;
-
-/// Colours. A panel over the documents has to be plainly in front of them
-/// rather than blended into them, so it is opaque and dark and the sheet
-/// behind it dims everything else.
-constexpr auto dimming     = 0x00000090U;
-constexpr auto panelInk    = 0xE8EAF0FFU;
-constexpr auto panelBack   = 0x22252EFFU;
-constexpr auto boxBack     = 0x171A21FFU;
-constexpr auto boxFocused  = 0x2C3446FFU;
-constexpr auto hintInk     = 0x7C8494FFU;
-constexpr auto titleInk    = 0xFFFFFFFFU;
-constexpr auto requiredInk = 0xFFC46BFFU;
-constexpr auto troubleInk  = 0xFF9A8CFFU;
-
-/// A colour as the canvas wants it, given RGBA8.
-std::uint32_t ink(const std::uint32_t rgba) { return rgba; }
 
 /// Characters in @p text, counting lead bytes: what a masked field shows one
 /// asterisk for. Bytes would show three for every accented letter, which says
@@ -82,11 +60,13 @@ Form::~Form() = default;
 
 void Form::deviceReady(render::RenderDevice &device,
                        const render::PipelineDesc &documentPipeline) {
-  canvas = std::make_unique<Canvas>(&device, fontName);
-  // Depth testing off, like the notification overlay: this is on top because
-  // it is drawn last, and a modal that a document could poke through would be
-  // a modal in name only.
-  canvas->createPipeline(documentPipeline, false);
+  device_   = &device;
+  pipeline_ = documentPipeline;
+  canvas.reset();
+  headingCanvas.reset();
+  drawnFont_.clear();
+  drawnHeadingFont_.clear();
+  builtFor = 0;
 }
 
 bool Form::grabbing() const {
@@ -145,7 +125,18 @@ constexpr std::uint64_t fieldId(const std::size_t which) {
 }
 constexpr std::uint64_t optionId(const std::size_t which,
                                  const std::size_t option) {
-  return fieldId(which) + 1 + option;
+  // Keep established IDs for short lists; long lists occupy a disjoint range.
+  return option < perField - 1 ? fieldId(which) + 1 + option
+                               : (1ULL << 31) + (which << 16) + option - 63;
+}
+
+constexpr std::size_t fieldNumber(std::uint64_t local) {
+  return local >= (1ULL << 31) ? (local - (1ULL << 31)) >> 16
+                               : (local - firstField) / perField;
+}
+constexpr std::size_t withinField(std::uint64_t local) {
+  return local >= (1ULL << 31) ? ((local - (1ULL << 31)) & 65535) + 64
+                               : (local - firstField) % perField;
 }
 
 } // namespace
@@ -180,6 +171,15 @@ void Form::describe(a11y::Builder &into) {
   {
     auto &heading = into.add(titleId, a11y::Role::Label);
     heading.value = title;
+    if (focusLayout_) {
+      if (const auto *box = focusLayout_->find(titleId)) {
+        const auto area = ui::toInputArea(box->rect, builtHeight);
+        heading.bounds  = {static_cast<double>(area.x),
+                           static_cast<double>(area.y),
+                           static_cast<double>(area.x + area.width),
+                           static_cast<double>(area.y + area.height)};
+      }
+    }
   }
   if (!note.empty() || !trouble.empty()) {
     auto &line = into.add(noteId, a11y::Role::Label);
@@ -188,6 +188,14 @@ void Form::describe(a11y::Builder &into) {
     // something the person just tried to do.
     line.value = trouble.empty() ? note : trouble;
     line.live  = trouble.empty() ? a11y::Live::Off : a11y::Live::Assertive;
+    if (focusLayout_) {
+      if (const auto *box = focusLayout_->find(noteId)) {
+        const auto area = ui::toInputArea(box->rect, builtHeight);
+        line.bounds = {static_cast<double>(area.x), static_cast<double>(area.y),
+                       static_cast<double>(area.x + area.width),
+                       static_cast<double>(area.y + area.height)};
+      }
+    }
   }
 
   const bool reveal = std::ranges::any_of(fields, [](const Field &one) {
@@ -219,9 +227,11 @@ void Form::describe(a11y::Builder &into) {
 
     switch (one.kind) {
     case Kind::Text:
+      node.actions |= a11y::bit(a11y::Action::SetValue);
       node.value = one.value;
       break;
     case Kind::Secret:
+      node.actions |= a11y::bit(a11y::Action::SetValue);
       // Never the passphrase itself, revealed or not. What is on screen is a
       // person's choice about their own screen; what goes on the accessibility
       // bus is readable by anything on the session, and a screen reader will
@@ -253,6 +263,16 @@ void Form::describe(a11y::Builder &into) {
         entry.actions =
             a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
         entry.focusable = true;
+        if (focusLayout_) {
+          if (const auto *box = focusLayout_->find(
+                  static_cast<std::uint32_t>(optionId(which, option)))) {
+            const auto area = ui::toInputArea(box->rect, builtHeight);
+            entry.bounds    = {static_cast<double>(area.x),
+                               static_cast<double>(area.y),
+                               static_cast<double>(area.x + area.width),
+                               static_cast<double>(area.y + area.height)};
+          }
+        }
       }
     }
   }
@@ -271,8 +291,8 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
   if (local < firstField) {
     return false;
   }
-  const auto which  = (local - firstField) / perField;
-  const auto within = (local - firstField) % perField;
+  const auto which  = fieldNumber(local);
+  const auto within = withinField(local);
 
   const std::scoped_lock locker(guard);
   if (!open_ || which >= fields.size()) {
@@ -286,7 +306,7 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
     if (a11y::Action::Click != action || option >= one.options.size()) {
       return false;
     }
-    focus = which;
+    setFocusedNode(static_cast<std::uint32_t>(fieldId(which)));
     requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     one.chosen = option;
     expanded   = false;
@@ -297,13 +317,13 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
 
   switch (action) {
   case a11y::Action::Focus:
-    focus = which;
+    setFocusedNode(static_cast<std::uint32_t>(fieldId(which)));
     requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     caret = one.value.size();
     revision++;
     return true;
   case a11y::Action::Click:
-    focus = which;
+    setFocusedNode(static_cast<std::uint32_t>(fieldId(which)));
     requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     if (Kind::Toggle == one.kind) {
       one.on = !one.on;
@@ -322,7 +342,7 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
       return false;
     }
     one.value = value;
-    focus     = which;
+    setFocusedNode(static_cast<std::uint32_t>(fieldId(which)));
     requestFocus(static_cast<std::uint32_t>(fieldId(which)));
     caret = one.value.size();
     trouble.clear();
@@ -339,9 +359,42 @@ std::optional<InputArea> Form::textArea() const {
   return typingAt;
 }
 
+bool Form::pointerEvent(const ui::PointerEvent &event) {
+  std::optional<std::uint32_t> target;
+  a11y::Action action = a11y::Action::Focus;
+  {
+    const std::scoped_lock locker(guard);
+    if (!open_) return false;
+    if (event.phase == ui::PointerPhase::Wheel && expanded && !fields.empty()) {
+      if (event.deltaY == 0) return true;
+      chooseOption(event.deltaY > 0 ? -1 : 1);
+      ++revision;
+      return true;
+    }
+    if (event.phase != ui::PointerPhase::Press || event.button != 1 ||
+        !focusLayout_)
+      return true;
+    const auto *box = focusLayout_->hitTest(
+        event.x, static_cast<float>(builtHeight) - event.y);
+    if (!box || box->id < firstField) return true;
+    target           = box->id;
+    const auto which = fieldNumber(box->id);
+    if (which >= fields.size()) return true;
+    if (withinField(box->id) != 0 || fields[which].kind == Kind::Choice ||
+        fields[which].kind == Kind::Toggle)
+      action = a11y::Action::Click;
+  }
+  return target && performAction(*target, action, {});
+}
+
 void Form::open(std::string aTitle, std::string aNote,
                 std::vector<Field> aFields, Accepted onAccept,
                 Cancelled onCancel) {
+  // IDs reserve 16 bits for each long list and 15 bits for its field.
+  if (aFields.size() > 32768 ||
+      std::ranges::any_of(
+          aFields, [](const Field &f) { return f.options.size() > 65599; }))
+    throw std::length_error("Form accessibility IDs exhausted");
   const std::scoped_lock locker(guard);
   title     = std::move(aTitle);
   note      = std::move(aNote);
@@ -442,7 +495,7 @@ void Form::setFocusedNode(std::uint32_t id) {
     if (const auto box = focusLayout_->find(id); box && box->textInput &&
                                                  box->rect.width > 0.0F &&
                                                  box->rect.height > 0.0F) {
-      typingAt = ui::toInputArea(box->rect, builtHeight);
+      typingAt = ui::toInputArea(box->contentRect, builtHeight);
     }
   }
 }
@@ -484,17 +537,9 @@ void Form::chooseOption(const int by) {
 }
 
 void Form::moveCaret(const int by) {
-  const auto &value = fields[focus].value;
-  if (by < 0) {
-    caret = caret == 0 ? 0
-                       : alignToCharacterStart(
-                             value, static_cast<std::uint32_t>(caret - 1));
-    return;
-  }
-  caret =
-      caret >= value.size()
-          ? value.size()
-          : alignToCharacterEnd(value, static_cast<std::uint32_t>(caret + 1));
+  ui::TextField input{.value = fields[focus].value, .caret = caret};
+  std::ignore = input.key(by < 0 ? Key::Left : Key::Right, KeyMods::None);
+  caret       = input.caret;
 }
 
 void Form::beforeFocusTraversal() {
@@ -524,6 +569,9 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
     }
     revision++;
 
+    if (fields.empty() && key != Key::Return && key != Key::Escape)
+      return false;
+
     switch (key) {
     case Key::Escape: {
       if (expanded) {
@@ -548,20 +596,22 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         trouble.clear();
         return true;
       }
-      auto &here = field();
-      // Enter on a closed drop-down opens it, so that a key can be picked
-      // without knowing that space is what opens one. A list with nothing in
-      // it is not opened: an empty panel would say less than the hint already
-      // showing, and the field is answered as empty either way.
-      if (Kind::Choice == here.kind && !here.options.empty() &&
-          !here.submitOnEnter) {
-        expanded  = true;
-        highlight = here.chosen;
-        return true;
-      }
-      if (Kind::Toggle == here.kind) {
-        here.on = !here.on;
-        return true;
+      if (!fields.empty()) {
+        auto &here = field();
+        // Enter on a closed drop-down opens it, so that a key can be picked
+        // without knowing that space is what opens one. A list with nothing in
+        // it is not opened: an empty panel would say less than the hint already
+        // showing, and the field is answered as empty either way.
+        if (Kind::Choice == here.kind && !here.options.empty() &&
+            !here.submitOnEnter) {
+          expanded  = true;
+          highlight = here.chosen;
+          return true;
+        }
+        if (Kind::Toggle == here.kind) {
+          here.on = !here.on;
+          return true;
+        }
       }
       if (const auto missing = firstMissing()) {
         // Refused rather than published half-filled: the fields marked
@@ -647,26 +697,21 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
 
     case Key::Backspace: {
       auto &value = field();
-      if (0 == caret || value.value.empty()) {
-        return true;
-      }
-      // A whole character, not a byte: half of a UTF-8 sequence is not a
-      // shorter string, it is a broken one.
-      const auto from = alignToCharacterStart(
-          value.value, static_cast<std::uint32_t>(caret - 1));
-      value.value.erase(from, caret - from);
-      caret = from;
+      if (value.kind != Kind::Text && value.kind != Kind::Secret) return false;
+      ui::TextField input{.value = value.value, .caret = caret};
+      std::ignore = input.key(Key::Backspace, mods);
+      value.value = std::move(input.value);
+      caret       = input.caret;
       trouble.clear();
       return true;
     }
     case Key::Delete: {
       auto &value = field();
-      if (caret >= value.value.size()) {
-        return true;
-      }
-      const auto to = alignToCharacterEnd(
-          value.value, static_cast<std::uint32_t>(caret + 1));
-      value.value.erase(caret, to - caret);
+      if (value.kind != Kind::Text && value.kind != Kind::Secret) return false;
+      ui::TextField input{.value = value.value, .caret = caret};
+      std::ignore = input.key(Key::Delete, mods);
+      value.value = std::move(input.value);
+      caret       = input.caret;
       trouble.clear();
       return true;
     }
@@ -707,241 +752,375 @@ void Form::textTyped(const std::string &utf8) {
     return;
   }
 
-  auto &value = here;
-  caret       = std::min(caret, value.value.size());
-  value.value.insert(caret, utf8);
-  caret += utf8.size();
+  ui::TextField input{.value = here.value, .caret = caret};
+  input.insert(utf8);
+  here.value = std::move(input.value);
+  caret      = input.caret;
   trouble.clear();
   revision++;
 }
 
 void Form::drawFrame(FrameContext &ctx) {
-  if (nullptr == canvas) {
-    return;
-  }
-
-  // Copied under the lock and drawn outside it: laying text out rasterises
-  // glyphs, which is not something to do while the event thread is waiting to
-  // record a keystroke.
-  std::string heading;
-  std::string subheading;
+  if (!device_) return;
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
+  std::string heading, subheading;
   std::vector<Field> shown;
-  std::size_t where  = 0;
-  std::size_t at     = 0;
-  std::uint64_t seen = 0;
-  bool listDown      = false;
-  std::size_t lit    = 0;
-  bool reveal        = false;
+  std::size_t where{}, at{}, lit{};
+  std::uint64_t seen{};
+  bool listDown{}, reveal{}, complaining{}, rebuild{};
   {
     const std::scoped_lock locker(guard);
-    if (!open_) {
-      return;
+    if (!open_) return;
+    seen    = revision;
+    rebuild = seen != builtFor || metrics != builtMetrics_ ||
+              ctx.theme != builtTheme_;
+    // Steady frames submit the retained buffers without copying field values,
+    // including secrets, or asking the text engine to shape them again.
+    if (rebuild) {
+      heading     = title;
+      complaining = !trouble.empty();
+      subheading  = complaining ? trouble : note;
+      shown       = fields;
+      where       = focus;
+      at          = caret;
+      listDown    = expanded;
+      lit         = highlight;
+      reveal      = std::ranges::any_of(fields, [](const Field &one) {
+        return Kind::Toggle == one.kind && one.revealsSecrets && one.on;
+      });
     }
-    heading    = title;
-    subheading = trouble.empty() ? note : trouble;
-    shown      = fields;
-    where      = focus;
-    at         = caret;
-    seen       = revision;
-    listDown   = expanded;
-    lit        = highlight;
-    reveal     = std::ranges::any_of(fields, [](const Field &one) {
-      return Kind::Toggle == one.kind && one.revealsSecrets && one.on;
-    });
   }
-  const bool complaining = subheading != note;
-
-  if (seen != builtFor || ctx.screenWidth != builtWidth ||
-      ctx.screenHeight != builtHeight) {
-    builtFor    = seen;
-    builtWidth  = ctx.screenWidth;
-    builtHeight = ctx.screenHeight;
-
-    canvas->clear();
-    canvas->setTag(render::tagKindOverlay);
-
-    const auto width  = static_cast<float>(ctx.screenWidth);
-    const auto height = static_cast<float>(ctx.screenHeight);
-    // Everything behind is dimmed rather than hidden: what is being published
-    // is still worth seeing while deciding how to describe it.
-    canvas->addRect(0.0F, 0.0F, width, height, ink(dimming));
-
-    const auto rows = static_cast<float>(shown.size());
-    // An open drop-down grows the panel rather than covering the rows under
-    // it: a list that obscures the fields it is part of is a list somebody has
-    // to close before they can see what they were filling in.
-    const auto listRows    = listDown && where < shown.size()
-                                 ? static_cast<float>(shown[where].options.size())
-                                 : 0.0F;
-    const auto panelHeight = (2 * padding) + (rowHeight * 2) +
-                             ((rows + listRows) * rowHeight) + rowHeight;
-    const auto left   = std::max(0.0F, (width - panelWidth) / 2.0F);
-    const auto bottom = std::max(0.0F, (height - panelHeight) / 2.0F);
-    canvas->addRect(left, bottom, panelWidth, panelHeight, ink(panelBack));
-    auto layout    = std::make_shared<ui::LayoutResult>();
-    layout->bounds = {left, bottom, panelWidth, panelHeight};
-    layout->boxes.push_back({.id          = static_cast<std::uint32_t>(panelId),
-                             .rect        = layout->bounds,
-                             .contentRect = layout->bounds});
-
-    auto top = bottom + panelHeight - padding;
-    // Ellipsised rather than allowed to run off the panel: a note saying where
-    // a document will be written is often a long path, and text spilling past
-    // the edge of a modal reads as a drawing mistake rather than as a value.
-    canvas->setTextWidthLimit(static_cast<int>(panelWidth - (2 * padding)));
-    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
-                                         .bottom = top - rowHeight,
-                                         .width  = panelWidth - (2 * padding),
-                                         .height = rowHeight});
-    canvas->addText(ctx.state, left + padding, top, heading, ink(titleInk),
-                    ink(panelBack));
-    top -= rowHeight;
-    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
-                                         .bottom = top - rowHeight,
-                                         .width  = panelWidth - (2 * padding),
-                                         .height = rowHeight});
-    canvas->addText(ctx.state, left + padding, top, subheading,
-                    ink(complaining ? troubleInk : hintInk), ink(panelBack));
-    top -= rowHeight * 0.6F;
-
-    for (std::size_t i = 0; i < shown.size(); i++) {
-      const auto &one    = shown[i];
-      const bool focused = i == where;
-      top -= rowHeight;
-
-      // A required field says so where it is asked, rather than only when it
-      // is refused.
-      canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
-                                           .bottom = top - rowHeight,
-                                           .width  = labelWidth,
-                                           .height = rowHeight});
-      canvas->addText(ctx.state, left + padding, top,
-                      one.required ? one.label + " *" : one.label,
-                      ink(one.required ? requiredInk : panelInk),
-                      ink(panelBack));
-
-      const auto boxLeft  = left + padding + labelWidth;
-      const auto boxWidth = panelWidth - (2 * padding) - labelWidth;
-      canvas->addRect(boxLeft, top - boxHeight + lineGap, boxWidth, boxHeight,
-                      ink(focused ? boxFocused : boxBack));
+  if (rebuild) {
+    const auto fontDescription = ui::scaledFontDescription(
+        fontName, ui::FontRole::Label, metrics, ctx.theme);
+    const auto headingDescription =
+        metrics.fontDescription(ui::FontRole::Title, ctx.theme);
+    if (!canvas || drawnFont_ != fontDescription) {
+      canvas = std::make_unique<Canvas>(device_, fontDescription);
+      canvas->createPipeline(pipeline_, false);
+      drawnFont_ = fontDescription;
+    }
+    if (!headingCanvas || drawnHeadingFont_ != headingDescription) {
+      headingCanvas = std::make_unique<Canvas>(device_, headingDescription);
+      headingCanvas->createPipeline(pipeline_, false);
+      drawnHeadingFont_ = headingDescription;
+    }
+    const auto font = text::FontManager::instance().getFont(fontDescription);
+    const auto titleFont =
+        text::FontManager::instance().getFont(headingDescription);
+    const auto line = font->metrics().lineHeight;
+    const auto safe = metrics.pixelSafeArea();
+    const auto pad  = std::min(std::max(0.0F, line * ctx.theme.paddingEm),
+                               safe.height * .04F);
+    const auto gap =
+        std::min(std::max(0.0F, line * ctx.theme.gapEm), safe.height * .015F);
+    const auto controlHeight =
+        std::max(metrics.px(ctx.theme.type.minTouchPx), line + pad * 2);
+    // Intrinsic font-relative width scales with typography, then containment
+    // takes precedence over the preferred size on a small window.
+    const auto panelWidth = std::min(safe.width, line * 36);
+    const auto innerWidth = std::max(0.0F, panelWidth - 2 * pad);
+    const bool columns    = innerWidth >= controlHeight * 9;
+    const auto rowHeight =
+        columns ? controlHeight
+                : std::ceil(line) + 2 + gap * .5F + controlHeight;
+    const text::TextFit titleFit{.maxWidthPx = innerWidth,
+                                 .maxHeightPx =
+                                     titleFont->metrics().lineHeight * 2,
+                                 .maxLines = 2,
+                                 .overflow = text::Overflow::Wrap};
+    const auto titleText = shaping_.fitted(heading, titleFont, titleFit);
+    const text::TextFit noteFit{.maxWidthPx  = innerWidth,
+                                .maxHeightPx = line * 3,
+                                .maxLines    = 3,
+                                .overflow    = text::Overflow::Wrap};
+    const auto noteText = shaping_.fitted(subheading, font, noteFit);
+    // A focused input gets first claim on the vertical budget. Supporting
+    // headings clip on small windows rather than squeezing its content away.
+    const auto supportingBudget =
+        std::max(0.0F, safe.height - 2 * pad - 3 * gap -
+                           std::min(rowHeight, safe.height * .7F));
+    const auto footerHeight =
+        std::min(std::ceil(line) + 2, supportingBudget * .2F);
+    const auto titleHeight =
+        std::min(std::max(titleText.heightPx, titleFont->metrics().lineHeight),
+                 supportingBudget * .5F);
+    const auto noteHeight =
+        subheading.empty()
+            ? 0.0F
+            : std::min(noteText.heightPx,
+                       supportingBudget - titleHeight - footerHeight);
+    const auto extraRows = listDown && where < shown.size()
+                               ? static_cast<float>(std::min<std::size_t>(
+                                     shown[where].options.size(), 4)) *
+                                     controlHeight
+                               : 0;
+    const auto fieldsHeight =
+        static_cast<float>(shown.size()) * (rowHeight + gap) + extraRows;
+    auto panel = ui::clampToSafeArea(
+        metrics.rounded(
+            {safe.left + (safe.width - panelWidth) * .5F,
+             safe.bottom + (safe.height -
+                            std::min(safe.height,
+                                     titleHeight + noteHeight + fieldsHeight +
+                                         footerHeight + pad * 2 + gap * 3)) *
+                               .5F,
+             panelWidth,
+             std::min(safe.height, titleHeight + noteHeight + fieldsHeight +
+                                       footerHeight + pad * 2 + gap * 3)}),
+        safe);
+    const auto actualPad =
+        std::min({pad, panel.width * .5F, panel.height * .5F});
+    const ui::Rect interior{panel.left + actualPad, panel.bottom + actualPad,
+                            std::max(0.0F, panel.width - 2 * actualPad),
+                            std::max(0.0F, panel.height - 2 * actualPad)};
+    const std::array<ui::LayoutItem, 4> sections{{
+        {.id        = 1,
+         .intrinsic = {interior.width, titleHeight},
+         .minimum   = {0, titleHeight}},
+        {.id        = 2,
+         .intrinsic = {interior.width, noteHeight},
+         .minimum   = {0, noteHeight}},
+        {.id        = 3,
+         .intrinsic = {interior.width, fieldsHeight},
+         .minimum   = {0, std::min(rowHeight, safe.height * .7F)},
+         .grow      = 1},
+        {.id        = 4,
+         .intrinsic = {interior.width, footerHeight},
+         .minimum   = {0, footerHeight}},
+    }};
+    const auto parts = ui::stack(interior, sections, {.gap = gap});
+    auto layout      = std::make_shared<ui::LayoutResult>();
+    layout->bounds   = panel;
+    layout->boxes.push_back({.id = 0, .rect = panel, .contentRect = interior});
+    layout->append(parts);
+    // Hidden rows remain in traversal order. Focusing one reveals its viewport
+    // on the next draw without losing the answers in other fields.
+    for (std::size_t i = 0; i < shown.size(); ++i) {
       const auto id = static_cast<std::uint32_t>(fieldId(i));
-      const ui::Rect fieldRect{boxLeft, top - boxHeight + lineGap, boxWidth,
-                               boxHeight};
       layout->boxes.push_back(
           {.id          = id,
-           .rect        = fieldRect,
-           .contentRect = fieldRect,
+           .parentId    = 0,
+           .rect        = {interior.left, interior.bottom, 0, 0},
+           .contentRect = {interior.left, interior.bottom, 0, 0},
            .focusable   = true,
            .focusGroup  = 1,
-           .textInput   = one.kind == Kind::Text || one.kind == Kind::Secret});
+           .textInput =
+               shown[i].kind == Kind::Text || shown[i].kind == Kind::Secret});
       layout->focusOrder.push_back(id);
-
-      // What the box says, which for a secret is not what it holds.
-      const auto held = Kind::Secret == one.kind && !reveal
-                            ? std::string(charactersIn(one.value), '*')
-                            : one.value;
-      auto shownValue = held.empty() ? one.hint : held;
-      auto valueInk   = held.empty() ? hintInk : panelInk;
-      if (Kind::Choice == one.kind) {
-        shownValue =
+    }
+    canvas->clear();
+    headingCanvas->clear();
+    canvas->setTag(render::tagKindOverlay);
+    headingCanvas->setTag(render::tagKindOverlay);
+    const auto surface    = ui::rgba(ctx.theme.colours.surface);
+    const auto foreground = ui::rgba(ctx.theme.colours.text);
+    const auto muted      = ui::rgba(ctx.theme.colours.muted);
+    const auto accent     = ui::rgba(ctx.theme.colours.accent);
+    canvas->addRect(0, 0, static_cast<float>(ctx.screenWidth),
+                    static_cast<float>(ctx.screenHeight), 0x00000090U);
+    canvas->addRect(panel.left, panel.bottom, panel.width, panel.height,
+                    surface);
+    headingCanvas->addText(ctx.state, parts.find(1)->rect, titleText,
+                           foreground, surface);
+    canvas->addText(ctx.state, parts.find(2)->rect, noteText,
+                    complaining ? accent : muted, surface);
+    const auto viewport = parts.find(3)->rect;
+    const auto capacity = std::max<std::size_t>(
+        1, static_cast<std::size_t>(std::floor(
+               (viewport.height + gap) / std::max(1.0F, rowHeight + gap))));
+    if (where < firstVisible_) firstVisible_ = where;
+    if (where >= firstVisible_ + capacity) firstVisible_ = where - capacity + 1;
+    firstVisible_ = std::min(
+        firstVisible_, shown.size() > capacity ? shown.size() - capacity : 0);
+    const auto first = listDown ? where : firstVisible_;
+    const auto last = std::min(shown.size(), first + (listDown ? 1 : capacity));
+    std::vector<ui::LayoutItem> rows;
+    for (auto i = first; i < last; ++i)
+      rows.push_back({.id        = static_cast<std::uint32_t>(fieldId(i)),
+                      .intrinsic = {viewport.width, rowHeight}});
+    auto rowBounds = viewport;
+    if (listDown) {
+      // Keep the highlighted option visible even when typography is taller
+      // than the viewport; both control and option text can clip independently.
+      const auto height =
+          std::min(rowHeight, std::max(0.0F, viewport.height - gap) * .5F);
+      rowBounds = {viewport.left, viewport.bottom + viewport.height - height,
+                   viewport.width, height};
+    }
+    const auto placed    = ui::stack(rowBounds, rows, {.gap = gap});
+    auto inputTheme      = ctx.theme;
+    const auto lastSpace = fontDescription.rfind(' ');
+    inputTheme.fonts[static_cast<std::size_t>(ui::FontRole::Label)] = {
+        fontDescription.substr(0, lastSpace),
+        static_cast<float>(font->pointSize())};
+    const ui::UiMetrics inputMetrics{.screenWidth  = ctx.screenWidth,
+                                     .screenHeight = ctx.screenHeight,
+                                     .marginShare  = 0};
+    canvas->pushClip(viewport);
+    for (auto i = first; i < last; ++i) {
+      const auto &one = shown[i];
+      const auto id   = static_cast<std::uint32_t>(fieldId(i));
+      const auto row  = placed.find(id)->rect;
+      ui::Rect labelBox, fieldBox;
+      if (columns) {
+        const ui::LayoutItem labelItem{.id = 5};
+        const ui::LayoutItem fieldItem{.id = id};
+        const auto pair = ui::split(row, labelItem, fieldItem,
+                                    {.firstShare = .32F, .gap = gap});
+        labelBox        = pair.find(5)->rect;
+        fieldBox        = pair.find(id)->rect;
+      } else {
+        const std::array<ui::LayoutItem, 2> items{{
+            {.id = 5, .intrinsic = {row.width, std::ceil(line) + 2}},
+            {.id = id, .intrinsic = {row.width, controlHeight}},
+        }};
+        const auto pair = ui::stack(row, items, {.gap = gap * .5F});
+        labelBox        = pair.find(5)->rect;
+        fieldBox        = pair.find(id)->rect;
+      }
+      std::ignore = canvas->addText(
+          ctx.state, labelBox, one.required ? one.label + " *" : one.label,
+          one.required ? accent : foreground, surface, {}, &shaping_);
+      const bool takesText = one.kind == Kind::Text || one.kind == Kind::Secret;
+      const auto masked    = one.kind == Kind::Secret && !reveal;
+      const auto value =
+          masked ? std::string(charactersIn(one.value), '*') : one.value;
+      std::string controlLabel;
+      if (one.kind == Kind::Choice) {
+        controlLabel =
             one.options.empty()
                 ? one.hint
                 : one.options[std::min(one.chosen, one.options.size() - 1)];
-        valueInk = one.options.empty() ? hintInk : panelInk;
-        // The mark every drop-down has, so it reads as one thing to open
-        // rather than as text somebody forgot to make editable.
-        shownValue += listDown && focused ? "   \u25B4" : "   \u25BE";
-      } else if (Kind::Toggle == one.kind) {
-        shownValue = one.on ? "[ hide ]" : "[ show ]";
-        valueInk   = one.on ? titleInk : panelInk;
+        controlLabel += listDown && i == where ? "   \u25B4" : "   \u25BE";
+      } else if (one.kind == Kind::Toggle)
+        controlLabel = one.on ? "[ hide ]" : "[ show ]";
+      ui::Widget widget{.id = id};
+      if (takesText)
+        widget.model = ui::TextField{
+            .value       = value,
+            .placeholder = one.hint,
+            .caret =
+                i == where
+                    ? (masked ? charactersIn(std::string_view(one.value).substr(
+                                    0, std::min(at, one.value.size())))
+                              : at)
+                    : 0};
+      else
+        widget.model = ui::Button{controlLabel, {}};
+      inputTheme.paddingEm = std::min(
+          ctx.theme.paddingEm, fieldBox.height / std::max(1.0F, line * 4));
+      widget.preferred.height = fieldBox.height;
+      const auto scene     = ui::layoutWidgets(widget, fieldBox, inputMetrics,
+                                               inputTheme, shaping_);
+      const auto *geometry = scene.layout.find(id);
+      const auto *visual   = scene.find(id);
+      auto box             = *geometry;
+      box.parentId         = 0;
+      box.focusGroup       = 1;
+      box.focusable        = true;
+      box.textInput        = takesText;
+      *std::ranges::find(layout->boxes, id, &ui::LayoutBox::id) = box;
+      const auto fill                                           = i == where
+                                                                      ? ui::rgba(glm::mix(ctx.theme.colours.surface,
+                                                                                          ctx.theme.colours.accent, .2F))
+                                                                      : surface;
+      canvas->addRect(box.rect.left, box.rect.bottom, box.rect.width,
+                      box.rect.height, fill);
+      canvas->pushClip(box.contentRect);
+      auto textBox = box.contentRect;
+      if (takesText) {
+        textBox.left -= visual->textOffsetPx;
+        textBox.width = std::max(textBox.width + visual->textOffsetPx,
+                                 visual->fitted.widthPx);
       }
-
-      const auto textLeft = boxLeft + 6.0F;
-      canvas->setTextWidthLimit(static_cast<int>(boxWidth - 12.0F));
-      canvas->setTextBounds(ui::TextBounds{.left   = boxLeft,
-                                           .bottom = top - boxHeight + lineGap,
-                                           .width  = boxWidth,
-                                           .height = boxHeight});
-      canvas->addText(ctx.state, textLeft, top, shownValue, ink(valueInk),
-                      ink(focused ? boxFocused : boxBack));
-
-      if (focused) {
-        // Where the platform should put a candidate window or an on-screen
-        // keyboard, in the pixels SDL counts in: from the top of the window
-        // rather than the bottom, which is what the canvas draws in. Only for
-        // fields that take text -- a button raises no keyboard.
-        const std::scoped_lock locker(guard);
-        typingAt = Kind::Text == one.kind || Kind::Secret == one.kind
-                       ? std::optional<InputArea>{InputArea{
-                             .x = static_cast<int>(boxLeft),
-                             .y = static_cast<int>(
-                                 static_cast<float>(ctx.screenHeight) -
-                                 (top + lineGap)),
-                             .width  = static_cast<int>(boxWidth),
-                             .height = static_cast<int>(boxHeight)}}
-                       : std::nullopt;
+      canvas->addText(ctx.state, textBox, visual->fitted,
+                      value.empty() && takesText ? muted : foreground, fill);
+      if (takesText && i == where && visual->caretOffsetPx) {
+        const auto thickness = std::min(metrics.px(1), box.contentRect.width);
+        canvas->addRect(
+            box.contentRect.left +
+                std::min(*visual->caretOffsetPx,
+                         std::max(0.0F, box.contentRect.width - thickness)),
+            box.contentRect.bottom, thickness, box.contentRect.height,
+            foreground);
       }
-
-      if (focused && (Kind::Text == one.kind || Kind::Secret == one.kind)) {
-        // Measured rather than counted: a caret placed by character count
-        // would be in the wrong place in anything but a monospaced font. What
-        // is measured is what is shown, so the caret in a masked field sits
-        // among the asterisks.
-        const auto upTo =
-            Kind::Secret == one.kind && !reveal
-                ? std::string(charactersIn(one.value.substr(
-                                  0, std::min(at, one.value.size()))),
-                              '*')
-                : one.value.substr(0, std::min(at, one.value.size()));
-        const auto before = canvas->measureText(upTo);
-        canvas->addRect(textLeft + before.width, top - boxHeight + lineGap,
-                        caretWidth, boxHeight, ink(panelInk));
-      }
-
-      // The options, under the field they belong to.
-      if (listDown && focused) {
-        for (std::size_t option = 0; option < one.options.size(); option++) {
-          top -= rowHeight;
-          const bool under = option == lit;
-          canvas->addRect(boxLeft, top - boxHeight + lineGap, boxWidth,
-                          boxHeight, ink(under ? boxFocused : boxBack));
-          canvas->setTextBounds(
-              ui::TextBounds{.left   = boxLeft,
-                             .bottom = top - boxHeight + lineGap,
-                             .width  = boxWidth,
-                             .height = boxHeight});
-          canvas->addText(ctx.state, textLeft, top, one.options[option],
-                          ink(under ? titleInk : panelInk),
-                          ink(under ? boxFocused : boxBack));
-        }
+      canvas->popClip();
+    }
+    if (listDown && where < shown.size() && !shown[where].options.empty()) {
+      const auto &options = shown[where].options;
+      const auto used     = placed.boxes.empty() ? viewport.height
+                                                 : placed.boxes.front().rect.height;
+      const ui::Rect listBox{viewport.left, viewport.bottom, viewport.width,
+                             std::max(0.0F, viewport.height - used - gap)};
+      const auto visible = std::max(
+          1.0F, std::floor(listBox.height / std::max(1.0F, controlHeight)));
+      ui::List list{.scrollPx =
+                        std::max(0.0F, static_cast<float>(lit) + 1 - visible) *
+                        controlHeight,
+                    .rowHeightPx = controlHeight,
+                    .overscan    = 0};
+      for (std::size_t option = 0; option < options.size(); ++option)
+        list.rows.push_back(
+            {static_cast<std::uint32_t>(optionId(where, option)),
+             options[option],
+             {}});
+      ui::Widget widget{.id        = 3,
+                        .model     = std::move(list),
+                        .preferred = {listBox.width, listBox.height}};
+      auto listTheme      = inputTheme;
+      listTheme.paddingEm = 0;
+      const auto choices =
+          ui::layoutWidgets(widget, listBox, inputMetrics, listTheme, shaping_);
+      for (const auto &visual : choices.visuals) {
+        if (visual.id == 3) continue;
+        const auto *box = choices.layout.find(visual.id);
+        layout->boxes.push_back(*box);
+        const auto selected = visual.itemIndex == lit;
+        if (selected)
+          canvas->addRect(box->rect.left, box->rect.bottom, box->rect.width,
+                          box->rect.height, accent);
+        canvas->addText(ctx.state, box->contentRect, visual.fitted, foreground,
+                        selected ? accent : surface);
       }
     }
-
-    top -= rowHeight;
-    canvas->setTextWidthLimit(static_cast<int>(panelWidth - (2 * padding)));
-    canvas->setTextBounds(ui::TextBounds{.left   = left + padding,
-                                         .bottom = top - rowHeight,
-                                         .width  = panelWidth - (2 * padding),
-                                         .height = rowHeight});
-    canvas->addText(ctx.state, left + padding, top,
-                    listDown
-                        ? "up/down: choose   enter: take it   esc: close it"
-                        : "tab: field   space: open/press   enter: go ahead   "
-                          "esc: leave it",
-                    ink(hintInk), ink(panelBack));
-
-    canvas->setTextBounds(std::nullopt);
+    canvas->popClip();
+    std::ignore = canvas->addText(
+        ctx.state, parts.find(4)->rect,
+        listDown ? "up/down: choose   enter: take it   esc: close it"
+                 : "tab: field   space: open/press   enter: go ahead   esc: "
+                   "leave it",
+        muted, surface, {}, &shaping_);
     canvas->commit();
+    headingCanvas->commit();
+    builtFor      = seen;
+    builtMetrics_ = metrics;
+    builtTheme_   = ctx.theme;
     {
       const std::scoped_lock locker(guard);
-      if (seen == revision) focusLayout_ = std::move(layout);
+      builtWidth  = ctx.screenWidth;
+      builtHeight = ctx.screenHeight;
+      if (seen == revision && open_) {
+        focusLayout_ = std::move(layout);
+        typingAt.reset();
+        if (const auto *box =
+                focusLayout_->find(static_cast<std::uint32_t>(fieldId(focus)));
+            box && box->textInput && box->contentRect.width > 0 &&
+            box->contentRect.height > 0)
+          typingAt = ui::toInputArea(box->contentRect, builtHeight);
+        ++revision;
+        builtFor = revision;
+      }
     }
   }
-
-  const glm::mat4 projection =
+  const auto projection =
       glm::ortho(0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
                  static_cast<float>(ctx.screenHeight));
   canvas->draw(ctx.state, projection);
+  headingCanvas->draw(ctx.state, projection);
 }
 
 } // namespace gleditor
