@@ -29,9 +29,9 @@ planned separately in [`world-space-rendering-plan.md`](world-space-rendering-pl
 
 ## How to read this, for implementing agents
 
-Section 3 is the acceptance test, and section 20 maps every clause of the two requests behind this
-document to it. Sections 5 to 8 are normative: where code lives, the view space, the binding model
-and the API. Sections 9 and 10 are the views. Section 17 is the order of work; each step keeps
+Section 3 is the acceptance test, and section 20 maps every clause of the requests and notes behind
+this document to it. Sections 5 to 8 are normative: where code lives, the view space, the binding
+model and the API. Sections 9 and 10 are the views. Section 17 is the order of work; each step keeps
 `make test` green. Section 18 records each ruling with its price and what it refused — read it
 before arguing with a decision, because the alternative was probably considered. Section 19 lists
 what is still open; do not block on it.
@@ -201,8 +201,10 @@ Each is one testable sentence. IDs are stable; §20 uses them.
 
 ### 3.3 Binding
 
-- **V-R13.** The number of axes, the number of axes one dimension or group is bound to, the number
-  of groups a dimension belongs to, and the size and nesting depth of a group MUST each be uncapped.
+- **V-R13.** The number of binding points, the number of points one dimension or group is bound to,
+  the number of groups a dimension belongs to, and the size and nesting depth of a group MUST each
+  be uncapped in the model; binding points are limited only by the movement keys there are to give
+  and by how many can be told apart on screen.
 - **V-R14.** A group MUST be bindable to an axis exactly as a dimension is, and changing its
   membership MUST change every axis that shows it.
 - **V-R15.** Bindings, groups and ring order MUST survive a toss and a session, and MUST be undoable
@@ -213,7 +215,8 @@ Each is one testable sentence. IDs are stable; §20 uses them.
 - **V-R16.** Every cell drawn MUST be drawn at the size that fits its whole content.
 - **V-R17.** The accursed cell's immediate neighbours on bound dimensions MUST be exactly aligned to
   its axes; no other cell need be.
-- **V-R18.** A cell that the viewport would cut MUST NOT be drawn.
+- **V-R18.** A cell that the viewport would cut MUST NOT be drawn with its content; it MAY be drawn
+  as an empty ghost, and the cells not shown in a direction MAY be indicated at the pane's edge.
 - **V-R19.** Opacity MUST fall monotonically toward the viewport's edges, to a configurable floor.
 - **V-R20.** The same input MUST produce the same placement.
 
@@ -281,6 +284,34 @@ Each is one testable sentence. IDs are stable; §20 uses them.
 - **V-R48.** Code MUST be placed as §1.2 says, and a test MUST sit with the code it tests: generic
   behaviour in `tests/lib/` only, view behaviour never re-testing the library.
 
+### 3.10 Added by the notes of 2026-10-07
+
+- **V-R49.** A view MAY offer sub-views, cycled by one action and listed in the palette; the
+  sub-view MUST be an input to `layout()` and never hidden state.
+- **V-R50.** A binding point MUST have a name, a pair of movement actions and a role; the built-in
+  roles MUST include spatial, subspace and hypertime, and a role MUST be addable without changing
+  the framework.
+- **V-R51.** The reader MUST be able to bind a dimension or a group by dragging an edge to an axis,
+  by dropping on the compass, and through the dimension selector, and each MUST end in the same
+  binding call.
+- **V-R52.** The selector MUST open round the accursed cell in three tiers reached with the z
+  movement keys — groups with their members, dimensions at hand (most used, most likely, pouch), and
+  every dimension — and an item activated there MUST be bound by pressing a binding point's name.
+- **V-R53.** "Most used" and "most likely" MUST be pure functions of recorded activity.
+- **V-R54.** The compass MUST show every binding point and what it shows, and MUST be a drop target.
+- **V-R55.** A pack MUST be drawn as one glued thing with its parts demarcated, and MUST move as
+  one.
+- **V-R56.** The edge between two packs MUST be a bundle of strands, one per lane present at both
+  ends, each in its dimension's colour, gathered between the packs and separate where they join.
+- **V-R57.** A pack MUST open into a spread — parts apart, strands apart, lane names shown — on
+  hover, by sub-view and by key, and any view that shows a pack MUST get this from shared code.
+- **V-R58.** In all-dim walk, neighbours out to a depth the reader sets MUST be able to show their
+  own wheels, and no wheel MUST cover a real cell at the rest camera.
+- **V-R59.** A wheel under pressure MUST simplify in a fixed order in which dimension names condense
+  first and the valence count goes last.
+- **V-R60.** A page MUST have its own transform relative to its document, so that a page can move
+  without its document and a document can move carrying its pages.
+
 ______________________________________________________________________
 
 ## 4. Concepts and vocabulary
@@ -297,9 +328,13 @@ ______________________________________________________________________
 | View cell       | A cell minted in a view arena. Its ref has `ephemeralBit`; a store refuses it.                         |
 | Occurrence      | A view cell that stands for one use of a real cell or a group; its value is a handle to it.            |
 | Axis            | A slot in the binding arena that shows a dimension or a group.                                         |
+| Binding point   | An axis with a name (`x`, `y`, `z`, `u`, `t`, …), movement keys and a role.                            |
+| Role            | What binding at a point means: spatial, subspace, hypertime, or one a plug-in adds.                    |
 | Dimension group | A named, ordered set of dimensions and groups; itself a view cell.                                     |
 | Lane            | The position of one group member inside every pack of that group.                                      |
 | Pack            | A container view cell: step *n* along a bound group. Its constituents are one per lane.                |
+| Strand          | One lane's thread in the bundle that joins two packs; coloured by its dimension.                       |
+| Spread          | A pack opened up: parts and strands apart, lane names shown.                                           |
 | Origin          | The real cell a rank of packs is counted from.                                                         |
 | Valence         | The number of (dimension, direction) pairs on which a cell has a neighbour.                            |
 | Toss            | Discarding the derived arena's contents in constant time.                                              |
@@ -307,6 +342,11 @@ ______________________________________________________________________
 | Deck            | A document's pages in order, as the stacked vanishing view arranges them.                              |
 | Mark            | A page's fact that it holds a non-formatting link end or transcluded content.                          |
 | Riffle, split   | The two ways a deck moves to a new page: page by page, or parted in one motion.                        |
+| Sub-view        | A variant of a view the reader cycles through; an input to its layout.                                 |
+| Selector        | The three-tier picker of dimensions and groups that opens round the accursed cell.                     |
+| Compass         | The rose in a slice pane's corner showing every binding point and what it shows.                       |
+| Dimension pouch | Dimensions the reader keeps at hand in the selector.                                                   |
+| Ghost           | The empty outline of a cell or page that is not being drawn in full where it stands.                   |
 
 ______________________________________________________________________
 
@@ -323,7 +363,7 @@ ______________________________________________________________________
       |                    \
       v                     v
  apps/common/xanadu/view/     libgleditor  (generic; knows no cell, link or view)
-   no graphics device           ui::PaneTree, ui::PlaneSet, Beams, Doc + PageArrangement,
+   no graphics device           ui::PaneTree, ui::PlaneSet, Beams, Doc with page matrices,
    View, SliceView, PageView,   spatial: project and unproject, render regions,
    ViewRegistry, ViewManifold,  text::fit, ShapingCache, FocusManager, widgets
    ViewAxisSet, layout records,
@@ -351,13 +391,16 @@ apps/common/xanadu/view/                 engine; linked by xuzz_test and the lan
   view_binding.{hpp,cpp}   ViewAxisSet: axes, occurrences, groups, ring order, undo
   slice_view.hpp         SliceView, SliceCursor, SlicePrepareInput, SliceLayoutInput
   page_view.hpp          PageView, PageRef, PageCatalog, PageCursor, PageLayoutInput
-  view_gesture.{hpp,cpp} drag-to-rebind as a pure state machine: events in, intents out
+    view_gesture.{hpp,cpp} drag-to-rebind as a pure state machine: events in, intents out
+  selector.{hpp,cpp}     the dimension selector: tiers, cursor, pure layout (§7.7)
+  dimension_ranking.{hpp,cpp}  most used and most likely, from activity (§7.8)
   raster.{hpp,cpp}       layout records -> text grid, for REPLs, --raster and golden tests
   slice/
     stretch_vanishing_view.{hpp,cpp}
     all_dim_walk_view.{hpp,cpp}
     dimensional_pack_view.{hpp,cpp}
-    pack_rank.{hpp,cpp}  lanes and steps (§9.3), usable by any view
+        pack_rank.{hpp,cpp}  lanes and steps (§9.3), usable by any view
+    pack_presentation.{hpp,cpp}  glue, strands and the spread (§9.3.7), for any view
   page/
     base_view.{hpp,cpp}
     coalesce.{hpp,cpp}   CoalesceStrategy; the TensionLayoutEngine strategy
@@ -367,10 +410,10 @@ apps/common/xanadu/view/                 engine; linked by xuzz_test and the lan
 
 apps/common/ui/view/                     draws and takes input
   view_host.{hpp,cpp}      scenes, placements, panes; owns each pane's FocusScope
-  view_presenter.{hpp,cpp} layout records -> ui::PlaneSet, Beams, Doc page arrangements;
+  view_presenter.{hpp,cpp} layout records -> ui::PlaneSet, Beams, Doc and Page matrices;
                            the text::fit measurer; picking; AccessKit nodes
   view_animation.{hpp,cpp} tweens between successive layouts by SubjectId
-  view_chrome.{hpp,cpp}    binding HUD, view palette, group editor as ui::Widget scenes
+    view_chrome.{hpp,cpp}    compass, view palette, group editor as ui::Widget scenes
   view_commands.{hpp,cpp}  registers every view action
 
 apps/xuzz/                               the program
@@ -382,7 +425,7 @@ libgleditor additions                    generic; planned in world-space-renderi
   include/gleditor/render/device.hpp     render regions: scissor rectangle and depth slice
   include/gleditor/ui/plane_set.hpp      many retained planes, one transform and opacity each
   include/gleditor/ui/pane_tree.hpp      split, close, resize and focus order over rectangles
-  include/gleditor/doc.hpp               PageArrangement: where a Doc puts each page
+    include/gleditor/doc.hpp               a settable matrix and opacity on each Page
 ```
 
 ### 5.3 Dependency rules
@@ -395,8 +438,8 @@ libgleditor additions                    generic; planned in world-space-renderi
    record meets a renderer call.
 1. `apps/xuzz/` includes `apps/common/` and the library, and holds no view, layout or drawing code.
 1. Nothing under `src/` or `include/gleditor/` includes anything under `apps/`, and no library type
-   is named for a xanalogical thing. A `ui::PlaneSet` holds planes, not cells; a `PageArrangement`
-   places pages of any document, the plain editor's included.
+   is named for a xanalogical thing. A `ui::PlaneSet` holds planes, not cells; a page's matrix moves
+   a page of any document, the plain editor's included.
 1. Nothing is added under `apps/xudu/` or `apps/zigzag/`.
 1. A third-party view needs rule 1's headers only.
 
@@ -570,7 +613,7 @@ ______________________________________________________________________
 
 ### 7.1 Structure
 
-Bindings are cells in the binding arena. Four view-owned dimensions carry them:
+Bindings are cells in the binding arena. Five view-owned dimensions carry them:
 
 | Dimension      | Rank                                                   | Reads as                           |
 | -------------- | ------------------------------------------------------ | ---------------------------------- |
@@ -578,6 +621,7 @@ Bindings are cells in the binding arena. Four view-owned dimensions carry them:
 | `d.binds`      | an axis slot, then the occurrence it shows             | "this axis shows that"             |
 | `d.dim-group`  | a group cell, then one occurrence per member, in order | "this group contains these"        |
 | `d.ring-order` | the ring head, then one occurrence per dimension       | "this is the order round the ring" |
+| `d.dim-pouch`  | the pouch head, then one occurrence per dimension kept | "these are at hand" (§7.7)         |
 
 ```text
  d.axes:        [head] --- [axis 0] --- [axis 1] --- [axis 2]
@@ -600,8 +644,8 @@ none of it touches the real dimension cell.
 
 Resolving what an axis shows is two reads: the slot's posward neighbour on `d.binds`, then its
 handle. The reverse questions — which axes show this dimension, which groups contain it — are scans
-of the axis rank and of the groups. Those are a handful of cells each, and the HUD is the only
-caller.
+of the axis rank and of the groups. Those are a handful of cells each, and the compass and the
+selector are the only callers.
 
 `ViewAxisBinding` and `DimensionBundle` stop being live storage. `ViewAxisBinding` remains as the
 shape of a three-axis preset, and `DimensionBundle`'s triples become seed presets from which a group
@@ -621,16 +665,55 @@ parent groups lost it.
 
 Group membership is ordered, and the order is meaningful: it is the order of the lanes (§9.3).
 
-### 7.3 Axes and what a view can place
+### 7.3 Binding points
 
-The number of axes is not capped, but a view has only so many directions to give them. Each view
-states which axis indices it places and where (§8.5, `axisDirection`): stretch vanishing and pack
-view place axes 0 and 1 in the plane and axis 2 in depth; all-dim walk places the same three as
-spokes. Axes beyond what a view places are still bound, still listed in the HUD and still have
-movement actions; all-dim walk shows their neighbours on the rings, badged with the axis.
+An axis slot is a **binding point**: a named place where a dimension or a group can be bound, with
+its own movement keys and its own way of being shown. Three is not the number. The limit is
+practical — how many pairs of movement keys there are to give, and how many points a reader can tell
+apart on screen — and it is well above three.
 
-When one dimension is bound to two axes, stepping on either moves along it; its immediate neighbours
-are placed once per axis, so a placement's identity includes the axis (§8.4).
+A binding point has:
+
+- a **name**, one letter by default, which is its label on the compass (§7.9) and the key that picks
+  it in the selector (§7.7);
+- two **movement actions**, posward and negward — `std:nav/step_x_pos` and its five siblings are
+  these for `x`, `y` and `z` today;
+- a **role**, which says what binding there means: where a view puts the neighbours, and what a step
+  does.
+
+| Point         | Role      | A dimension bound here                                                                                            |
+| ------------- | --------- | ----------------------------------------------------------------------------------------------------------------- |
+| `x`, `y`, `z` | spatial   | has its neighbours along a direction of the placement's space: right, up, away                                    |
+| `u`           | subspace  | has each neighbour as the root of its own cluster, in a separate 3-D space attached to the cell; a step enters it |
+| `t`           | hypertime | is walked through time, not space                                                                                 |
+
+These five are the defaults. Binding points are configuration, not code: `layout.bindingPoints` in
+`system://layout` lists them in order, each with a name and a role, and their movement keys are rows
+of `system://keymap`. Adding a point is adding a row. The binding arena has one slot on `d.axes` per
+configured point, whose content is the point's name. Roles are an extension point (§8.10): a role is
+registered as a view is, and a binding point names one.
+
+**Spatial.** A view gives each spatial point a direction (`axisDirection`, §8.5). Stretch vanishing
+and the pack view put `x` and `y` in the plane and `z` in depth; all-dim walk makes them spokes.
+
+**Subspace.** The space a `u` neighbour opens is an embedded placement (§11.5) of the same view,
+rooted at that neighbour and drawn in the cell's plane as an inset. Stepping posward on `u` moves
+the cursor into it and the camera with it; stepping negward comes back out. A cell can so be the
+door to a cluster that would not fit, or would not make sense, in the space the cell itself is in.
+
+**Hypertime.** A step on `t` moves the cursor through time. If a history rank such as `d.version` is
+bound there, it is walked like any dimension. If nothing is bound, a step goes to the previous or
+next version of the slice in which the accursed cell changed (`Manifold::historyOf`,
+`manifold.hpp:497`), and the placement shows the slice as it was then. A ref is an operation index
+and means the same cell in every version, so the cursor and the bindings carry across: the host
+builds the view space over that version's manifold and replays the bindings by ref. What it costs to
+have a manifold for another version at hand is VU12.
+
+A point whose role a view does not present is still bound, still on the compass and still moves the
+cursor; all-dim walk shows its neighbours on the rings, badged with the point's name.
+
+When one dimension is bound to two points, stepping on either moves along it; its immediate
+neighbours are placed once per point, so a placement's identity includes the point (§8.4).
 
 ### 7.4 The rebind sequence
 
@@ -650,11 +733,124 @@ group edit. Nothing on the path depends on how much was derived.
 Undo is local to the placement: each `ViewAxisSet` edit pushes its inverse, and undo replays it and
 tosses. It is not hypertime, and it appends nothing to any store.
 
-Bindings, groups and ring order are written to `system://layout`, per slice, by dimension *name*
-(refs do not survive a session), under `layout.slice.<sliceId>.axes`, `.groups` and `.ringOrder`. On
-attach they are replayed through `ViewAxisSet`; a name that no longer resolves is skipped and
-reported. They are not written to the slice's own store — how a reader looks is not a fact about the
-document (R8) — and not to `system://activity`, which records visits.
+Bindings, groups and ring order are written to `system://layout`, and the dimension pouch to
+`system://pouches`, per slice, by dimension *name* (refs do not survive a session), under
+`layout.slice.<sliceId>.axes`, `.groups` and `.ringOrder`. On attach they are replayed through
+`ViewAxisSet`; a name that no longer resolves is skipped and reported. They are not written to the
+slice's own store — how a reader looks is not a fact about the document (R8) — and not to
+`system://activity`, which records visits.
+
+### 7.6 Ways to bind
+
+Binding is the act the whole system turns on, so there are several ways to do it, for different
+moments, and all end in `ViewAxisSet::bind` (V-R51):
+
+- **From what is in front of you.** In all-dim walk, drag an edge to an axis (§9.2.7).
+- **From the corner.** Drop anything that is a dimension or a group on an arm of the compass (§7.9),
+  or click an arm.
+- **From everything there is.** Open the selector (§7.7).
+- **Without looking.** The existing cycle and swap actions step a point through the dimensions and
+  exchange two points.
+
+### 7.7 The dimension selector
+
+The selector opens round the accursed cell, which stays in view at its centre, and holds the
+keyboard as a modal scope until it closes. It has three tiers, one behind another, and the z
+movement keys go from tier to tier.
+
+```text
+   tier 1: groups                tier 2: at hand               tier 3: every dimension
+
+      (g2)--m m m                  . most used .                +----+ +------+ +---+
+     /                           .  . likely .  .               | d1 | | d.em | |d.3|
+   (g1)   c    (g3)             .  .  pouch  .  .               +----+ +------+ +---+
+     \                            .  .   c   .  .               +------+ +--+ +-----+
+      (g4)                        .  .       .  .               | d.ph | |d7| | d.x |
+   the selected group              .  .     .  .                +------+ +--+ +-----+
+   fans out its members             three rings                 stretch placement, most
+   in a second layer                                            relevant nearest the centre
+```
+
+- **Tier 1, groups.** The placement's groups stand in a ring round the cell — a torus when there are
+  more than one ring can hold. The selected group fans its members out in a second layer beyond it,
+  so the reader sees what a group contains before binding it and can change it without leaving:
+  remove a member, reorder members, drop a dimension in from the pouch or from another tier, or
+  start a new group. Every edit is a `ViewAxisSet` call and can be undone.
+- **Tier 2, at hand.** Three concentric rings of dimensions: outermost the **most used**; inside it
+  the **most likely** next, from the reader's recent and past activity (§7.8); innermost the
+  **pouch**, dimensions the reader has put there to keep. Any dimension shown anywhere in the
+  selector can be sent to the pouch or taken out of it.
+- **Tier 3, everything.** Every dimension cell of the slice, laid out by stretch vanishing's
+  placement (§9.1.3) over a ranked list, the most relevant to this context nearest the centre.
+
+A dimension is a real cell, so the items are the dimension cells themselves, drawn like any cell,
+with their names as content. A group is a binding-arena cell. The selector mints nothing else.
+
+**Choosing.** An item is activated by a click; by one of the quick keys `0` to `9`, shown on the ten
+nearest items; or by travelling to it — the x movement keys go round a ring and the y keys go
+between rings or rows — and pressing `Return`. An activated item is *armed*. Pressing a binding
+point's name — `x`, `y`, `z`, `u`, `t` — binds it there and closes the selector. An armed or unarmed
+item can instead be dragged to the compass. `Escape` closes without binding.
+
+The selector is laid out in the engine as a pure function of the binding arena, the ranking and its
+own cursor (`selector.hpp`), emits the same records as a view, and is drawn by the same presenter in
+the world round the cell. It needs no chrome of its own.
+
+### 7.8 Most used and most likely
+
+Both orders are computed from what the reader has done, by a pure function:
+
+```cpp
+// dimension_ranking.hpp
+/// A completed step along a dimension, or a binding of it.
+struct DimensionEvent {
+  zigzag::DimRef dimension{zigzag::noCell};
+  std::uint64_t ordinal{}; // position in the reader's activity, oldest first
+};
+struct RankedDimension {
+  zigzag::DimRef dimension{zigzag::noCell};
+  float used{};   // how much, lately
+  float likely{}; // how probably next, here
+};
+/// Pure. @p present is the dimensions the accursed cell is linked on.
+void rankDimensions(std::span<const DimensionEvent> history,
+                    std::span<const zigzag::DimRef> present,
+                    std::vector<RankedDimension> &out);
+```
+
+- **Used.** Each event of a dimension counts, and a count halves every `rank.halfLife` events of
+  age, so "most used" means lately without forgetting the past.
+- **Likely.** A first-order Markov model: for the dimension the reader used last, how often each
+  dimension came next, with the same decay, smoothed towards "used" by `rank.smoothing` so an unseen
+  pair is unlikely and not impossible. A dimension the accursed cell is actually linked on is
+  weighted up by `rank.presentBoost`, because the likeliest next move is one that is possible.
+
+The model is a product of the activity log and is rebuilt from it; nothing else is stored. That
+needs the log to say which dimension a step followed, which a `Visit` does not record today. Until
+it does, the events of the current session are used (VU5).
+
+### 7.9 The compass
+
+A rose in the top left corner of every slice pane shows every binding point and what is bound to it.
+
+```text
+          y  d.2
+          |
+  d.1 x --+-- x  d.1          x, y: the cardinal arms
+         /|
+   z d.3  |                   z: the arm drawn into the page
+          y
+    (u) contacts   (t) --     other points: petals round the rim, each with its role's glyph
+```
+
+Each arm is labelled with the name of what it shows and coloured as that dimension is coloured
+everywhere else — its edges, its strands, its lane. A group shows its name and how many members it
+has, and lists them on hover. An unbound point is an empty arm.
+
+The compass is the binding display and a drop target: an edge dragged from the wheel, an item from
+the selector, a lane label from a pack, or another arm (which swaps the two). Clicking an arm opens
+the selector with that point already chosen, so the next activation binds without a further key. It
+is chrome: a widget scene, in screen space (§11.7).
 
 ______________________________________________________________________
 
@@ -681,10 +877,16 @@ struct ChordSpec {
   std::string action, call, chord, context;
 };
 
+struct SubviewSpec {
+  std::string id, name;
+};
+
 struct ViewDescriptor {
   std::string kind; // "slice.stretch-vanishing", "page.base"
   std::string name, description, glyph;
   ViewSubject subject{};
+  /// Variants the reader cycles through (V-R49). The first is the default.
+  std::vector<SubviewSpec> subviews;
   std::vector<settings::SettingSpec> settings;
   std::vector<ChordSpec> chords;
   std::function<std::unique_ptr<View>()> make;
@@ -870,10 +1072,11 @@ afterwards (§7.4). `ringPlace()` is the one mutator a view calls for itself, an
 enum class SubjectKind : std::uint8_t {
   Cell,     // value: a real CellRef
   ViewCell, // value: a view CellRef; epoch says which generation
-  Page,     // value: document << 32 | page
+    Page,     // value: document << 32 | page
+  Document, // value: the document's place in the list; a frame for its pages
   Label,    // value: the dimension or link the label names
   Badge,    // value: what is counted
-  Marker,   // value: view-defined (ghost, tail, tick)
+    Marker,   // value: view-defined (ghost, tail, tick, edge heat)
 };
 struct SubjectId {
   SubjectKind kind{};
@@ -908,10 +1111,14 @@ enum ItemFlags : std::uint32_t {
   itemFocus    = 1U << 0,
   itemViewOnly = 1U << 1, // draws with view-only chrome; never role cell/page
   itemMarked   = 1U << 2,
-  itemGhost    = 1U << 3,
+    itemGhost    = 1U << 3, // an empty outline standing for something not drawn here
+  itemGlow     = 1U << 4, // a soft band whose opacity is an intensity
+  itemTinted   = 1U << 5, // face tinted by the strand that joins it
 };
 inline constexpr std::uint32_t noIndex = ~std::uint32_t{0};
 
+/// An item or frame that names a frame is placed relative to it, and moves
+/// with it: a pack carries its parts, a document carries its pages.
 struct PlacedItem {
   SubjectId id;
   glm::vec3 centre{};
@@ -924,17 +1131,28 @@ struct PlacedItem {
   std::uint32_t frame{noIndex}; // the PlacedFrame this item sits in
 };
 
-enum class EdgeKind : std::uint8_t { Dimension, Link, Transclusion, Tether };
+enum class EdgeKind : std::uint8_t {
+  Dimension,
+  Strand, // one lane's thread in a bundle between packs
+  Link,
+  Transclusion,
+  Tether,
+};
 struct PlacedEdge {
   SubjectId from, to;
   glm::vec3 a{}, b{};
   EdgeKind kind{};
   std::uint64_t relation{}; // DimRef, or the link's cell
-  float opacity{1.0F};
+    float opacity{1.0F};
   std::uint32_t label{noIndex}; // the PlacedItem that names this edge
+  /// Strands of one bundle share an id and pass through the same two points
+  /// between their ends, where the bundle is gathered.
+  std::uint32_t bundle{noIndex};
+  glm::vec3 gatherA{}, gatherB{};
 };
 
-/// A container drawn round other items: a pack, a lane table, a deck.
+/// A container drawn round other items: a pack, a document, a deck. Its own
+/// centre is relative to its parent frame, if it has one.
 struct PlacedFrame {
   SubjectId id;
   glm::vec3 centre{};
@@ -1012,9 +1230,11 @@ struct BindingPreview { // "as if this axis showed that": for a drag in flight
 struct SliceLayoutInput {
   const ViewManifold &space;
   const SliceCursor &cursor;
-  PaneFrame frame;
+    PaneFrame frame;
   Measure measure;
   std::optional<BindingPreview> preview;
+  std::uint32_t subview{};        // index into the descriptor's subviews
+  std::optional<SubjectId> hover; // what the pointer is over, if anything
 };
 
 enum class MoveKind : std::uint8_t {
@@ -1134,9 +1354,11 @@ struct PageCursor {
 
 struct PageLayoutInput {
   const PageCatalog &catalog;
-  PageCursor cursor;
+    PageCursor cursor;
   std::optional<ActiveLink> active;
   PaneFrame frame;
+  std::uint32_t subview{};
+  std::optional<SubjectId> hover;
 };
 
 class PageView : public View {
@@ -1218,15 +1440,17 @@ and pages around it tween.
 
 ### 8.10 Extension points
 
-| To add                  | Implement                         | You are given                                       | You must never                                                            |
-| ----------------------- | --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
-| a slice view            | `SliceView`, a `ViewDescriptor`   | a `ViewManifold`, a cursor, a frame, a measurer     | write in `layout()`; link a real cell; keep a `ViewCellRef` across a toss |
-| a page view             | `PageView`, a `ViewDescriptor`    | a `PageCatalog`, a cursor, the active link, a frame | reach a document's text or a store                                        |
-| a way to coalesce pages | `CoalesceStrategy` (§10.3)        | page boxes, link ends, the anchor                   | depend on wall-clock time                                                 |
-| a deck order            | `DeckSource` (§10.5)              | the catalog                                         | reorder a document's own pages in the store                               |
-| a pack rule             | a function over `pack_rank.hpp`   | the base manifold, a group's leaf dimensions        | mint outside `prepare()`                                                  |
-| a record kind           | a new `SubjectKind` or `EdgeKind` | presenters ignore kinds they do not know            | carry a view `CellRef` without its epoch                                  |
-| a gesture               | a state machine in `view_gesture` | pointer events and the current records              | change a binding before the gesture commits                               |
+| To add                  | Implement                              | You are given                                       | You must never                                                            |
+| ----------------------- | -------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------- |
+| a slice view            | `SliceView`, a `ViewDescriptor`        | a `ViewManifold`, a cursor, a frame, a measurer     | write in `layout()`; link a real cell; keep a `ViewCellRef` across a toss |
+| a page view             | `PageView`, a `ViewDescriptor`         | a `PageCatalog`, a cursor, the active link, a frame | reach a document's text or a store                                        |
+| a way to coalesce pages | `CoalesceStrategy` (§10.3)             | page boxes, link ends, the anchor                   | depend on wall-clock time                                                 |
+| a deck order            | `DeckSource` (§10.5)                   | the catalog                                         | reorder a document's own pages in the store                               |
+| a pack rule             | a function over `pack_rank.hpp`        | the base manifold, a group's leaf dimensions        | mint outside `prepare()`                                                  |
+| a record kind           | a new `SubjectKind` or `EdgeKind`      | presenters ignore kinds they do not know            | carry a view `CellRef` without its epoch                                  |
+| a gesture               | a state machine in `view_gesture`      | pointer events and the current records              | change a binding before the gesture commits                               |
+| a binding point's role  | a role, registered as a view is (§7.3) | the bound target, the cursor, the placement         | assume a view presents it: a view may only list the point on the compass  |
+| a sub-view              | a `SubviewSpec` on the descriptor      | its index in every layout input                     | keep which sub-view is showing anywhere but the placement                 |
 
 ### 8.11 Errors
 
@@ -1256,7 +1480,7 @@ ______________________________________________________________________
 
 Coordinates are placement-local (§8.4): x right, y up, z towards the viewer; "away" is −z. An axis
 *shows* a dimension or a group (§7); where a view other than the pack view meets a group on an axis
-it uses the group's first member dimension, and the HUD says so.
+it uses the group's first member dimension, and the compass says so.
 
 ### 9.1 Stretch vanishing
 
@@ -1276,7 +1500,7 @@ first reached; the second route is drawn as an edge only.
 #### 9.1.3 Placement
 
 Let `e(x, u)` be half the extent of cell `x`'s content box along direction `u`, and `g` the gap
-(`stretch.gap`). Axis 0 runs along +x and axis 1 along +y.
+(`stretch.gap`). Binding point `x` runs along +x and `y` along +y.
 
 1. **The focus.** `c` is placed at the origin at its measured size.
 
@@ -1317,9 +1541,9 @@ pane.
 
 #### 9.1.4 The depth axis
 
-Axis 2 runs away from the viewer. A cell reached along it from `p` is placed in the next plane
-behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x and y and sliding by the
-same rule within that plane, which has its own grid. Planes in front of the focus are drawn only
+Binding point `z` runs away from the viewer. A cell reached along it from `p` is placed in the next
+plane behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x and y and sliding by
+the same rule within that plane, which has its own grid. Planes in front of the focus are drawn only
 where they do not cover it.
 
 #### 9.1.5 Fade and clip
@@ -1335,15 +1559,26 @@ that `e` is 0 at the edge and 1 at the centre:
 where `f` is `stretch.fadeFloor` and `b` is `stretch.fadeBand`. Opacity is constant over the middle
 of the pane and falls smoothly through the outer band to the floor (V-R19).
 
-A cell whose box is not entirely inside the view is not emitted at all (V-R18): the test is the
-library's `insideFrustum`, the mirror of `outsideFrustum`. The presenter applies the same test to
-each cell's *animated* box, so a cell in flight appears only once it is wholly inside, and it uses a
-margin of `stretch.clipMargin` pixels before showing a cell again, so a cell resting on the edge
-does not flicker as the camera moves.
+A cell whose box is not entirely inside the view is never drawn with its content (V-R18): the test
+is the library's `insideFrustum`, the mirror of `outsideFrustum`. A cut cell is emitted as a
+**ghost** instead: a `Marker` with `itemGhost` and no content, an empty outline of its box at
+`stretch.ghostOpacity`, drawn only where it lies inside the pane. A ghost says that a cell is there
+without showing half of one. The presenter applies the same test to each cell's *animated* box, so a
+cell in flight appears only once it is wholly inside, and it uses a margin of `stretch.clipMargin`
+pixels before showing a cell again, so a cell resting on the edge does not flicker as the camera
+moves.
+
+**Edge heat.** Ghosts show the cells that just missed. Beyond them the walk has stopped, but it
+knows roughly how much it left: for each direction, the cells it placed outside the pane plus the
+neighbours it did not go on to visit. Those counts are summed into `stretch.heatSectors` sectors
+round the pane, and each sector is a `Marker` with `itemGlow` along the pane's edge whose opacity
+rises with its count, reaching full at `stretch.heatFull`. The glow is where there is more to see
+and how much. It is a lower bound, since unvisited cells have unvisited neighbours, and the chrome
+says "at least". Ghosts are on by default; the heat is the view's second sub-view and a setting.
 
 The accursed cell is never faded and never hidden. A cell larger than the pane cannot be shown
 whole, so it is shown only when it is the accursed cell, scrolling within the pane; as a neighbour
-it is represented by its tick (§9.1.6), which says so.
+it is a ghost with a tick (§9.1.6) that says so.
 
 #### 9.1.6 Staying oriented
 
@@ -1384,9 +1619,11 @@ a list.
 #### 9.1.8 Acceptance
 
 Two layouts of the same input are identical. Every radius-1 neighbour shares the focus's coordinate
-on the axis perpendicular to its own. No two emitted boxes overlap. No emitted box fails
-`insideFrustum`. Opacity at the centre is 1, at the band's inner edge is 1, and at the pane's edge
-is the floor. A slice of 10⁶ cells and one of 10³ place the same number of cells for the same pane.
+on the axis perpendicular to its own. No two emitted boxes overlap. No item with content fails
+`insideFrustum`; every cut cell has exactly one ghost. A sector's glow is zero when nothing lies
+that way and rises with the count. Opacity at the centre is 1, at the band's inner edge is 1, and at
+the pane's edge is the floor. A slice of 10⁶ cells and one of 10³ place the same number of cells for
+the same pane.
 
 ### 9.2 All-dim walk
 
@@ -1399,9 +1636,9 @@ makes it visible as how full the wheel is.
 #### 9.2.2 What is shown
 
 The accursed cell `c` at the hub. For every dimension `c` is linked on and each direction, the
-neighbour, joined to the hub by an edge labelled with the dimension's name. Dimensions shown on a
-placed axis put their neighbours on that axis; all others go on rings. Nothing `c` is linked to is
-left out (V-R21).
+neighbour, joined to the hub by an edge labelled with the dimension's name. Dimensions bound to a
+spatial binding point put their neighbours on that axis; all others go on rings. Nothing `c` is
+linked to is left out (V-R21).
 
 This view mints no derived cells. The neighbours are real cells, the labels are the dimension cells'
 own content, and the order round the rings is the `d.ring-order` rank in the binding arena (§7.1).
@@ -1445,10 +1682,12 @@ pair slots (rounded down to an even number on ring 0), at angles `θ = θ⁰_j +
 Because the pair is opposite through the hub, each dimension reads as a straight line through the
 accursed cell, which is what an axis is.
 
-**The axes are spokes of the same wheel.** On ring 0 the slot at θ = 0 belongs to axis 0 and the
-slot at θ = π/2 to axis 1, whether or not those axes are bound, so binding and unbinding never moves
-anything else. Axis 2 is the line through the hub along F. Neighbours on a bound dimension therefore
-sit exactly on the cell's axes (V-R22), and the step actions move along them as in any view.
+**The axes are spokes of the same wheel.** On ring 0 the slot at θ = 0 belongs to binding point `x`
+and the slot at θ = π/2 to `y`, whether or not they are bound, so binding and unbinding never moves
+anything else. `z` is the line through the hub along F. Points with other roles have no direction
+here: their neighbours take ring slots, badged with the point's name. Neighbours on a bound
+dimension therefore sit exactly on the cell's axes (V-R22), and the step actions move along them as
+in any view.
 
 **Keeping the hub visible.** Seen from the rest camera, a ring leaning by τ projects to an ellipse
 whose vertical half-axis is `r_j·cos τ`. The lean is clamped so that it never closes over the hub:
@@ -1476,7 +1715,7 @@ wheel is exactly as full as the cell's valence, a low-valence cell is a small fi
 *order* of dimensions round it is the same at every cell (V-R24): `d.email` is always before
 `d.phone`, though the angle each sits at depends on which other dimensions are present. A new
 dimension is appended to the ring order the first time it is met, in `prepare()`. The user changes
-the order by dragging a spoke round the wheel or from the HUD.
+the order by dragging a spoke round the wheel.
 
 The alternative, a fixed slot per dimension for the whole slice, keeps angles constant but spreads a
 cell's few neighbours over rings sized for every dimension in the slice, which hides valence and
@@ -1520,15 +1759,51 @@ after a toss is discarded by its epoch. Dropping on an axis binds that axis and 
 alone; dragging a spoke along the wheel instead reorders the ring. The keyboard form — select the
 spoke, `B`, choose the axis — ends in the same call (V-R25).
 
-#### 9.2.8 High valence
+#### 9.2.8 The neighbours' wheels
 
-There is no cap. More dimensions fill more rings. The camera frames the outermost occupied ring, but
-not beyond the distance at which a slot's text is still readable; past that the outer rings run off
-the pane and the reader orbits, zooms, or steps the selection, which turns the selected spoke to the
-front. Cells that project below the readable size are drawn as badges with their valence. The side
-list in the chrome always holds every dimension by name, in ring order.
+The sub-views of this view are depths: the wheel alone, then the wheel with the wheels of its
+neighbours, then of theirs, up to `ring.maxDepth`. The sub-view key steps through them, so the depth
+is the reader's to set while reading.
 
-#### 9.2.9 Edge cases and accessibility
+A neighbour within the depth has its own wheel, built by the rules above with that neighbour as its
+hub, at `ring.childScale` of its parent's size, and without the pair slot that leads back to its
+parent — that connection is the edge already drawn.
+
+A child wheel **bends**. It is not a flat circle: it opens away from its parent. Its slots lie on
+the arc that leaves out `ring.childGap` either side of the direction back to the parent, and each
+slot is set back from the viewer in proportion to its angle from the outward direction, by
+`ring.childBend`, so the wheel curls round behind its hub like a cupped hand and its near edge does
+not reach across its parent.
+
+It then **flexes**. Slots are placed in a fixed order — depth first, then ring order. A slot whose
+box would cover a real cell already placed, seen from the rest camera, is moved back by
+`ring.flexStep` and outward along its own spoke until it is clear, at most `ring.flexTries` times. A
+wheel that cannot be cleared drops a level of detail (§9.2.9) and is tried again. No wheel ever
+covers a real cell (V-R58). The order is fixed and there is no relaxation, so the same input gives
+the same figure.
+
+#### 9.2.9 Detail under pressure
+
+There is no cap on valence. A wheel that has more to show than it has room or legibility for
+simplifies, in a fixed order in which the names go first and the number goes last (V-R59):
+
+| Level           | Drawn                                                                            |
+| --------------- | -------------------------------------------------------------------------------- |
+| full            | every neighbour as a cell, every edge with its dimension's name                  |
+| names condensed | names fitted with a middle ellipsis down to `ring.nameMinChars`                  |
+| names hidden    | no names drawn; edges keep their colours, and the names stay as accessible names |
+| badges          | neighbours as badges showing their valence                                       |
+| summary         | one ring with a coloured tick per dimension, and the valence in the middle       |
+| count           | the valence alone                                                                |
+
+A wheel is drawn at the first level at which everything on it projects at readable size and clears
+(§9.2.8). The accursed cell's wheel starts at full and is the last to give way; a neighbour's wheel
+starts one level lower for each step of depth. The camera frames the outermost occupied ring of the
+accursed cell's wheel, but not from further than a slot's text can be read; past that the reader
+orbits, zooms, or steps the selection, which turns the selected spoke to the front. The side list in
+the chrome always holds every dimension by name, in ring order.
+
+#### 9.2.10 Edge cases and accessibility
 
 A cell with no neighbours is a hub alone, and the side list says "No linked cells on any dimension."
 
@@ -1536,13 +1811,16 @@ The hub is role `cell`. Each dimension is a child group named for it, holding it
 named with its text and its valence. Reading order is the axes in axis order and then the ring
 order; it never depends on angle.
 
-#### 9.2.10 Acceptance
+#### 9.2.11 Acceptance
 
 The items placed equal the neighbours of `c` over `dimensionsOf(c)` exactly. For every dimension
 with two neighbours, their centres sum to twice the hub's. Bound-axis neighbours lie on R, U and F.
 The clamp inequality holds for every ring. The order of dimensions by (ring, angle) equals their
 ring order, at any focus. Binding or unbinding an axis moves no unbound dimension. Drag and keyboard
-leave `shown(axis)` equal. A cancelled drag leaves the binding arena unchanged.
+leave `shown(axis)` equal. A cancelled drag leaves the binding arena unchanged. At every depth, no
+item of a neighbour's wheel overlaps a real cell's box at the rest camera. Raising valence at a
+fixed pane size lowers a wheel's level one step at a time, in the table's order, and never skips the
+names.
 
 ```text
                  d.employer
@@ -1669,24 +1947,66 @@ lane, up to `pack.laneMaxLines` — so rows line up; each pack is as wide as its
 up to `pack.chipMaxWidth`. The origin column shows the origin cell in full, and the lane names — the
 members' names — are label items beside it, once.
 
-Each pack is a `PlacedFrame` with view-only chrome: a dashed border and a header with the group's
-name and the step. Each constituent is a `PlacedItem` inside it, `itemViewOnly` for an empty place
-and an ordinary cell item otherwise. A nested pack is a frame inside a lane, laid out the same way,
-drawn to `pack.nestDepth` levels and collapsed to a badge with its count below that. The depth drawn
-is a display budget; the structure nests as deep as the groups do (V-R30).
+Each pack is a `PlacedFrame` with view-only chrome: one outline round all its parts and a header
+with the group's name and the step. Each constituent is a `PlacedItem` in that frame, placed
+relative to it: `itemViewOnly` for an empty place and an ordinary cell item otherwise. A nested pack
+is a frame inside a lane, laid out the same way, drawn to `pack.nestDepth` levels and collapsed to a
+badge with its count below that. The depth drawn is a display budget; the structure nests as deep as
+the groups do (V-R30).
 
 When a second in-plane axis shows a dimension, each cell of the origin's rank on it is a row with
 its own rank of packs, derived only for the rows in view. When a second axis shows a group, it acts
 as its first member.
 
-#### 9.3.7 Cost
+#### 9.3.7 Glue, strands and the spread
+
+This is `pack_presentation`, shared code: any view that shows a pack gets the same look and the same
+way of opening it (V-R57).
+
+**Glue.** A pack is one thing made of parts, and it is drawn that way. Its constituents sit edge to
+edge inside one outline, with a seam of `pack.seam` between lanes, and they move as one, because
+they are placed relative to the pack's frame and the frame is what moves (V-R55). Nothing else on
+screen is drawn like that, so a pack is not taken for a row of separate cells, and its parts are not
+taken for one cell.
+
+**Strands.** The edge from one pack to the next is a bundle of thin strands: one for each lane that
+holds a cell at both ends, each in its dimension's colour — the colour that dimension has on the
+compass, on its edges in other views and on its lane's seam (V-R56). The strands leave the
+constituents of one pack, gather into a bundle between the packs, and separate again as they reach
+the next, each joining its own constituent. From the origin cell they start gathered.
+
+```text
+  +------+                       +------+
+  | e1   |====\           /======| e2   |      three strands leave, gathered between
+  +------+     \         /       +------+
+  | p1   |======#=======#        |      |      d.phone has run out: its strand is gone
+  +------+     /         \       +------+
+  | a1   |====/           \======| a2   |      the bundle is one strand thinner
+  +------+                       +------+
+```
+
+A lane that has run out has no strand, so the bundle thins as the rank tapers and the taper can be
+read from a distance. Where a strand joins a constituent, that constituent's face takes a tint of
+the strand's colour (`itemTinted`); when the join lies in front of the face from where the camera
+is, the tint goes to the border instead, so the text is not washed. Each strand is a `PlacedEdge` of
+kind `Strand` whose `relation` is its dimension; the strands of one bundle share a `bundle` id and
+the two points `gatherA` and `gatherB` where they run together.
+
+**The spread.** A glued pack hides which part is which. The spread shows it: the lanes move apart by
+`pack.spreadGap`, the strands run separately instead of gathering, and in the room that opens each
+lane's dimension name fades in as a label. It happens three ways: for one pack, while the pointer is
+over the place its strands join; for every pack, in the view's `spread` sub-view; and from the
+palette. Since the sub-view and the hover are inputs to `layout()`, the spread is the same pure
+function as the glued form.
+
+#### 9.3.8 Cost
 
 Extending a rank of packs by one step is one link read per leaf dimension of the group. The
 placement keeps, for each row and direction, the real cell each lane has reached, so it never
 re-walks from the origin, and so it can re-derive the visible window after a toss (§6.7). Only packs
 in view, plus a margin of `pack.aheadSteps`, exist.
 
-#### 9.3.8 Keeping a pack
+#### 9.3.9 Keeping a pack
 
 A pack is a way of looking and vanishes when the binding changes. A reader who wants one kept asks
 for it by name: `promotePack()` (§8.5) hands the container and its constituents to
@@ -1695,7 +2015,7 @@ naming its original, as `promote()` already does for handle cells (`arena_manifo
 refuses above its budget. It is never automatic. Whether the promoted `d.pack` and `d.packing`
 should be the slice's own named dimensions is VU4.
 
-#### 9.3.9 Edge cases and accessibility
+#### 9.3.10 Edge cases and accessibility
 
 A group of one dimension gives packs of one lane; they still have pack chrome, because a pack must
 never be mistaken for the stored cell it stands for. An empty group cannot be bound. A cell with no
@@ -1705,14 +2025,17 @@ A pack is role `group`, named "*group* step *n*: *k* of *m* lanes"; each constit
 its text and "via *dimension*"; an empty place is named "*dimension*: nothing here". Entering and
 leaving move accessibility focus.
 
-#### 9.3.10 Acceptance
+#### 9.3.11 Acceptance
 
 Both worked examples derive exactly as drawn, including the two occurrences of `e1` and the
 existence of step +3. For every cursor on a rank of packs, a step posward and then negward returns
 the same cursor and the same real cell. Retrieve yields the real cell and appends no operation.
 After a toss the same cursor resolves to the same real cell. `verifyViewSpace` passes after every
 step. Binding an empty group is refused. Derived cell count is bounded by the window for a walk of
-any length.
+any length. Between two packs there is exactly one strand for each lane present in both, and each
+has its dimension's colour. Every constituent's position is relative to its pack's frame. Layout
+with the `spread` sub-view, and with `hover` on a pack's join, emits a label for every lane and no
+gathered strand for that pack.
 
 ______________________________________________________________________
 
@@ -1727,10 +2050,13 @@ is *marked* — holds an end of a non-formatting link (any `LinkType` but `Forma
 `apps/common/xanadu/ops.hpp:229`) or content that also appears elsewhere — and where the ends of the
 active link fall. From that it emits one `PlacedItem` per page it wants drawn.
 
-The presenter turns those items into a library `PageArrangement` for each `Doc`: the transform and
-opacity of each page. Today a `Doc` computes each page's matrix itself, in one column
-(`src/doc.cpp`); the arrangement seam is the generic library change that lets anything else decide
-(see the rendering plan). The plain editor can use it too.
+Each document is a `PlacedFrame` of kind `Document`, and its pages are items in that frame, placed
+relative to it (V-R60). The presenter gives the frame's transform to the library `Doc` and each
+item's to its `Page`. A page thus has its own matrix, relative to its document: a view moves one
+page without moving the document, and moves the document without restating its pages. A `Page`
+already has such a matrix, but only its `Doc` writes it, as a column (`src/doc.cpp`); making it
+settable, with an opacity, is the generic library change (see the rendering plan). The plain editor
+can use it too.
 
 Three things hold for every page view:
 
@@ -1762,10 +2088,11 @@ facing the other end. They are world-space edges, so they follow pages wherever 
 
 #### 10.3.1 At rest
 
-Foreground documents stand in a row in list order, each one `page.base.documentGap` from the last. A
-document's pages flow downwards, `page.base.pageGap` apart. Every page is `Plane`-facing, upright
-and opaque. This is the library's present arrangement (`documentSlot`, `kDefaultDocumentGap`,
-`Doc::pageGapPx`), now produced by a view.
+Foreground documents stand in a row in list order, each one `page.base.documentGap` from the last:
+those are the document frames. Within its frame a document's pages flow downwards,
+`page.base.pageGap` apart. Every page is `Plane`-facing, upright and opaque. This is the library's
+present arrangement (`documentSlot`, `kDefaultDocumentGap`, `Doc::pageGapPx`), now produced by a
+view.
 
 ```text
    doc A        doc B        doc C
@@ -1791,7 +2118,9 @@ When a link or a transclusion is active, the pages that hold its ends come toget
   pages' horizontal gap and `page.base.coalesceGap`, with no two participants overlapping. Level
   passages a small gap apart is what lets both ends be read in one glance.
 - **In front of the row.** Participants are lifted towards the viewer by `page.base.liftDepth`, so
-  they pass in front of the columns they leave and cannot collide with pages that stayed.
+  they pass in front of the columns they leave and cannot collide with pages that stayed. A page
+  that flies moves by its own matrix; its document's frame does not move, and the rest of the
+  document stays where it was.
 - **What stays behind.** Each page that flew leaves a ghost marker in its home place (`itemGhost`)
   and a `Tether` edge from the ghost to the page (V-R33). Pages that do not take part stay at home
   at `page.base.contextOpacity`.
@@ -1879,11 +2208,12 @@ pane, in which each page is offset from the one in front. Page `t+i` is centred 
 b + i\,s\,\hat{u}, \qquad i = 0, 1, 2, \dots
 ```
 
-and page `t−i` at `b′ + (i−1)·s·û`, where `s` is `stack.spacing`, `b` is where the current page
-stands and `b′ = b − (W + stack.gutter)·x̂` puts the passed stack beside it, on the side a previous
-page lies in a book: the left for left-to-right text, the right when `DocumentFacts::rightToLeft`.
-Every page stays parallel to the pane. Turning pages to make a fan was refused: text foreshortened
-by rotation is harder to read than the same text smaller.
+and page `t−i` at `b′ + (i−1)·s·û`, all relative to the document's frame, which is the deck's place
+in the scene; `s` is `stack.spacing`, `b` is where the current page stands and
+`b′ = b − (W + stack.gutter)·x̂` puts the passed stack beside it, on the side a previous page lies
+in a book: the left for left-to-right text, the right when `DocumentFacts::rightToLeft`. Every page
+stays parallel to the pane. Turning pages to make a fan was refused: text foreshortened by rotation
+is harder to read than the same text smaller.
 
 Because the two stacks are parallel lines in space, they converge on one vanishing point, and the
 spacing between pages shrinks with distance. That is the long line of pages. Both tops — the current
@@ -2121,14 +2451,15 @@ a walk `DeckSource` read the same log.
 
 ### 11.7 Chrome
 
-The binding HUD, the view palette, the group editor and the all-dim walk's side list are
+The compass (§7.9), the view palette, the group editor and the all-dim walk's side list are
 `ui::Widget` scenes in `ui::ScreenOverlay`s: `List` rows for dimensions, `Tabs` for views,
 `TextField` for a group's name, `Badge` for counts. They inherit fitted labels with full accessible
 names, focus order, minimum touch size, safe-area clamping and live response to the `ui.*` settings.
 A pane's chrome is clipped to the pane with `Canvas::pushClip`.
 
 The palette lists the views whose subject matches the focused placement, from the registry, built-in
-and third-party alike.
+and third-party alike, and under the current view its sub-views. The dimension selector (§7.7) is
+not chrome: it is drawn in the world round the accursed cell.
 
 ______________________________________________________________________
 
@@ -2142,38 +2473,46 @@ host, seeded into `system://keymap`; none is handled in code. Rows marked † ha
 checked against the existing keymap; registration refuses a collision (`ChordCollision`) and the
 conflict is then resolved in the table, not in code.
 
-| Action               | Call                            | Default chord             | Context    |
-| -------------------- | ------------------------------- | ------------------------- | ---------- |
-| `view.palette`       | `std:view/palette`              | `Ctrl+Alt+V`              | X          |
-| `view.cycle`         | `std:view/cycle`                | `Ctrl+Alt+Shift+V`        | X          |
-| `view.select`        | `std:view/select(n)`            | `Ctrl+Alt+V` then `1`…`9` | X          |
-| `pane.split.right`   | `std:view/pane_split("right")`  | `Ctrl+Alt+Shift+H`        | X          |
-| `pane.split.down`    | `std:view/pane_split("down")`   | `Ctrl+Alt+Shift+J`        | X          |
-| `pane.close`         | `std:view/pane_close`           | `Ctrl+Alt+Shift+W`        | X          |
-| `pane.next`          | `std:view/pane_next`            | `Ctrl+Alt+Shift+Tab`      | X          |
-| `pane.openAsPage`    | `std:view/open_as_page`         | `Ctrl+Alt+Shift+O`        | S          |
-| `camera.rest`        | `std:view/camera_rest`          | `Ctrl+Alt+0` †            | X          |
-| `camera.orbit`       | `std:view/camera_orbit(dx, dy)` | `Ctrl+Alt+Shift+`arrows † | X          |
-| `axis.cycle`         | `std:view/axis_cycle`           | `Ctrl+Tab`                | S, HUD row |
-| `axis.pick`          | `std:view/axis_pick`            | `Ctrl+Alt+D`              | S          |
-| `group.new`          | `std:view/group_new`            | `Ctrl+Alt+G`              | S          |
-| `group.edit`         | `std:view/group_edit`           | `Ctrl+Alt+Shift+G`        | S          |
-| `bind.undo`          | `std:view/bind_undo`            | `Ctrl+Alt+Z`              | S          |
-| `ring.next`, `.prev` | `std:view/ring_select(±1)`      | `]`, `[`                  | AW         |
-| `ring.walk`          | `std:view/ring_walk`            | `Return`                  | AW         |
-| `ring.bind`          | `std:view/ring_bind`            | `B`                       | AW         |
-| `pack.enter`         | `std:view/pack_enter`           | `Return`                  | PV         |
-| `pack.leave`         | `std:view/pack_leave`           | `Escape`                  | PV, inside |
-| `pack.lane`          | `std:view/pack_lane(±1)`        | the cross-axis step keys  | PV, inside |
-| `pack.retrieve`      | `std:view/pack_retrieve`        | `Shift+Return`            | PV         |
-| `pack.keep`          | `std:view/pack_keep`            | `Ctrl+Alt+K` †            | PV         |
+| Action               | Call                            | Default chord                                | Context              |
+| -------------------- | ------------------------------- | -------------------------------------------- | -------------------- |
+| `view.palette`       | `std:view/palette`              | `Ctrl+Alt+V`                                 | X                    |
+| `view.cycle`         | `std:view/cycle`                | `Ctrl+Alt+Shift+V`                           | X                    |
+| `view.select`        | `std:view/select(n)`            | `Ctrl+Alt+V` then `1`…`9`                    | X                    |
+| `pane.split.right`   | `std:view/pane_split("right")`  | `Ctrl+Alt+Shift+H`                           | X                    |
+| `pane.split.down`    | `std:view/pane_split("down")`   | `Ctrl+Alt+Shift+J`                           | X                    |
+| `pane.close`         | `std:view/pane_close`           | `Ctrl+Alt+Shift+W`                           | X                    |
+| `pane.next`          | `std:view/pane_next`            | `Ctrl+Alt+Shift+Tab`                         | X                    |
+| `pane.openAsPage`    | `std:view/open_as_page`         | `Ctrl+Alt+Shift+O`                           | S                    |
+| `camera.rest`        | `std:view/camera_rest`          | `Ctrl+Alt+0` †                               | X                    |
+| `camera.orbit`       | `std:view/camera_orbit(dx, dy)` | `Ctrl+Alt+Shift+`arrows †                    | X                    |
+| `view.subview`       | `std:view/subview(±1)`          | `Ctrl+Alt+.`, `Ctrl+Alt+,` †                 | X                    |
+| `step.u`, `step.t`   | `std:nav/step(point, ±1)`       | `Alt+`arrows † (`u` left/right, `t` up/down) | S                    |
+| `dimension.select`   | `std:view/selector`             | `Ctrl+Alt+D`                                 | S                    |
+| `selector.tier`      | the `z` step actions            | as bound                                     | selector             |
+| `selector.travel`    | the `x` and `y` step actions    | as bound                                     | selector             |
+| `selector.quick`     | `std:view/selector_quick(n)`    | `0`…`9`                                      | selector             |
+| `selector.bind`      | `std:view/selector_bind(point)` | the point's name: `x` `y` `z` `u` `t`        | selector, item armed |
+| `selector.pouch`     | `std:view/selector_pouch`       | `P`                                          | selector             |
+| `axis.cycle`         | `std:view/axis_cycle`           | `Ctrl+Tab`                                   | S                    |
+| `group.new`          | `std:view/group_new`            | `Ctrl+Alt+G`                                 | S                    |
+| `group.edit`         | `std:view/group_edit`           | `Ctrl+Alt+Shift+G`                           | S                    |
+| `bind.undo`          | `std:view/bind_undo`            | `Ctrl+Alt+Z`                                 | S                    |
+| `ring.next`, `.prev` | `std:view/ring_select(±1)`      | `]`, `[`                                     | AW                   |
+| `ring.walk`          | `std:view/ring_walk`            | `Return`                                     | AW                   |
+| `ring.bind`          | `std:view/ring_bind`            | `B`                                          | AW                   |
+| `pack.enter`         | `std:view/pack_enter`           | `Return`                                     | PV                   |
+| `pack.leave`         | `std:view/pack_leave`           | `Escape`                                     | PV, inside           |
+| `pack.lane`          | `std:view/pack_lane(±1)`        | the cross-axis step keys                     | PV, inside           |
+| `pack.retrieve`      | `std:view/pack_retrieve`        | `Shift+Return`                               | PV                   |
+| `pack.keep`          | `std:view/pack_keep`            | `Ctrl+Alt+K` †                               | PV                   |
 
 `view.select(n)` picks the n-th installed view for the focused placement's subject, so the same
 chord serves slice and page placements and a third-party view gets a number without a new row.
 Movement along axes, next and previous page, and next and previous link keep their existing actions
 and chords. Pointer forms and their keyboard forms: orbit (secondary drag); rebind (drag an edge to
-an axis, or `ring.bind`); reorder the ring (drag a spoke round, or the HUD); go to a page (click, or
-page and link actions); scrub a deck (drag or wheel, or hold next page).
+an axis or anything to the compass; or `ring.bind`, or the selector and a point's name); open a pack
+(hover its join; or the `spread` sub-view); reorder the ring (drag a spoke round, or the HUD); go to
+a page (click, or page and link actions); scrub a deck (drag or wheel, or hold next page).
 
 ### 12.2 Messages
 
@@ -2200,53 +2539,65 @@ Existing settings are used, not copied: the `ui.*` scale, font-role and touch-si
 `zigzag.cellHorizontalPaddingPx`, `cellVerticalPaddingPx`, `contentMaxWidthPx` (the width limit
 given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBeamWidthPx`.
 
-| Setting                                          | Default      | Meaning                                                             |
-| ------------------------------------------------ | ------------ | ------------------------------------------------------------------- |
-| `view.arena.windowCells`                         | 4096         | derived cells before a placement tosses and re-derives (§6.7)       |
-| `view.camera.restYaw`, `restPitch`               | 12, 8        | the rest camera's turn, so depth is visible                         |
-| `view.motion.reduced`                            | false        | every tween and transition becomes a cut                            |
-| `view.viewOnlyOpacity`                           | 0.7          | chrome of view-only items                                           |
-| `stretch.gap`                                    | 4            | space between neighbouring boxes                                    |
-| `stretch.minContact`                             | 12           | least overlap with the cell a box was reached from                  |
-| `stretch.overfill`                               | 1.3          | viewport multiple the walk fills                                    |
-| `stretch.layerDepth`                             | 120          | distance between depth planes                                       |
-| `stretch.fadeBand`, `fadeFloor`                  | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                  |
-| `stretch.clipMargin`                             | 6            | margin before a hidden cell is shown again                          |
-| `stretch.breadcrumbs`                            | 6            | cells in the breadcrumb strip                                       |
-| `ring.radius`, `ring.radiusStep`                 | 220, 90      | ring 0's least radius; growth per ring                              |
-| `ring.tiltStep`                                  | 28           | lean added per pair of rings                                        |
-| `ring.slotWidth`, `ring.slotHeight`              | 140, 44      | a ring cell's box                                                   |
-| `ring.hubMaxShare`                               | 0.4          | most of the pane the hub's content may take                         |
-| `ring.labelAt`                                   | 0.55         | where on an edge its label sits                                     |
-| `ring.stubs`                                     | true         | draw second-hop stubs                                               |
-| `ring.dragThreshold`, `ring.dropRadius`          | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`) |
-| `pack.laneMaxLines`, `pack.chipMaxWidth`         | 3, 220       | limits on a constituent's box                                       |
-| `pack.nestDepth`                                 | 3            | nested packs drawn before collapsing to a badge                     |
-| `pack.aheadSteps`                                | 2            | packs derived beyond the pane                                       |
-| `page.backgroundDepth`, `page.backgroundOpacity` | 720, 0.42    | where and how dim a context document is                             |
-| `page.base.documentGap`, `page.base.pageGap`     | 432, 32      | between documents; between pages                                    |
-| `page.base.coalesceGap`, `liftDepth`             | 432, 90      | gap between coalesced pages; how far they come forward              |
-| `page.base.coalesceSteps`                        | 25           | fixed solver steps                                                  |
-| `page.base.contextOpacity`                       | 0.42         | pages not taking part while a link is active                        |
-| `page.base.levelTolerance`                       | 2            | how level tied passages must end up                                 |
-| `page.base.subjectMs`, `rowMs`, `rowDelayMs`     | 620, 450, 90 | motion of the page brought over and of those making room            |
-| `stack.spacing`, `stack.gutter`, `stack.deckGap` | 60, 48, 240  | along the line; between the two tops; between decks                 |
-| `stack.tuckStrip`                                | 40           | strip of the passed stack shown in a narrow pane                    |
-| `stack.nearPages`, `stack.nearFalloff`           | 6, 0.7       | pages scored behind each top; weight per place                      |
-| `stack.lineStartWeight`, `lineEndWeight`         | 0.5, 0.2     | value of a partly visible line                                      |
-| `stack.search.azimuthStep`, `recessionStep`      | 15, 5        | candidate grid                                                      |
-| `stack.search.minRecession`, `maxRecession`      | 10, 60       | range of the line's angle from the view axis                        |
-| `stack.search.hysteresis`                        | 0.05         | how much better a new direction must score                          |
-| `stack.fadePages`, `stack.fadeFloor`             | 12, 0.08     | fade rate along the line; least opacity                             |
-| `stack.minPagePx`                                | 8            | height below which unmarked pages stop                              |
-| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`   | 60, 120, 420 | riffle timings, and the bound that decides riffle or split          |
-| `stack.splitMs`, `stack.splitLeadMs`             | 320, 80      | block motion; delay before the target flies in                      |
+| Setting                                                | Default      | Meaning                                                                     |
+| ------------------------------------------------------ | ------------ | --------------------------------------------------------------------------- |
+| `view.arena.windowCells`                               | 4096         | derived cells before a placement tosses and re-derives (§6.7)               |
+| `view.camera.restYaw`, `restPitch`                     | 12, 8        | the rest camera's turn, so depth is visible                                 |
+| `view.motion.reduced`                                  | false        | every tween and transition becomes a cut                                    |
+| `view.viewOnlyOpacity`                                 | 0.7          | chrome of view-only items                                                   |
+| `stretch.gap`                                          | 4            | space between neighbouring boxes                                            |
+| `stretch.minContact`                                   | 12           | least overlap with the cell a box was reached from                          |
+| `stretch.overfill`                                     | 1.3          | viewport multiple the walk fills                                            |
+| `stretch.layerDepth`                                   | 120          | distance between depth planes                                               |
+| `stretch.fadeBand`, `fadeFloor`                        | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                          |
+| `stretch.clipMargin`                                   | 6            | margin before a hidden cell is shown again                                  |
+| `stretch.ghostOpacity`                                 | 0.25         | outline of a cell the pane would cut                                        |
+| `stretch.heatSectors`, `stretch.heatFull`              | 16, 24       | directions the edge heat is summed in; count at full glow                   |
+| `stretch.breadcrumbs`                                  | 6            | cells in the breadcrumb strip                                               |
+| `ring.radius`, `ring.radiusStep`                       | 220, 90      | ring 0's least radius; growth per ring                                      |
+| `ring.tiltStep`                                        | 28           | lean added per pair of rings                                                |
+| `ring.slotWidth`, `ring.slotHeight`                    | 140, 44      | a ring cell's box                                                           |
+| `ring.hubMaxShare`                                     | 0.4          | most of the pane the hub's content may take                                 |
+| `ring.labelAt`                                         | 0.55         | where on an edge its label sits                                             |
+| `ring.stubs`                                           | true         | draw second-hop stubs                                                       |
+| `ring.maxDepth`, `ring.childScale`                     | 2, 0.5       | how far out neighbours show wheels; a child wheel's size                    |
+| `ring.childGap`, `ring.childBend`                      | 50, 0.6      | arc left open towards the parent; how far a child wheel curls back          |
+| `ring.flexStep`, `ring.flexTries`                      | 24, 6        | how a slot is moved clear of a real cell, and how often                     |
+| `ring.nameMinChars`                                    | 6            | shortest a condensed dimension name gets before it is hidden                |
+| `ring.dragThreshold`, `ring.dropRadius`                | 6, 36        | drag start distance; drop target radius (not below `ui.minTouchPx`)         |
+| `pack.laneMaxLines`, `pack.chipMaxWidth`               | 3, 220       | limits on a constituent's box                                               |
+| `pack.nestDepth`                                       | 3            | nested packs drawn before collapsing to a badge                             |
+| `pack.seam`, `pack.spreadGap`                          | 1, 28        | line between glued lanes; room between them when spread                     |
+| `pack.strandWidth`                                     | 2            | a strand's thickness                                                        |
+| `rank.halfLife`, `rank.smoothing`, `rank.presentBoost` | 200, 4, 2    | ranking: decay in events; pull towards "used"; weight of present dimensions |
+| `pack.aheadSteps`                                      | 2            | packs derived beyond the pane                                               |
+| `page.backgroundDepth`, `page.backgroundOpacity`       | 720, 0.42    | where and how dim a context document is                                     |
+| `page.base.documentGap`, `page.base.pageGap`           | 432, 32      | between documents; between pages                                            |
+| `page.base.coalesceGap`, `liftDepth`                   | 432, 90      | gap between coalesced pages; how far they come forward                      |
+| `page.base.coalesceSteps`                              | 25           | fixed solver steps                                                          |
+| `page.base.contextOpacity`                             | 0.42         | pages not taking part while a link is active                                |
+| `page.base.levelTolerance`                             | 2            | how level tied passages must end up                                         |
+| `page.base.subjectMs`, `rowMs`, `rowDelayMs`           | 620, 450, 90 | motion of the page brought over and of those making room                    |
+| `stack.spacing`, `stack.gutter`, `stack.deckGap`       | 60, 48, 240  | along the line; between the two tops; between decks                         |
+| `stack.tuckStrip`                                      | 40           | strip of the passed stack shown in a narrow pane                            |
+| `stack.nearPages`, `stack.nearFalloff`                 | 6, 0.7       | pages scored behind each top; weight per place                              |
+| `stack.lineStartWeight`, `lineEndWeight`               | 0.5, 0.2     | value of a partly visible line                                              |
+| `stack.search.azimuthStep`, `recessionStep`            | 15, 5        | candidate grid                                                              |
+| `stack.search.minRecession`, `maxRecession`            | 10, 60       | range of the line's angle from the view axis                                |
+| `stack.search.hysteresis`                              | 0.05         | how much better a new direction must score                                  |
+| `stack.fadePages`, `stack.fadeFloor`                   | 12, 0.08     | fade rate along the line; least opacity                                     |
+| `stack.minPagePx`                                      | 8            | height below which unmarked pages stop                                      |
+| `stack.minFlipMs`, `flipMs`, `maxTransitionMs`         | 60, 120, 420 | riffle timings, and the bound that decides riffle or split                  |
+| `stack.splitMs`, `stack.splitLeadMs`                   | 320, 80      | block motion; delay before the target flies in                              |
 
 The defaults that restate today's constants are converted from them at `Doc::pixelsToWorld` (1/18):
 24 world units of document gap, the same again between coalesced pages, and 40 of background depth.
-Each group of settings has its Schema and Notes pages (V-R41). Per-slice state —
-`layout.slice.<id>.view`, `.axes`, `.groups`, `.ringOrder` — and per-document-set state —
-`layout.pages.<id>.view` — live in `system://layout`.
+Each group of settings has its Schema and Notes pages (V-R41). The binding points themselves are
+`layout.bindingPoints`. A dimension's colour is `ui.dimension.<name>.colour`, assigned from a
+palette when first seen and the reader's to change; it is the one colour that dimension has
+everywhere. The dimension pouch is kept in `system://pouches`. Per-slice state —
+`layout.slice.<id>.view`, `.subview`, `.axes`, `.groups`, `.ringOrder` — and per-document-set state
+— `layout.pages.<id>.view` — live in `system://layout`.
 
 ______________________________________________________________________
 
@@ -2269,9 +2620,11 @@ A label that is not drawn is still an edge with a name.
 | Record                                          | Drawn with                                                                                                    |
 | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `PlacedItem` for a cell, label, badge or marker | a plane in a library `ui::PlaneSet`: retained fitted text and rectangles, one transform and opacity per plane |
-| `PlacedItem` for a page                         | the document's own `Page`, placed through its `Doc`'s `PageArrangement`                                       |
-| `PlacedFrame`                                   | a plane in the `PlaneSet` behind its items                                                                    |
-| `PlacedEdge`                                    | `gleditor::Beams`                                                                                             |
+| `PlacedItem` for a page                         | the document's own `Page`, through that page's matrix and opacity                                             |
+| `PlacedFrame` for a document                    | the `Doc`'s model matrix                                                                                      |
+| `PlacedFrame` for a pack                        | a parent plane in the `PlaneSet`; its items are child planes and move with it                                 |
+| `PlacedEdge` of kind `Strand`                   | thin `gleditor::Beams` segments along a curve through the bundle's two gather points                          |
+| `PlacedEdge`, other kinds                       | `gleditor::Beams`                                                                                             |
 | `DropTarget`                                    | a beam and a plane while a drag is in flight; hit-tested with the unprojected ray                             |
 | chrome                                          | `ui::ScreenOverlay` widget scenes                                                                             |
 
@@ -2296,8 +2649,8 @@ All generic, all tested in `tests/lib/`, none naming a xanalogical thing; planne
 | `insideFrustum`                                     | stretch vanishing's all-or-nothing clip (§9.1.5)                 |
 | render regions: device scissor and depth slice      | panes, embedded views (§11.4, §11.5)                             |
 | depth test without depth write                      | translucent pages and faded cells                                |
-| `ui::PlaneSet`                                      | cells, labels, frames and badges as individually placed planes   |
-| `PageArrangement` on `Doc`                          | every page view                                                  |
+| `ui::PlaneSet`, with parent planes and soft bands   | cells, labels, badges; glued packs; ghosts and edge heat         |
+| a settable matrix and opacity on each `Page`        | every page view                                                  |
 | `ui::PaneTree`                                      | splitting the window                                             |
 
 Nothing in this document needs a new shader or vertex format.
@@ -2356,11 +2709,11 @@ ______________________________________________________________________
 
 A test sits with the code it tests and nothing is tested twice (V-R48).
 
-| Code                                                                                       | Test binary                                                                   | Directory             | Links                             |
-| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | --------------------- | --------------------------------- |
-| library: unprojection, regions, `PlaneSet`, `PageArrangement`, `PaneTree`, `insideFrustum` | `gleditor_test`                                                               | `tests/lib/`          | the library only                  |
-| view framework and built-in views (engine)                                                 | `xuzz_test`                                                                   | `tests/xuzz/`         | the engine; no library, no device |
-| presenter, host, chrome, commands                                                          | the binary that links `apps/common/ui/` and the library (`zigzag_test` today) | `tests/zigzag/` today | both                              |
+| Code                                                                                   | Test binary                                                                   | Directory             | Links                             |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------- | --------------------------------- |
+| library: unprojection, regions, `PlaneSet`, page matrices, `PaneTree`, `insideFrustum` | `gleditor_test`                                                               | `tests/lib/`          | the library only                  |
+| view framework and built-in views (engine)                                             | `xuzz_test`                                                                   | `tests/xuzz/`         | the engine; no library, no device |
+| presenter, host, chrome, commands                                                      | the binary that links `apps/common/ui/` and the library (`zigzag_test` today) | `tests/zigzag/` today | both                              |
 
 `xuzz_test` holds xuzz's own code and no more. A view test supplies a fixed measurer and asserts on
 records; it does not sweep fonts, scales or backends, because fitting, shaping, projection, focus
@@ -2376,7 +2729,13 @@ longer describe it; renaming them is VU6.
 - **Binding.** One dimension on two axes and in two groups; nested groups; cycle and empty-group
   refusals; undo and redo restore `shown()` for every axis; persistence round trip by name,
   including a name that has gone.
-- **Each slice view.** Its acceptance list (§9.1.8, §9.2.10, §9.3.10).
+- **Binding points.** A configured sixth point gets a slot, a compass arm and movement actions with
+  no code change; a point whose role a view does not present still moves the cursor.
+- **Selector and ranking.** `rankDimensions` on hand-written histories: decay, the Markov order
+  after a given last dimension, the boost for present dimensions, and determinism. The selector's
+  layout and cursor for each tier; arming an item and naming a point calls `bind` with that pair;
+  group edits in tier 1 are `ViewAxisSet` calls and undo.
+- **Each slice view.** Its acceptance list (§9.1.8, §9.2.11, §9.3.11).
 - **Each page view.** Its acceptance list (§10.3.4, §10.4.10), over hand-written catalogs.
 - **Purity.** `layout()` twice gives equal sinks; a layout with allocation counting on reports none
   after the sink has reached size.
@@ -2431,7 +2790,7 @@ too, where today it links only the slice ones. After this step `apps/xuzz/` hold
 
 As [`world-space-rendering-plan.md`](world-space-rendering-plan.md) orders it: unprojection and
 `insideFrustum`; render regions with scissor, then depth slices; depth test without write;
-`ui::PlaneSet`; `PageArrangement`; `ui::PaneTree`. *Tests:* in `tests/lib/` only, with
+`ui::PlaneSet`; page matrices; `ui::PaneTree`. *Tests:* in `tests/lib/` only, with
 `compare-backends.sh` scenes for regions and planes.
 
 ### Step 3: the view space and the binding model
@@ -2443,8 +2802,9 @@ application change. *Tests:* `tests/xuzz/view_manifold_test.cpp`, `view_binding_
 
 ### Step 4: the slice views
 
-`slice_view.hpp`, `pack_rank.*`, then stretch vanishing, all-dim walk and the pack view, each with
-its acceptance list as a test file and its golden layouts. No application change.
+`slice_view.hpp`, `pack_rank.*`, `pack_presentation.*`, then stretch vanishing, all-dim walk and the
+pack view, each with its acceptance list as a test file and its golden layouts; then
+`dimension_ranking.*` and `selector.*`. No application change.
 
 ### Step 5: the page model and the page views
 
@@ -2455,15 +2815,16 @@ one body per document, which reproduces `LinkBeams`' result, and then switched t
 ### Step 6: the presenter and the host
 
 `apps/common/ui/view/`: the presenter (including the `PageCatalog` over the library's documents and
-the measurer over `text::fit()`), the animation, the chrome and the host. `xuzz_app` builds a
-`ViewHost`; `ViewCoordinator` goes. `ZigzagVisualizer` and `xanadu::Views` are each wrapped as a
-legacy placement, so the unified mode is one scene with two placements and nothing regresses while
-the new views become selectable beside them. *Tests:* host tests for split, close, focus and
-persistence; presenter tests as §16.2; existing visualizer tests unchanged.
+the measurer over `text::fit()`), the animation, the chrome with the compass, and the host.
+`xuzz_app` builds a `ViewHost`; `ViewCoordinator` goes. `ZigzagVisualizer` and `xanadu::Views` are
+each wrapped as a legacy placement, so the unified mode is one scene with two placements and nothing
+regresses while the new views become selectable beside them. *Tests:* host tests for split, close,
+focus and persistence; presenter tests as §16.2; existing visualizer tests unchanged.
 
 ### Step 7: commands, keymap and bindings
 
-`view_commands` registers every action with its default chord, absorbing `zigzag_commands`.
+`view_commands` registers every action with its default chord, absorbing `zigzag_commands`, and the
+binding points come from `layout.bindingPoints`, starting with `x`, `y`, `z`, `u` and `t`.
 `ViewAxisBinding` stops being live storage and `DimensionBundle` becomes group presets. *Tests:* the
 visualizer's navigation, swap, cycle and bundle tests are adapted to assert the same behaviour
 against `ViewAxisSet`.
@@ -2617,6 +2978,56 @@ edits, and keeps each cell against the one that reached it. Price: gaps where no
 Refused: track tables; relaxation; a single skyline, which fills one direction and this view
 radiates in four.
 
+**V26. A view has sub-views, and the one showing is an input to its layout.** Why: the spread of a
+pack, the depth of neighbours' wheels and the edge heat are variants of one view, not other views;
+one key cycles them and the cursor never moves. Price: a descriptor lists them, and a layout must
+handle each. Refused: a view kind per variant — it crowds the palette and makes a variant look like
+a change of place; a mode kept inside the view — hidden state, and `layout()` is no longer a
+function of its input.
+
+**V27. Axes are named binding points with movement keys and a role.** Why: three is not the number;
+what limits it is keys and what can be told apart; and a point can mean more than a direction — a
+door to another space, or time. Price: roles are a second registry, and every view must say what it
+does with each role or leave the point to the compass. Refused: three fixed axes; any number of
+anonymous axes — one with no keys cannot be walked, and one with no name cannot be asked for.
+
+**V28. Dimensions are chosen in a three-tier selector in the world, and shown on a compass.** Why:
+groups, the dimensions at hand and every dimension are three different questions; putting them round
+the accursed cell keeps the reader's place; and naming the point by its key makes a binding three
+keystrokes. Price: a modal scope and a second way to lay out dimension cells. Refused: a list dialog
+— it hides the cell and has no place for groups and their members together; chrome only — dimensions
+are cells and are better shown as cells.
+
+**V29. "Most used" and "most likely" are computed from the activity log by a first-order Markov
+model with decay.** Why: they are facts about what the reader did, so they are replay products, not
+settings; first order is what a session's worth of events can support. Price: a `Visit` must come to
+record the dimension followed (VU5); until then the model knows only the current session. Refused:
+counters stored as configuration; a higher-order model.
+
+**V30. A thing in a frame is placed relative to the frame; a page has its own matrix relative to its
+document.** Why: a pack must move as one glued thing and a document must carry its pages, and a part
+must still be movable on its own; hierarchy says both. Price: a record's position is not its world
+position until its frames are composed. Refused: absolute positions for everything — the whole and
+its parts then tween separately and drift; a pull-style arrangement object on `Doc`, as first
+planned — the page should own its matrix as the document owns its own.
+
+**V31. The edge between packs is a bundle of strands, and a dimension has one colour everywhere.**
+Why: a single edge cannot say which lanes continue; strands can, and thin out as lanes end. One
+colour per dimension is what lets a strand, a compass arm and a wheel's edge be recognised as the
+same thing. Price: a colour per dimension to assign and keep distinct, and it must not be the only
+cue. Refused: one thick edge per pair of packs; colours chosen per view.
+
+**V32. A cell the pane would cut is drawn as an empty ghost, and what lies beyond as edge heat.**
+Why: content cut in half reads as missing data, but nothing at all makes the edge of the pane look
+like the edge of the data. Price: two more kinds of marker. Refused: drawing cut content; drawing
+nothing — the earlier text.
+
+**V33. Neighbours' wheels bend and flex by fixed rules, and a wheel loses detail in a fixed order
+with names first.** Why: the same input must give the same figure, and names are the widest and
+least needed thing on a wheel when its colours and the side list still say which dimension is which.
+Price: a wheel that cannot be cleared loses detail where relaxation might have found room. Refused:
+spring relaxation; a cap on depth or valence.
+
 ______________________________________________________________________
 
 ## 19. Open questions
@@ -2633,9 +3044,10 @@ is the first member now. Settled by: use.
 **VU4.** When a pack is kept, should its `d.pack` and `d.packing` be the slice's own named
 dimensions, shared by every kept pack? Settled by: the first design of kept packs as content.
 
-**VU5.** Should a `Visit` record the view and the bindings, so going back restores how the reader
-was looking? Settled by: journeys that go back across a view switch; if so, more cells in the
-activity store, not a wider struct.
+**VU5.** What more should a `Visit` record? The dimension a step followed is needed by the ranking
+(§7.8) and is the first thing to add. Whether it should also record the view and the bindings, so
+going back restores how the reader was looking, is settled by journeys that go back across a view
+switch. Either way the answer is more cells in the activity store, not a wider struct.
 
 **VU6.** With `apps/xudu/` and `apps/zigzag/` gone, should `tests/xudu/`, `tests/zigzag/` and their
 binaries be renamed for what they link? Settled by: the owner; nothing here depends on it.
@@ -2652,6 +3064,24 @@ by: use on slices with a meaningful third dimension.
 
 **VU10.** Should the base view fly a passage smaller than a page, as the satelloid cards do today?
 Settled by: whether page-level coalescing leaves too much unrelated text in view.
+
+**VU11.** How should a subspace be shown — as an inset in the cell's plane, a pane of its own, or a
+place the camera travels to — and how deep may subspaces nest before the reader is lost? Settled by:
+use on a slice with real sub-clusters.
+
+**VU12.** What does the hypertime role cost? It needs a manifold for another version at hand.
+Settled by: measuring `rebuildManifold` for a version against keeping a few recent ones, and
+deciding which versions count as "the accursed cell changed".
+
+**VU13.** Is the ranking per slice or across slices, do steps and bindings weigh the same, and what
+does the selector show before there is any history? Settled by: use; the defaults are per slice,
+equal weight, and ring order.
+
+**VU14.** Which keys do `u` and `t` take, and how many binding points can the keymap carry before
+they stop being memorable? Settled by: the keymap's conflict report and use.
+
+**VU15.** Is edge heat best as sectors, and is a lower bound honest enough? Settled by: use on dense
+slices.
 
 ______________________________________________________________________
 
@@ -2711,6 +3141,31 @@ ______________________________________________________________________
 | "libgleditor must be kept to generic components"                                            | §1.2; §5.3 rule 4; §13.3                   |
 | "its own battery of tests that I don't want duplicated in xuzz_test"                        | V-R48; §16.1                               |
 
+### The notes of 2026-10-07
+
+| Note                                                                                       | Met by                                         |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| "pages should have their own matrices … move relative to the doc as a whole"               | V-R60; §8.4; §10.1; V30; the rendering plan §6 |
+| "edges should appear as a bundle of thin strands with consistent coloring per dimension"   | V-R56; §9.3.7; V31                             |
+| "drops strands as the pack cells lose constituents"                                        | §9.3.7                                         |
+| "strands separate on reaching the pack and … light up or color the faces (or the edges …)" | §9.3.7                                         |
+| "on mouse hover … a menu setting and a keybinding (… alternate sub views …)"               | V-R49, V-R57; §8.1; §9.3.7; V26                |
+| "the strands pull apart … to give room for dimension labels that fade in"                  | V-R57; §9.3.7                                  |
+| "this feature can be reused by other views when dealing with packs"                        | `pack_presentation`, §5.2, §9.3.7              |
+| "packs … visually glued together components with clear demarcations"                       | V-R55; §9.3.7; V30                             |
+| "binding points are limited only by our available key binds … much larger than 3"          | V-R13, V-R50; §7.3; V27                        |
+| "a U binding … separate 3d spaces or sub clusters, and T could walk hypertime"             | §7.3; VU11, VU12                               |
+| "the clipped cell at the edges could be minimally drawn … heat map … empty ghost cell"     | V-R18; §9.1.5; V32                             |
+| "the neighbors (up to a runtime configurable N steps away …) can display their own wheels" | V-R58; §9.2.8                                  |
+| "the wheel bends and flexes in 3d space to not occlude any real cell"                      | V-R58; §9.2.8; V33                             |
+| "the wheel can simplify to a summary and or just the valence count … names … first"        | V-R59; §9.2.9                                  |
+| "dragging edges … to an axis is one way. A 3d visual dimension selector is another"        | V-R51; §7.6, §7.7                              |
+| "tier 1 … dimension groups that radial out their component dimensions"                     | V-R52; §7.7                                    |
+| "second tier (… z movement keys) … most used … most likely (… Markov …) … pouch"           | V-R52, V-R53; §7.7, §7.8; V29                  |
+| "tier 3 is a stretch vanishing view of dimension cells"                                    | V-R52; §7.7                                    |
+| "quick launch keys like 0-9 or traversal … then pick the binding axis by name"             | V-R52; §7.7; §12.1                             |
+| "click and dragged to a rose compass in the top left corner"                               | V-R54; §7.9                                    |
+
 ______________________________________________________________________
 
 ## 21. Change history
@@ -2738,3 +3193,9 @@ ______________________________________________________________________
   - labels were in screen space; everything is in world space (V15);
   - view code was planned for `apps/xuzz/`, and view tests re-swept the library; placement and
     testing follow §1.2 (V17).
+- 2026-10-07 — First batch of notes folded in: pages have their own matrices and everything in a
+  frame is placed relative to it (V30); packs are glued, joined by strand bundles, and open into a
+  spread (V31, §9.3.7); views have sub-views (V26); axes are named binding points with roles, `u`
+  for subspaces and `t` for hypertime (V27, §7.3); a three-tier dimension selector, a ranking from
+  activity and a compass (V28, V29, §7.6 to §7.9); cut cells are ghosts with edge heat (V32);
+  neighbours show their own wheels, which bend, flex and simplify names first (V33, §9.2.8, §9.2.9).

@@ -16,7 +16,7 @@ names a cell, a link, a xanadoc or a view; the plain editor can use all of it. E
 Three workstreams were asked for by name: **unprojection that matches the projection code**,
 **device scissor** and **depth range**. Four more are what the view system needs besides, and are
 marked as additions: an "entirely inside" frustum test, depth test without depth write, placed
-planes, and a page arrangement seam.
+planes, and a matrix of its own for every page.
 
 ## 1. Conventions that exist and must not change
 
@@ -273,12 +273,15 @@ only for pages.
 namespace gleditor::ui {
 
 using PlaneId = std::uint32_t;
+inline constexpr PlaneId noPlane = ~PlaneId{0};
 
 struct PlaneState {
   glm::mat4 toWorld{1.0F};
   float opacity{1.0F};
-  bool faceCamera{}; // turn the plane to the viewer; position and scale kept
+    bool faceCamera{}; // turn the plane to the viewer; position and scale kept
   bool visible{true};
+  /// When set, toWorld is relative to that plane, which carries this one.
+  PlaneId parent{noPlane};
 };
 
 /// Many retained planes in shared buffers, each drawn with its own state.
@@ -288,7 +291,8 @@ public:
   void remove(PlaneId plane);
 
   /// Rebuild one plane's content. Only that plane's range is uploaded.
-  class Painter; // addRect, addLine, addImage, addText(box, FittedText)
+    class Painter; // addRect, addLine, addImage, addText(box, FittedText),
+                 // addBand: a rectangle whose alpha falls off to one edge
   Painter paint(PlaneId plane);
 
   /// Uniforms only: moving, fading and turning a plane uploads nothing.
@@ -318,6 +322,8 @@ public:
 - For each plane `projectPlane` and `labelLOD` decide whether its text sub-range is drawn. The
   rectangles are drawn regardless, so a plane too small to read is still there to see and to pick.
 - Text arrives already fitted (`FittedText`), so the set never shapes.
+- A plane with a parent is drawn at `parent × own`. Moving the parent moves its children with no
+  further call, which is how a group of planes is kept glued; opacity multiplies down the same way.
 
 `WorldPanel` and `Canvas` are unchanged. A `WorldPanel` could later sit on a `PlaneSet`; that is not
 part of this plan.
@@ -327,62 +333,74 @@ part of this plan.
 `tests/lib/plane_set_test.cpp`: repainting one plane uploads one range; `setState` uploads nothing
 and a `ShapingStatsScope` over a frame of pure motion reports zero; draw order is as stated; a plane
 below the legibility threshold keeps its rectangle and its pick; `faceCamera` yields a plane normal
-to the view direction at its own position; removal frees the range for reuse. A probe modelled on
-`tools/ui-text-baseline.cpp` reports frame time and upload counts for 100, 1,000 and 10,000 planes.
+to the view direction at its own position; removal frees the range for reuse; moving a parent moves
+its children and uploads nothing. A probe modelled on `tools/ui-text-baseline.cpp` reports frame
+time and upload counts for 100, 1,000 and 10,000 planes.
 
-## 6. Page arrangement (addition)
+## 6. A matrix for every page (addition)
 
 ### 6.1 The need
 
-A `Doc` gives each `Page` a model matrix itself, in one vertical column (`src/doc.cpp`). A deck of
-pages receding in depth, or a page lifted out of its column, needs the matrix and the opacity to
-come from outside.
+A `Doc` has a model matrix, and moving it moves the document as a whole (`Doc::animateMoveTo`). A
+`Page` has a matrix too, relative to its document, but only the `Doc` writes it, and always as one
+vertical column (`src/doc.cpp`). A deck of pages receding in depth, or one page lifted out of its
+column while the rest stay, needs a page to be movable on its own, relative to the document it
+belongs to.
 
-### 6.2 The seam
+### 6.2 The change
+
+A page owns its placement, as a document owns its own:
 
 ```cpp
-// include/gleditor/doc.hpp
-struct PagePlacement {
-  glm::mat4 toDocument{1.0F}; // the page's plane in the document's space
+// include/gleditor/doc.hpp, on Page
+struct PagePose {
+  glm::mat4 toDocument{1.0F}; // the page's plane, relative to its document
   float opacity{1.0F};
   bool visible{true};
 };
 
-class PageArrangement {
-public:
-  virtual ~PageArrangement() = default;
-  [[nodiscard]] virtual PagePlacement
-  place(std::size_t pageIndex, float widthPx, float heightPx) const = 0;
-  /// Pages to build first, nearest need first. A column's "near the
-  /// viewport" is a range of offsets; an arrangement's need not be.
-  virtual void priority(std::vector<std::size_t> &pages) const {}
-  /// Changes when place() would answer differently.
-  [[nodiscard]] virtual std::uint64_t revision() const noexcept = 0;
-};
-
-// on Doc
-void setPageArrangement(std::shared_ptr<const PageArrangement> arrangement);
+/// Where the document's own flow would put this page. Always available.
+[[nodiscard]] PagePose flowPose() const;
+/// Where the page is. The flow pose until someone says otherwise.
+[[nodiscard]] const PagePose &pose() const noexcept;
+void setPose(const PagePose &pose);
+/// Tween from the current pose; the same timeline documents move on.
+void animatePoseTo(ch::Timeline &timeline, const PagePose &target,
+                   double seconds, double delay = 0.0);
+/// Back to the flow.
+void clearPose();
 ```
 
-With no arrangement set a `Doc` behaves exactly as today. With one:
+```cpp
+// on Doc
+/// Pages to build first, nearest need first. The default is the pages near
+/// the viewport in the flow; a caller that has moved pages knows better.
+void setBuildPriority(std::span<const std::size_t> pages);
+```
 
-- `Doc::collect` uses `place()` for each built page's matrix and per-draw opacity, and skips pages
-  that are not visible;
-- everything that composes `modelMatrix() * page->getModel()` today — `PageFrame`
-  (`doc.hpp:948-956`), the caret, selection, hit testing — composes the placement instead, so the
-  caret is where the page is;
-- the page builder asks `priority()` which pages to build first;
-- the renderer, which sorts *documents* back to front today (`src/renderer.cpp`, before
-  `doc->collect`), sorts *page batches* by depth when any is translucent, and draws them without
-  depth write.
+- A page with no pose set behaves exactly as today, and so does a document none of whose pages has
+  one.
+- The page's world transform is `document × page`, everywhere: `Doc::collect`, `PageFrame`
+  (`doc.hpp:948-956`), the caret, selection, hit testing. They compose
+  `modelMatrix() * page->getModel()` today, so they keep doing so and the page's matrix is what
+  changed. A caret is therefore where its page is.
+- Opacity is the per-draw uniform a page batch already has (`DrawUniforms::opacity`), multiplied by
+  the document's.
+- The renderer sorts *documents* back to front today (`src/renderer.cpp`, before `doc->collect`).
+  When any page is translucent it sorts *page batches* by depth instead, and draws the translucent
+  ones without depth write (§4).
+
+The first draft of this plan had a document ask an arrangement object where each page goes. Poses on
+the page are simpler and say what is true: a page is a thing with a place, and its document is its
+frame of reference.
 
 ### 6.3 Tests
 
-`tests/lib/doc_page_arrangement_test.cpp`: an arrangement that restates the vertical flow gives the
-matrices `Doc` gives today, page for page, so `doc_gap_test.cpp` and `onion_skin_test.cpp` hold
-unchanged; a page moved by an arrangement is picked, and its caret drawn, where it was moved to;
-invisible pages produce no batch; `priority()` changes build order; translucent pages are drawn back
-to front.
+`tests/lib/doc_page_pose_test.cpp`: with no pose set, every page's matrix is what `Doc` gives today,
+so `doc_gap_test.cpp` and `onion_skin_test.cpp` hold unchanged; a page given a pose is drawn,
+picked, and has its caret, where the pose puts it; moving the document moves a posed page with it
+and leaves its pose unchanged; `clearPose()` returns it to the flow; an invisible page produces no
+batch; `setBuildPriority` changes build order; translucent pages are drawn back to front.
 
 ## 7. Pane tree (addition)
 
@@ -420,7 +438,7 @@ space to the sibling; order is stable under resize.
 | 4    | depth slices in regions                          | 3          | §3.4 in full                                  |
 | 5    | `depthWrite`                                     | —          | §4                                            |
 | 6    | `ui::PlaneSet`                                   | 1, 3, 5    | §5.3; a planes scene in `compare-backends.sh` |
-| 7    | `PageArrangement`                                | 5          | §6.3; existing document tests unchanged       |
+| 7    | page poses                                       | 5          | §6.3; existing document tests unchanged       |
 | 8    | `ui::PaneTree`                                   | —          | §7                                            |
 
 Steps 3 and 4 land on OpenGL, GLES and Vulkan in the same change, so the backends never disagree
@@ -438,9 +456,11 @@ about what a region means. Every step passes `make test`, `make lint`, and
 | Desktop OpenGL without `glDepthRangef`                           | fall back to `glDepthRange`                                                            |
 | The WebAssembly and Android builds, which take the GLES path     | the loader gains the same entry points; `packaging/wasm/build.sh` is built in the gate |
 | A single-precision inverse losing a far point                    | the inverse is in double; the round-trip test covers the far plane                     |
-| `PageArrangement` moving a page away from its caret or its pick  | the caret and pick tests of §6.3                                                       |
+| A posed page parting from its caret or its pick                  | the caret and pick tests of §6.3                                                       |
 | Draw count with thousands of planes                              | the `PlaneSet` probe of §5.3 before the view system depends on it                      |
 
 ## Change history
 
 - 2026-10-07 — Initial plan.
+- 2026-10-07 — Pages get their own poses in place of an arrangement object (§6); `PlaneSet` gains
+  parent planes and soft bands (§5).
