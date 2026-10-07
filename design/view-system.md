@@ -74,7 +74,35 @@ one xanadoc view and one zigzag view, program-wide, with no pane/viewport manage
 abstraction — it owns document switching, onion-skin comparison, camera framing, link UI, and
 drawing directly.
 
-### 1.2 Why none of this hosts three new views
+### 1.2 Xuzz is the only application
+
+`xudu` and `zigzag` are retired as programs. Commit `b48bf09` ("fold xudu and zigzag into unified
+sovereign xuzz application") deleted `apps/xudu/main.cpp` and `apps/zigzag/main.cpp`; the Makefile
+links `$(XUZZ_OBJS) $(XUDU_OBJS) $(ZIGZAG_OBJS)` into the one `build/xuzz`, and `build/xudu` and
+`build/zigzag` are symlinks to it. `apps/xudu/` and `apps/zigzag/` survive only as directories of
+components that `xuzz` links, and `apps/xuzz/view_coordinator.hpp` already includes both
+(`xudu/views.hpp`, `zigzag/zigzag_visualizer.hpp`).
+
+This document therefore specifies a view system *for xuzz*, and adds no code to either legacy
+directory:
+
+- the framework and the built-in views' pure layout code go in the engine,
+  `apps/common/xanadu/view/`, where `xuzz_test` (which links the engine and no graphics device) can
+  test them;
+- everything that touches the renderer, input or the window goes in `apps/xuzz/`;
+- `ZigzagVisualizer` and `xudu::Views` are the things being replaced. Each migration step (§15)
+  moves a responsibility out of them into a view or into `apps/xuzz/`, and the step that empties one
+  deletes it. Nothing new is written against "the zigzag side" or "the xudu side" as a separately
+  buildable unit, and no seam exists to keep the two apart: a slice view and a page view are two
+  kinds of view in one program, distinguished by what they lay out (cells or pages), not by which
+  application owns them.
+
+`.claude/rules/architectural_governance.md` §1 still words its isolation rule in terms of
+`apps/xudu` and `apps/zigzag` as applications. That wording predates the fold and should be revised
+alongside this work; the rule that survives unchanged is that `src/` and `include/gleditor/` never
+include `apps/`.
+
+### 1.3 Why none of this hosts three new views
 
 - **Stretch vanishing** needs per-cell content-fit placement, edge opacity, and a hard clip rule
   none of today's fixed-radius chain layout or binary frustum culling expresses
@@ -95,7 +123,7 @@ drawing directly.
   and one xanadoc view; "many xanadoc views and many zigzag views mixed freely in one screen" has no
   extension point to build on.
 
-### 1.3 What already exists and is reused, not reinvented
+### 1.4 What already exists and is reused, not reinvented
 
 - `ArenaManifold` (`apps/common/xanadu/zigzag/arena_manifold.hpp`) already gives copy-on-write
   overlay over a base `Manifold`, an `ephemeralBit` on every ref it mints, `mark()`/`release()`/
@@ -234,11 +262,9 @@ the traceability table's (§18) left-hand keys.
 - **V-R33.** Every behaviour this document specifies MUST be exercisable and testable headless (no
   window, no real display, no audio device), per `.claude/rules/headless_tests.md`.
 - **V-R34.** Movement within a view (stepping, entering/leaving a pack, following a ring spoke) MUST
-  append no operation to the visited store (R8); a completed transition MAY be recorded, once
-  `system://activity` exists, as a visit in that separate store — see V33 below and §10.4.
-- **V33 — R8 extension status.** Any text in this document that mentions `system://activity` MUST be
-  read as a recorded proposal, not an existing store; nothing in the migration plan (§15) is blocked
-  on it existing.
+  append no operation to the visited store (R8); a completed transition is recorded as a `Visit` in
+  the reader's `system://activity` store through the existing `xanadu::ActivityLog`
+  (`apps/common/xanadu/link_navigation.hpp`, `store_activity_log.hpp`) — §8.7, §10.4.
 
 ______________________________________________________________________
 
@@ -273,72 +299,81 @@ ______________________________________________________________________
 ### 5.1 Layer diagram
 
 ```text
-                       apps/xuzz/view_composition.{hpp,cpp}
-                 (the ONLY file that includes both of the two trees below)
-                        |                                  |
-          apps/zigzag/views/*                      apps/xudu/views/*  (follow-up)
-          StretchVanishingView                      OutlinePageView (illustrative)
-          AllDimWalkView
-          DimensionalPackView
-                        |                                  |
-                        +---------------+   +---------------+
-                                        |   |
-                            apps/common/xanadu/view/*   (NEW, shared engine code)
-                            View, SliceView, PageView, ViewRegistry, ViewHost,
-                            ViewManifold, ViewAxisSet, mintViewLink,
-                            LayoutInput/LayoutSink, AnimationState
-                                        |
-                       apps/common/xanadu/zigzag/{manifold,arena_manifold,cell_views}.hpp
-                                        |
-                             src/render/view_draw_adapter.{hpp,cpp}
-                                        |
-                           include/gleditor/{canvas,beams,render/*}.hpp
+   apps/xuzz/                      (the one application; renderer, input, window)
+     view_host_app.{hpp,cpp}       pane tree wiring, focus, gesture routing
+     view_draw_adapter.{hpp,cpp}   layout records -> Canvas/Beams, picking, a11y
+     view_commands.{hpp,cpp}       registers every view action for system://keymap
+                  |
+                  v
+   apps/common/xanadu/view/        (engine: no graphics device, linked by xuzz_test)
+     View, SliceView, PageView, ViewRegistry, ViewHost, ViewManifold,
+     ViewAxisSet, mintViewLink, LayoutInput/LayoutSink, AnimationState
+     builtin/  StretchVanishingView, AllDimWalkView, DimensionalPackView
+                  |
+                  v
+   apps/common/xanadu/zigzag/{manifold,arena_manifold,cell_views}.hpp
+   apps/common/xanadu/{store,store_activity_log,system_docs}.hpp
+
+   include/gleditor/{canvas,beams,render/*}.hpp   <- used by apps/xuzz only
 ```
+
+The built-in views sit in the engine because their work is derivation and geometry: cells in,
+placement records out. The two things a layout needs from the graphics side — the size of a cell's
+content and the viewport — arrive as data in `LayoutInput` (§8.4), the first through a
+`function_ref` measurer, so a test supplies a fixed-size measurer and asserts on records without a
+font, a window or a GPU.
 
 ### 5.2 Package map
 
 ```text
-apps/common/xanadu/view/                        (NEW — shared by zigzag, xudu, xuzz)
-  view.hpp                  View identity/lifecycle, ViewDescriptor, ViewRegistry
-  view_host.hpp              ViewHost pane tree, Viewport, mixed composition
-  view_error.hpp              ViewError, std::expected aliases
-  slice_view.hpp               SliceView refinement (zigzag seam)
-  page_view.hpp                PageView refinement (xanadoc seam — declarations only, §10.3)
-  view_manifold.hpp           ViewManifold: binding arena + derived arena over one Manifold
-  view_binding.hpp            ViewAxisSet, dimension-group API
-  view_link.hpp                 mintViewLink choke point, verifyViewManifoldInvariant
-  view_layout.hpp               LayoutInput/LayoutSink, PlacedItem/PlacedEdge/AxisGizmo/PackFrame
-  view_gesture.hpp               ViewGesture drag-to-rebind state machine contract
-  view_strategy.hpp              PackBuilder / RingBuilder / VanishingTraversal
-  view_animation.hpp            AnimationState, epoch-guarded stable-id scheme
-  pack_dims.hpp                    d.pack / d.packing well-known DimRef accessors, PackBuilder impl
+apps/common/xanadu/view/                 (NEW — engine)
+  view.hpp               View identity/lifecycle, ViewDescriptor, ViewRegistry
+  view_host.hpp          ViewHost pane tree, Viewport, mixed composition (model only)
+  view_error.hpp         ViewError, std::expected aliases
+  slice_view.hpp         SliceView refinement (lays out cells)
+  page_view.hpp          PageView refinement (lays out pages; declarations only, §10.3)
+  view_manifold.hpp      ViewManifold: binding arena + derived arena over one Manifold
+  view_binding.hpp       ViewAxisSet, dimension-group API
+  view_link.hpp          mintViewLink choke point, verifyViewManifoldInvariant
+  view_layout.hpp        LayoutInput/LayoutSink, PlacedItem/PlacedEdge/AxisGizmo/PackFrame
+  view_gesture.hpp       ViewGesture drag-to-rebind state machine (pure: events in, intents out)
+  view_strategy.hpp      PackBuilder / RingBuilder / VanishingTraversal
+  view_animation.hpp     AnimationState, epoch-guarded stable-id scheme
+  pack_dims.hpp          d.pack / d.packing accessors, PackBuilder implementation
+  builtin/
+    stretch_vanishing_view.{hpp,cpp}
+    all_dim_walk_view.{hpp,cpp}
+    dimensional_pack_view.{hpp,cpp}
+    builtin_views.cpp    registerBuiltinViews(ViewRegistry&)
 
-apps/zigzag/views/                              (NEW — concrete zigzag views)
-  stretch_vanishing_view.{hpp,cpp}
-  all_dim_walk_view.{hpp,cpp}
-  dimensional_pack_view.{hpp,cpp}
-  zigzag_view_registration.cpp      registerBuiltinZigzagViews(ViewRegistry&)
+apps/xuzz/                               (the application)
+  view_host_app.{hpp,cpp}     (REPLACES view_coordinator.{hpp,cpp}) owns the ViewHost, routes
+                              input and focus, calls reclaim()/layout()/advance()/draw per pane
+  view_draw_adapter.{hpp,cpp} (NEW) layout records -> Canvas/Beams, scissor/depth range, picking,
+                              AccessKit nodes, the TextLayout-backed content measurer
+  view_commands.{hpp,cpp}     (NEW; absorbs apps/zigzag/zigzag_commands.cpp) view actions
 
-apps/xudu/views/                                (FOLLOW-UP — this chapter defines only the plug point)
-  page_view_registration.cpp        registerBuiltinPageViews(ViewRegistry&)   [not implemented here]
+apps/zigzag/zigzag_visualizer.*          (RETIRED by §15; no new code)
+apps/xudu/views.*                        (wrapped as the one legacy page view until the follow-up)
 
-apps/xuzz/
-  view_composition.{hpp,cpp}        (REPLACES view_coordinator.{hpp,cpp}) owns the ViewHost pane tree
-
-src/render/view_draw_adapter.{hpp,cpp}           (NEW) LayoutResult -> Canvas/Beams, scissor/depth-range
-include/gleditor/render/viewport.hpp             (NEW) ViewportDesc, setScissorRect/setDepthRange
-include/gleditor/spatial.hpp                    (EXTEND) unprojectScreenToRay()
+include/gleditor/render/viewport.hpp     (NEW) ViewportDesc, setScissorRect/setDepthRange
+include/gleditor/spatial.hpp             (EXTEND) unprojectScreenToRay()
 ```
 
 ### 5.3 Dependency rules
 
-Per `.claude/rules/architectural_governance.md` §1: `apps/zigzag/views/` and `apps/xudu/views/`
-never include each other. Both depend only on `apps/common/xanadu/view/` and their own app's
-existing headers. `apps/xuzz/view_composition.cpp` is the single file permitted to include headers
-from both trees, exactly mirroring how `BridgeCoordinator` lets `apps/xudu` talk to ZigZag today
-only through `xanadu::ZigzagPresentationSurface` without including `apps/zigzag` headers.
-`src/render/ view_draw_adapter.*` is called by `apps/common/xanadu/view/*`; nothing under `src/` or
-`include/gleditor/` ever includes anything under `apps/`.
+1. `apps/common/xanadu/view/` includes the engine (`apps/common/xanadu/`) and the header-only
+   `<gleditor/cpp26*.hpp>` facilities, and nothing that needs a graphics device. `xuzz_test` links
+   it as it links the rest of the engine.
+1. `apps/xuzz/` includes the view framework and the library (`include/gleditor/`). It is the only
+   place a layout record meets a renderer call.
+1. No new file is added under `apps/xudu/` or `apps/zigzag/`, and no new code includes
+   `zigzag_visualizer.hpp`. Existing includes of it shrink to zero as §15 proceeds.
+1. Nothing under `src/` or `include/gleditor/` includes anything under `apps/`. The draw adapter
+   consumes the view framework's record types, which is why it lives in `apps/xuzz/` and not in
+   `src/render/`.
+1. A third-party view is a `ViewDescriptor` handed to `ViewRegistry`; it needs rule 1's headers
+   only.
 
 ______________________________________________________________________
 
@@ -915,10 +950,19 @@ struct ViewportDesc {
   glm::mat4 viewProjection{1.0F};         // host-owned camera
 };
 
+struct ContentExtent {
+  float widthPx{0.0F};
+  float heightPx{0.0F};
+};
+
 struct LayoutInput {
   const ViewManifold &view;
   zigzag::CellRef focus;
   ViewportDesc viewport;
+  /// Content-fit size of a real cell at a width limit. The application
+  /// passes a cached TextLayout-backed measurer; a test passes a fixed one.
+  /// This is what keeps layout() free of fonts and of any graphics device.
+  gleditor::cpp26::function_ref<ContentExtent(zigzag::CellRef, float)> measure;
   std::uint64_t frameId; // deterministic tie-break
 };
 
@@ -1006,7 +1050,7 @@ attach()                          -- once, on pane open; replays system://layout
 onBindingChanged()/onCursorMoved()/onStoreAdvanced()  -- as triggered, never per-frame
 layout(input, sink)                -- pure, every frame, into reused sink storage
 AnimationState::advance(sink,dt,epoch)  -- epoch-guarded tween, Choreograph-backed (§12)
-view_draw_adapter::draw(ctx, animated)  -- Canvas/Beams calls, picking bind, a11y emission
+apps/xuzz view_draw_adapter draw(ctx, animated)  -- Canvas/Beams, picking, a11y
 detach()                           -- once, on pane close; writes bindings back to system://layout
 ```
 
@@ -1015,7 +1059,7 @@ detach()                           -- once, on pane close; writes bindings back 
 | #   | Extension                    | Interface                                         | Guaranteed                                                                                      | Must never do                                                                                                                                   |
 | --- | ---------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | a   | New slice view               | `SliceView` + `ViewDescriptor` via `registerView` | Fresh `ViewManifold` per pane; valid `LayoutInput`; `mintViewLink` as the only mutation surface | Call `ArenaManifold::link()` directly; shadow a bound dimension (I5); persist via the real `Store` from a read path; allocate inside `layout()` |
-| b   | New page view                | `PageView` (follow-up)                            | Same `View` contract; a `Viewport`; `Manifold::contentOf`/`textOf` for embedded content         | Depend on any `apps/zigzag` header; embed an ephemeral `CellRef` handed to it by a `SliceView`                                                  |
+| b   | New page view                | `PageView` (follow-up)                            | Same `View` contract; a `Viewport`; `Manifold::contentOf`/`textOf` for embedded content         | Depend on a graphics device in `layout()`; embed an ephemeral `CellRef` handed to it by a `SliceView`                                           |
 | c   | New pack/derivation strategy | `PackBuilder`/`RingBuilder`/`VanishingTraversal`  | A `ViewManifold&`, the `mintViewLink` function, the current `ViewAxisSet`                       | Mint through anything but `ViewManifold::mintCell`/`link`; retain a `ViewCellRef` across a frame without re-validating its epoch                |
 | d   | New layout record kind       | add a field/`push()` overload to `LayoutSink`     | Backward compatible: an unknown-to-them record kind is ignored, not a failure                   | Embed a raw `CellRef` without going through `ViewCellRef`                                                                                       |
 | e   | New gesture                  | `ViewGesture` state machine + `View::hitTest`     | Exclusive ownership of `Idle→…→Idle`; a speculative `layout()` call per preview frame           | Commit a binding mutation before `{Committed}`; bypass `ViewAxisSet::bind()` to write `d.binds` directly                                        |
@@ -1103,13 +1147,15 @@ public:
 };
 ```
 
-**Activity-store recording.** `SliceView::move()` returns a `MoveOutcome`;
-`ViewHost::dispatchMove()` decides, after the call returns, whether the outcome is a settled,
-completed transition (debounced for a continuous drag, immediate for a discrete step) and, once
-`system://activity` exists, appends a record
-`{fromReal, toReal, viewKind, dimensionOrGroupUsed, timestamp}` to it. This document scopes the call
-site and record shape only; the store's own schema is R8's open implementation item and is out of
-scope here (§3.7's V33, §17).
+**Activity-store recording.** The activity store exists: `xanadu::StoreActivityLog`
+(`apps/common/xanadu/store_activity_log.hpp`) appends branching `Visit`s — parent, target
+`OccurrenceSite`, `Arrival`, optional link context — to the reader's `system://activity` store, and
+`tests/xuzz/store_activity_log_test.cpp` pins it. `SliceView::move()` returns a `MoveOutcome`;
+`ViewHost::dispatchMove()` decides, after the call returns, whether the outcome is a completed
+transition (debounced for a continuous drag, immediate for a discrete step) and appends one `Visit`
+through the same `ActivityLog` interface link navigation uses, with the *real* focus cell as its
+target. A view cell is never a visit target (I6). Whether a `Visit` should also carry the view kind
+and the bindings in force, so Activity Back can restore them, is VU6.
 
 ### 8.8 Error model
 
@@ -1773,9 +1819,8 @@ make.
 regardless of which pane holds the caret; entering an endpoint in a different pane moves that pane's
 focus without touching another pane's camera or caret; if no pane currently shows the target's kind
 of content, a new pane opens with an origin marker connecting back, never a silent replace of the
-pane the user was reading. Activity back/forward (once `system://activity` exists, V33) restores
-which pane layout was active at a visit's save point, since a visit's saved view already covers
-camera and companion state.
+pane the user was reading. Activity back/forward restores which pane layout was active at a visit's
+save point, since a visit's saved view already covers camera and companion state.
 
 ______________________________________________________________________
 
@@ -1788,29 +1833,29 @@ Xuzz (the `Alt`-prefixed twin); **AW** = all-dim walk only; **PV** = pack view o
 single unclaimed leader, `Ctrl+Alt+V` ("View"), matching the project's existing `Ctrl+Alt+*` leader
 family (`Ctrl+Alt+N`, `Ctrl+Alt+[`/`]`, `Ctrl+Alt+L`).
 
-| Action id                      | Vortex call                               | Default chord         | Context              |
-| ------------------------------ | ----------------------------------------- | --------------------- | -------------------- |
-| `view.palette.toggle`          | `zigzag.view.togglePalette`               | `Ctrl+Alt+V`          | Z/X                  |
-| `view.cycle.forward`           | `zigzag.view.cycle`                       | `Ctrl+Alt+Shift+V`    | Z/X                  |
-| `view.select.stretchVanishing` | `zigzag.view.select("stretch-vanishing")` | `Ctrl+Alt+V` then `1` | Z                    |
-| `view.select.allDimWalk`       | `zigzag.view.select("all-dim-walk")`      | `Ctrl+Alt+V` then `2` | Z                    |
-| `view.select.packView`         | `zigzag.view.select("pack-view")`         | `Ctrl+Alt+V` then `3` | Z                    |
-| `pane.split.horizontal`        | `xuzz.pane.split("horizontal")`           | `Ctrl+Alt+Shift+H`    | X                    |
-| `pane.split.vertical`          | `xuzz.pane.split("vertical")`             | `Ctrl+Alt+Shift+J`    | X                    |
-| `pane.close`                   | `xuzz.pane.close`                         | `Ctrl+Alt+Shift+W`    | X                    |
-| `pane.focus.next`              | `xuzz.pane.focusNext`                     | `Ctrl+Alt+Shift+Tab`  | X                    |
-| `pane.openAsPage`              | `xuzz.pane.openSelectionAsPage`           | `Ctrl+Alt+Shift+O`    | X (selection active) |
-| `axis.rebind.cycle`            | `zigzag.view.cycleAxisDimension`          | `Ctrl+Tab`            | Z (HUD row focused)  |
-| `axis.rebind.pick`             | `zigzag.view.pickAxisDimension`           | `Ctrl+Alt+D`          | Z                    |
-| `group.new`                    | `zigzag.view.newDimensionGroup`           | `Ctrl+Alt+G`          | Z                    |
-| `group.edit`                   | `zigzag.view.editDimensionGroup`          | `Ctrl+Alt+Shift+G`    | Z                    |
-| `rebind.undo`                  | `zigzag.view.undoRebind`                  | `Ctrl+Alt+Z`          | Z                    |
-| `ring.selectSpoke.next`        | `zigzag.view.ringSelectNext`              | `]`                   | AW                   |
-| `ring.selectSpoke.prev`        | `zigzag.view.ringSelectPrev`              | `[`                   | AW                   |
-| `ring.bindSelectedToAxis`      | `zigzag.view.ringBindSelected`            | `B`                   | AW                   |
-| `pack.enter`                   | `zigzag.view.packEnter`                   | `Return`              | PV                   |
-| `pack.leave`                   | `zigzag.view.packLeave`                   | `Escape`              | PV                   |
-| `pack.retrieveConstituent`     | `zigzag.view.packRetrieve`                | `Shift+Return`        | PV                   |
+| Action id                      | Vortex call                            | Default chord         | Context              |
+| ------------------------------ | -------------------------------------- | --------------------- | -------------------- |
+| `view.palette.toggle`          | `std:view/toggle_palette`              | `Ctrl+Alt+V`          | Z/X                  |
+| `view.cycle.forward`           | `std:view/cycle`                       | `Ctrl+Alt+Shift+V`    | Z/X                  |
+| `view.select.stretchVanishing` | `std:view/select("stretch-vanishing")` | `Ctrl+Alt+V` then `1` | Z                    |
+| `view.select.allDimWalk`       | `std:view/select("all-dim-walk")`      | `Ctrl+Alt+V` then `2` | Z                    |
+| `view.select.packView`         | `std:view/select("pack-view")`         | `Ctrl+Alt+V` then `3` | Z                    |
+| `pane.split.horizontal`        | `xuzz.pane.split("horizontal")`        | `Ctrl+Alt+Shift+H`    | X                    |
+| `pane.split.vertical`          | `xuzz.pane.split("vertical")`          | `Ctrl+Alt+Shift+J`    | X                    |
+| `pane.close`                   | `xuzz.pane.close`                      | `Ctrl+Alt+Shift+W`    | X                    |
+| `pane.focus.next`              | `xuzz.pane.focusNext`                  | `Ctrl+Alt+Shift+Tab`  | X                    |
+| `pane.openAsPage`              | `xuzz.pane.openSelectionAsPage`        | `Ctrl+Alt+Shift+O`    | X (selection active) |
+| `axis.rebind.cycle`            | `std:view/cycle_axis_dimension`        | `Ctrl+Tab`            | Z (HUD row focused)  |
+| `axis.rebind.pick`             | `std:view/pick_axis_dimension`         | `Ctrl+Alt+D`          | Z                    |
+| `group.new`                    | `std:view/new_dimension_group`         | `Ctrl+Alt+G`          | Z                    |
+| `group.edit`                   | `std:view/edit_dimension_group`        | `Ctrl+Alt+Shift+G`    | Z                    |
+| `rebind.undo`                  | `std:view/undo_rebind`                 | `Ctrl+Alt+Z`          | Z                    |
+| `ring.selectSpoke.next`        | `std:view/ring_select_next`            | `]`                   | AW                   |
+| `ring.selectSpoke.prev`        | `std:view/ring_select_prev`            | `[`                   | AW                   |
+| `ring.bindSelectedToAxis`      | `std:view/ring_bind_selected`          | `B`                   | AW                   |
+| `pack.enter`                   | `std:view/pack_enter`                  | `Return`              | PV                   |
+| `pack.leave`                   | `std:view/pack_leave`                  | `Escape`              | PV                   |
+| `pack.retrieveConstituent`     | `std:view/pack_retrieve`               | `Shift+Return`        | PV                   |
 
 Every row is additive to `defaultSettingSpecs(SystemDocKind::Keymap)` and follows the existing
 `both()` registration idiom (`zigzag_commands.cpp:28-35`), giving each a bare-Z and `Alt`-X twin
@@ -1928,11 +1973,11 @@ ______________________________________________________________________
 All tests run headless per `.claude/rules/headless_tests.md` (V-R33): `SDL_VIDEODRIVER=offscreen`,
 `SDL_AUDIODRIVER=dummy`, `LIBGL_ALWAYS_SOFTWARE=1`, the `make test`-exported XDG pair.
 
-- **Unit (engine-only, no GPU)**: `tests/xudu/view_manifold_test.cpp` — I1 property test after
+- **Unit (engine-only, no GPU)**: `tests/xuzz/view_manifold_test.cpp` — I1 property test after
   random bind/pack/toss sequences; I2 (hand a `ViewCellRef` to a real `Store::setLink`, assert typed
   refusal); I3/epoch staleness (mint, toss, assert the old `ViewCellRef` fails a liveness check); I4
-  (`resolveReal` terminates within the bound for nested packs). `tests/zigzag/pack_builder_test.cpp`
-  — both worked examples from §9.3.4 verbatim, plus cycle and ragged-end fixtures.
+  (`resolveReal` terminates within the bound for nested packs). `tests/xuzz/pack_builder_test.cpp` —
+  both worked examples from §9.3.4 verbatim, plus cycle and ragged-end fixtures.
 - **Invariant**: `verifyViewManifoldInvariant` run as a standing check inside every other new test
   file, not only its own — any test that mutates a `ViewManifold` calls it before asserting on
   anything else.
@@ -1967,34 +2012,41 @@ Each step builds and keeps `make test` green; each is committable independently.
 1. **Introduce
    `apps/common/xanadu/view/{view,view_error,view_manifold,view_binding,view_link}.hpp`** with
    `ViewManifold`, `ViewAxisSet`, `mintViewLink`, `verifyViewManifoldInvariant`; no app wiring yet.
-   *Tests*: new `tests/xudu/view_manifold_test.cpp` covering I1-I4, all headless, linking only the
-   engine (matching `xudu_test`'s pattern).
+   *Tests*: new `tests/xuzz/view_manifold_test.cpp` covering I1-I4, all headless, linking only the
+   engine (`xuzz_test`).
 1. **Implement `d.pack`/`d.packing` via `PackBuilder`** (§9.3) as a standalone library
    (`pack_dims.hpp`) with its own test exercising both worked examples directly against a fixture
-   `Manifold`. *Tests*: `tests/zigzag/pack_builder_test.cpp`, new. No `apps/zigzag`/`apps/xudu`
-   change yet.
+   `Manifold`. *Tests*: `tests/xuzz/pack_builder_test.cpp`, new. No application change yet.
 1. **Add `view_layout.hpp`'s record types and `view_animation.hpp`'s epoch-guarded
    `AnimationState`**, still with no concrete view. *Tests*: a synthetic "null view" exercising
    layout → animate → nothing-dereferences-a-stale-ref-after-`toss()`, using step 1's operation
    counter to make "toss is O(1)" an assertion, not a claim.
-1. **Carve `StretchVanishingView` out of `rebuildActiveViewTopology()`'s `CellContent`-mode path**,
-   behind `ViewRegistry`, wired into `ZigzagVisualizer` as an additive, feature-flagged alternate
-   path (old path still default). *Tests*: existing `tests/zigzag/test_visualizer.cpp` unchanged;
-   new `tests/zigzag/stretch_vanishing_view_test.cpp` covers determinism and the partially-clipped-
-   invisible rule.
-1. **Carve `AllDimWalkView` and `DimensionalPackView`** the same way, each behind the same flag,
-   each with its own headless test: ring-slot stability across focus changes for the former; pack
-   reversibility (move posward then negward returns to the same real cell, §9.3.5) for the latter.
-1. **Flip the feature flag; retire `ViewAxisBinding`'s role as live storage** — it survives only as
-   the `system://layout` serialisation/preset format (§7.1, §7.4). `ZigzagVisualizer::current_view_`
-   becomes a cached read of `ViewAxisSet`. *Tests*: `test_visualizer.cpp`'s
+1. **Implement `StretchVanishingView`** in `apps/common/xanadu/view/builtin/`, as pure layout over
+   `LayoutInput`, registered through `registerBuiltinViews()`. No application wiring yet. *Tests*:
+   new `tests/xuzz/stretch_vanishing_view_test.cpp` with a fixed-size measurer covers determinism,
+   axis alignment at radius 1, the fade curve and the partially-clipped-invisible rule.
+1. **Implement `AllDimWalkView` and `DimensionalPackView`** the same way, each with its own
+   `xuzz_test` file: ring-slot stability across focus changes for the former; pack reversibility
+   (move posward then negward returns to the same real cell, §9.3.5) for the latter.
+1. **Add `apps/xuzz/view_draw_adapter` and `view_host_app`; retire `ViewCoordinator`.** The host
+   owns the pane tree and draws each pane's records. `ZigzagVisualizer` and `xudu::Views` are each
+   registered as one legacy view behind the same `View` interface, so the three new views and the
+   two old presentations are selectable side by side and nothing regresses. *Tests*: new
+   `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle; `tests/zigzag/test_visualizer.cpp`
+   unchanged; `tools/compare-backends.sh` gains a scene per new view.
+1. **Move view actions into `apps/xuzz/view_commands`** with their `system://keymap` defaults
+   (§11.1), absorbing `apps/zigzag/zigzag_commands.cpp`. **Retire `ViewAxisBinding` as live
+   storage** — it survives only as the `system://layout` serialisation and preset format (§7.1,
+   §7.4) — and reduce `DimensionBundle` to seed presets for dimension groups. *Tests*:
+   `test_visualizer.cpp`'s
    `NavigationAlongDimensions`/`SwapDimensions`/`CycleDimensions`/`DimensionBundleSwitchingAndCycling`
-   are **adapted**, not retired — same observable behaviour, asserted against the new storage.
-1. **Add the `ViewHost` pane tree, retire `ViewCoordinator`'s single-pane model**, wiring
-   `apps/xuzz/view_composition.cpp` to compose both `apps/zigzag/views` and the
-   still-single-xanadoc- view `apps/xudu::Views` (page views stay one pane type until the follow-up
-   spec lands). *Tests*: new `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle; existing
-   `ViewCoordinator` tests (if any) retired with a comment pointing at their `ViewHost` replacement.
+   are **adapted**, not retired — same observable behaviour, asserted against `ViewAxisSet`.
+1. **Port the legacy zigzag presentations to views and delete `ZigzagVisualizer`.** Its Cell Content
+   and Topology modes become two more built-in slice views; palette, command bar and cell editing
+   move to `apps/xuzz/`. `apps/zigzag/` then holds only `unified_transclusion_engine.*`, which moves
+   to the engine (below), and the directory is removed along with `ZIGZAG_SRCS` in the Makefile.
+   *Tests*: `tests/zigzag/test_visualizer.cpp` cases are re-homed into `tests/xuzz/` against the
+   views that replaced each behaviour; a case with no replacement is retired with a line naming why.
 1. **Standing no-ops-appended CI check**, added once as the `expectNoOpsAppended` helper (§14),
    reused by every subsequent view test rather than reimplemented per test.
 1. **Golden-layout determinism fixtures** for stretch vanishing and all-dim walk, stored under
@@ -2002,12 +2054,11 @@ Each step builds and keeps `make test` green; each is committable independently.
    (not subject to the `CompactOpNode`-layout regeneration rule, since these are `LayoutResult`
    snapshots).
 
-`UnifiedTransclusionEngine::ephemeralSlots_`'s bespoke ephemeral-cell cache is migrated at step 6:
-once `DimensionalPackView`'s meta-dimension presentation needs overlap with what that engine's cache
-does, the engine moves to mint through `ViewManifold`/`mintViewLink` rather than its own
-`ephemeralByParentAndIndex_` map — tracked as its own sub-step so it does not block the three
-required views, but called out explicitly rather than left to drift into a third ephemeral-cell
-mechanism.
+`UnifiedTransclusionEngine::ephemeralSlots_`'s bespoke ephemeral-cell cache is migrated at step 9:
+the engine moves to `apps/common/xanadu/` and mints through `ViewManifold::mintCell`/`link` rather
+than its own `ephemeralByParentAndIndex_` map, so the tree ends with one ephemeral-cell mechanism
+(`ArenaManifold`) and not three. It is its own sub-step so it does not block the three required
+views.
 
 ______________________________________________________________________
 
@@ -2049,7 +2100,7 @@ Why: all-dim walk and pack view both need more than three simultaneously bound a
 ceilings the project's own conventions forbid. Price: O(bound-axis-count) traversal to answer
 "what's on X," versus O(1) struct read — accepted because the axis count must not be capped, the
 same trade R12 already accepted for `d.dims`. `ViewAxisBinding` and `DimensionBundle` are retired as
-live storage at migration step 7 and reduced to two remaining roles: the `system://layout`
+live storage at migration step 8 and reduced to two remaining roles: the `system://layout`
 persistence/ serialisation shape (dimension names survive a session; `CellRef`s do not) and an
 initial-preset seed a user may pick from when creating a group. Refused: deleting them outright,
 which would leave no seed format and no backward-compatible session-restore shape.
@@ -2147,10 +2198,11 @@ individually bound dimensions, not groups, since the requirement does not descri
 inside stretch vanishing's raster; if that combination is wanted later, a tie-break rule keyed to
 `d.dim-group`'s rank order is the natural extension, not a redesign.
 
-**VU6.** The `system://activity` store's own schema and write API (R8's reader-visit extension)
-remain unimplemented and undesigned beyond the record shape this document assumes
-(`{fromReal, toReal, viewKind, dimensionOrGroupUsed, timestamp}`, §8.7). Settled by: a dedicated
-design pass on `system://activity` itself, out of scope here.
+**VU6.** Whether a `Visit` (`apps/common/xanadu/link_navigation.hpp`) should record the view kind
+and axis bindings in force, so Activity Back restores how the reader was looking and not only where.
+Today a `Visit` carries a target, an arrival and an optional link context. Settled by: a UX
+validation pass over journeys that walk back across a view switch; if it is wanted, the answer is
+more cells on the activity store's own dimensions, not a wider `Visit` struct.
 
 ______________________________________________________________________
 
@@ -2161,7 +2213,7 @@ ______________________________________________________________________
 | "highly pluggable, highly extensible View system"                                                | V-R1, V-R2; §5 package map; §8.1 `ViewRegistry`; ruling V4        |
 | "decides how xanadocs (pages) and slices (cells) should be laid out in a given viewport"         | §8.1 `View::layout`; §8.4 `LayoutInput`/`ViewportDesc`            |
 | "view should sit on top of the store"                                                            | §6.1; §8.1 `attach(const Store&)`; §6.3 I2                        |
-| "divided into different views for xanadocs and zigzag slices so the two can be mixed freely"     | V-R11, V-R12, V-R13; §10.1-10.3; §15 step 8                       |
+| "divided into different views for xanadocs and zigzag slices so the two can be mixed freely"     | V-R11, V-R12, V-R13; §10.1-10.3; §15 step 7                       |
 | "each cell can only be connected on the two directions of all the bound dimensions"              | V-R5; §6.3 I1; §6.5 `mintViewLink`/verifier                       |
 | "any minted cells used by the view live in the view only"                                        | V-R6, V-R9; §6.3 I2, I5; ruling V1, V6                            |
 | "quickly tossed in O(1) time as dimensions are rebound"                                          | V-R7; §6.4; ruling V1; §13's probe; §15 step 1                    |
@@ -2193,3 +2245,7 @@ ______________________________________________________________________
 ## 19. Change history
 
 - 2026-10-07 — Initial proposal.
+- 2026-10-07 — Rehomed onto xuzz as the only application (§1.2, §5, §15): built-in views in the
+  engine, renderer and input wiring in `apps/xuzz/`, no new code under `apps/xudu/` or
+  `apps/zigzag/`, `ZigzagVisualizer` deleted by the migration. Corrected the activity store's
+  status: it is implemented (`StoreActivityLog`).

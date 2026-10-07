@@ -393,10 +393,10 @@ Rules:
   `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (view movement does not mutate a visited
   store; a proposed separate activity store records completed reader visits), R11 and R12 are the
   ones most often needed.
-- [`view-system.md`](design/view-system.md) — proposal, unbuilt: the pluggable View system over the
-  store (`ViewManifold`, cell-based axis bindings and dimension groups, the O(1) toss of view-minted
-  cells) and the stretch vanishing, all-dim walk and dimensional pack views. Read before adding a
-  zigzag view or touching `ViewAxisBinding`.
+- [`view-system.md`](design/view-system.md) — proposal, unbuilt: xuzz's pluggable View system over
+  the store (`ViewManifold`, cell-based axis bindings and dimension groups, the O(1) toss of
+  view-minted cells) and the stretch vanishing, all-dim walk and dimensional pack views. Read before
+  adding a zigzag view or touching `ViewAxisBinding`.
 - [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
   carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),
