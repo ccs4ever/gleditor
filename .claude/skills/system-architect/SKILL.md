@@ -3,7 +3,7 @@ name: system-architect
 description: >-
   System architect agentic workflow for project-level code quality, refactoring,
   layer promotion, DRY consolidation, data-backed optimizations, and magic number
-  elimination across gleditor, xudu, and zigzag. Enforces layer-appropriate dynamic
+  elimination across the gleditor library, the plain gleditor editor, and xuzz. Enforces layer-appropriate dynamic
   configuration (system xanadocs with format links, system zigzag slices, yaml configs).
 ---
 
@@ -11,8 +11,10 @@ description: >-
 
 This skill defines the multi-agent architecture and operational protocols for maintaining pristine
 code quality, modular architectural layering, empirical performance optimization, and clean
-layer-appropriate configuration across **`gleditor`** (core library and editor), **`apps/xudu`**
-(xanadoc editor), and **`apps/zigzag`** (multidimensional visualizer).
+layer-appropriate configuration across **`gleditor`** (core library and plain editor) and
+**`xuzz`**, the one application for xanadocs and ZigZag slices. `xudu` and `zigzag` are retired as
+applications; `apps/xudu/` and `apps/zigzag/` hold components that `xuzz` links, and new code goes
+in the engine (`apps/common/xanadu/`) or in `apps/xuzz/`.
 
 ```
        +-------------------------------------------------------------+
@@ -32,8 +34,8 @@ layer-appropriate configuration across **`gleditor`** (core library and editor),
                                      v
        +-------------------------------------------------------------+
        |             Layer-Appropriate Configuration                 |
-       |  - Xudu: Live System Xanadocs (Format Links, no Markdown)   |
-       |  - Zigzag: Dynamic System Slices (d.schema, d.notes)        |
+       |  - Xanadocs: Live System Xanadocs (Format Links, no MD)     |
+       |  - Slices: Dynamic System Slices (d.schema, d.notes)        |
        |  - Gleditor: Plain YAML Configs (user_notes block)          |
        |  - src/ / include/: Fallback structs, typed constexpr       |
        +-------------------------------------------------------------+
@@ -50,7 +52,7 @@ ______________________________________________________________________
 - **Key Responsibilities**:
   - Detect layer inversions: ensure `include/` and `src/` never include headers from `apps/`.
   - Identify duplicated utility functions, mathematical helpers, or parsing routines across
-    `apps/xudu`, `apps/zigzag`, and `apps/gleditor`.
+    `apps/xuzz`, `apps/xudu`, `apps/zigzag`, and the engine in `apps/common/xanadu`.
   - Locate hardcoded literals (e.g. physics spring stiffness, rendering margins, packet timeouts,
     font sizes) that belong in user configuration.
   - Audit system configuration structures for compliance with the supplemental metadata invariant
@@ -91,9 +93,9 @@ ______________________________________________________________________
 Magic numbers and arbitrary parameters must never be left hardcoded in application logic. Instead,
 they must be situated at the appropriate architectural layer according to these strict rules:
 
-### 2.1 `apps/xudu` (Xanadoc Editor): Live System Xanadocs
+### 2.1 Xanadocs in `xuzz`: Live System Xanadocs
 
-In `xudu`, all user-configurable parameters (e.g., physics spring constants, beam tensions, anchor
+In `xuzz`, all user-configurable parameters (e.g., physics spring constants, beam tensions, anchor
 bracket colors, notification offsets, keymaps) must be read **live dynamically from an appropriate
 system xanadoc** (e.g., `system://keymap`, `system://settings`, `system://layout`, `system://ui`).
 
@@ -118,11 +120,11 @@ Every system xanadoc must provide two bidirectionally linked companion pages:
   - `FormatAttribute::AlignCentre`: centers the header horizontally across the page.
   - Font scale specifier: scales the font to a slightly larger point size.
 
-### 2.2 `apps/zigzag` (Multidimensional Visualizer): System Slices
+### 2.2 ZigZag Slices in `xuzz`: System Slices
 
-In `zigzag`, user-configurable parameters (cell dimensions, camera projection angles, step animation
-timings, dimension cycle intervals) must be loaded dynamically from a set of **system zigzag
-slices**.
+For slice views, user-configurable parameters (cell dimensions, camera projection angles, step
+animation timings, dimension cycle intervals) must be loaded dynamically from a set of **system
+zigzag slices**.
 
 #### Invariant: Orthogonal Metadata Dimensions
 
@@ -152,14 +154,15 @@ ______________________________________________________________________
 
 ## 3. Layer Promotion Protocol
 
-When code in an application (`apps/xudu`, `apps/zigzag`, `apps/gleditor`) matures or proves
-generally useful across the docuverse, it must be promoted to the core library following this
-protocol:
+When code in `apps/xuzz`, in the legacy component directories `apps/xudu` and `apps/zigzag`, or in
+`apps/gleditor` matures or proves generally useful, it must be promoted — xanalogical code to the
+engine (`apps/common/xanadu/`), everything else to the core library — following this protocol:
 
 1. **Isolation Audit**: Ensure the candidate component has no implicit dependencies on application
    singletons, application-specific UI, or other apps.
 1. **API Abstraction**: Extract a clean, minimal C++23 interface with public headers placed in
-   `include/gleditor/<subsystem>/` and implementation in `src/<subsystem>/`.
+   `include/gleditor/<subsystem>/` and implementation in `src/<subsystem>/` (or under
+   `apps/common/xanadu/` for engine code).
 1. **Data-Backed Verification**: Verify that the extracted component maintains or improves cache
    locality and does not introduce unnecessary memory copies.
 1. **Consumer Migration**: Update consumer applications to use the new shared library interface.

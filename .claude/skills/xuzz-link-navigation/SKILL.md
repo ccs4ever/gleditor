@@ -3,7 +3,7 @@ name: xuzz-link-navigation
 description: >-
   Implement or review Xuzz navigation through many-to-many Xanadu links, ZigZag cell content,
   and persistent branching walks. Use for link selection, endpoint browsing, activity traversal,
-  and document/cell transitions; use the xudu or ZigZag UI skills for unrelated layout work.
+  and document/cell transitions; use the xanadoc (xudu-ui-design) or ZigZag UI skills for unrelated layout work.
 ---
 
 # Xuzz link navigation
@@ -41,7 +41,7 @@ small, local fix, perform these checks directly without spawning agents.
 
 1. **Establish the baseline.** Inspect `apps/common/xanadu/ops.hpp`, `link_layout.cpp`,
    `link_views.hpp`, `apps/xudu/beams.cpp`, `bridge_coordinator.cpp`, the Xuzz setup in
-   `apps/xudu/main.cpp`, and the ZigZag presentation surface. Read the relevant bridge and
+   `apps/xuzz/xuzz_app.cpp`, and the ZigZag presentation surface. Read the relevant bridge and
    convergence sections linked from the design document. State what is wired today and what the task
    will add.
 1. **Model one navigation session per selected link.** Keep the link authority and ID, both ordered

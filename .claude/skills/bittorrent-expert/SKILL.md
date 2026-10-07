@@ -2,16 +2,17 @@
 name: bittorrent-expert
 description: >-
   Expert protocol runbook and architectural guide for BitTorrent swarms, BEP 10 wire extensions,
-  BEP 46 mutable DHT naming, Merkle identity ledgers, and Transcopyright micropayments in gleditor,
-  xudu, and zigzag. Use when designing, debugging, or implementing P2P swarm transport, author discovery,
+  BEP 46 mutable DHT naming, Merkle identity ledgers, and Transcopyright micropayments in the
+  xanalogical engine and xuzz. Use when designing, debugging, or implementing P2P swarm transport, author discovery,
   live collaboration, identity consensus, and micropayment state channels.
 ---
 
 # BitTorrent & Sovereign Swarm Protocol Architecture
 
 This skill defines the technical specifications, packet formats, cryptographic state machines, and
-performance guidelines for BitTorrent peer-to-peer protocols across the **gleditor**, **xudu**
-(xanadoc editor), and **zigzag** (multidimensional visualizer) ecosystems.
+performance guidelines for BitTorrent peer-to-peer protocols in the xanalogical engine
+(`apps/common/xanadu/`) and `xuzz`. The `xudu_` prefix on wire extension names and the `xudu:topic:`
+rendezvous prefix are protocol identifiers, not references to a program.
 
 ```
        +-------------------------------------------------------------------------+
@@ -31,7 +32,7 @@ ______________________________________________________________________
 ## 1. The Swarm as a Sovereign Transport Layer
 
 In traditional decentralized systems, identity, collaborative editing, and micropayments are
-delegated to auxiliary HTTP servers, sidecars, or blockchain RPCs. In `xudu`, **the BitTorrent peer
+delegated to auxiliary HTTP servers, sidecars, or blockchain RPCs. In `xuzz`, **the BitTorrent peer
 wire is the sole transport layer**:
 
 1. **Zero Additional Ports**: All metadata, identity handshakes, live operational transforms, and
@@ -150,7 +151,7 @@ ______________________________________________________________________
 ## 4. Decentralized Merkle Identity Ledger
 
 Implemented via `microsoft/merklecpp` in
-\[`apps/xudu/core/merkle_ledger.hpp`\](file:///data/git/gleditor/apps/xudu/core/merkle_ledger.hpp):
+[`apps/common/xanadu/merkle_ledger.hpp`](../../../apps/common/xanadu/merkle_ledger.hpp):
 
 1. **Append-Only Tree Structure**:
    - Leaf nodes hold verified `IdentityEntry` records and `VoteEntry` consensus endorsements.

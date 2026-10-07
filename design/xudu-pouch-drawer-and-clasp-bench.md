@@ -79,7 +79,7 @@ ______________________________________________________________________
                                    │   ▼
        +-------------------------------------------------------------+
        |                   Codebase Expert                           |
-       |  - xudu::Store: Reuses author's shared UserPermascroll.     |
+       |  - xanadu::Store: Reuses author's shared UserPermascroll.     |
        |  - ClickableRegistry: Dedicated overlay tag base 0x70000000 |
        |  - LinkBeams: Session::addLink() triggers 3D ribbons.       |
        |  - Swing-Back: Version::occurrencesOf + centroidAlignment.  |
@@ -156,11 +156,11 @@ ______________________________________________________________________
 
 ### 4.1 Zero Raw Byte Duplication
 
-The Pouch Drawer is **not** an ephemeral GUI array. It is backed by a dedicated `xudu::Store`
+The Pouch Drawer is **not** an ephemeral GUI array. It is backed by a dedicated `xanadu::Store`
 instance sharing the author's primary `UserPermascroll`:
 
 ```cpp
-auto pouchStore = std::make_unique<xudu::Store>(session.userPermascrollPtr());
+auto pouchStore = std::make_unique<xanadu::Store>(session.userPermascrollPtr());
 ```
 
 When a span is dropped into the drawer:
@@ -231,10 +231,10 @@ documents):
 1. In the **Relation Nexus**, the user selects the Nelsonian link type: `Comment`, `Illustration`,
    `Disagreement`, `Authorship`, `Quotation`, `Dimension`, or `Format`.
 
-1. Clicking `[ FORGE CLASP ]` commits a compound `xudu::Link` to the active document's store:
+1. Clicking `[ FORGE CLASP ]` commits a compound `xanadu::Link` to the active document's store:
 
    ```cpp
-   xudu::Link link;
+   xanadu::Link link;
    link.type = selectedType;
    link.tier = selectedTier;
    link.left = leftZone.allSpans();   // N spans
@@ -267,14 +267,14 @@ original context without disorienting camera jumps.
              Summon document via background opener from Z = -40
        │
        ▼
-2. Collinear Sworphing (xudu::LinkBeams / gleditor::anim):
+2. Collinear Sworphing (xanadu::LinkBeams / gleditor::anim):
    Source document glides forward along Z and docks beside current view
    Timing: `sworphSubject = 0.62s`
        │
        ▼
 3. Visual Target Aura & Framing:
    Original span illuminates with Electric Cyan brackets `⟦...⟧` and breathing pulse
-   Camera adjusts framing distance via `xudu::framingDistance` (0.70s settle)
+   Camera adjusts framing distance via `xanadu::framingDistance` (0.70s settle)
 ```
 
 ### 6.1 Aperture Expansion

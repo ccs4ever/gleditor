@@ -4,14 +4,14 @@ description: >-
   Multi-agent deep reasoning workflow in Xanadulogical architecture.
   Orchestrates a tripartite dialectic between an Ideological Purist (Nelsonian principles),
   a Systems Realist (hardware/graphics/networking constraints), and a Codebase Expert
-  (gleditor/xudu/zigzag C++23 implementation details).
+  (gleditor/xuzz C++23 implementation details).
 ---
 
 # Xanadulogical Deep Reasoning: The Tripartite Dialectic
 
 This skill defines the multi-agent reasoning architecture designed to solve complex design,
-theoretical, and implementation challenges across the **gleditor**, **xudu** (xanadoc editor), and
-**zigzag** (multidimensional visualizer) ecosystems.
+theoretical, and implementation challenges across the **gleditor** library and **xuzz**, the one
+application for xanadocs and ZigZag slices.
 
 ```
        +-------------------------------------------------------------+
@@ -41,7 +41,7 @@ theoretical, and implementation challenges across the **gleditor**, **xudu** (xa
                                    │   ▼
        +-------------------------------------------------------------+
        |                   Codebase Expert                           |
-       |  - `xudu::Store` (Primedia Spool + 64B CompactOpNode DAG)   |
+       |  - `xanadu::Store` (EDL over the 64B CompactOpNode DAG)     |
        |  - `Resolver` & `SwarmContentSource` async piece streaming  |
        |  - Zero-Cairo/Zero-Pango FreeType2+HarfBuzz text engine     |
        |  - `StreamBufferGL` ring uploader & Vulkan 1.3 pipelines    |
@@ -71,14 +71,14 @@ ______________________________________________________________________
     Machines* 87.1's Zigzag chapters, the Xanadu Green/Gold design notes, `xanadu.com.au`'s ZigZag
     materials, and Nelson's own ZigZag Rhetorical Structure and "Geeks Bearing Gifts" commentary —
     not just this repo's `design/enfilade/*` notes. Ground every claim about ranks, dimensions,
-    crums, and enfilades in that primary material before treating `apps/zigzag` or
-    `apps/common/xanadu` as the final word on what Zigzag *should* be; the codebase is one
-    implementation of the idea, not the idea itself. Treat `d.*` dimensions, `CellRef`, and
-    `Manifold`/`ArenaManifold` as candidate mappings of Nelsonian Zigzag concepts to be critiqued
-    against the primary sources, not accepted uncritically.
-  - **xuzz Intertwingularity**: Because `xuzz` fuses xudu's xanalogical hypertext model with
-    zigzag's multidimensional space, the Purist must evaluate any proposal for whether it honors
-    *both* halves simultaneously — a xanadoc that is not also addressable as zigzag structure (via
+    crums, and enfilades in that primary material before treating `apps/common/xanadu` as the final
+    word on what Zigzag *should* be; the codebase is one implementation of the idea, not the idea
+    itself. Treat `d.*` dimensions, `CellRef`, and `Manifold`/`ArenaManifold` as candidate mappings
+    of Nelsonian Zigzag concepts to be critiqued against the primary sources, not accepted
+    uncritically.
+  - **xuzz Intertwingularity**: Because `xuzz` fuses the xanalogical hypertext model with ZigZag's
+    multidimensional space, the Purist must evaluate any proposal for whether it honors *both*
+    halves simultaneously — a xanadoc that is not also addressable as zigzag structure (via
     `OpKind::Structure` / `Manifold`) is an incomplete convergence, and a zigzag space with no
     xanalogical provenance is not truly Xanadu space.
 
@@ -123,9 +123,9 @@ follows a 4-phase cycle:
 - **Required step for anything touching zigzag, `xuzz`, or cross-cutting hypertext/space
   questions**: before formulating the thesis, do deep research on Project Xanadu's Zigzag from
   primary Nelsonian sources (not just this repo's design notes) — ranks, dimensions, crums,
-  enfilades — and explicitly reason about how the xanalogical model (xudu) and the Zigzag
-  multidimensional model (zigzag) are meant to be one intertwingled thing in `xuzz`, since the two
-  are no longer separable concerns.
+  enfilades — and explicitly reason about how the xanalogical model and the Zigzag multidimensional
+  model are meant to be one intertwingled thing in `xuzz`, since the two are no longer separable
+  concerns.
 
 ### Phase 2: Silicon & Network Stress-Testing (Antithesis)
 
@@ -137,7 +137,7 @@ follows a 4-phase cycle:
 ### Phase 3: Codebase Grounding & Synthesis (Synthesis)
 
 - **Agent**: `codebase_expert`
-- **Goal**: Map the debate directly onto `gleditor`, `apps/xudu`, and `apps/zigzag`. Where do
+- **Goal**: Map the debate directly onto `gleditor`, `apps/common/xanadu` and `apps/xuzz`. Where do
   existing structures (e.g. `CompactOpNode`, `SwarmContentSource`, `ZZSpace`, `StreamBufferGL`)
   already solve the problem? What precise C++23 structs, APIs, or database schemas bridge the pure
   ideal with practical hardware constraints?

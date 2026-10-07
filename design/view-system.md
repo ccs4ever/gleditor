@@ -5,21 +5,21 @@ Status: proposal. Date: 2026-10-07.
 ## Abstract
 
 `ZigzagVisualizer` is a single 4,000-line class that owns one fixed-axis layout algorithm, and
-`xudu::Views` is a single coordinator that owns xanadoc presentation; neither exposes a seam another
-layout strategy could plug into, and `apps/xuzz/view_coordinator.{hpp,cpp}` composes exactly one of
-each, program-wide. This document specifies a `View` abstraction that sits between the store and the
-renderer: a registry of swappable layout strategies, a `ViewManifold` that separates configuration a
-user set (which dimensions are bound to which axes) from presentation geometry a view minted to draw
-the current frame, and a per-frame pipeline (`layout` → `AnimationState::advance` → draw adapter)
-that is pure, allocation-disciplined, and testable without a GPU. It specifies, precisely enough to
-implement without further design work, three ZigZag views — **stretch vanishing**, **all-dim walk**,
-and **dimensional pack view** — the `d.pack`/`d.packing` dimension pair a pack view needs, and the
-one invariant every ZigZag view must hold: a cell has at most one neighbour per dimension per
-direction, including every view-minted cell, at every moment, even while dimensions are being
-rebound. It specifies a toss operation that is literally O(1) — a generation counter increment — and
-separates it honestly from the O(visible) and O(discarded) work that follows it but never blocks it.
-Xanadoc-side (`PageView`) layout algorithms are explicitly out of scope; this document fixes only
-the seam a follow-up specification will fill.
+`xanadu::Views` is a single coordinator that owns xanadoc presentation; neither exposes a seam
+another layout strategy could plug into, and `apps/xuzz/view_coordinator.{hpp,cpp}` composes exactly
+one of each, program-wide. This document specifies a `View` abstraction that sits between the store
+and the renderer: a registry of swappable layout strategies, a `ViewManifold` that separates
+configuration a user set (which dimensions are bound to which axes) from presentation geometry a
+view minted to draw the current frame, and a per-frame pipeline (`layout` →
+`AnimationState::advance` → draw adapter) that is pure, allocation-disciplined, and testable without
+a GPU. It specifies, precisely enough to implement without further design work, three ZigZag views —
+**stretch vanishing**, **all-dim walk**, and **dimensional pack view** — the `d.pack`/`d.packing`
+dimension pair a pack view needs, and the one invariant every ZigZag view must hold: a cell has at
+most one neighbour per dimension per direction, including every view-minted cell, at every moment,
+even while dimensions are being rebound. It specifies a toss operation that is literally O(1) — a
+generation counter increment — and separates it honestly from the O(visible) and O(discarded) work
+that follows it but never blocks it. Xanadoc-side (`PageView`) layout algorithms are explicitly out
+of scope; this document fixes only the seam a follow-up specification will fill.
 
 ## How to read this, for implementing agents
 
@@ -67,9 +67,9 @@ triples (`Execution`, `Scope`, `Contract`, `Logic`, `Stdlib`, `Custom`); it is t
 analogue to a dimension group, and it is a closed C++ enum of exactly-three-dimension presets, not
 data a user can build.
 
-`apps/xuzz/view_coordinator.{hpp,cpp}` holds exactly one `xudu::Views&` and one
+`apps/xuzz/view_coordinator.{hpp,cpp}` holds exactly one `xanadu::Views&` and one
 `shared_ptr<zigzag::ZigzagVisualizer>` and toggles between `Unified`, `XanadocOnly`, `ZigzagOnly` —
-one xanadoc view and one zigzag view, program-wide, with no pane/viewport manager. `xudu::Views`
+one xanadoc view and one zigzag view, program-wide, with no pane/viewport manager. `xanadu::Views`
 (`apps/xudu/views.{hpp,cpp}`, 2043+263 lines) is likewise one coordinator, not a pluggable
 abstraction — it owns document switching, onion-skin comparison, camera framing, link UI, and
 drawing directly.
@@ -90,7 +90,7 @@ directory:
   `apps/common/xanadu/view/`, where `xuzz_test` (which links the engine and no graphics device) can
   test them;
 - everything that touches the renderer, input or the window goes in `apps/xuzz/`;
-- `ZigzagVisualizer` and `xudu::Views` are the things being replaced. Each migration step (§15)
+- `ZigzagVisualizer` and `xanadu::Views` are the things being replaced. Each migration step (§15)
   moves a responsibility out of them into a view or into `apps/xuzz/`, and the step that empties one
   deletes it. Nothing new is written against "the zigzag side" or "the xudu side" as a separately
   buildable unit, and no seam exists to keep the two apart: a slice view and a page view are two
@@ -1222,8 +1222,8 @@ Three candidates were weighed:
   arrangement elsewhere, reading as random reshuffling rather than "that cell grew a little."
   Refused for V-R18 (determinism) and the stability property stretch vanishing exists to provide.
 - *Shelf/skyline packing (NFDH-style), chosen.* Walk cells in strict breadth-first order from `c`:
-  first its axis-aligned immediate neighbours along `B` (placed exactly as today's `mapAxis` places
-  them, at `axisUnit * axisSpacing` with
+  first its axis-aligned immediate neighbours along `B` (each placed on its axis's unit vector at
+  `axisUnit * axisSpacing`, with
   `axisSpacing = (focusExtent + neighbourExtent)/2 + rankClearancePx`), then every cell reached by
   one more hop from an already-placed cell, in a fixed tie-break order (ascending `CellRef`, so two
   runs with the same input always visit frontier ties identically). For each new cell, maintain a
@@ -1301,11 +1301,15 @@ once the screen is full, never a hard "top 50 neighbours only" cutoff.
 
 #### 9.1.8 Interaction
 
-Movement keys are identical to today's step actions (`step-x-pos/neg`, etc.) — stretch vanishing
-changes layout, not the movement vocabulary. Pointer click focuses a visible cell through the
-existing `PickObserver` path; hover previews a faded cell's full content in a tooltip without moving
-focus. Keyboard twin: none needed beyond existing step actions (there is no pointer-only affordance
-this view introduces).
+Movement is the ordinary step action on each bound axis — stretch vanishing changes layout, not the
+movement vocabulary. Pointer click focuses a visible cell through the library's `PickObserver` path;
+hover previews a faded cell's full content in a tooltip without moving focus. There is no
+pointer-only affordance, so no further keyboard twin is needed.
+
+Because alignment is given up past radius 1, three cues keep the reader oriented: the accursed cell
+carries the focus emphasis and is never faded; each radius-1 neighbour carries a tick naming the
+dimension and direction that reached it; and a breadcrumb strip lists the last
+`stretch.breadcrumbDepth` cells walked, read from the reader's activity log (§8.7).
 
 #### 9.1.9 Degenerate cases
 
@@ -1314,9 +1318,9 @@ this view introduces).
 - A single-cell slice: the home cell alone fills the pane.
 - Content taller/wider than the viewport: the cell scrolls internally; a corner glyph marks "more
   below/right."
-- Valence in the hundreds: only cells within `neighborhood_radius` are laid out; beyond it, the
-  nearest bound-axis tick shows a count (`d.2 → (+214 more)`), never silently stopping at an
-  unannounced radius.
+- A rank hundreds of cells long: the breadth-first budget (§9.1.7) stops filling when the viewport
+  is full; the tick on the last cell placed along that rank shows how many were not
+  (`d.2 → (+214 more)`), so the walk never stops at an unannounced radius.
 
 #### 9.1.10 Accessibility
 
@@ -1343,12 +1347,20 @@ matches the `smoothstep` formula within floating-point tolerance (V-R17).
 #### 9.1.13 Diagram
 
 ```text
-   step0        step1         step2        step3
-  +-----+      +------+      +------+      +----+
-  |  c  | ---> | a1   | ---> |  a2  | ---> | t3 |
-  +-----+      | t1   |      |  t2  |      +----+
-               +------+      +------+
-    (radius-1 axis-aligned; radius >=2 skyline-packed, not gridded)
+  viewport
+ +--------------------------------------------------+
+ |  . faint .   +-------+ +----------+   . faint .  |
+ |  +------+    | up 1  | | reached  |  +-------+   |
+ |  | r=2  |    +-------+ | from up1 |  | r = 3 |   |
+ |  +------+ +-------+ +=========+ +--------+----+  |
+ |           | left1 | || c     || | right 1    |   |
+ |           +-------+ +=========+ +------------+   |
+ |    +----------+     +--------+ +------+          |
+ |    | r = 2    |     | down 1 | | r=2  |          |
+ +--------------------------------------------------+
+   radius 1: on c's axes, spaced by measured size
+   radius 2 and beyond: skyline-packed against the cell that reached them
+   near the edge: fainter; a box the edge would cut is not drawn at all
 ```
 
 ______________________________________________________________________
@@ -1387,8 +1399,8 @@ Candidates weighed:
   per-dimension for the session — re-encountering the same dimension reuses its slot; removing a
   dimension frees its slot without renumbering the others; adding one allocates the next free slot.
   Within a dimension's ring, its posward neighbour sits at one fixed azimuth and its negward
-  neighbour at `azimuth + π` (diametrically opposite). Bound dimensions keep today's exact spoke
-  placement and are excluded from ring allocation. Unbound dimensions' rings stack at increasing
+  neighbour at `azimuth + π` (diametrically opposite). Bound dimensions sit on their axis spokes (as
+  in §9.1.4) and are excluded from ring allocation. Unbound dimensions' rings stack at increasing
   radius and increasing depth tilt as valence grows: ring `k` (0-indexed by first-seen order among
   unbound dimensions) sits at `radius(k) = r0 + k·rStep`, tilted
   `tilt(k) = min(tiltMax, tilt0 + k·tiltStep)`. Tilt never reaches 90°, so every ring's near half
@@ -1421,10 +1433,10 @@ front arc visible.
 
 #### 9.2.4 Dimension-name labels; ring-slot placeholders
 
-A dimension's content is its own name (R2), so an edge label is simply `textOf(dim)` applied to the
-dimension cell itself — no view-minted label cell is needed for the label text. A view-minted
-ring-slot placeholder cell *is* needed for each unbound dimension `c` links on, carrying a
-`d.ring-dim` link to the real dimension cell, giving the renderer a stable screen anchor distinct
+A dimension is itself a cell whose content is its name, so an edge label is simply `textOf(dim)`
+applied to the dimension cell itself — no view-minted label cell is needed for the label text. A
+view-minted ring-slot placeholder cell *is* needed for each unbound dimension `c` links on, carrying
+a `d.ring-dim` link to the real dimension cell, giving the renderer a stable screen anchor distinct
 from the dimension cell's own text. This ring-slot cell is view-minted (ephemeral, tossed on rebind
 per I3, recoverable per I4).
 
@@ -1434,12 +1446,15 @@ per I3, recoverable per I4).
 refusal.** Entering via a ring spoke whose dimension is not currently bound rebinds the
 least-recently-used axis to that dimension and walks focus there, re-deriving the whole axis/ring
 layout fresh at the new focus (I3's toss-and-rebuild naturally re-evaluates whichever dimension the
-user just walked along). No `d.binds` link outside this one axis is rewritten; the move is announced
-on the status line (`"<dimension> is now bound to <axis>."`) so the user is never surprised by a
-side-effect of walking somewhere. This is argued against two alternatives: a hard refusal ("movement
-only along bound dimensions") would contradict Nelson's "move along any connection, bound or not,"
-and a *silent persistent* rebind would corrupt the user's deliberately chosen bindings on an
-ordinary lateral move.
+user just walked along). No `d.binds` link outside this one axis is rewritten. The temporary bind is
+stacked on that axis slot ahead of the binding the user chose, is not written to `system://layout`,
+is not an undo entry, and is lifted — restoring the user's binding — when the reader next moves
+along a different axis or switches view. The move is announced on the status line
+(`"<dimension> is now bound to <axis>."`) so the user is never surprised by a side-effect of walking
+somewhere. This is argued against two alternatives: a hard refusal ("movement only along bound
+dimensions") would contradict Nelson's "move along any connection, bound or not," and a *silent
+persistent* rebind would corrupt the user's deliberately chosen bindings on an ordinary lateral
+move.
 
 #### 9.2.6 Drag-to-rebind
 
@@ -1477,17 +1492,17 @@ the next available axis (keyboard twin of drag).
 #### 9.2.9 Degenerate cases
 
 A cell with no neighbours on any dimension: empty ring, hub drawn alone, side-panel note
-`"No linked cells on any dimension."` A single-cell slice: same. Valence in the hundreds on one
-dimension: cluster marker per §9.2.7, never a frame-rate cliff from individually rendering hundreds
-of positions.
+`"No linked cells on any dimension."` A single-cell slice: same. Valence in the hundreds, one per
+dimension — that is, hundreds of dimensions: aggregate rings per §9.2.7, never a frame-rate cliff
+from individually rendering hundreds of positions.
 
 #### 9.2.10 Accessibility
 
 The hub is `role: cell` with a `valence` property per dimension (`"d.2: 3 neighbors"`); each spoke
 is a child `role: group` named by its dimension, containing the neighbour node(s), or, when
 clustered, a single `role: group` named `"d.7: 214 more, collapsed"` with an expand action. Reading
-order is a stable, declared order — bound axes first (X, Y, Z), then unbound dimensions in the
-slice's own declaration order — never angular/visual position, which is meaningless to a screen
+order is a stable, declared order — bound axes first, in axis-rank order, then unbound dimensions in
+the slice's own declaration order — never angular/visual position, which is meaningless to a screen
 reader.
 
 #### 9.2.11 Tunables
@@ -1699,8 +1714,8 @@ all are edge-visible and no two fully overlap — scales legibly from one to a f
 members (bounded by `pack.fanMaxVisible`, beyond which it degrades to a count badge, never a silent
 omission), and its arc radius grows with member count without requiring a relayout of the parent
 axis. Each fanned member's edge-facing side carries a thin colour tab matching the contributing
-dimension's existing per-dimension colour (reusing `DimensionVisual::color` rather than inventing a
-second encoding).
+dimension's colour, the same one its axis and ring edges use (read from `system://ui`, one encoding
+per dimension everywhere).
 
 #### 9.3.10 Axis placement; nesting LOD
 
@@ -1806,7 +1821,7 @@ explicitly a follow-up specification's job (ruling V12). What is guaranteed to t
   `BridgeCoordinator`/`ZigzagPresentationSurface` already provide.
 
 What the follow-up specification must still decide: the xanadoc-side layout algorithm itself (onion-
-skin, flow, pagination inside a pane); which parts of today's `xudu::Views` coordinator get carved
+skin, flow, pagination inside a pane); which parts of today's `xanadu::Views` coordinator get carved
 into a concrete `PageView` versus staying host-level; and the UI for creating/arranging page panes
 analogous to §11's chord table. Nothing in this document's `View`/`ViewHost`/`LayoutSink` contract
 is expected to change to accommodate those decisions — that is the guarantee this section exists to
@@ -2029,7 +2044,7 @@ Each step builds and keeps `make test` green; each is committable independently.
    `xuzz_test` file: ring-slot stability across focus changes for the former; pack reversibility
    (move posward then negward returns to the same real cell, §9.3.5) for the latter.
 1. **Add `apps/xuzz/view_draw_adapter` and `view_host_app`; retire `ViewCoordinator`.** The host
-   owns the pane tree and draws each pane's records. `ZigzagVisualizer` and `xudu::Views` are each
+   owns the pane tree and draws each pane's records. `ZigzagVisualizer` and `xanadu::Views` are each
    registered as one legacy view behind the same `View` interface, so the three new views and the
    two old presentations are selectable side by side and nothing regresses. *Tests*: new
    `tests/xuzz/view_host_test.cpp` for split/close/focus-cycle; `tests/zigzag/test_visualizer.cpp`
@@ -2203,6 +2218,13 @@ and axis bindings in force, so Activity Back restores how the reader was looking
 Today a `Visit` carries a target, an arrival and an optional link context. Settled by: a UX
 validation pass over journeys that walk back across a view switch; if it is wanted, the answer is
 more cells on the activity store's own dimensions, not a wider `Visit` struct.
+
+**VU7.** Whether one dimension may be bound to two axes at once, as classic ZigZag allows. §7.1
+links an axis slot to the dimension cell on `d.binds`, and a cell has one negward neighbour per
+dimension, so a dimension can sit under one axis slot only. Settled by: deciding whether the doubled
+binding is wanted; if so, the slot links instead to a view-minted binding cell whose *value* is a
+handle to the dimension (`ArenaManifold::handleTarget`), which costs one cell per binding and
+removes the limit.
 
 ______________________________________________________________________
 

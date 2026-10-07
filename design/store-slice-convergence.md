@@ -1,8 +1,8 @@
 # The Unified Store/Slice: Cells as Operations, and OSMIC's Sixth Hyperop
 
-A design specification for generalizing [`xudu::Store`](apps/common/xanadu/store.hpp) so that it can
-take over the role of a Zigzag Slice, by implementing the one hyperop OSMIC names and this codebase
-has never had: **MAKE/CHANGE STRUCTURE MAP**.
+A design specification for generalizing [`xanadu::Store`](apps/common/xanadu/store.hpp) so that it
+can take over the role of a Zigzag Slice, by implementing the one hyperop OSMIC names and this
+codebase has never had: **MAKE/CHANGE STRUCTURE MAP**.
 
 Nothing here is wired into the build yet. This document records the model, the rulings that produced
 it, and the price of each ruling, so that the reasoning survives the implementation. Where a number
