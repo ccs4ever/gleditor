@@ -233,6 +233,9 @@ the traceability table's (§18) left-hand keys.
 
 - **V-R24.** A dimension group MUST be user-authorable (create, rename, add/remove member, delete),
   of any size, and MUST be bindable to a single axis exactly as a single dimension would be.
+- **V-R35.** One dimension or group MUST be bindable to any number of axes at once, and one
+  dimension MUST be able to belong to any number of groups, with no cap on either (§7.1, ruling
+  V13).
 - **V-R25.** A real cell's posward pack along a bound group MUST be the set of cells reached by one
   more hop, from any already-packed cell, along any member dimension of the group, continuing until
   no such hop exists (the BFS-frontier rule, §9.3.3), with duplicates, cycles, and ragged ends
@@ -279,11 +282,11 @@ ______________________________________________________________________
 | Slice view      | A `View` refinement (`SliceView`) whose layout source is a ZigZag `Manifold`.                                                               |
 | Page view       | A `View` refinement (`PageView`) whose layout source is xanadoc span/paragraph structure; this document only fixes the seam (§10.3).        |
 | View manifold   | `ViewManifold`: a pane's binding arena and derived arena over one real base `Manifold`.                                                     |
-| Binding layer   | The view manifold's arena that survives a toss: axis slots, `d.binds` links, group cells and their membership.                              |
+| Binding layer   | The view manifold's arena that survives a toss: axis slots, occurrences, group cells and their membership.                                  |
 | Derived layer   | The arena that does not survive a toss: packs, ring-slot placeholders, placement helpers, anything minted purely to draw the current frame. |
 | View cell       | Any cell minted by a view (`ephemeralBit` set, carries a `ViewEpoch`).                                                                      |
-| Axis            | One slot in a view's `ViewAxisSet`, bound to a real dimension or a group cell.                                                              |
-| Bound dimension | A dimension currently linked, via `d.binds`, to an axis slot.                                                                               |
+| Axis            | One slot in a view's `ViewAxisSet`, showing an occurrence of a real dimension or of a group.                                                |
+| Bound dimension | A dimension with an occurrence under at least one axis slot; it may be under several.                                                       |
 | Dimension group | A user-authored, named, ordered set of member dimensions, itself a cell, bindable to an axis like a single dimension.                       |
 | Pack            | A view-minted container cell standing for one step of a group's BFS-frontier walk from a real cell or a previous pack.                      |
 | Container       | A pack cell in its role as the thing constituents hang off (`d.pack` posward).                                                              |
@@ -415,10 +418,11 @@ Two kinds of ephemeral state exist, and they have different lifetimes, so they l
 siblings, not nested (an arena's base is a `const Manifold *`, so nesting is not available and is
 not needed).
 
-1. **Binding arena**: the axis-slot rank, `d.binds` links, group cells and their membership (the
-   `d.dim-group` runs). This is configuration the user set — the equivalent of a window layout — and
-   it survives every toss. Losing it on a pack recomputation would reset which dimensions are bound
-   to which axis on every focus move, breaking "movement works as expected".
+1. **Binding arena**: the axis-slot rank, the occurrence cells and their `d.binds` and
+   `d.occurrence` links, group cells and their membership (the `d.dim-group` ranks). This is
+   configuration the user set — the equivalent of a window layout — and it survives every toss.
+   Losing it on a pack recomputation would reset which dimensions are bound to which axis on every
+   focus move, breaking "movement works as expected".
 1. **Derived arena**: pack containers, ring-slot placeholders, placement helpers, *and the
    view-owned dimension cells those hang on* (`d.pack`, `d.packing`, one `axisStep` dimension per
    bound axis, `d.ring-dim`) — anything minted purely to answer "what does the current frame look
@@ -441,15 +445,15 @@ Each invariant below corresponds to one of V-R5 through V-R10. "Enforcement" nam
 **I1 — at most one neighbour per (cell, dimension, direction).** Scoped precisely: for every cell
 `c` the view currently holds, real or view-minted, and every dimension `d` that is currently bound,
 a group member of a currently-bound group, or a view-owned bookkeeping dimension (`d.pack`,
-`d.packing`, `d.dim-group`, `d.binds`, a ring-slot dimension), `linked(c, d, dir)` answers at most
-one `CellRef` for each `dir`. **Enforcement**: for free, by representation — `ArenaManifold::link()`
-calls `setOneSide()` on both ends and evicts whatever either end held, so no code path through it
-can produce two posward neighbours on one dimension. The only way to violate I1 is to write a
-`DimLink` directly instead of through the single choke point (§6.5), which this document forbids as
-an implementation rule and backs with a `clang-tidy` pattern match (§6.5). **Test**: a property test
-(`verifyViewManifoldInvariant`, §6.5) run after randomised sequences of bind/pack/ring/toss
-operations, asserting `dimensionsOf(c)` carries at most one `DimLink` per scoped dimension for every
-`c` the arena holds.
+`d.packing`, `d.dim-group`, `d.binds`, `d.occurrence`, a ring-slot dimension), `linked(c, d, dir)`
+answers at most one `CellRef` for each `dir`. **Enforcement**: for free, by representation —
+`ArenaManifold::link()` calls `setOneSide()` on both ends and evicts whatever either end held, so no
+code path through it can produce two posward neighbours on one dimension. The only way to violate I1
+is to write a `DimLink` directly instead of through the single choke point (§6.5), which this
+document forbids as an implementation rule and backs with a `clang-tidy` pattern match (§6.5).
+**Test**: a property test (`verifyViewManifoldInvariant`, §6.5) run after randomised sequences of
+bind/pack/ring/toss operations, asserting `dimensionsOf(c)` carries at most one `DimLink` per scoped
+dimension for every `c` the arena holds.
 
 **I2 — a view-minted cell never reaches a store.** Already a byte-level invariant one layer down:
 `Manifold::applyStructure` refuses any `SetLink` whose target `isEphemeral()` (`manifold.hpp:699`),
@@ -622,40 +626,91 @@ ______________________________________________________________________
 
 **Ruling (V4): a binding is cells on a view-owned rank inside the view manifold, not a struct field
 and not a fixed array.** The view mints one `axisDim` dimension cell once per pane; each axis slot
-is a cell on that rank, carrying a `d.binds` link to the real dimension or group cell it currently
-targets. Binding dimension `d.1` to axis slot 2 is `link(axisSlot2, d.binds, POS, d1Cell)`. Adding
-an axis mints one more rank member; there is no fixed count. `ViewAxisBinding`'s X/Y/Z struct and
-`DimensionBundle`'s closed five-entry enum are retired as live storage (§16, ruling V4) and reduced
-to two roles only: (a) the serialization/preset shape persisted into `system://layout` (§7.4), since
-dimension names, not `CellRef`s, are what survives a session boundary; and (b) an initial seed a
-user can pick from when creating a new group, exactly as `DimensionBundle` already enumerates five
-named presets today.
+is a cell on that rank. Adding an axis mints one more rank member; there is no fixed count.
+`ViewAxisBinding`'s X/Y/Z struct and `DimensionBundle`'s closed five-entry enum are retired as live
+storage (§16, ruling V4) and reduced to two roles only: (a) the serialization/preset shape persisted
+into `system://layout` (§7.4), since dimension names, not `CellRef`s, are what survives a session
+boundary; and (b) an initial seed a user can pick from when creating a new group, exactly as
+`DimensionBundle` already enumerates five named presets today.
 
-The cost of this representation, argued rather than assumed: one cell (32-byte `CellSlot`) plus one
-`DimLink` (12 bytes) per axis slot, versus three `DimID`/string fields in `ViewAxisBinding` — noise
-at the handful-of-axis-slots scale a view operates at. The *traversal* cost of "what's bound on X"
-is O(bound-axis-count) hops instead of an O(1) struct read; that is the real price, paid for the
-same reason R12 paid an analogous price for `d.dims` — the number of simultaneously bound dimensions
-in all-dim walk and pack view is not known at compile time and must not be capped.
+**Ruling (V13): a slot does not link to its target; it links to an *occurrence* of it.** Linking an
+axis slot straight to a dimension cell on `d.binds` would give the dimension cell one negward
+`d.binds` neighbour, and a cell has only one: the dimension could sit under one axis and no more.
+Classic ZigZag puts the same dimension on two axes freely (`d.1` across and down shows a rank and
+its continuation at once), and the same defect would stop a dimension belonging to two groups. So
+every *use* of a dimension or group is its own view-minted cell in the binding arena, an occurrence,
+and three view-owned dimensions carry the structure:
+
+| Dimension      | Rank                                                               | Reads as                                     |
+| -------------- | ------------------------------------------------------------------ | -------------------------------------------- |
+| `d.binds`      | axis slot, then the occurrence in force, then any stacked beneath  | "this axis shows that"                       |
+| `d.occurrence` | the target (a real dimension cell, or a group cell), then its uses | "everywhere this dimension or group is used" |
+| `d.dim-group`  | a group cell, then its member occurrences in order                 | "this group contains these" (§7.2)           |
+
+```text
+   axisDim rank:      [axis X] ---- [axis Y] ---- [axis Z]
+                         |             |             |
+   d.binds:           (occ a)       (occ b)       (occ c)
+                         |             |             |
+   d.occurrence:   [d.1] - (occ a) - (occ b)    [G] - (occ c)
+
+   d.1 is on X and on Y; group G is on Z. d.1's own d.binds slots are empty.
+```
+
+An occurrence is the clone idiom applied to bindings: its target is the head of its `d.occurrence`
+rank, found the way `cloneMaster()` finds a clone's master (`manifold.hpp:446-458`), cycle guard
+included. I1 holds on all three dimensions without exception, because each occurrence is a distinct
+cell with its own two slots per dimension. Binding `d.1` to axis Y is: mint an occurrence, append it
+to `d.1`'s `d.occurrence` rank, link `axisY -d.binds-> occurrence`. Unbinding unlinks and splices
+the occurrence out of both ranks.
+
+The cost, argued rather than assumed: two cells and three links per binding (slot and occurrence)
+against three fields in `ViewAxisBinding`. Resolving "what is on this axis" is one hop to the
+occurrence and then a walk to the head of its `d.occurrence` rank — O(uses of that target), which is
+the number of axes and groups naming it, a handful. In exchange the reverse question, "which axes
+and groups use this dimension", is the same rank read forwards, with no index: it is what
+`rebindAllAxesOf()` and the binding HUD need. Nothing here is capped: not the axis count, not the
+number of axes one dimension is on, not the number of groups it belongs to.
+
+What a doubled binding means on screen:
+
+- **Movement.** Stepping on either axis moves along the one dimension. I1 is untouched: the cell
+  still has one posward and one negward neighbour on it.
+- **Layout.** The same neighbour is placed once per axis that shows it, so a radius-1 neighbour on
+  `d.1` appears on the X spoke and on the Y spoke. `PlacedItem` therefore carries the axis it was
+  placed for (§8.4), and animation identity is the pair (cell, axis), so the two placements tween
+  independently. Past radius 1, stretch vanishing keeps its first-placement-wins rule (§9.1.3), with
+  axis-rank order breaking the tie.
+- **All-dim walk.** A dimension on any axis is a spoke, not a ring member, however many axes it is
+  on. Dropping a dragged edge on an axis binds *that axis* and leaves every other axis alone, so
+  dragging an already-bound spoke onto a second axis doubles it; swapping two axes stays the
+  separate swap action.
+- **Derived cells.** Each axis has its own `axisStep` dimension (§6.2), so packs derived for a group
+  on X and the same group on Y are separate ranks and cannot collide.
 
 ### 7.2 Dimension groups
 
-A group is a cell `g`, minted on a view-owned `d.dim-group` run (deliberately not
-`system://settings`' `d.groups`/`d.subgroups`, which group *settings fields*, not dimensions of a
-slice being browsed — reusing that name risks a collision the first time a slice happens itself to
-be a system xanadoc). `g`'s `d.dim-group` run links the real dimension cells (or nested group cells,
-§9.3.7) that are its members, any number, uncapped. `g`'s own `CellRef` is what gets bound to an
-axis slot via `d.binds`, exactly as a single dimension would be — axis-binding code never cases on
-"is the target a dimension or a group." Rebinding an entire set at once is: change `g`'s membership;
-every axis slot bound to `g` picks up the new membership on the next read, because the slot points
-at `g`'s identity, not a snapshot of its members.
+A group is a view-minted cell `g` in the binding arena (deliberately not on `system://settings`'
+`d.groups`/`d.subgroups`, which group *settings fields*, not dimensions of a slice being browsed —
+reusing that name risks a collision the first time a slice happens itself to be a system xanadoc).
+`g` heads a `d.dim-group` rank of member occurrences (§7.1): each member is an occurrence of a real
+dimension cell or of another group (§9.3.7), any number, uncapped, in the order the user gave. A
+dimension may therefore be a member of any number of groups and bound alone to an axis at the same
+time, and a group may be nested in several parents.
+
+A group is bound exactly as a dimension is — an occurrence of `g` under the axis slot — so
+axis-binding code never cases on "is the target a dimension or a group", and one group may be on
+several axes. Rebinding an entire set at once is: change `g`'s membership; every axis showing `g`
+picks up the new membership on the next read, because its occurrence resolves to `g`'s identity, not
+to a snapshot of its members. Deleting `g` walks its `d.occurrence` rank and removes each use; the
+status line names the axes and parent groups that lost it.
 
 ### 7.3 Rebind sequence
 
 ```text
 1. ViewManifold::rebind(op):
      -> op(axes)                          -- binding arena only, e.g.
-          mintViewLink(axisSlot, d.binds, POS, target)   -- choke point, I1
+          mint occurrence; link it on d.occurrence and d.binds  -- choke point, I1
           undo stack entry pushed
      -> toss()                            -- derived arena: O(1), section 6.4
 2. ViewHost observes the return and invokes view->onBindingChanged()
@@ -896,9 +951,10 @@ private:
 namespace xanadu::view {
 
 /// A single real dimension, or a group cell's identity -- zzstructure never
-/// distinguishes the two at the type level (a dimension is a cell, R2), so
+/// distinguishes the two at the type level (a dimension is a cell), so
 /// axis code never cases on which.
 using BindTarget = zigzag::CellRef;
+using ViewAxisId = std::uint32_t; // position on the axisDim rank
 
 class ViewAxisSet {
 public:
@@ -906,11 +962,16 @@ public:
   std::size_t addAxis();                                     // open-ended
   std::expected<void, ViewError> removeAxis(std::size_t index);
 
-  /// Goes through mintViewLink; a double-bind of the same axis slot is
-  /// refused the same way any other occupied direction is (I1 extends to
-  /// the binding layer itself).
+  /// Replaces what the axis shows with a new occurrence of target (§7.1).
+  /// The same target may be on any number of axes at once; binding it here
+  /// leaves its other axes alone. Every link goes through mintViewLink.
   std::expected<void, ViewError> bind(std::size_t axisIndex, BindTarget target);
   [[nodiscard]] gleditor::cpp26::optional<BindTarget> boundTarget(std::size_t axisIndex) const noexcept;
+  /// Every axis showing target, in axis-rank order: target's d.occurrence
+  /// rank filtered to occurrences that sit under an axis slot.
+  [[nodiscard]] std::vector<ViewAxisId> axesOf(BindTarget target) const;
+  /// Every group target is a member of, by the same rank.
+  [[nodiscard]] std::vector<zigzag::CellRef> groupsOf(BindTarget target) const;
 
   zigzag::CellRef createGroup(std::string_view name, std::span<const zigzag::DimRef> members);
   std::expected<void, ViewError> renameGroup(zigzag::CellRef group, std::string_view name);
@@ -932,6 +993,7 @@ private:
   zigzag::DimRef axisDim_{zigzag::noCell};
   zigzag::DimRef dimGroupDim_{zigzag::noCell};
   zigzag::DimRef bindsDim_{zigzag::noCell};
+  zigzag::DimRef occurrenceDim_{zigzag::noCell};
   std::vector<struct BindingEdit> undoStack_;
 };
 
@@ -966,12 +1028,18 @@ struct LayoutInput {
   std::uint64_t frameId; // deterministic tie-break
 };
 
+inline constexpr ViewAxisId noAxis = ~ViewAxisId{0};
+
 struct PlacedItem {
   ViewCellRef cell;
   glm::vec3 position;
   glm::quat orientation{1, 0, 0, 0};
   float width{}, height{};
   float opacity{1.0F};
+  /// The axis this placement belongs to, or noAxis off the spokes. With cell
+  /// it is the animation identity: one dimension on two axes places the
+  /// same neighbour twice (§7.1).
+  ViewAxisId axis{noAxis};
   enum class Visibility : std::uint8_t { Visible, ClippedHidden, Lod } visibility{};
   std::uint16_t depthLayer{};
   enum class ContentMode : std::uint8_t { Full, Abbreviated, Badge } contentMode{};
@@ -1512,9 +1580,9 @@ See §11's settings table (`ring.*`, `axis.*`, `label.*`).
 #### 9.2.12 Acceptance tests
 
 A dimension's ring slot is unchanged across a focus move that does not remove it (V-R21); drag and
-keyboard rebind paths produce the identical final `d.binds` target (V-R22); every ring position's
-`PlacedItem`/side-panel data carries the far cell's own neighbour count (V-R23); a property test
-confirms no dimension's ring slot is ever recomputed from the total dimension count.
+keyboard rebind paths leave the axis resolving to the identical target (V-R22); every ring
+position's `PlacedItem`/side-panel data carries the far cell's own neighbour count (V-R23); a
+property test confirms no dimension's ring slot is ever recomputed from the total dimension count.
 
 #### 9.2.13 Diagram
 
@@ -1993,6 +2061,11 @@ All tests run headless per `.claude/rules/headless_tests.md` (V-R33): `SDL_VIDEO
   refusal); I3/epoch staleness (mint, toss, assert the old `ViewCellRef` fails a liveness check); I4
   (`resolveReal` terminates within the bound for nested packs). `tests/xuzz/pack_builder_test.cpp` —
   both worked examples from §9.3.4 verbatim, plus cycle and ragged-end fixtures.
+- **Doubled bindings**: in `tests/xuzz/view_manifold_test.cpp`, bind one dimension to two axes and
+  put it in two groups; assert `boundTarget()` resolves to it on both axes, `axesOf()` and
+  `groupsOf()` list both uses, unbinding one axis leaves the other bound, the invariant verifier
+  passes throughout, and a stretch-vanishing layout places the radius-1 neighbour once per axis with
+  distinct (cell, axis) identities (V-R35).
 - **Invariant**: `verifyViewManifoldInvariant` run as a standing check inside every other new test
   file, not only its own — any test that mutates a `ViewManifold` calls it before asserting on
   anything else.
@@ -2180,6 +2253,20 @@ guarantees it will not need to change the `View`/`LayoutSink` contract to do so.
 a concrete `PageView` layout algorithm here "for completeness" — the one sketch in §9
 (`OutlinePageView`) is explicitly illustrative, not normative, and is labelled as such.
 
+**V13. A binding is an occurrence cell, so one dimension or group may be on any number of axes and
+in any number of groups.** Why: a direct `d.binds` link from slot to dimension cell spends the
+dimension's single negward slot, capping it at one axis and, by the same arithmetic on
+`d.dim-group`, one group — a ceiling classic ZigZag does not have and a user would work around by
+cloning dimensions. Occurrences ranked on `d.occurrence` under their target are the `d.clone` idiom
+(§7.1). Price: one more cell and two more links per binding or membership; resolving a slot's target
+walks to the head of a rank whose length is the number of uses; a doubled dimension places its
+radius-1 neighbours once per axis, so placement identity becomes (cell, axis). Refused: (a) the
+direct link — the ceiling; (b) an occurrence that holds its target as an `OpHandle` value
+(`ArenaManifold::handleTarget`) — O(1) to resolve, but the relation is then a number inside a cell
+rather than a link, so "which axes use this dimension" needs a scan or a side index, and a tool that
+walks the binding structure cannot see it; (c) refusing the doubled binding outright — it removes a
+standard ZigZag arrangement to save one cell.
+
 ______________________________________________________________________
 
 ## 17. Open questions
@@ -2219,13 +2306,6 @@ Today a `Visit` carries a target, an arrival and an optional link context. Settl
 validation pass over journeys that walk back across a view switch; if it is wanted, the answer is
 more cells on the activity store's own dimensions, not a wider `Visit` struct.
 
-**VU7.** Whether one dimension may be bound to two axes at once, as classic ZigZag allows. §7.1
-links an axis slot to the dimension cell on `d.binds`, and a cell has one negward neighbour per
-dimension, so a dimension can sit under one axis slot only. Settled by: deciding whether the doubled
-binding is wanted; if so, the slot links instead to a view-minted binding cell whose *value* is a
-handle to the dimension (`ArenaManifold::handleTarget`), which costs one cell per binding and
-removes the limit.
-
 ______________________________________________________________________
 
 ## 18. Traceability
@@ -2254,7 +2334,7 @@ ______________________________________________________________________
 | "aids in visualizing the valence of each cell"                                                   | V-R23; §9.2.10                                                    |
 | "quickly rebinding dimensions by dragging an edge to the bound axis"                             | V-R22; §9.2.6                                                     |
 | **Dimensional pack view** — "dimensions can be grouped to quickly rebind an entire set at once"  | V-R24; §7.2, §7.3                                                 |
-| "dimension group can also be bound to a single dimension"                                        | §7.1 `BindTarget`; §7.2                                           |
+| "dimension group can also be bound to a single dimension"                                        | §7.1 `BindTarget`; §7.2; V-R35, ruling V13                        |
 | "each real cell is represented as a pack of every cell connected along a dimension in the group" | V-R25; §9.3.2-9.3.4                                               |
 | "extending as far as there is at least one cell to pack"                                         | §9.3.4 BFS-frontier stop rule                                     |
 | "pack of cells maintain the movement invariant"                                                  | V-R26; §9.3.5                                                     |
@@ -2271,3 +2351,5 @@ ______________________________________________________________________
   engine, renderer and input wiring in `apps/xuzz/`, no new code under `apps/xudu/` or
   `apps/zigzag/`, `ZigzagVisualizer` deleted by the migration. Corrected the activity store's
   status: it is implemented (`StoreActivityLog`).
+- 2026-10-07 — Bindings and group memberships are occurrence cells (§7.1, §7.2, ruling V13), so a
+  dimension or group may be on several axes and in several groups. Closes the former VU7.
