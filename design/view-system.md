@@ -3191,8 +3191,8 @@ record the view and the bindings, so going back restores how the reader was look
 store's design to make. Either way the answer is more cells on its own dimensions, not a wider
 struct.
 
-**VU6.** With `apps/xudu/` and `apps/zigzag/` gone, should `tests/xudu/`, `tests/zigzag/` and their
-binaries be renamed for what they link? Settled by: the owner; nothing here depends on it.
+**VU6.** Decided: the binary that links the library and `apps/common/ui/` is `ui_test`, with its
+tests in `tests/ui/`, renamed straight after the relocation. `tests/xudu/` keeps its name for now.
 
 **VU7.** `session` and `batch_orchestrator` mix engine work with library calls. Should each be split
 so its engine half reaches `apps/common/xanadu/`? Settled by: the first language tool that wants

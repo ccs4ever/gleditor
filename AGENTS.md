@@ -423,6 +423,9 @@ Rules:
   the order of work for the two documents around it — spikes, tracks, milestones, gates, the visual
   direction and its checks. Its §2 lists corrections found against the code that the spec and the
   rendering plan have not yet absorbed; read it with them.
+- [`projects/start-view-project.md`](design/projects/start-view-project.md) — the prompt that starts
+  the view project in a fresh session, with the owner's decisions; the reviews it was planned from
+  are in `design/projects/view-reviews/`.
 - [`world-space-rendering-plan.md`](design/world-space-rendering-plan.md) — plan, unbuilt, library
   only: unprojection matching the projection code, render regions (device scissor and depth range),
   placed planes and a page arrangement seam. Records the backends' clip-space conventions, Vulkan's

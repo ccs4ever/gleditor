@@ -6,7 +6,10 @@ This plan turns [`view-system.md`](view-system.md) (the spec) and
 [`world-space-rendering-plan.md`](world-space-rendering-plan.md) (the rendering plan) into ordered
 work. It was drafted after four expert reviews against the code — engine, rendering, build and
 visual design — and then attacked by three challengers: one for correctness and sequencing, one for
-scope and delivery, one for the experience. §9 records what they said and what changed.
+scope and delivery, one for the experience. §9 records what they said and what changed. The seven
+reports are kept in [`projects/view-reviews/`](projects/view-reviews/), and
+[`projects/start-view-project.md`](projects/start-view-project.md) is the prompt that starts the
+work.
 
 ## 1. How to use this plan
 
@@ -40,7 +43,7 @@ is 60 to 120 commits.
 | F7  | Only Vulkan records batches on worker threads; OpenGL and GLES draw in order, and re-issue every vertex attribute pointer on every draw.                                                                                                                                                                  | `include/gleditor/render/device.hpp:190-195`; `src/render/gl/device_gl.cpp:770-797`  | One draw per plane may cost too much on OpenGL long before 10,000 planes. Spike R1 decides how `PlaneSet` batches before any of it is written.                                                                                                                               |
 | F8  | Picking scopes are a global budget of about 8,000 shared with every widget.                                                                                                                                                                                                                               | `include/gleditor/render_state.hpp:61-74`                                            | One persistent scope per `PlaneSet`, with planes told apart by the cluster field, never one per placement or per pack.                                                                                                                                                       |
 | F9  | Link occurrences are byte extents. Nothing maps an extent to a page and a height.                                                                                                                                                                                                                         | `apps/common/xanadu/link_occurrences.hpp`                                            | The presenter's `PageCatalog` implementation owns that mapping (U3); it is new work, not a lookup.                                                                                                                                                                           |
-| F10 | `ActivityLog` is a closed interface round one payload, `Visit`.                                                                                                                                                                                                                                           | `apps/common/xanadu/link_navigation.hpp:88`                                          | Walk summaries need a second interface or a new method; until the activity store's design exists (spec VU5) the ranking runs on the session's summaries only (E14).                                                                                                          |
+| F10 | `ActivityLog` is a closed interface round one payload, `Visit`.                                                                                                                                                                                                                                           | `apps/common/xanadu/link_navigation.hpp:88`                                          | Walk summaries need a second kind of record. E14 adds one to the activity store in the simplest shape that fits; it can be refined when that store is designed.                                                                                                              |
 | F11 | `Manifold` has no public way to mint cells.                                                                                                                                                                                                                                                               | —                                                                                    | Test fixtures are built through a small `Store` and `rebuildManifold()`, as `tests/xuzz/two_by_three_fixture.hpp` does.                                                                                                                                                      |
 | F12 | The WebAssembly packaging script still assumes separate `xudu` and `zigzag` outputs, and a CI job checks for files it has not produced since the fold.                                                                                                                                                    | `packaging/wasm/build.sh:68-75`; `.github/workflows/packaging.yml:717-718`           | Fixed in the relocation commit, and called out there so the existing breakage is not blamed on the move.                                                                                                                                                                     |
 
@@ -76,8 +79,8 @@ is 60 to 120 commits.
 
 ## 3. Spikes
 
-Throwaway code, headless, a day or less each. They are milestone 0: all of them run before any
-package, because several can change the shape of what follows.
+Throwaway code, headless, a day or less each. They are milestone 1: all of them run after the
+relocation and before any other package, because several can change the shape of what follows.
 
 | #   | Question                                                                                    | Method                                                                                                                        | Pass                                                                                                     | Gates                  |
 | --- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------- |
@@ -110,8 +113,8 @@ package, because several can change the shape of what follows.
 
 | #   | Milestone                 | Packages                                    | What a reader gets                                                                                                                                                                                                 | Risk it retires                                                 |
 | --- | ------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
-| M0  | Spikes                    | §3                                          | nothing                                                                                                                                                                                                            | the assumptions most likely to be wrong                         |
-| M1  | The tree in its new shape | A1                                          | nothing                                                                                                                                                                                                            | the build, before anything is stacked on it                     |
+| M0  | The tree in its new shape | A1, A2                                      | nothing                                                                                                                                                                                                            | the build, tested in isolation before anything is stacked on it |
+| M1  | Spikes                    | §3                                          | nothing                                                                                                                                                                                                            | the assumptions most likely to be wrong                         |
 | M2  | The spine                 | E0 to E6, E8, E9, U0, U1, U2, U5a, U6a, U7a | A second slice presentation, chosen from the palette beside today's: stretch vanishing with ghosts. A compass that shows what each point is bound to. Binding by a typed command. Sub-views listed in the palette. | every layer of the design, end to end, on primitives that exist |
 | M3  | Packs                     | E7, E11, U7b                                | Groups made and bound by command; the lane table, strands and the spread.                                                                                                                                          | pack semantics; the derived arena under real use                |
 | M4  | The wheel                 | L1, L5, L6, L9, L10, E10, E12, U4a, U5b     | All-dim walk in three dimensions; drag an edge to an axis or to the compass. The first thing a reader notices unprompted.                                                                                          | placed planes and their cost; the look of the wheel             |
@@ -121,7 +124,7 @@ package, because several can change the shape of what follows.
 | M8  | Panes and scenes          | L3, L4, L8, U4b                             | Several panes; pages and cells in one scene through the host.                                                                                                                                                      | regions on three backends; rewiring the application             |
 | M9  | Cut-over                  | X0 to X4                                    | The legacy presentations gone.                                                                                                                                                                                     | —                                                               |
 
-**The first release is M1 to M6.** Everything after it is separable.
+**The first release is M0 to M6.** Everything after it is separable.
 
 **The spine does not wait for the library.** Stretch vanishing and the pack view are flat: every
 cell lies in one plane per depth layer. The presenter draws a flat placement with the canvases and
@@ -138,27 +141,28 @@ no keys, until the package that gives them meaning (E16) lands.
 
 **Deferred beyond the first release**, each on its own, none blocking another:
 
-| Deferred                                                                     | Until                                                     | Cost of waiting                                                |
-| ---------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
-| edge heat                                                                    | after M2                                                  | ghosts alone say "more this way" without saying how much       |
-| neighbours' wheels beyond depth 0, and the lower levels of the detail ladder | after M4                                                  | the wheel shows one cell's connections only                    |
-| nested packs; keeping a pack                                                 | after M3                                                  | a group cannot contain a group in a pack; packs cannot be kept |
-| "most likely" (the Markov order)                                             | after M6, and after the activity store can hold summaries | the selector ranks by use and by ring order only               |
-| editing a group's members inside the selector's first tier                   | after M6                                                  | groups are edited by command and in the group editor           |
-| the `u` and `t` roles                                                        | E16, after the first release                              | five points become three until then                            |
-| the stagger search                                                           | M7 ships a fixed direction first                          | a deck may peek the wrong way in an odd pane                   |
-| embedding; other deck sources                                                | after M8                                                  | —                                                              |
+| Deferred                                                                     | Until                                  | Cost of waiting                                                |
+| ---------------------------------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------- |
+| edge heat                                                                    | after M2                               | ghosts alone say "more this way" without saying how much       |
+| neighbours' wheels beyond depth 0, and the lower levels of the detail ladder | after M4                               | the wheel shows one cell's connections only                    |
+| nested packs; keeping a pack                                                 | after M3                               | a group cannot contain a group in a pack; packs cannot be kept |
+| "most likely" (the Markov order)                                             | after M6                               | the selector ranks by use and by ring order only               |
+| editing a group's members inside the selector's first tier                   | after M6                               | groups are edited by command and in the group editor           |
+| the `u` and `t` roles                                                        | E16, after the first release (decided) | five points become three until then                            |
+| the stagger search                                                           | M7 ships a fixed direction first       | a deck may peek the wrong way in an odd pane                   |
+| embedding; other deck sources                                                | after M8                               | —                                                              |
 
 The two things a reviewer proposed cutting — edge heat and the Markov order — are deferred, not cut:
 both were asked for.
 
 ### 4.2 Track A: relocation
 
-| #   | Package                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Files      | Tests and gate                                                                                                                                                                                                                                                                                                | Size |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
-| A1  | Empty `apps/xudu/` and `apps/zigzag/`. `git mv` all of `apps/xudu/` to `apps/common/ui/xanadoc/` and all of `apps/zigzag/` to `apps/common/ui/slice/`. Rewrite the `"xudu/…"` and `"zigzag/…"` include spellings (about twenty files). Delete `XUDU_SRCS`, `ZIGZAG_SRCS` and their object lists; fix `ALL_OBJS`, the `xuzz` link line and the `zigzag_test` link line (`Makefile:606-607`, `:623-624`, `:702-706`, `:841-843`, `:902-903`). Fix `packaging/wasm/build.sh` and the stale check in `packaging.yml` (F12). Update the paths cited in `AGENTS.md`, the README, the skills and `tools/code-quality-audit.py`. | moves only | Full gate (§6). `find apps/xudu apps/zigzag -type f` prints nothing: the `find`-based source lists would silently go on compiling a file left behind. The test binary that linked the slice components now also links the xanadoc ones; confirm its libraries. Format with clang-format 19, not the system's. | M    |
+| #   | Package                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Files        | Tests and gate                                                                                                                                                                                                                                                                                                | Size |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| A1  | Empty `apps/xudu/` and `apps/zigzag/`. `git mv` all of `apps/xudu/` to `apps/common/ui/xanadoc/` and all of `apps/zigzag/` to `apps/common/ui/slice/`. Rewrite the `"xudu/…"` and `"zigzag/…"` include spellings (about twenty files). Delete `XUDU_SRCS`, `ZIGZAG_SRCS` and their object lists; fix `ALL_OBJS`, the `xuzz` link line and the `zigzag_test` link line (`Makefile:606-607`, `:623-624`, `:702-706`, `:841-843`, `:902-903`). Fix `packaging/wasm/build.sh` and the stale check in `packaging.yml` (F12). Update the paths cited in `AGENTS.md`, the README, the skills and `tools/code-quality-audit.py`. | moves only   | Full gate (§6). `find apps/xudu apps/zigzag -type f` prints nothing: the `find`-based source lists would silently go on compiling a file left behind. The test binary that linked the slice components now also links the xanadoc ones; confirm its libraries. Format with clang-format 19, not the system's. | M    |
+| A2  | Rename `zigzag_test` to `ui_test` and `tests/zigzag/` to `tests/ui/`: it is the binary that links the library and all of `apps/common/ui/`. Makefile, CI, `AGENTS.md`, the README.                                                                                                                                                                                                                                                                                                                                                                                                                                       | renames only | Full gate; the same tests pass under the new name.                                                                                                                                                                                                                                                            | S    |
 
-One commit: it is behaviour-preserving, and half a move is worse than none.
+A1 is one commit: it is behaviour-preserving, and half a move is worse than none. A2 is a second.
 
 ### 4.3 Track L: the library
 
@@ -188,25 +192,25 @@ invisible in every scene that does not.
 
 `apps/common/xanadu/view/`; tests in `tests/xuzz/`, linking the engine only.
 
-| #   | Package                                                                                                                                                                                                          | Depends    | Tests                                                                     | Size |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------- | ---- |
-| E0  | `ArenaManifold`: the `release()` guard and `shadowCount()`                                                                                                                                                       | S1         | in `tests/xudu/arena_manifold_test.cpp`; federation tests unchanged       | S    |
-| E1  | `view_records.hpp`: `SubjectId`, records with the dash class (G13), `LayoutSink`, `PaneFrame`, `Measure`                                                                                                         | —          | sink grows and logs, never drops; identity and epoch                      | M    |
-| E2  | `view_error.hpp` and the message keys (G8)                                                                                                                                                                       | —          | every enumerator has a key                                                | S    |
-| E3  | `view.hpp`: descriptor with sub-views, registry                                                                                                                                                                  | E2         | duplicate kind and chord collision refused                                | S    |
-| E4  | `view_manifold`: two arenas, mint, occurrence, `link` with the layer rule (G1), toss, epoch, counts (G3), `verifyViewSpace`                                                                                      | E0, S4     | I1 to I6; random sequences then verify; the toss test                     | L    |
-| E5  | `view_binding`: binding points and `AxisRole` (G2), occurrences, groups, ring order seeded from `d.dims` (G11), pouch, undo, replay by name (G9)                                                                 | E4         | doubled bindings; nested groups; cycles; undo; replay with a missing name | L    |
-| E6  | `raster`                                                                                                                                                                                                         | E1         | fixed records give a fixed grid                                           | S    |
-| E7  | `pack_rank` and `pack_presentation`: lanes, steps, glue, seams, strands, spread, added to the shared chrome helper                                                                                               | E4         | both worked examples; strand per shared lane; spread emits lane labels    | L    |
-| E8  | `slice_view.hpp`: cursor, inputs, `move`, `cellAt`                                                                                                                                                               | E5         | default movement; cursor survives a toss                                  | S    |
-| E9  | Stretch vanishing, with ghosts and the two-axis rule (G5, D1, D2); the shared chrome helper for ghosts, view-only marks and the focus mark, as its own file from the first view; edge heat follows as a sub-view | E8         | §9.1.8 as a test file; goldens as rasters                                 | L    |
-| E10 | All-dim walk: wheel, slots, labels that avoid labels (G12), ring reordering (G14); first at depth 0 and the top three levels of detail                                                                           | E8, V2     | §9.2.11; no label overlaps at valence 60                                  | L    |
-| E11 | Dimensional pack view, `promotePack` (G4), occurrence highlighting (G7)                                                                                                                                          | E7, E8, S5 | §9.3.11                                                                   | L    |
-| E12 | `view_gesture`: drag to rebind and to reorder the ring, as a state machine                                                                                                                                       | E10        | every transition; cancel changes nothing                                  | S    |
-| E13 | `selector`: tiers, cursor, layout                                                                                                                                                                                | E5, E9     | each tier; arming and naming a point binds                                | M    |
-| E14 | `dimension_ranking`: `WalkRecorder`, summaries, ranking (G6)                                                                                                                                                     | —          | decay; Markov order; slips dropped; determinism                           | M    |
-| E15 | `builtin_views`: one registration call. Each view's descriptor, with its own settings and chords, ships in that view's package, so a view is reachable the day it lands.                                         | E3         | the keymap conflict test passes as each view is added                     | S    |
-| E16 | The `u` and `t` roles' cursor rules                                                                                                                                                                              | E5, S3     | step in and out of a subspace; a step on `t` against two built states     | M    |
+| #   | Package                                                                                                                                                                                                          | Depends    | Tests                                                                        | Size |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------- | ---- |
+| E0  | `ArenaManifold`: the `release()` guard and `shadowCount()`                                                                                                                                                       | S1         | in `tests/xudu/arena_manifold_test.cpp`; federation tests unchanged          | S    |
+| E1  | `view_records.hpp`: `SubjectId`, records with the dash class (G13), `LayoutSink`, `PaneFrame`, `Measure`                                                                                                         | —          | sink grows and logs, never drops; identity and epoch                         | M    |
+| E2  | `view_error.hpp` and the message keys (G8)                                                                                                                                                                       | —          | every enumerator has a key                                                   | S    |
+| E3  | `view.hpp`: descriptor with sub-views, registry                                                                                                                                                                  | E2         | duplicate kind and chord collision refused                                   | S    |
+| E4  | `view_manifold`: two arenas, mint, occurrence, `link` with the layer rule (G1), toss, epoch, counts (G3), `verifyViewSpace`                                                                                      | E0, S4     | I1 to I6; random sequences then verify; the toss test                        | L    |
+| E5  | `view_binding`: binding points and `AxisRole` (G2), occurrences, groups, ring order seeded from `d.dims` (G11), pouch, undo, replay by name (G9)                                                                 | E4         | doubled bindings; nested groups; cycles; undo; replay with a missing name    | L    |
+| E6  | `raster`                                                                                                                                                                                                         | E1         | fixed records give a fixed grid                                              | S    |
+| E7  | `pack_rank` and `pack_presentation`: lanes, steps, glue, seams, strands, spread, added to the shared chrome helper                                                                                               | E4         | both worked examples; strand per shared lane; spread emits lane labels       | L    |
+| E8  | `slice_view.hpp`: cursor, inputs, `move`, `cellAt`                                                                                                                                                               | E5         | default movement; cursor survives a toss                                     | S    |
+| E9  | Stretch vanishing, with ghosts and the two-axis rule (G5, D1, D2); the shared chrome helper for ghosts, view-only marks and the focus mark, as its own file from the first view; edge heat follows as a sub-view | E8         | §9.1.8 as a test file; goldens as rasters                                    | L    |
+| E10 | All-dim walk: wheel, slots, labels that avoid labels (G12), ring reordering (G14); first at depth 0 and the top three levels of detail                                                                           | E8, V2     | §9.2.11; no label overlaps at valence 60                                     | L    |
+| E11 | Dimensional pack view, `promotePack` (G4), occurrence highlighting (G7)                                                                                                                                          | E7, E8, S5 | §9.3.11                                                                      | L    |
+| E12 | `view_gesture`: drag to rebind and to reorder the ring, as a state machine                                                                                                                                       | E10        | every transition; cancel changes nothing                                     | S    |
+| E13 | `selector`: tiers, cursor, layout                                                                                                                                                                                | E5, E9     | each tier; arming and naming a point binds                                   | M    |
+| E14 | `dimension_ranking`: `WalkRecorder`, summaries kept in the activity store, ranking (G6)                                                                                                                          | —          | decay; Markov order; slips dropped; determinism; summaries survive a restart | M    |
+| E15 | `builtin_views`: one registration call. Each view's descriptor, with its own settings and chords, ships in that view's package, so a view is reachable the day it lands.                                         | E3         | the keymap conflict test passes as each view is added                        | S    |
+| E16 | The `u` and `t` roles' cursor rules                                                                                                                                                                              | E5, S3     | step in and out of a subspace; a step on `t` against two built states        | M    |
 
 E9 and E10 are independent once E8 lands. E14 depends on nothing and can be done at any time.
 
@@ -269,17 +273,17 @@ few hundred.
 | X1  | The visualizer's Cell Content and Topology modes as two slice views                                                                                                                       | M4, X0     | the visualizer's layout tests re-homed against them                               | M    |
 | X2  | `ViewAxisBinding` and `DimensionBundle` reduced to presets; the legacy navigation tests asserted against `ViewAxisSet`                                                                    | E5, X1     | same behaviour, new storage                                                       | M    |
 | X3  | **Go or no-go** (below). Then delete `ZigzagVisualizer`, the arrangement in `LinkBeams`, `BridgeCoordinator` and `zigzag_commands`; reduce `Views` to documents                           | X1, X2, M8 | each legacy test re-homed or retired with a reason                                | L    |
-| X4  | Journeys, probes, a `compare-backends.sh` scene per view; rename the third test binary for what it links (spec VU6)                                                                       | all        | the journeys of the spec's §16.2                                                  | M    |
+| X4  | Journeys, probes, a `compare-backends.sh` scene per view                                                                                                                                  | all        | the journeys of the spec's §16.2                                                  | M    |
 
 **Coexistence.** Old and new are both selectable at run time from M2; there is no `#ifdef` and no
 build flag. The legacy presentation is the default, and its tests go on running, which is what keeps
 it from rotting while it is still what a reader gets.
 
-**Go or no-go.** X3 does not happen by default. It happens when a review finds that the new views
-pass every journey the legacy ones pass, that the checks of §5.5 hold, and that the frame-time
-probes are no worse. If not, the legacy presentation stays the default, nothing is deleted, and the
-new views remain a choice. The cost of that is carrying both: X0's carving is what keeps it small,
-since after it the two share everything but layout and drawing.
+**Go or no-go.** X3 does not happen by default. The orchestrator of the work decides, and decides go
+only when a review finds that the new views pass every journey the legacy ones pass, that the checks
+of §5.5 hold, and that the frame-time probes are no worse. If not, the legacy presentation stays the
+default, nothing is deleted, and the new views remain a choice. The cost of that is carrying both:
+X0's carving is what keeps it small, since after it the two share everything but layout and drawing.
 
 **What becomes of everything A1 moves.** The view system replaces layout and arrangement. Most of
 what lives in `apps/common/ui/` after A1 is neither.
@@ -371,8 +375,9 @@ Every number in the table that is not already a setting becomes one (`motion.*`,
 
 ### 5.4 Component notes
 
-The full guidance for each component is the visual review's report; these are the points most likely
-to be got wrong.
+The full guidance for each component is the visual review's report
+([`projects/view-reviews/04-aesthetics.md`](projects/view-reviews/04-aesthetics.md)); these are the
+points most likely to be got wrong.
 
 - **Compass.** The eye lands on what is bound, not on the rose: arms are thin, labels carry the
   weight. An unbound arm is present and faint, so the reader sees there is somewhere to drop.
@@ -418,7 +423,7 @@ records; **H** needs a person.
 
 ### 5.6 Where the eye is consulted
 
-- **At M0:** V1, the colour strip.
+- **At M1, with the spikes:** V1, the colour strip.
 - **With E9, the first view:** ghosts, the focus mark and view-only chrome are written once, in a
   small shared helper; E7 adds seams and strands to it. Three views built one after another must not
   each invent their own.
@@ -429,8 +434,8 @@ records; **H** needs a person.
   the same claim as looking the same once pages can window.
 - **Before P4's defaults are fixed:** V3.
 - **At each milestone from M2:** the checks of §5.5 on a set of captured frames and one recording of
-  the milestone's journey, kept with the commit that closes it, and inspected by someone other than
-  the author. At M2, M4 and M6 one task is given to a reader who has not seen the feature: bind
+  the milestone's journey, inspected by a subagent whose only job that is, never by whoever wrote
+  the code. At M2, M4 and M6 one task is given to a reader who has not seen the feature: bind
   another dimension and read a rank; find which dimension connects two cells; bind a dimension that
   is not on screen.
 
@@ -456,34 +461,38 @@ links it, nothing proves it is usable. That is why M2 is as small as it is.
 
 ## 7. Risks
 
-| Risk                                                                        | Likelihood      | Cost                             | Handling                                                                                                                 |
-| --------------------------------------------------------------------------- | --------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| A draw per plane is too slow on OpenGL                                      | medium          | `PlaneSet` redesigned            | R1 before L6; flat views do not use `PlaneSet` at all                                                                    |
-| Page poses break reflow, the caret or picking                               | high without F2 | corrupted documents on screen    | L7 splits flow from pose first, behind tests, with no behaviour change                                                   |
-| The base view at fixed steps does not match today                           | medium          | visible regression at M4         | S2; parity step in P3 with captures                                                                                      |
-| Three views drift apart in look                                             | high            | rework across views              | shared chrome with E7; milestone reviews                                                                                 |
-| The relocation breaks packaging or a target not built locally               | medium          | red CI                           | F12 fixed in the same commit; the emptiness check; the full gate                                                         |
-| Legacy and new paths diverge while both live                                | medium          | bugs found late                  | both are view kinds; legacy tests run until X3                                                                           |
-| Translucent order is wrong where kinds overlap                              | medium          | visible only in some scenes      | one sorted list; a scene that forces overlap in L7's gate                                                                |
-| Settings and chords: a hundred entries, by hand                             | certain         | tedium and slips                 | a table helper; added per view; the conflict test                                                                        |
-| The `t` role needs a manifold per state                                     | unknown         | a cache, or `t` deferred         | S3; E16 is last in its track and nothing depends on it                                                                   |
-| The activity store cannot hold walk summaries yet                           | certain         | ranking forgets between sessions | E14 runs on the session; persistence waits for that store's design                                                       |
-| Rewiring the application to the host                                        | high            | the largest single change        | deferred to M8 behind the seam of U0; done in several commits; every `--view` mode reproduced first                      |
-| The new views are not good enough to replace the old                        | possible        | two presentations carried        | the go or no-go at X3; X0 keeps the shared part large and the duplicated part small                                      |
-| Two streams collide in `system_docs.cpp`, the keymap table and the Makefile | high            | merge friction                   | settings and chords live in each view's descriptor, not one file; the Makefile's source lists are globs and need no edit |
-| Scope: 60 to 120 commits                                                    | certain         | nothing usable for a long time   | the first release is M1 to M6; M2 and M3 use only what exists; the deferrals of §4.1                                     |
+| Risk                                                          | Likelihood      | Cost                          | Handling                                                               |
+| ------------------------------------------------------------- | --------------- | ----------------------------- | ---------------------------------------------------------------------- |
+| A draw per plane is too slow on OpenGL                        | medium          | `PlaneSet` redesigned         | R1 before L6; flat views do not use `PlaneSet` at all                  |
+| Page poses break reflow, the caret or picking                 | high without F2 | corrupted documents on screen | L7 splits flow from pose first, behind tests, with no behaviour change |
+| The base view at fixed steps does not match today             | medium          | visible regression at M4      | S2; parity step in P3 with captures                                    |
+| Three views drift apart in look                               | high            | rework across views           | shared chrome with E7; milestone reviews                               |
+| The relocation breaks packaging or a target not built locally | medium          | red CI                        | F12 fixed in the same commit; the emptiness check; the full gate       |
+| Legacy and new paths diverge while both live                  | medium          | bugs found late               | both are view kinds; legacy tests run until X3                         |
+| Translucent order is wrong where kinds overlap                | medium          | visible only in some scenes   | one sorted list; a scene that forces overlap in L7's gate              |
+| Settings and chords: a hundred entries, by hand               | certain         | tedium and slips              | a table helper; added per view; the conflict test                      |
+| The `t` role needs a manifold per state                       | unknown         | a cache, or `t` deferred      | S3; E16 is last in its track and nothing depends on it                 |
 
-## 8. Decisions for the owner
+| Rewiring the application to the host | high | the largest single change | deferred to M8 behind
+the seam of U0; done in several commits; every `--view` mode reproduced first | | The new views are
+not good enough to replace the old | possible | two presentations carried | the go or no-go at X3;
+X0 keeps the shared part large and the duplicated part small | | Two streams collide in
+`system_docs.cpp`, the keymap table and the Makefile | high | merge friction | settings and chords
+live in each view's descriptor, not one file; the Makefile's source lists are globs and need no edit
+| | Scope: 60 to 120 commits | certain | nothing usable for a long time | the first release is M1 to
+M6; M2 and M3 use only what exists; the deferrals of §4.1 |
 
-1. **Relocation now, as its own change?** It is independent, mechanical, and everything else is
-   easier after it. One reviewer would run it only after the spikes; nothing in it depends on them.
-1. **The third test binary's name** once it links all of `apps/common/ui/` (spec VU6).
-1. **Whether `u` and `t` are in the first delivery.** They are specified, but E16 is separable and
-   `t` still has an open meaning.
-1. **How much of the selector is in the first release.** This plan ships its second and third tiers
-   and "most used" at M6, and defers the first tier's in-place editing and the Markov order.
-1. **Who gives the go or no-go at X3**, and who inspects each milestone's frames.
-1. **Where walk summaries live** in the activity store, which decides when the ranking can remember.
+## 8. Decisions made
+
+The owner answered the five questions the first version of this plan left open.
+
+| Question                                            | Decision                                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Relocation now, as its own change?                  | **Yes, and first** — before the spikes, so it is tested in isolation (M0).                                                 |
+| Are `u` and `t` in the first release?               | **No.** Deferred with E16.                                                                                                 |
+| Who gives the go or no-go, and who inspects frames? | **The orchestrator** decides, at every milestone and at the cut-over. **A specialised subagent** inspects captured frames. |
+| Where do walk summaries live?                       | **Wherever fits for now**, in the activity store; refine later (E14).                                                      |
+| The third test binary's name?                       | **`ui_test`**, with `tests/ui/`, renamed straight after the relocation (A2).                                               |
 
 ## 9. Challenges and responses
 
@@ -536,3 +545,6 @@ Three challengers attacked the first draft. What each said that mattered, and wh
 - 2026-10-07 — Initial plan, from four expert reviews.
 - 2026-10-07 — Revised after the challenge round: milestones reordered, the host deferred behind an
   extracted seam, deferrals and the go or no-go added, gaps G12 to G16, spike R5.
+- 2026-10-07 — The owner's decisions recorded (§8): relocation first, then spikes; `u` and `t`
+  deferred; the orchestrator decides go or no-go and a subagent inspects frames; walk summaries in
+  the activity store as they fit; the third test binary becomes `ui_test`.
