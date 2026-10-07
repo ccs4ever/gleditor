@@ -42,6 +42,7 @@ struct UiMetrics {
                              Rect safeArea, float gap = 0.0F);
 /// Empty overrides use the live role. Explicit legacy descriptions keep their
 /// family, style and point size while following UI and font scale changes.
+[[nodiscard]] Theme withFontOverride(Theme, FontRole, std::string_view);
 [[nodiscard]] std::string scaledFontDescription(std::string_view override,
                                                 FontRole, const UiMetrics &,
                                                 const Theme &);

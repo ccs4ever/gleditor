@@ -5,14 +5,18 @@
 #ifndef XUDU_PAGE_BREAK_OVERLAY_HPP
 #define XUDU_PAGE_BREAK_OVERLAY_HPP
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <glm/vec2.hpp>
 
+#include "common/ui/page_break_presentation.hpp"
+#include "common/xanadu/microversion.hpp"
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/pick_observer.hpp>
@@ -28,7 +32,8 @@ class Session;
  *        and centered button "[+ Split to New Page (Ctrl+Ret)]".
  */
 class PageBreakOverlay : public gleditor::FrameContributor,
-                         public gleditor::PickObserver {
+                         public gleditor::PickObserver,
+                         public gleditor::a11y::Source {
 public:
   static constexpr std::uint32_t kTagPageBreakAffordance = 13001U;
 
@@ -36,7 +41,7 @@ public:
       std::function<void(std::uint32_t docIndex, std::uint32_t charOffset)>;
 
   explicit PageBreakOverlay(Session &session, RendererRef renderer,
-                            std::string fontName = "Sans 10");
+                            std::string fontName = {});
   ~PageBreakOverlay() override;
 
   // FrameContributor interface
@@ -48,6 +53,17 @@ public:
   // PickObserver interface
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
+
+  void describe(gleditor::a11y::Builder &builder) override {
+    presentation_.describe(builder);
+  }
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override {
+    return presentation_.accessibilityRevision();
+  }
+  bool performAction(std::uint64_t id, gleditor::a11y::Action action,
+                     std::string_view value) override {
+    return presentation_.performAction(id, action, value);
+  }
 
   void setOnSplit(SplitHandler handler) { onSplit_ = std::move(handler); }
 
@@ -77,8 +93,27 @@ private:
   bool hasHover_{false};
   std::uint32_t hoverDoc_{0};
   std::uint32_t hoverCharOffset_{0};
-  glm::vec2 buttonMin_{0.0F, 0.0F};
-  glm::vec2 buttonMax_{0.0F, 0.0F};
+  struct Target {
+    std::uint32_t document{}, offset{};
+    std::size_t store{}, operations{};
+    std::uint64_t generation{};
+    xanadu::MicroversionId version;
+    bool operator==(const Target &) const = default;
+  };
+  PageBreakPresentation presentation_;
+  std::optional<Target> target_;
+  std::uint64_t targetRevision_{};
+  std::uint64_t drawnRevision_{};
+  std::optional<std::array<float, 3>> drawnGap_;
+  struct BoundaryCache {
+    std::optional<Target> stamp;
+    std::vector<std::uint32_t> offsets;
+  };
+  std::vector<BoundaryCache> boundaries_;
+  mutable std::mutex actionMutex_;
+  std::optional<Target> pendingSplit_;
+  void selectTarget(std::optional<Target>);
+  void drainActions();
 };
 
 } // namespace xudu

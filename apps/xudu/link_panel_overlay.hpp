@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -29,7 +30,9 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
+#include <gleditor/ui/overlay.hpp>
 
+#include "common/ui/link_panel_presentation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
@@ -40,7 +43,8 @@ namespace xudu {
 
 class LinkPanelOverlay : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
-                         public gleditor::SpanDecorator {
+                         public gleditor::SpanDecorator,
+                         public gleditor::a11y::Source {
 public:
   /// Picking tags from here up are the panel's: its background, then one per
   /// button.
@@ -56,8 +60,7 @@ public:
   using FramingHandler =
       std::function<void(const AnchorPair &, ch::Timeline &)>;
 
-  LinkPanelOverlay(LinkContext &context, Session &session) noexcept
-      : context(context), session(session) {}
+  LinkPanelOverlay(LinkContext &context, Session &session);
 
   void setCellHighlighter(CellHighlighter highlighter) {
     cellHighlighter = std::move(highlighter);
@@ -75,9 +78,27 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &pipeline) override;
   void drawFrame(gleditor::FrameContext &ctx) override;
+  [[nodiscard]] bool busy() const override {
+    const std::scoped_lock lock(actionGuard);
+    return !pending.empty();
+  }
   void decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) override;
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
+  void describe(gleditor::a11y::Builder &into) override {
+    panel.describe(into);
+  }
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override {
+    return panel.accessibilityRevision();
+  }
+  bool performAction(std::uint64_t id, gleditor::a11y::Action action,
+                     std::string_view value) override {
+    return panel.performAction(id, action, value);
+  }
+  [[nodiscard]] std::shared_ptr<const gleditor::ui::WidgetScene>
+  presentation() const {
+    return panel.snapshot();
+  }
 
 private:
   /// What the committed geometry and highlights were built from.
@@ -94,15 +115,27 @@ private:
 
   void rebuildHighlights();
   void rebuildPanel(gleditor::FrameContext &ctx);
+  void queueAction(gleditor::ui::WidgetId);
+  void executePending();
 
   LinkContext &context;
   Session &session;
   xanadu::LinkPanelConfig config;
   std::uint64_t configRevision{1};
 
-  render::RenderDevice *device{};
-  render::PipelineDesc pipeline;
-  std::unique_ptr<gleditor::Canvas> canvas;
+  gleditor::ui::ScreenOverlay panel;
+  gleditor::text::ShapingCache measurements;
+  gleditor::ui::UiMetrics builtMetrics;
+  gleditor::ui::Theme builtTheme;
+  struct PendingAction {
+    std::uint64_t selection{};
+    xanadu::NavigationCommand command;
+  };
+  mutable std::mutex actionGuard;
+  std::shared_ptr<const common_ui::LinkPanelPresentation> currentPresentation;
+  std::uint64_t presentationSelection{};
+  std::vector<PendingAction> pending;
+  std::uint32_t nextActionId{1024};
   std::optional<Stamp> panelBuiltFor;
   std::optional<Stamp> highlightsBuiltFor;
   /// Open view index and the range to colour in it.

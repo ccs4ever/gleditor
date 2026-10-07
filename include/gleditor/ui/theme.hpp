@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <gleditor/color.hpp>
 #include <glm/ext/vector_float4.hpp>
+#include <optional>
 #include <string>
 
 namespace gleditor::ui {
@@ -29,6 +30,7 @@ struct TypeScale {
 };
 struct ThemeColours {
   glm::vec4 surface{0.12F, 0.14F, 0.18F, 1.0F};
+  std::optional<glm::vec4> buttonSurface;
   glm::vec4 text{0.95F, 0.95F, 0.96F, 1.0F};
   glm::vec4 muted{0.65F, 0.68F, 0.72F, 1.0F};
   glm::vec4 accent{0.25F, 0.7F, 0.95F, 1.0F};

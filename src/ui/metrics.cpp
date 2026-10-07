@@ -110,13 +110,11 @@ Rect placeNear(Rect anchor, float width, float height, Rect safeArea,
   }
   return clampToSafeArea(placed, safe);
 }
-std::string scaledFontDescription(std::string_view override, FontRole role,
-                                  const UiMetrics &metrics,
-                                  const Theme &theme) {
-  if (override.empty()) return metrics.fontDescription(role, theme);
-  auto resolved = theme;
-  auto &font    = resolved.fonts.at(static_cast<std::size_t>(role));
-  font.family   = override;
+Theme withFontOverride(Theme resolved, FontRole role,
+                       std::string_view override) {
+  if (override.empty()) return resolved;
+  auto &font  = resolved.fonts.at(static_cast<std::size_t>(role));
+  font.family = override;
   // Match FontManager's size-less description default; keep the original
   // family/style spelling because resolving to a face name loses style hints.
   font.points = 16;
@@ -131,6 +129,11 @@ std::string scaledFontDescription(std::string_view override, FontRole role,
       font.points = points;
     }
   }
-  return metrics.fontDescription(role, resolved);
+  return resolved;
+}
+std::string scaledFontDescription(std::string_view override, FontRole role,
+                                  const UiMetrics &metrics,
+                                  const Theme &theme) {
+  return metrics.fontDescription(role, withFontOverride(theme, role, override));
 }
 } // namespace gleditor::ui

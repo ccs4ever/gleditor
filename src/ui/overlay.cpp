@@ -365,10 +365,17 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
   for (const auto &visual : scene.visuals) {
     const auto *box = scene.layout.find(visual.id);
     if (!box) continue;
+    const auto itemSurface = visual.accessibilityRole == a11y::Role::Button
+                                 ? rgba(theme_.colours.buttonSurface.value_or(
+                                       theme_.colours.surface))
+                                 : surface;
     if (visual.background) {
       background_->setTag(render::tagKindOverlay, visual.pickingId);
-      const auto fill = rgba(visual.selected ? theme_.colours.accent
-                                             : theme_.colours.surface);
+      const auto fill = rgba(
+          visual.selected ? theme_.colours.accent
+          : visual.accessibilityRole == a11y::Role::Button
+              ? theme_.colours.buttonSurface.value_or(theme_.colours.surface)
+              : theme_.colours.surface);
       background_->addRect(box->rect.left, box->rect.bottom, box->rect.width,
                            box->rect.height, fill);
     }
@@ -403,7 +410,8 @@ void ScreenOverlay::rebuildCanvas(RenderState &state,
           std::max(textBox.width + visual.textOffsetPx, visual.fitted.widthPx);
     }
     canvas->addText(state, textBox, visual.fitted, colour,
-                    visual.selected ? rgba(theme_.colours.accent) : surface);
+                    visual.selected ? rgba(theme_.colours.accent)
+                                    : itemSurface);
     canvas->popClip();
   }
   rebuildFocusCanvas(scene);

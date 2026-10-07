@@ -15,7 +15,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <gleditor/a11y/tree.hpp>
+#include <gleditor/ui/layout.hpp>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -33,7 +36,8 @@
 namespace xudu {
 
 class OverviewOverlay : public gleditor::FrameContributor,
-                        public gleditor::PickObserver {
+                        public gleditor::PickObserver,
+                        public gleditor::a11y::Source {
 public:
   /// The panel's picking tag.
   static constexpr std::uint32_t kTagOverview = 19000U;
@@ -50,10 +54,18 @@ public:
 
   void setConfig(const xanadu::OverviewConfig &next);
   void setMarkSource(MarkSource source, MarkRevision revision) {
-    markSource   = std::move(source);
+    const std::scoped_lock lock(guard);
+    markSource = std::move(source);
+    builtFor.reset();
     markRevision = std::move(revision);
   }
-  void toggle() { visibleOverride = !isVisible(); }
+  void toggle();
+  [[nodiscard]] static gleditor::ui::Rect
+  panelBounds(const xanadu::OverviewConfig &, const gleditor::ui::UiMetrics &);
+  void describe(gleditor::a11y::Builder &) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t, gleditor::a11y::Action,
+                     std::string_view) override;
 
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &pipeline) override;
@@ -72,6 +84,8 @@ private:
     std::uint64_t marks{};
     std::uint64_t config{};
     bool visible{};
+    gleditor::ui::UiMetrics metrics;
+    std::uint64_t geometry{};
     bool operator==(const Stamp &) const = default;
   };
 
@@ -80,6 +94,10 @@ private:
   }
   void rebuild(gleditor::FrameContext &ctx, const Stamp &stamp);
 
+  mutable std::mutex guard;
+  std::uint64_t revision{1};
+  std::uint32_t pickScope{}, pickToken{};
+  std::shared_ptr<const std::vector<std::uint32_t>> pickTargets;
   AppStateRef state;
   xanadu::OverviewConfig config;
   std::uint64_t configRevision{1};

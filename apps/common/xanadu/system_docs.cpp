@@ -205,8 +205,15 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overview.viewportColour, overview.markColour: Its colours as RGBA "
            "integers; marks show the selected link's chosen places and the "
            "focused ZigZag card.\n"
-           "linkPanel.font: Font of the selected-link panel. Default is Sans "
-           "10.\n"
+           "linkPanel.font: Font override of the selected-link panel. An empty "
+           "default follows the label typography role. Explicit fonts follow "
+           "display and font scales.\n"
+           "linkPanel.maxLines: Maximum wrapped description lines; default 3, "
+           "range 1 to 20. linkPanel.maxWidthShare and "
+           "linkPanel.maxHeightShare: "
+           "Maximum shares of the safe area; width default 0.9, height default "
+           "1, "
+           "range 0.1 to 1.\n"
            "linkPanel.marginPx, linkPanel.topPx, linkPanel.paddingPx, "
            "linkPanel.lineGapPx: The panel's distance from the window's right "
            "and top edges, its inner space and its line spacing, in logical "
@@ -755,10 +762,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kRadialMenuInnerRadius),
          .notes   = "Inner deadzone radius of radial menu in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {42.0}}}},
-        {.name    = std::string(settings::kLinkPanelFont),
-         .notes   = "Font of the selected-link panel",
+        {.name  = std::string(settings::kLinkPanelFont),
+         .notes = "Font override of the selected-link panel; empty follows the "
+                  "label role",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {panel.font}}}},
+        {.name    = std::string(settings::kLinkPanelMaxLines),
+         .notes   = "Maximum wrapped lines per link-panel description",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{panel.maxLines}}}}},
+        {.name    = std::string(settings::kLinkPanelMaxWidthShare),
+         .notes   = "Maximum share of safe width occupied by the link panel",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.maxWidthShare}}}}},
+        {.name    = std::string(settings::kLinkPanelMaxHeightShare),
+         .notes   = "Maximum share of safe height occupied by the link panel",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.maxHeightShare}}}}},
         {.name    = std::string(settings::kLinkPanelMarginPx),
          .notes   = "Gap between the link panel and the window edge in pixels",
          .schemas = {{.expectedTypes = {"float"},
@@ -2961,6 +2981,17 @@ UIConfig UIConfig::fromStore(const Store &store) {
   const auto colour = [&model](std::string_view name, std::uint32_t &into) {
     into = static_cast<std::uint32_t>(model.getInt64(name, std::int64_t{into}));
   };
+  panel.maxLines = static_cast<std::uint16_t>(std::clamp<std::int64_t>(
+      model.getInt64(settings::kLinkPanelMaxLines, panel.maxLines), 1, 20));
+  length(settings::kLinkPanelMaxWidthShare, panel.maxWidthShare);
+  length(settings::kLinkPanelMaxHeightShare, panel.maxHeightShare);
+  const auto defaults  = LinkPanelConfig{};
+  panel.maxWidthShare  = std::isfinite(panel.maxWidthShare)
+                             ? std::clamp(panel.maxWidthShare, 0.1F, 1.0F)
+                             : defaults.maxWidthShare;
+  panel.maxHeightShare = std::isfinite(panel.maxHeightShare)
+                             ? std::clamp(panel.maxHeightShare, 0.1F, 1.0F)
+                             : defaults.maxHeightShare;
   length(settings::kLinkPanelMarginPx, panel.marginPx);
   length(settings::kLinkPanelTopPx, panel.topPx);
   length(settings::kLinkPanelPaddingPx, panel.paddingPx);

@@ -1134,6 +1134,8 @@ int XuzzApp::run(const int argc, char **argv) {
 
   state->accessibility->addSource(docSwitcher.get());
   state->accessibility->addSource(&links);
+  state->accessibility->addSource(&linkPanel);
+  state->accessibility->addSource(&overview);
   state->accessibility->addSource(&map);
   state->accessibility->addSource(&publishForm);
   state->accessibility->addSource(&quotationOverlay);

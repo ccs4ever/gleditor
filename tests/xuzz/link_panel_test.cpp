@@ -169,6 +169,32 @@ TEST(LinkPanelTest, ConfigDefaultsComeFromTheUiSystemDoc) {
   EXPECT_FLOAT_EQ(xanadu::UIConfig::fromStore(store).linkPanel.marginPx, 30.0F);
 }
 
+TEST(LinkPanelTest, FitLimitsComeFromLiveUiSettingsAndRemainBounded) {
+  xanadu::Store store;
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  auto head = store.primaryCurrentVersion();
+  head = xanadu::setSetting(store, head, xanadu::settings::kLinkPanelMaxLines,
+                            std::int64_t{6});
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kLinkPanelMaxWidthShare, .75);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kLinkPanelMaxHeightShare, .8);
+  store.repointCurrentVersion(head);
+  const auto panel = xanadu::UIConfig::fromStore(store).linkPanel;
+  EXPECT_EQ(panel.maxLines, 6);
+  EXPECT_FLOAT_EQ(panel.maxWidthShare, .75F);
+  EXPECT_FLOAT_EQ(panel.maxHeightShare, .8F);
+  EXPECT_TRUE(panel.font.empty());
+  head = xanadu::setSetting(store, head, xanadu::settings::kLinkPanelMaxLines,
+                            std::int64_t{500});
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kLinkPanelMaxWidthShare, 5.);
+  store.repointCurrentVersion(head);
+  const auto bounded = xanadu::UIConfig::fromStore(store).linkPanel;
+  EXPECT_EQ(bounded.maxLines, 20);
+  EXPECT_FLOAT_EQ(bounded.maxWidthShare, 1.F);
+}
+
 TEST(LinkPanelTest, ReadingNamesTheMembersTheCaretIsOn) {
   Panel p;
   p.run(nav::SelectLink{.key = p.key()});

@@ -5,8 +5,10 @@
 #include "overview_overlay.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/geometric.hpp>
@@ -32,14 +34,17 @@ constexpr float kOutlineShareOfInset = 0.25F;
 } // namespace
 
 void OverviewOverlay::setConfig(const xanadu::OverviewConfig &next) {
+  const std::scoped_lock lock(guard);
   if (next != config) {
     config = next;
     ++configRevision;
+    ++revision;
   }
 }
 
 void OverviewOverlay::deviceReady(render::RenderDevice &device,
                                   const render::PipelineDesc &pipeline) {
+  const std::scoped_lock lock(guard);
   // The panel draws no text; the canvas needs a font all the same.
   canvas = std::make_unique<gleditor::Canvas>(&device, state->defaultFontName);
   canvas->createPipeline(pipeline, false);
@@ -47,14 +52,20 @@ void OverviewOverlay::deviceReady(render::RenderDevice &device,
 }
 
 void OverviewOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const std::scoped_lock lock(guard);
   if (!canvas) {
     return;
   }
+  auto metrics         = ctx.metrics;
+  metrics.screenWidth  = ctx.screenWidth;
+  metrics.screenHeight = ctx.screenHeight;
+  metrics.chrome       = ctx.chrome;
   Stamp stamp{.width   = ctx.screenWidth,
               .height  = ctx.screenHeight,
               .marks   = markRevision ? markRevision() : 0,
               .config  = configRevision,
-              .visible = isVisible()};
+              .visible = isVisible(),
+              .metrics = metrics};
   {
     std::scoped_lock locker(state->view);
     stamp.camera = state->view.pos;
@@ -64,15 +75,40 @@ void OverviewOverlay::drawFrame(gleditor::FrameContext &ctx) {
     if (doc) {
       ++stamp.documents;
       stamp.pages += doc->numPages();
+      const auto hash = [&](float value) {
+        stamp.geometry =
+            (stamp.geometry ^ std::bit_cast<std::uint32_t>(value)) *
+            1099511628211ULL;
+      };
+      const auto model = doc->getModel();
+      for (int column = 0; column < 4; ++column)
+        for (int row = 0; row < 4; ++row) hash(model[column][row]);
+      for (std::size_t page = 0; page < doc->numPages(); ++page) {
+        if (const auto frame = doc->pageFrame(page)) {
+          hash(frame->leftPx);
+          hash(frame->bottomPx);
+          hash(frame->rightPx);
+          hash(frame->topPx);
+          for (int column = 0; column < 4; ++column)
+            for (int row = 0; row < 4; ++row)
+              hash(frame->localToWorld[column][row]);
+        }
+      }
     }
   }
   if (builtFor != stamp) {
     builtFor = stamp;
+    ++revision;
     rebuild(ctx, stamp);
   }
   if (canvas->empty()) {
     return;
   }
+  if (!pickScope) pickScope = ctx.state.allocatePersistentOverlayPickScope();
+  canvas->setIdentity(pickScope, 0);
+  ctx.state.bindOverlayWidgets(
+      render::packTagIdentity(render::tagKindOverlay, pickScope, 0),
+      pickTargets);
   const auto ortho = glm::ortho( // NOLINT(readability-suspicious-call-argument)
       0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
       static_cast<float>(ctx.screenHeight), -1.0F, 1.0F);
@@ -152,15 +188,26 @@ void OverviewOverlay::rebuild(gleditor::FrameContext &ctx, const Stamp &stamp) {
   const glm::vec2 viewLo(stamp.camera.x - halfW, stamp.camera.y - halfH);
   const glm::vec2 viewHi(stamp.camera.x + halfW, stamp.camera.y + halfH);
 
-  panelMin  = glm::vec2(config.leftPx, config.bottomPx);
-  panelSize = glm::vec2(config.widthPx, config.heightPx);
+  const auto bounds = panelBounds(config, stamp.metrics);
+  panelMin          = {bounds.left, bounds.bottom};
+  panelSize         = {bounds.width, bounds.height};
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    canvas->commit();
+    return;
+  }
+  if (pickToken == std::numeric_limits<std::uint32_t>::max())
+    throw std::length_error("Overview pick identities exhausted");
+  ++pickToken;
+  pickTargets = std::make_shared<const std::vector<std::uint32_t>>(
+      std::initializer_list<std::uint32_t>{pickToken});
   // Inset so pages and marks never touch the panel's edge.
   const float inset = std::min(panelSize.x, panelSize.y) * kInsetShare;
   const auto fit    = xanadu::OverviewFit::fit(
       lo, hi, panelMin + glm::vec2(inset), panelSize - glm::vec2(2.0F * inset));
   lastFit = fit;
 
-  canvas->setTag(render::tagKindOverlay, kTagOverview);
+  canvas->setTag(render::tagKindOverlay, 1);
+  canvas->pushClip(bounds);
   canvas->addRect(panelMin.x, panelMin.y, panelSize.x, panelSize.y,
                   config.backgroundColour);
   for (const auto &[pageLo, pageHi] : pages) {
@@ -187,21 +234,81 @@ void OverviewOverlay::rebuild(gleditor::FrameContext &ctx, const Stamp &stamp) {
   canvas->addLine(b.x, a.y, b.x, b.y, rim, config.viewportColour);
   canvas->addLine(b.x, b.y, a.x, b.y, rim, config.viewportColour);
   canvas->addLine(a.x, b.y, a.x, a.y, rim, config.viewportColour);
+  canvas->popClip();
   canvas->setTag(render::tagKindOverlay, 0);
   canvas->commit();
 }
 
 bool OverviewOverlay::picked(const render::PickingResult &pick,
                              RenderState & /*state*/) {
-  if (render::tagKindOverlay != pick.tag.kind ||
-      kTagOverview != pick.tag.clusterIndex || !lastFit) {
+  const std::scoped_lock lock(guard);
+  if (render::tagKindOverlay != pick.tag.kind || !isVisible() || !lastFit)
+    return false;
+  if (pick.requestId != 0) {
+    if (pick.tag.docIndex != pickScope || pick.tag.pageIndex != 0) return false;
+    if (pick.overlayWidgetId != pickToken) return true;
+  } else if (!(pick.tag.docIndex == 0 && pick.tag.pageIndex == 0 &&
+               pick.tag.clusterIndex == kTagOverview) &&
+             !(pick.tag.docIndex == pickScope && pick.tag.pageIndex == 0 &&
+               pick.tag.clusterIndex == 1)) {
     return false;
   }
   // Picks count rows from the top; the panel is laid out from the bottom.
   const glm::vec2 at(static_cast<float>(pick.x),
                      static_cast<float>(screenHeight - pick.y));
+  if (at.x < panelMin.x || at.y < panelMin.y ||
+      at.x > panelMin.x + panelSize.x || at.y > panelMin.y + panelSize.y)
+    return true;
   const auto world = lastFit->toWorld(at);
   std::scoped_lock locker(state->view);
+  state->view.pos.x = world.x;
+  state->view.pos.y = world.y;
+  return true;
+}
+
+void OverviewOverlay::toggle() {
+  const std::scoped_lock lock(guard);
+  visibleOverride = !isVisible();
+  ++revision;
+}
+
+gleditor::ui::Rect
+OverviewOverlay::panelBounds(const xanadu::OverviewConfig &config,
+                             const gleditor::ui::UiMetrics &metrics) {
+  return gleditor::ui::clampToSafeArea(
+      metrics.rounded({metrics.px(config.leftPx), metrics.px(config.bottomPx),
+                       metrics.px(config.widthPx),
+                       metrics.px(config.heightPx)}),
+      metrics.pixelSafeArea());
+}
+
+void OverviewOverlay::describe(gleditor::a11y::Builder &builder) {
+  const std::scoped_lock lock(guard);
+  if (!isVisible() || !lastFit) return;
+  auto &node = builder.add(kTagOverview, gleditor::a11y::Role::Button);
+  node.label = "Overview: move camera to scene centre";
+  node.bounds =
+      gleditor::a11y::Rect{panelMin.x, screenHeight - panelMin.y - panelSize.y,
+                           panelMin.x + panelSize.x, screenHeight - panelMin.y};
+  node.focusable = true;
+  node.actions   = gleditor::a11y::bit(gleditor::a11y::Action::Click);
+  builder.contribute(builder.id(kTagOverview));
+}
+
+std::uint64_t OverviewOverlay::accessibilityRevision() const {
+  const std::scoped_lock lock(guard);
+  return revision;
+}
+
+bool OverviewOverlay::performAction(std::uint64_t id,
+                                    gleditor::a11y::Action action,
+                                    std::string_view) {
+  const std::scoped_lock lock(guard);
+  if (gleditor::a11y::Ids::localOf(id) != kTagOverview ||
+      action != gleditor::a11y::Action::Click || !isVisible() || !lastFit)
+    return false;
+  const auto world = lastFit->toWorld(panelMin + panelSize * 0.5F);
+  const std::scoped_lock viewLock(state->view);
   state->view.pos.x = world.x;
   state->view.pos.y = world.y;
   return true;

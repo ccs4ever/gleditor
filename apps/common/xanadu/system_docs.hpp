@@ -252,7 +252,12 @@ inline constexpr std::string_view kOverviewViewportColour =
     "overview.viewportColour";
 inline constexpr std::string_view kOverviewMarkColour = "overview.markColour";
 // The selected-link panel. Colours are RGBA8, most significant byte red.
-inline constexpr std::string_view kLinkPanelFont      = "linkPanel.font";
+inline constexpr std::string_view kLinkPanelFont     = "linkPanel.font";
+inline constexpr std::string_view kLinkPanelMaxLines = "linkPanel.maxLines";
+inline constexpr std::string_view kLinkPanelMaxWidthShare =
+    "linkPanel.maxWidthShare";
+inline constexpr std::string_view kLinkPanelMaxHeightShare =
+    "linkPanel.maxHeightShare";
 inline constexpr std::string_view kLinkPanelMarginPx  = "linkPanel.marginPx";
 inline constexpr std::string_view kLinkPanelTopPx     = "linkPanel.topPx";
 inline constexpr std::string_view kLinkPanelPaddingPx = "linkPanel.paddingPx";
@@ -1026,7 +1031,10 @@ struct OverviewConfig {
  * with, so the two cannot drift.
  */
 struct LinkPanelConfig {
-  std::string font{"Sans 10"};
+  std::string font;
+  std::uint16_t maxLines{3};
+  float maxWidthShare{0.9F};
+  float maxHeightShare{1.0F};
   /// Gap between the panel and the window's right edge.
   float marginPx{16.0F};
   /// Gap between the panel and the window's top edge: clear of the document
