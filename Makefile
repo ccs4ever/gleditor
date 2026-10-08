@@ -1102,15 +1102,27 @@ TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
 	xudu-swarm-peer vquery vpl vplc vprolog)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/ui_test
-	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	$(OBJDIR)/ui_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
-		tools/swarm-netns-test.sh && \
-		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; \
-	fi
+# The four binaries run one after another in one recipe -- they share
+# build/xdg, so they must not run at once -- and make abandons a recipe at its
+# first failing line whatever -k says. So the recipe reads -k itself: under
+# `make -k test` every binary and the swarm tests run and the target fails at
+# the end if any of them did; without it the first failure stops the run, as
+# before. The first word of MAKEFLAGS holds the single-letter flags, unless
+# there are none, in which case it is a long option starting with "-".
+TEST_KEEP_GOING = $(findstring k,$(filter-out -%,$(firstword $(MAKEFLAGS))))
+TEST_BINARIES := gleditor_test xudu_test xuzz_test ui_test
+test: $(TEST_PROGRAMS) $(addprefix $(OBJDIR)/,$(TEST_BINARIES))
+	@status=0; \
+	for t in $(TEST_BINARIES); do \
+		echo "$(OBJDIR)/$$t $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')"; \
+		$(OBJDIR)/$$t $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)') || { \
+			status=1; [ -n "$(TEST_KEEP_GOING)" ] || exit 1; }; \
+	done; \
+	if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
+		{ tools/swarm-netns-test.sh && \
+		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; } || status=1; \
+	fi; \
+	exit $$status
 
 test/all: test
 

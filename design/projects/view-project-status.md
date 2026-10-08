@@ -77,20 +77,25 @@ Taken at `a863fbe`, each binary run alone and headless, outside `make`:
 | `xuzz_test`     | 61     | 0      | 0                                           |
 | `ui_test`       | 191    | 1      | 0 (was `zigzag_test`)                       |
 
-`make format-check` and `make lint` are green on the base. The full `make test`, with the rootless
-swarm tests, has not been run in this environment. `tools/compare-backends.sh`: OpenGL and GLES
-agree pixel for pixel, and the culling, atlas-growth and minification checks pass; Vulkan is not
-available under SDL2 offscreen; the run fails at its E2E stage on the three E2E reds below.
+`make format-check` and `make lint` are green on the base. A full `make -k test` after A2 ran every
+binary and both rootless swarm runs: the swarm tests pass (12, then 4), so this container has
+`veth`. Under it `xudu_test` failed 6, not 4: the two timing benchmarks marked below failed as well,
+and both passed in every run of `xudu_test` on its own, so they are load-sensitive rather than
+broken. `tools/compare-backends.sh`: OpenGL and GLES agree pixel for pixel, and the culling,
+atlas-growth and minification checks pass; Vulkan is not available under SDL2 offscreen; the run
+fails at its E2E stage on the three E2E reds below.
 
 ### Known reds, not this project's
 
-All six reproduce alone, without any concurrent run.
+The six without "(sometimes)" reproduce alone, without any concurrent run.
 
 | Test                                                                           | Failure                                           | Suspected cause                                                                                                             |
 | ------------------------------------------------------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs`              | advance off by 0.77 px against a 0.5 px tolerance | installed fonts: here `Monospace` is DejaVu Sans Mono and `Sans` is Inter                                                   |
 | `StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels`       | a control's fitted label has no glyphs            | fonts, unconfirmed                                                                                                          |
 | `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`                              | 5.4 µs against 3.96 µs at 500 operations          | a microsecond timing assertion                                                                                              |
+| `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` (sometimes)             | a speedup assertion at millisecond scale          | timing; failed under `make -k test`, passed alone                                                                           |
+| `VortexBenchmarkTest.MemoizedVsUnmemoizedExecution` (sometimes)                | a speedup assertion                               | timing; failed under `make -k test`, passed alone                                                                           |
 | `E2EBinaryOrchestrationTest.textSurvivesAtWholePageDistance`                   | 72 inked pixels, at least 100 expected            | fonts, unconfirmed                                                                                                          |
 | `E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped`            | the dropped text lands at the wrong offset        | glyph metrics, unconfirmed                                                                                                  |
 | `E2EBinaryOrchestrationTest.storePanelCreatesObjectsThroughNamedDrawnControls` | `xuzz` exits 1                                    | unknown; the log warns that `std:xudu/publish` and `std:zigzag/save_store` share a key, which may be a real keymap conflict |
@@ -123,9 +128,9 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
 
 ## Findings for the owner
 
-- **`make test` stops at the first red binary.** Its recipe runs the four binaries one after
-  another, so `gleditor_test`'s one font failure keeps the other three, and the swarm tests, from
-  running at all. Until the baseline reds are settled, every gate here runs the binaries one by one.
+- **`make test` stopped at the first red binary**, so `gleditor_test`'s font failure kept the other
+  three, and the swarm tests, from running. `make -k test` now runs them all (the recipe reads `-k`
+  itself) and fails at the end if any did.
 - **CI's build job installs neither Poppler, libmagic, libvlc nor librnp**, all of which the
   Makefile requires, so it most likely fails at pkg-config. Not checked against a CI run.
 - **The `config.h` race.** `apps/xuzz/xuzz_app.cpp` includes the generated `config.h`, but only the

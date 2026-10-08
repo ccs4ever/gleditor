@@ -116,6 +116,7 @@ window. When visual confirmation is the point, the user will say so.
 
 ```sh
 make -j$(nproc) test                  # gleditor_test, xudu_test, xuzz_test, ui_test, then the rootless swarm tests
+make -k test                          # run every binary and the swarm tests even after one fails
 make test TEST_FILTER='MediaTest.*'   # gtest filter applied to all four
 make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against build/xudu
 ```
@@ -127,6 +128,8 @@ make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against 
 - **A test sits with its code, once.** Generic library behaviour is tested in `tests/lib/` and
   nowhere else; `xuzz_test` is kept to xuzz's own code and must not repeat the library's battery
   (font, scale and backend sweeps belong to `tests/lib/`).
+- Without `-k`, `make test` stops at the first binary with a failure and runs nothing after it; the
+  recipe reads `-k` itself, because make would otherwise abandon the one recipe they share.
 - `make test` ends with `tools/swarm-netns-test.sh` under `unshare -Urnm`. That needs the `veth`
   kernel module; without it the run ends in `Error: Unknown device type.` and a non-zero exit
   **after all four gtest binaries passed**. `sudo modprobe veth` is the fix and it is the user's to
