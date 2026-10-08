@@ -504,3 +504,7 @@ capture under SDL2 still wants `xvfb-run`).
 - 2026-10-08 — Step 1 built (L1): §2.1 as written, in `spatial.hpp`, tested by
   `tests/lib/spatial_unproject_test.cpp`. The sub-viewport case compares a pane's camera with the
   off-centre frustum (`glm::frustum`) that the same camera is when seen from the whole target.
+- 2026-10-08 — Step 2 built (L2): `insideFrustum` as §2.3 states it, with a case in
+  `tests/lib/draw_budget.cpp` for each of the six planes. `outsideFrustum`'s comment gave "Vulkan
+  clips to [0, w]" as its reason for skipping depth; in the neutral clip space a contributor holds,
+  both backends' volume is `−w ≤ z ≤ w`, as §1 says, so the comment now gives the real reason.

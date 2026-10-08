@@ -67,10 +67,11 @@ struct DrawStats {
  * divide, so a corner behind the camera needs no special case -- dividing by a
  * negative w is what would flip a sign and cull something visible.
  *
- * Only the four side planes are tested. The depth range is the one thing the
- * backends do not agree on -- OpenGL clips to [-w, w] and Vulkan to [0, w] --
- * and a document is spread sideways and downwards rather than in depth, so
- * testing it would add a backend-dependent rule for nothing measurable.
+ * Only the four side planes are tested: a document is spread sideways and
+ * downwards rather than in depth, so testing depth would cost for nothing
+ * measurable. (It would not be backend-dependent: the matrix here is in the
+ * neutral clip space, -w <= z <= w, and only the Vulkan device's own copy is
+ * rewritten to reversed Z.)
  */
 inline bool outsideFrustum(const glm::mat4 &mvp, const float halfW,
                            const float halfH, const float depth) {
@@ -91,6 +92,34 @@ inline bool outsideFrustum(const glm::mat4 &mvp, const float halfW,
          allOutside([](const glm::vec4 &pos) { return pos.x > pos.w; }) ||
          allOutside([](const glm::vec4 &pos) { return pos.y < -pos.w; }) ||
          allOutside([](const glm::vec4 &pos) { return pos.y > pos.w; });
+}
+
+/**
+ * @brief True when a flat box, centred on the model-space origin, lies wholly
+ *        within the view: every corner in front of the camera and inside all
+ *        six clip planes.
+ *
+ * @param mvp    projection * view * model for the box.
+ * @param halfW,halfH Half the box's extent in model units.
+ *
+ * Unlike outsideFrustum() this tests depth too. That is safe here because the
+ * test is made in the backend-neutral clip space the renderer builds, where
+ * the volume is -w <= z <= w; Vulkan's reversed depth is applied later, inside
+ * its device, to its own copy of the matrix. A box that crosses the near
+ * plane is cut by it, so it is not inside.
+ */
+[[nodiscard]] inline bool insideFrustum(const glm::mat4 &mvp, const float halfW,
+                                        const float halfH) noexcept {
+  const std::array<glm::vec4, 4> corners = {
+      mvp * glm::vec4(-halfW, -halfH, 0.0F, 1.0F),
+      mvp * glm::vec4(halfW, -halfH, 0.0F, 1.0F),
+      mvp * glm::vec4(-halfW, halfH, 0.0F, 1.0F),
+      mvp * glm::vec4(halfW, halfH, 0.0F, 1.0F)};
+  return std::ranges::all_of(corners, [](const glm::vec4 &pos) {
+    return pos.w > 0.0F && pos.x >= -pos.w && pos.x <= pos.w &&
+           pos.y >= -pos.w && pos.y <= pos.w && pos.z >= -pos.w &&
+           pos.z <= pos.w;
+  });
 }
 
 /**

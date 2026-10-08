@@ -93,6 +93,76 @@ TEST(Frustum, mostPagesOfALongDocumentAreRejected) {
   EXPECT_LT(kept, 10) << "kept " << kept << " of 1000 pages";
 }
 
+namespace {
+
+/// A box turned edge-on to the camera, so its own y runs along the view axis
+/// and its corners lie at two depths.
+glm::mat4 edgeOnAt(const float z) {
+  return glm::rotate(glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, z)),
+                     glm::radians(90.0F), glm::vec3(1.0F, 0.0F, 0.0F));
+}
+
+} // namespace
+
+TEST(InsideFrustum, aBoxWhollyInViewIsInside) {
+  EXPECT_TRUE(insideFrustum(viewProjection(200.0F), halfW, halfH));
+  // Turned to the view, too, so long as both of its depths are in range.
+  EXPECT_TRUE(
+      insideFrustum(viewProjection(200.0F) * edgeOnAt(0.0F), halfW, halfH));
+}
+
+// At 200 units the view reaches about 110 to each side and 83 up and down;
+// each offset puts one edge of the box over one of the four side planes.
+TEST(InsideFrustum, aBoxStraddlingASidePlaneIsNotInside) {
+  const auto base = viewProjection(200.0F);
+  for (const glm::vec3 offset :
+       {glm::vec3(-95.0F, 0.0F, 0.0F), glm::vec3(95.0F, 0.0F, 0.0F),
+        glm::vec3(0.0F, -70.0F, 0.0F), glm::vec3(0.0F, 70.0F, 0.0F)}) {
+    const auto mvp = base * glm::translate(glm::mat4(1.0F), offset);
+    EXPECT_FALSE(insideFrustum(mvp, halfW, halfH))
+        << "offset " << offset.x << ", " << offset.y;
+    // Straddling, so not outside either: the two tests are not complements.
+    EXPECT_FALSE(outsideFrustum(mvp, halfW, halfH, depth));
+  }
+}
+
+// The near plane is 0.1 in front of the camera at z = 200. A sliver centred on
+// it, narrow enough to be inside the side planes that close, is cut by it.
+TEST(InsideFrustum, aBoxStraddlingTheNearPlaneIsNotInside) {
+  const auto base         = viewProjection(200.0F);
+  constexpr float sliverW = 0.01F;
+  constexpr float sliverH = 0.05F;
+  EXPECT_FALSE(insideFrustum(base * edgeOnAt(199.9F), sliverW, sliverH));
+  // The same sliver a little further away is wholly inside.
+  EXPECT_TRUE(insideFrustum(base * edgeOnAt(199.5F), sliverW, sliverH));
+}
+
+// The far plane is 10,000 in front of the camera, at z = -9800.
+TEST(InsideFrustum, aBoxStraddlingTheFarPlaneIsNotInside) {
+  const auto base = viewProjection(200.0F);
+  EXPECT_FALSE(insideFrustum(base * edgeOnAt(-9800.0F), 10.0F, 100.0F));
+  EXPECT_TRUE(insideFrustum(base * edgeOnAt(-9600.0F), 10.0F, 100.0F));
+}
+
+TEST(InsideFrustum, aBoxWhollyOutsideIsNotInside) {
+  const auto base = viewProjection(200.0F);
+  EXPECT_FALSE(insideFrustum(
+      base * glm::translate(glm::mat4(1.0F), glm::vec3(4000.0F, 0.0F, 0.0F)),
+      halfW, halfH));
+  EXPECT_FALSE(insideFrustum(
+      base * glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, -20000.0F)),
+      halfW, halfH));
+}
+
+// Behind the camera every corner has a negative w, which would flip every
+// comparison after a divide; the test must not read that as inside.
+TEST(InsideFrustum, aBoxBehindTheCameraIsNotInside) {
+  const auto base = viewProjection(200.0F);
+  EXPECT_FALSE(insideFrustum(
+      base * glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 400.0F)),
+      halfW, halfH));
+}
+
 TEST(ScreenScale, movingTheCameraBackShrinksThings) {
   const auto near = screenScaleAt(viewProjection(200.0F), 800.0F);
   const auto far  = screenScaleAt(viewProjection(2000.0F), 800.0F);
