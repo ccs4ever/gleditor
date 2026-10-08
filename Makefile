@@ -780,8 +780,13 @@ $(FLAGSTAMP): FORCE | $(OBJDIR)/
 	@sig='$(CXXFLAGS) $(LDFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
 $(ALL_OBJS): $(FLAGSTAMP)
 
-$(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
-$(OBJDIR)/apps/xuzz/main.o $(OBJDIR)/apps/xuzz/main.dep: $(OBJDIR)/src/config.h
+# Every source that includes the generated config.h must wait for it, its
+# dependency scan included: -MM fails on a header that does not exist yet. The
+# list is read from the sources, because a hand-kept one went stale -- it named
+# apps/xuzz/main.cpp, which does not include config.h, and missed xuzz_app.cpp
+# and cli.cpp, which do, so a fresh `make -j` could fail on whichever won.
+CONFIG_H_USERS := $(shell grep -rlE '\#include ["<]config\.h[">]' apps src tests tools 2>/dev/null)
+$(call obj,$(CONFIG_H_USERS)) $(patsubst %.cpp,$(OBJDIR)/%.dep,$(CONFIG_H_USERS)): $(OBJDIR)/src/config.h
 
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
