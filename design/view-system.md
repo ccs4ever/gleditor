@@ -977,23 +977,41 @@ struct ViewDescriptor {
   ViewSubject subject{};
   /// Variants the reader cycles through (V-R49). The first is the default.
   std::vector<SubviewSpec> subviews;
-  std::vector<settings::SettingSpec> settings;
+  std::vector<SettingSpec> settings; // xanadu::SettingSpec, system_docs.hpp
   std::vector<ChordSpec> chords;
   std::function<std::unique_ptr<View>()> make;
 };
 
 class ViewRegistry {
 public:
+  /// Holds the default keymap's chords from the start.
+  ViewRegistry();
   /// Refuses a second descriptor of the same kind (DuplicateViewKind) and a
-  /// default chord that is already taken (ChordCollision).
+  /// default chord that is already taken in its scope, by an action or by
+  /// the same descriptor (ChordCollision). A refusal leaves nothing behind.
   std::expected<ViewRegistry *, ViewError> add(ViewDescriptor descriptor);
   [[nodiscard]] std::span<const ViewDescriptor> views() const noexcept;
   [[nodiscard]] gleditor::cpp26::optional<const ViewDescriptor &>
   find(std::string_view kind) const noexcept;
+  /// The call holding a chord in a scope: the words of a ChordCollision.
+  [[nodiscard]] std::optional<std::string_view>
+  chordHolder(std::string_view chord, std::string_view context) const;
 };
 
+// builtin_views.hpp, with the first built-in view (E15)
 void registerBuiltinViews(ViewRegistry &registry);
 ```
+
+A chord collides with another when their scopes are equal and their chords are equal in
+`canonicalChord()`'s spelling (lower case, modifiers sorted), the rule
+`SystemDocsTest.DefaultKeymapGivesEachChordOneActionPerScope` already applied to the default keymap;
+the normaliser moved from that test into `system_docs` so the registry and the test cannot disagree.
+A `ChordSpec`'s `context` is a keymap scope as `keymapScope()` answers it — empty for anywhere,
+`zigzag`, `document` — or a narrower one a view names. The registry is seeded with the default
+keymap rather than the live one: a reader who rebinds a key has chosen what wins, and the conflict
+gate is about defaults. Price: a view's chord can collide with a reader's own binding, which the
+keymap resolves as it does today. Refused: checking only between views — the † rows of §12.1 exist
+because the collision that matters is with the keymap already shipped.
 
 The registry is an object the host owns, not a singleton, and built-in views are added by one
 explicit call, as `registerZigzagCommands()` is one call today. A plugin calls `add()` the same way.
@@ -3408,3 +3426,6 @@ ______________________________________________________________________
   §12.2).
 - 2026-10-08 — Plan G13 absorbed: `PlacedEdge` carries a dash class. `SubjectId` factories,
   `placedPose()` and `view_ids.hpp` added to §8.4 and §5.2 with the records (E1).
+- 2026-10-08 — §8.1 as built (E3): the registry is seeded with the default keymap, a collision is
+  same scope and same canonical chord, `chordHolder()` names the holder, settings are
+  `xanadu::SettingSpec`, and `registerBuiltinViews()` is declared with the built-in views.

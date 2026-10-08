@@ -5,6 +5,7 @@
 #include "common/xanadu/system_docs.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <filesystem>
@@ -2892,6 +2893,32 @@ std::string_view keymapScope(const std::string_view action) {
     return kKeyScopeDocument;
   }
   return {};
+}
+
+std::string canonicalChord(const std::string_view chord) {
+  std::vector<std::string> parts;
+  std::string part;
+  for (const char c : chord) {
+    // A "+" right after another separator (or first) is the key itself.
+    if ('+' == c && !part.empty()) {
+      parts.push_back(std::move(part));
+      part.clear();
+    } else {
+      part += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+  }
+  auto key = std::move(part);
+  if (":" == key) {
+    key = ";";
+    parts.emplace_back("shift");
+  }
+  std::ranges::sort(parts);
+  std::string canonical;
+  for (const auto &modifier : parts) {
+    canonical += modifier;
+    canonical += '+';
+  }
+  return canonical + key;
 }
 
 std::string_view canonicalKeymapAction(const std::string_view action) {

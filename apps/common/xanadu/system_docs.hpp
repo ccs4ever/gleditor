@@ -911,6 +911,16 @@ inline constexpr std::string_view kKeyScopeZigzag   = "zigzag";
  */
 [[nodiscard]] std::string_view keymapScope(std::string_view action);
 
+/**
+ * @brief @p chord in one spelling, so that "Shift+Alt+X" and "alt+shift+x"
+ *        compare equal: lower case, modifiers sorted, then the key.
+ *
+ * ":" is the shifted semicolon key, as the keymap parser reads it. Two
+ * bindings collide when their scopes and canonical chords are equal; the
+ * default keymap's own test and the view registry both ask it so.
+ */
+[[nodiscard]] std::string canonicalChord(std::string_view chord);
+
 [[nodiscard]] std::string_view canonicalKeymapAction(std::string_view action);
 [[nodiscard]] std::string_view legacyKeymapAction(std::string_view action);
 
