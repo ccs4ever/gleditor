@@ -1528,6 +1528,16 @@ This is what `xuzz --raster` prints today, generalised to any view. `vquery`, `v
 can show a result slice through a slice view with it, and golden layout fixtures (§16) are stored as
 rasters beside their numeric dumps, so a reviewer can read a layout change as a picture.
 
+As built (E6): the projection is orthographic down local z and fitted to the grid, each axis
+separately, so the records' extent fills the columns and rows and no character aspect ratio has to
+be assumed. Items are drawn nearest first and keep their cells; edges, then frames, fill only the
+cells left empty, and a box's inside is blanked, so a line never crosses a box drawn in front of it.
+A real cell is ruled `+-|`, a focused one `+=|`, a view-only one has `.` corners (nothing view-only
+is square), a ghost is dots, a frame `#=!`, a collapsed frame its count in brackets; labels and
+badges are bare text, read whole; dimension edges and strands take `- | / \` by slope, links and
+transclusions `*`, tethers `:`. Text is cut at the box, by code point, and never measured: the
+raster is for reading a layout, not for checking fit, which is the presenter's.
+
 ### 8.8 The host
 
 In `apps/common/ui/view/`, namespace `xanadu::view`.
@@ -3429,3 +3439,4 @@ ______________________________________________________________________
 - 2026-10-08 — §8.1 as built (E3): the registry is seeded with the default keymap, a collision is
   same scope and same canonical chord, `chordHolder()` names the holder, settings are
   `xanadu::SettingSpec`, and `registerBuiltinViews()` is declared with the built-in views.
+- 2026-10-08 — §8.7's conventions as built (E6).
