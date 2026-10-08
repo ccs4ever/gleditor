@@ -1,0 +1,119 @@
+# What an AI coding session should not spend context on in this repository.
+#
+# gitignore syntax. Nothing listed here is secret. It is noise for a session
+# that pays for every file it lists, searches or reads: other checkouts,
+# generated output, vendored code nobody edits here, and binary fixtures that
+# are only meaningful through the tools that read them.
+#
+# If you need something listed here, open it deliberately by its path.
+
+# -- Other checkouts of this same repository ----------------------------------
+# Each worktree is a full copy of the tree; searching them returns every hit
+# again, from a branch that is not the one being worked on.
+/.git/
+/.worktrees/
+
+# -- The same instructions under other names -----------------------------------
+# .agents is a symlink to .claude, so everything under it appears twice.
+# GEMINI.md is another assistant's entry point; AGENTS.md is the runbook.
+/.agents
+/GEMINI.md
+
+# -- Not the build -------------------------------------------------------------
+# The build is GNU Make and pkg-config (AGENTS.md: "no CMake"). These two are
+# leftovers and mislead a session into thinking otherwise.
+/CMakeLists.txt
+/conanfile.txt
+
+# -- Build output and caches ---------------------------------------------------
+# Also in .gitignore; repeated because a tool may read only this file.
+/build/
+/.cache/
+/.codex/
+/.idea/
+/dist/
+/result
+# Doxygen output of `make doc`, and the copy the Debian build stages.
+/docs/
+/debian/
+compile_commands.json
+coverage.lcov
+*.prof
+*.o
+*.obj
+*.d
+*.dep
+*.a
+*.so
+*.dylib
+*.dll
+*.gch
+*.pch
+# SPIR-V compiled from assets/shaders/*.glsl by `make shaders`.
+/assets/shaders/vulkan/*.spv
+
+# -- Vendored submodules -------------------------------------------------------
+# Never edited in this repository: a change is a submodule bump (AGENTS.md).
+# SDL alone is tens of megabytes of someone else's source, examples and tests.
+# Kept visible: only the headers this tree compiles against, which is what a
+# session needs when it asks "what does this call take?".
+/thirdparty/**
+!/thirdparty/*/
+!/thirdparty/Choreograph/src/
+!/thirdparty/Choreograph/src/**
+!/thirdparty/argparse/include/
+!/thirdparty/argparse/include/**
+!/thirdparty/merklecpp/merklecpp.h
+!/thirdparty/nontype_functional/include/
+!/thirdparty/nontype_functional/include/**
+!/thirdparty/beman_optional/include/
+!/thirdparty/beman_optional/include/**
+!/thirdparty/beman_inplace_vector/include/
+!/thirdparty/beman_inplace_vector/include/**
+!/thirdparty/SDL/include/
+!/thirdparty/SDL/include/**
+!/thirdparty/zstd/lib/
+!/thirdparty/zstd/lib/zstd.h
+!/thirdparty/zstd/contrib/
+!/thirdparty/zstd/contrib/seekable_format/
+!/thirdparty/zstd/contrib/seekable_format/*.h
+
+# -- Binary fixtures -----------------------------------------------------------
+# Stores, permascrolls and their sealed pieces. As bytes they say nothing; read
+# a store with `build/xudu-dump --section=ops <store>`. The readable halves stay
+# visible: ops.export (OSMIC text), sources/ (generator inputs) and the READMEs.
+/tests/samples/**/ops.nodes
+/tests/samples/**/store.tables
+/tests/samples/**/*.primedia
+/tests/samples/**/*.torrent
+/tests/samples/**/*.dat
+/tests/samples/**/*.mdb
+# Written into the fixture tree by the publication tests; not part of it.
+/tests/samples/**/publication-state/
+# The King James Bible, 2.4 MB, for load benchmarks. Marked binary in
+# .gitattributes for the same reason it is listed here.
+/tests/samples/kjv.txt
+
+# -- Media ---------------------------------------------------------------------
+# Decoder and transclusion fixtures. Design mock-ups under design/ui/ are left
+# visible on purpose: looking at them is part of UI work.
+/tests/**/*.mp4
+/tests/**/*.wav
+/tests/**/*.flac
+/tests/**/*.zst
+/tests/**/*.tif
+/tests/**/*.jpg
+/tests/**/*.webp
+/tests/**/*.gif
+/tests/**/*.pdf
+
+# -- Packaging payloads --------------------------------------------------------
+# The Gradle wrapper is generated and vendored; the scripts beside it are text
+# and stay visible.
+/packaging/android/gradle/wrapper/gradle-wrapper.jar
+/packaging/android/gradlew
+/packaging/android/gradlew.bat
+
+# -- Boilerplate ---------------------------------------------------------------
+# The GPL's text. AGENTS.md says what matters about the licence.
+/LICENSE
