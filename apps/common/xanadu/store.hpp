@@ -1371,6 +1371,14 @@ private:
   /// Ephemeral indices for structure birth and container lookups:
   mutable std::vector<std::uint32_t> editedBirths_;
   mutable std::vector<std::uint32_t> containerBirths_;
+  /// For each operation, the xanadoc its branch is editing: its own birth if
+  /// that is a xanadoc's, else its parent's entry. Kept so that
+  /// activeXanadocOnBranch() is a lookup: rebuild() asks it on every call,
+  /// and walking the ancestry to answer made a checkpointed rebuild cost the
+  /// length of the history again in any store with no xanadoc in it.
+  mutable std::vector<std::uint32_t> branchXanadocs_;
+  [[nodiscard]] bool isXanadocBirth(std::uint32_t birth) const;
+  void indexBranchXanadoc(std::uint32_t index, std::uint32_t parentIndex);
 
   void syncCurrentVersionsFromRank(const zigzag::Manifold &manifold);
   void syncAliasesFromRank(const zigzag::Manifold &manifold);

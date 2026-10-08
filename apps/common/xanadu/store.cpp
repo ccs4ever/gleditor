@@ -284,9 +284,30 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
                                   : 0;
   }
 
+  indexBranchXanadoc(index, parentIdx);
+
   if (chronofilade_ && index > 0) {
     chronofilade_->recordOp(index, node, produces, *this);
   }
+}
+
+bool Store::isXanadocBirth(const std::uint32_t birth) const {
+  const auto *const node = birth != 0 ? opsSpool.get(birth) : nullptr;
+  return node && OpKind::Structure == node->kind &&
+         StructureVerb::Make == structureVerbOf(node->flags) &&
+         StructureKind::Xanadoc == structureKindOf(node->flags);
+}
+
+void Store::indexBranchXanadoc(const std::uint32_t index,
+                               const std::uint32_t parentIndex) {
+  if (index >= branchXanadocs_.size()) {
+    branchXanadocs_.resize(index + 1, 0);
+  }
+  const auto birth = index < editedBirths_.size() ? editedBirths_[index] : 0;
+  branchXanadocs_[index] = isXanadocBirth(birth) ? birth
+                           : (parentIndex != 0 && parentIndex < index)
+                               ? branchXanadocs_[parentIndex]
+                               : 0;
 }
 
 void Store::indexGenesisCells() {
@@ -295,6 +316,7 @@ void Store::indexGenesisCells() {
   sliceBirth_    = 0;
   editedBirths_.assign(opsSpool.size() + 1, 0);
   containerBirths_.assign(opsSpool.size() + 1, 0);
+  branchXanadocs_.assign(opsSpool.size() + 1, 0);
 
   for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
     const auto *const node = opsSpool.get(idx);
@@ -331,6 +353,7 @@ void Store::indexGenesisCells() {
                                   ? containerBirths_[editedBirths_[idx]]
                                   : 0;
     }
+    indexBranchXanadoc(idx, node->parentIndex);
   }
 }
 
@@ -533,24 +556,8 @@ Store::lastOpOnStructure(const MicroversionId &parent,
 }
 
 std::uint32_t Store::activeXanadocOnBranch(const MicroversionId &parent) const {
-  auto curr = opsSpool.indexOf(parent);
-  while (curr != 0) {
-    if (curr < editedBirths_.size() && editedBirths_[curr] != 0) {
-      const auto birth        = editedBirths_[curr];
-      const auto *const bNode = opsSpool.get(birth);
-      if (bNode && OpKind::Structure == bNode->kind &&
-          StructureVerb::Make == structureVerbOf(bNode->flags) &&
-          StructureKind::Xanadoc == structureKindOf(bNode->flags)) {
-        return birth;
-      }
-    }
-    const auto *const node = opsSpool.get(curr);
-    if (!node || node->parentIndex == 0 || node->parentIndex >= curr) {
-      break;
-    }
-    curr = node->parentIndex;
-  }
-  return 0;
+  const auto index = opsSpool.indexOf(parent);
+  return index < branchXanadocs_.size() ? branchXanadocs_[index] : 0;
 }
 
 MicroversionId Store::resolveTextContext(const MicroversionId &parent,
