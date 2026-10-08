@@ -1567,10 +1567,23 @@ enum class ViewError : std::uint8_t {
   PromotionRefused,   // promote()'s own budget or refusal
   ArenaRefused,       // the arena refused; carries nothing more
 };
-[[nodiscard]] constexpr std::string_view messageKey(ViewError error) noexcept;
+/// Everything a view tells the reader (§12.2), errors or not.
+enum class ViewMessage : std::uint8_t { NothingThatWay, /* ... */ };
+[[nodiscard]] constexpr ViewMessage messageKey(ViewError error) noexcept;
+[[nodiscard]] constexpr std::string_view messageId(ViewMessage) noexcept;
+[[nodiscard]] constexpr std::string_view messageText(ViewMessage) noexcept;
 ```
 
 "Nothing further that way" is not an error: it is a `MoveOutcome` with `moved == false`.
+
+Messages have their own enumeration (plan G8) because the two sets differ: six of the nine
+situations of §12.2 are not refusals, and every refusal still needs words when it reaches the reader
+through a third-party view. `messageKey()` is the one map from a refusal to its message, a switch
+with no default, so an error added without a message does not compile. `messageId()` is a stable
+name (`view.emptyGroup`) for tests, logs and a later translation table; `messageText()` is the
+template, with its fields in braces for whoever raises it to fill. Price: two switches to extend per
+message. Refused: `messageKey()` answering words directly, as first written — it left the non-error
+messages nowhere, and rewording a message would have changed its key.
 
 ______________________________________________________________________
 
@@ -2639,7 +2652,21 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 | Keeping a pack refused           | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
 | Pages still arriving             | "*document*: *N* pages so far, still paginating."              | none               |
 
-Each is also an accessibility announcement.
+Each is also an accessibility announcement. The refusals below are faults of a view or of the host
+rather than of the reader, but a third-party view can still surface them, so each has words:
+
+| Situation                              | Text                                                                        | Error                |
+| -------------------------------------- | --------------------------------------------------------------------------- | -------------------- |
+| A view link would displace a neighbour | "That view cell already has a neighbour *direction* along *dimension*; ..." | `OccupiedDirection`  |
+| A view link names a real cell          | "A view links only its own view-only cells; a cell of the slice was ..."    | `RealCellInViewLink` |
+| A view cell from a tossed generation   | "That view-only cell was discarded when the view changed."                  | `StaleEpoch`         |
+| An occurrence of nothing               | "That is neither a cell of the slice nor a group of this view."             | `UnknownTarget`      |
+| No such axis                           | "There is no axis *n*."                                                     | `UnknownAxis`        |
+| A view kind installed twice            | "A view of kind '*kind*' is already installed."                             | `DuplicateViewKind`  |
+| A view's default chord is taken        | "*chord* already runs *action*; '*kind*' was not installed."                | `ChordCollision`     |
+| The arena refused                      | "The view space refused the change."                                        | `ArenaRefused`       |
+
+The full words are in `messageText()`; the table elides the two longest.
 
 ### 12.3 Settings
 
@@ -3360,3 +3387,6 @@ ______________________________________________________________________
 - 2026-10-07 — Step 1's destinations corrected: nothing from `apps/xudu/` or `apps/zigzag/` can go
   to the engine. An implementation plan now orders the work and lists the amendments still to make.
 - 2026-10-08 — §16.1: the third test binary is `ui_test` in `tests/ui/` (VU6), renamed by A2.
+- 2026-10-08 — Plan G8 absorbed: messages have their own key enumeration, `ViewMessage`, and
+  `messageKey()` maps a `ViewError` into it; the refusals §12.2 left unworded have words (§8.11,
+  §12.2).
