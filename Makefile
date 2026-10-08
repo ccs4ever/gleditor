@@ -1034,6 +1034,15 @@ endif
 $(OBJDIR)/ui-text-baseline: $(UI_TEXT_BASELINE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(UI_TEXT_BASELINE_OBJS) $(APP_LDFLAGS) $(LIBS)
 
+# SPIKE (view project R1/R2/R5), throwaway, not for merge.
+.PHONY: spike-planes
+spike-planes: $(OBJDIR)/spike-planes
+ifdef GLEDITOR_ENABLE_VULKAN
+spike-planes: shaders
+endif
+$(OBJDIR)/spike-planes: $(OBJDIR)/tools/spike-planes.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJDIR)/tools/spike-planes.o $(APP_LDFLAGS) $(LIBS)
+
 # Proves the decode-index prototype (design/decode-index-spike.md) on real
 # files rather than leaving it a paper design: a PNG scanline checkpoint
 # spike (zlib inflateCopy()), an audio/video seek spike (FFmpeg

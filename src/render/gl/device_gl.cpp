@@ -608,6 +608,7 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
 
   record.layout      = desc.layout;
   record.depthTest   = desc.depthTest;
+  record.depthWrite  = desc.depthWrite;
   record.mvpLoc      = api.GetUniformLocation(record.program, "uMVP");
   record.opacityLoc  = api.GetUniformLocation(record.program, "uOpacity");
   record.identityLoc = api.GetUniformLocation(record.program, "uIdentity");
@@ -672,6 +673,7 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   if (-1 != it->second.atlasLoc) {
     api.Uniform1i(it->second.atlasLoc, glyphAtlasUnit);
   }
+  api.DepthMask(it->second.depthWrite ? GL_TRUE : GL_FALSE);
   if (it->second.depthTest) {
     api.Enable(GL_DEPTH_TEST);
   } else {

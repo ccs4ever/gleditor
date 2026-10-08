@@ -1,0 +1,30 @@
+render: opengles device, version OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.24.04.4
+backend	planes	variant	draws	instances	build_ms	issue_ms	cpu_frame_ms	complete_ms
+opengles	100	per-plane	100	800	0.001	0.286	1.455	1.455
+opengles	100	per-group10	10	800	0.000	0.186	1.364	1.364
+opengles	100	single	1	800	0.000	0.108	0.572	0.572
+# 100 planes: per-plane vs per-group10 2 pixels differ (>1)
+opengles	300	per-plane	300	2400	0.003	0.812	2.810	2.810
+opengles	300	per-group10	30	2400	0.000	0.546	2.322	2.322
+opengles	300	single	1	2400	0.000	0.308	0.793	0.793
+# 300 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengles	1000	per-plane	1000	8000	0.011	3.135	9.459	9.459
+opengles	1000	per-group10	100	8000	0.001	2.246	7.775	7.775
+opengles	1000	single	1	8000	0.000	1.040	1.577	1.578
+# 1000 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengles	1300	per-plane	1300	10400	0.014	4.084	10.705	10.706
+opengles	1300	per-group10	130	10400	0.002	2.963	9.432	9.432
+opengles	1300	single	1	10400	0.000	1.388	1.924	1.924
+# 1300 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengles	5000	per-plane	5000	40000	0.086	25.560	35.293	35.293
+opengles	5000	per-group10	500	40000	0.006	15.242	23.791	23.791
+opengles	5000	single	1	40000	0.000	5.568	8.876	8.876
+# 5000 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengles	10000	per-plane	10000	80000	0.193	50.245	64.679	64.679
+opengles	10000	per-group10	1000	80000	0.020	27.047	42.829	42.830
+opengles	10000	single	1	80000	0.000	13.925	14.530	14.530
+# 10000 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengles	50000	per-plane	50000	400000	1.057	278.202	288.012	288.013
+opengles	50000	per-group10	5000	400000	0.102	201.917	209.606	209.607
+opengles	50000	single	1	400000	0.001	78.465	82.899	82.899
+# 50000 planes: per-plane vs per-group10 0 pixels differ (>1)

@@ -104,7 +104,7 @@ public:
    *        would be a beam nothing could be behind.
    */
   void createPipeline(const std::string &assetDir, const std::string &spirvDir,
-                      bool depthTest = true);
+                      bool depthTest = true, bool depthWrite = true);
 
   /// Whether there is a pipeline to draw with. False when the shaders could
   /// not be read, which is not fatal: the rest of the frame still draws.

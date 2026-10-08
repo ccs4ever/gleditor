@@ -168,6 +168,7 @@ private:
     GLint identityLoc{-1};
     GLint atlasLoc{-1};
     bool depthTest{true};
+    bool depthWrite{true};
   };
 
   /// Compile one stage, throwing with the driver's log on failure.

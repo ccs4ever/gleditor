@@ -188,6 +188,8 @@ struct PipelineDesc {
    * depth conventions, which no single value satisfies.
    */
   bool depthTest{true};
+  /// SPIKE R5 (not for merge): depth tested but not written when false.
+  bool depthWrite{true};
 };
 
 /**

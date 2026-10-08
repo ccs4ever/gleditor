@@ -1,0 +1,31 @@
+render: vulkan device, llvmpipe (LLVM 20.1.2, 256 bits) (API 1.4.318)
+backend	planes	variant	draws	instances	build_ms	issue_ms	cpu_frame_ms	complete_ms
+vulkan	100	per-plane	100	800	0.002	0.017	16.330	16.665
+vulkan	100	per-group10	10	800	0.001	0.005	22.262	22.268
+vulkan	100	single	1	800	0.000	0.004	10.918	11.690
+# 100 planes: per-plane vs per-group10 0 pixels differ (>1)
+driver info: recording 300 draws on 1 thread(s): 258 ns/draw split against 171 ns/draw in one piece
+vulkan	300	per-plane	300	2400	0.004	0.051	21.435	21.820
+vulkan	300	per-group10	30	2400	0.001	0.008	21.115	21.123
+vulkan	300	single	1	2400	0.000	0.004	10.596	10.607
+# 300 planes: per-plane vs per-group10 0 pixels differ (>1)
+vulkan	1000	per-plane	1000	8000	0.018	0.178	26.951	27.130
+vulkan	1000	per-group10	100	8000	0.002	0.019	28.167	28.174
+vulkan	1000	single	1	8000	0.000	0.003	13.263	13.757
+# 1000 planes: per-plane vs per-group10 0 pixels differ (>1)
+vulkan	1300	per-plane	1300	10400	0.021	0.236	36.259	36.827
+vulkan	1300	per-group10	130	10400	0.003	0.027	40.350	40.853
+vulkan	1300	single	1	10400	0.000	0.004	15.594	15.973
+# 1300 planes: per-plane vs per-group10 1 pixels differ (>1)
+vulkan	5000	per-plane	5000	40000	0.099	1.891	91.937	91.947
+vulkan	5000	per-group10	500	40000	0.013	0.091	74.721	74.732
+vulkan	5000	single	1	40000	0.001	0.004	19.984	19.994
+# 5000 planes: per-plane vs per-group10 0 pixels differ (>1)
+vulkan	10000	per-plane	10000	80000	0.199	5.100	92.042	92.309
+vulkan	10000	per-group10	1000	80000	0.025	0.202	100.605	100.707
+vulkan	10000	single	1	80000	0.000	0.005	35.127	35.683
+# 10000 planes: per-plane vs per-group10 5 pixels differ (>1)
+vulkan	50000	per-plane	50000	400000	1.049	38.687	451.321	451.965
+vulkan	50000	per-group10	5000	400000	0.108	2.156	246.604	247.836
+vulkan	50000	single	1	400000	0.001	0.007	104.242	104.922
+# 50000 planes: per-plane vs per-group10 3 pixels differ (>1)

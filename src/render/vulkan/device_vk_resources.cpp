@@ -818,7 +818,8 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   depthStencil.sType =
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
   depthStencil.depthTestEnable  = desc.depthTest ? VK_TRUE : VK_FALSE;
-  depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
+  depthStencil.depthWriteEnable =
+      (desc.depthTest && desc.depthWrite) ? VK_TRUE : VK_FALSE;
   // Equal depths pass, and the later draw wins -- see the matching note in the
   // GL backend. Greater rather than less because this backend's depth is
   // reversed (see DeviceVK::recordBatch()): nearer is larger.

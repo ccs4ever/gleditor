@@ -1,0 +1,29 @@
+backend	planes	variant	draws	instances	build_ms	issue_ms	cpu_frame_ms	complete_ms
+opengl	100	per-plane	100	800	0.002	0.378	27.943	27.944
+opengl	100	per-group10	10	800	0.000	0.254	21.235	21.236
+opengl	100	single	1	800	0.000	0.103	9.028	9.028
+# 100 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengl	300	per-plane	300	2400	0.004	0.898	24.007	24.008
+opengl	300	per-group10	30	2400	0.001	0.685	36.010	36.011
+opengl	300	single	1	2400	0.000	0.315	12.702	12.702
+# 300 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengl	1000	per-plane	1000	8000	0.016	2.850	38.307	38.307
+opengl	1000	per-group10	100	8000	0.002	1.888	37.166	37.166
+opengl	1000	single	1	8000	0.000	1.085	12.825	12.825
+# 1000 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengl	1300	per-plane	1300	10400	0.023	13.438	40.776	40.777
+opengl	1300	per-group10	130	10400	0.003	2.463	37.162	37.162
+opengl	1300	single	1	10400	0.000	1.322	12.069	12.070
+# 1300 planes: per-plane vs per-group10 6 pixels differ (>1)
+opengl	5000	per-plane	5000	40000	0.086	32.075	57.534	57.535
+opengl	5000	per-group10	500	40000	0.010	24.548	51.787	51.788
+opengl	5000	single	1	40000	0.000	8.526	18.612	18.612
+# 5000 planes: per-plane vs per-group10 0 pixels differ (>1)
+opengl	10000	per-plane	10000	80000	0.208	59.902	100.872	100.872
+opengl	10000	per-group10	1000	80000	0.022	40.787	76.074	76.074
+opengl	10000	single	1	80000	0.000	17.206	24.210	24.211
+# 10000 planes: per-plane vs per-group10 6 pixels differ (>1)
+opengl	50000	per-plane	50000	400000	1.067	349.194	366.382	366.382
+opengl	50000	per-group10	5000	400000	0.099	253.762	264.101	264.102
+opengl	50000	single	1	400000	0.001	79.459	94.096	94.097
+# 50000 planes: per-plane vs per-group10 7 pixels differ (>1)
