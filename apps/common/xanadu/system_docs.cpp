@@ -10,6 +10,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -92,7 +93,15 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "autoSaveSeconds: Inactivity interval in seconds before changes are "
            "committed. Default is 5.\n"
            "theme: Color scheme palette identifier (system, light, dark). "
-           "Default is system.\n";
+           "Default is system.\n"
+           "activity.settleMs: Pause in milliseconds that ends a run of "
+           "movement through a slice and files one walk summary in the "
+           "activity store. Default is 1200.\n"
+           "activity.bounceMs: A step undone within this many milliseconds is "
+           "a slip and is not counted. Default is 300.\n"
+           "rank.halfLife: Runs of age over which a dimension's step count "
+           "halves when the most used dimensions are ranked. Positive. "
+           "Default is 200.\n";
   case SystemDocKind::Layout:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -727,7 +736,8 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     };
     break;
 
-  case SystemDocKind::Settings:
+  case SystemDocKind::Settings: {
+    const WalkRankingConfig walks;
     specs = {
         {.name    = std::string(settings::kFontSize),
          .notes   = "Base text point size",
@@ -760,8 +770,21 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                      {.expectedTypes = {"integer", "integer", "integer"},
                       .defaultValues = {std::int64_t{26}, std::int64_t{26},
                                         std::int64_t{26}}}}},
+        {.name    = std::string(settings::kActivitySettleMs),
+         .notes   = "Pause in milliseconds that ends a run of movement",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{walks.settleMs}}}}},
+        {.name    = std::string(settings::kActivityBounceMs),
+         .notes   = "A step undone within this many milliseconds is a slip",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{walks.bounceMs}}}}},
+        {.name    = std::string(settings::kRankHalfLife),
+         .notes   = "Positive runs of age over which a dimension's use halves",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {walks.halfLifeRuns}}}},
     };
     break;
+  }
 
   case SystemDocKind::UI: {
     const LinkPanelConfig panel;
@@ -2989,6 +3012,30 @@ SettingsConfig SettingsConfig::fromStore(const Store &store) {
   const auto bgRgb = model.getDoubleList(settings::kThemeBackground);
   if (bgRgb.size() == 3) {
     cfg.themeBackgroundRgb = bgRgb;
+  }
+  return cfg;
+}
+
+WalkRankingConfig WalkRankingConfig::fromStore(const Store &store) {
+  WalkRankingConfig cfg;
+  if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
+    return cfg;
+  }
+  const auto model  = SystemStoreModel::fromStore(store);
+  const auto millis = [&model](const std::string_view name,
+                               const std::uint32_t fallback) {
+    const auto stored = model.getInt64(name, fallback);
+    if (stored < 0 || stored > std::numeric_limits<std::uint32_t>::max()) {
+      return fallback;
+    }
+    return static_cast<std::uint32_t>(stored);
+  };
+  cfg.settleMs = millis(settings::kActivitySettleMs, cfg.settleMs);
+  cfg.bounceMs = millis(settings::kActivityBounceMs, cfg.bounceMs);
+  const auto halfLife =
+      model.getDouble(settings::kRankHalfLife, cfg.halfLifeRuns);
+  if (std::isfinite(halfLife) && halfLife > 0.0) {
+    cfg.halfLifeRuns = halfLife;
   }
   return cfg;
 }

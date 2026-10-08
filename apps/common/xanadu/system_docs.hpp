@@ -237,7 +237,10 @@ inline constexpr std::string_view kTheme           = "theme";
 inline constexpr std::string_view kAutoSaveSeconds = "autoSaveSeconds";
 inline constexpr std::string_view kPublicationPollSeconds =
     "publicationPollSeconds";
-inline constexpr std::string_view kThemeBackground = "theme.background";
+inline constexpr std::string_view kThemeBackground  = "theme.background";
+inline constexpr std::string_view kActivitySettleMs = "activity.settleMs";
+inline constexpr std::string_view kActivityBounceMs = "activity.bounceMs";
+inline constexpr std::string_view kRankHalfLife     = "rank.halfLife";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
@@ -947,6 +950,28 @@ struct SettingsConfig {
   std::vector<double> themeBackgroundRgb{0.1, 0.1, 0.1};
 
   [[nodiscard]] static SettingsConfig fromStore(const Store &store);
+};
+
+/**
+ * @brief How movement through a slice is condensed into walk summaries and
+ *        how "most used" decays (design/view-system.md §7.8).
+ *
+ * The defaults here are the ones defaultSettingSpecs() seeds system://settings
+ * with, so the two cannot drift. fromStore() keeps a default in place of a
+ * stored value that would make the ranking meaningless: a half-life that is
+ * not positive and finite, or a time no millisecond count can hold.
+ */
+struct WalkRankingConfig {
+  /// A pause this long ends a run of movement.
+  std::uint32_t settleMs{1200};
+  /// A step undone this soon is a slip and is dropped from the run.
+  std::uint32_t bounceMs{300};
+  /// A run's counts halve every this many runs of age.
+  double halfLifeRuns{200.0};
+
+  bool operator==(const WalkRankingConfig &) const = default;
+
+  [[nodiscard]] static WalkRankingConfig fromStore(const Store &store);
 };
 
 enum class ToastAnchor : std::uint8_t {

@@ -860,57 +860,126 @@ The number of records is then the number of times the reader *stopped somewhere*
 cells passed, and the pairs are exactly what the model below needs, already counted. A walk summary
 is also the unit a visit already is: one completed transition, to the place the reader settled.
 
+**Only movement through the slice is recorded** (plan G6). A step is from one real cell to another
+along a real dimension: `SliceStep::of()` answers nothing for a ref that carries `ephemeralBit`, so
+a view-arena cell or dimension cannot reach the recorder. The host passes its `AlongAxis` and
+`AlongSpoke` moves; entering or leaving a pack, a lane move and a step within the view space are not
+movement through the slice and are not passed.
+
 ```cpp
-// dimension_ranking.hpp
+// dimension_ranking.hpp (as built, E14)
 struct DimensionSteps {
-  zigzag::DimRef dimension;
+  zigzag::DimRef dimension{};
   std::uint32_t steps{};
 };
+/// from may equal to: going on along one dimension is counted too.
 struct DimensionChange {
-  zigzag::DimRef from, to;
+  zigzag::DimRef from{}, to{};
   std::uint32_t times{};
 };
-/// One settled run of movement, condensed.
+/// One settled run of movement, condensed. Owns its counts: a summary
+/// outlives the run that made it, and the recorder starts another.
 struct WalkSummary {
-  std::uint64_t ordinal{}; // position among the reader's runs, oldest first
-  zigzag::CellRef began, ended;
-  std::span<const DimensionSteps> steps;
-  std::span<const DimensionChange> changes;
+  std::uint64_t ordinal{}; // among the reader's runs, from 1; the store assigns it
+  zigzag::CellRef began{}, ended{};
+  std::vector<DimensionSteps> steps;     // ascending by dimension
+  std::vector<DimensionChange> changes;  // ascending by (from, to)
+};
+
+class SliceStep {
+public:
+  [[nodiscard]] static std::optional<SliceStep>
+  of(zigzag::CellRef from, zigzag::CellRef to, zigzag::DimRef dimension) noexcept;
+  // from(), to(), dimension()
 };
 
 /// Accumulates the run in progress. Pure state: time comes in as an argument.
+/// Each call that can settle a run answers its summary.
 class WalkRecorder {
 public:
-  WalkRecorder *step(zigzag::CellRef from, zigzag::CellRef to,
-                     zigzag::DimRef dimension, std::uint64_t atMs);
-  /// The run so far, if it has any steps left after slips are dropped.
-  [[nodiscard]] std::optional<WalkSummary> settle();
+  explicit WalkRecorder(const WalkRankingConfig &config) noexcept;
+  /// After a pause of settleMs, answers the run before it; the step begins
+  /// the next. A step straight back within bounceMs cancels the one before.
+  std::optional<WalkSummary> step(SliceStep step, std::uint64_t atMs);
+  /// The host's clock shows a pause with no step.
+  std::optional<WalkSummary> poll(std::uint64_t nowMs);
+  /// The reader did something that is not a step.
+  std::optional<WalkSummary> settle();
 };
 
 struct RankedDimension {
-  zigzag::DimRef dimension;
-  float used{};   // how much, lately
-  float likely{}; // how probably next, here
+  zigzag::DimRef dimension{};
+  double used{}; // how much, lately
 };
-/// Pure. @p last is the dimension most recently moved along, if any;
-/// @p present is the dimensions the accursed cell is linked on.
+/// Pure. Most used first, ties by ascending dimension.
 void rankDimensions(
-    std::span<const WalkSummary> history, std::optional<zigzag::DimRef> last,
-    std::span<const zigzag::DimRef> present,
+    std::span<const WalkSummary> history, const WalkRankingConfig &config,
     gleditor::cpp26::function_ref<void(const RankedDimension &)> out);
+
+/// Walk summaries in system://activity, per slice by the slice's DocumentId.
+class WalkSummaryLog {
+public:
+  WalkSummaryLog(Store *activity, std::filesystem::path directory);
+  std::uint64_t append(const DocumentId &slice, WalkSummary summary);
+  [[nodiscard]] std::span<const WalkSummary> history(const DocumentId &slice) const;
+};
 ```
 
-- **Used.** A dimension's steps count, and a count halves every `rank.halfLife` runs of age, so
-  "most used" means lately without forgetting the past.
-- **Likely.** A first-order Markov model: for the dimension the reader used last, how often each
-  dimension followed it, with the same decay, smoothed towards "used" by `rank.smoothing` so an
-  unseen pair is unlikely and not impossible. A dimension the accursed cell is actually linked on is
-  weighted up by `rank.presentBoost`, because the likeliest next move is one that is possible.
+`step()` answers a summary rather than chaining because a step after a pause is the one event that
+both ends a run and begins another, and the run it ends would otherwise be lost or merged into the
+next. A slip is matched against the step before it; a pause is measured from the latest step
+offered, slip or not, because a reader bouncing is not a reader who has stopped.
 
-The model is a product of the walk summaries and is rebuilt from them; nothing else is stored. Two
-things are still open. The store grows by a record per settled run, which is slow but unbounded, so
-old summaries may need folding into one aggregate per slice (VU13). And the summaries need a home in
-the activity store's own structure, which is that store's design to make (VU5).
+- **Used.** A dimension's steps count, and a count halves every `rank.halfLife` runs of age, so
+  "most used" means lately without forgetting the past. A run's age is the newest ordinal in the
+  history less its own, so the same history in any order ranks the same.
+- **Likely.** *Deferred beyond the first release (plan §4.1); not built by E14.* A first-order
+  Markov model: for the dimension the reader used last, how often each dimension followed it, with
+  the same decay, smoothed towards "used" by `rank.smoothing` so an unseen pair is unlikely and not
+  impossible. A dimension the accursed cell is actually linked on is weighted up by
+  `rank.presentBoost`, because the likeliest next move is one that is possible. When it is built,
+  `RankedDimension` gains `likely` and `rankDimensions` the last and present dimensions. The
+  summaries already count the pairs it reads, so it needs a new reading of the records kept, not a
+  new kind of record.
+
+**Where the summaries are kept** (plan F10 and VU5, as built). `ActivityLog` stays round its one
+payload, `Visit`; walk summaries are a second kind of record beside it in the same store. A summary
+is cells and dimensions, never text to parse, because what it says is structure: which slice, which
+ends, which dimensions, how often.
+
+```text
+home --d.activity-walks--> run --d.activity-walks--> run ...      every run, oldest first
+home --d.activity-slices--> slice --d.activity-slices--> slice    text: the slice's DocumentId
+slice --d.walk-runs--> run --d.walk-runs--> run ...               that slice's runs, oldest first
+run --d.walk-ends--> began --d.walk-ends--> ended                 integer scalars: cell refs
+run --d.walk-steps--> dim --d.walk-steps--> dim ...               integer: a dimension's ref
+                      dim --d.walk-count--> steps                 integer: steps along it
+run --d.walk-pairs--> from --d.walk-pairs--> from ...             integer: the first dimension
+                      from --d.walk-to--> to                      integer: the one that followed
+                      from --d.walk-count--> times                integer: how often
+```
+
+A run cell's text is `walk`. Refs into the visited slice are integer scalar cells (R6), not links,
+because a link cannot reach into another store; the slice is named, by a slice cell whose text is
+its `DocumentId`, because a dimension is a cell of one store and means nothing in another. An
+ordinal is not stored: a run's place on `d.activity-walks` is its ordinal, so a run in another slice
+still ages this one's, "lately" being the reader's time. Steps are kept in ascending dimension and
+pairs in ascending order, so a ring along either rank is a repeat, and a repeat is refused. A shape
+no recorder could have written — a missing or third end, a missing or zero count, parts out of
+order, pairs that do not number one fewer than the steps, a run filed under no slice, a slice filed
+twice — is refused when it is appended and refused loudly when it is read, because dropping it would
+silently change the reader's ranking. The visited slice gains no operation (R8).
+
+A settled run with *k* dimensions and *p* pairs costs 7 + 4*k* + 6*p* operations, plus two for a
+slice's first run, and the genesis and eight dimensions for the store's first. The price is paid in
+the reader's own store, once per stop, which is what R8's extension accepted.
+
+`Visit` is still one cell of text, `visit1`, on `d.activity-visits`. It should follow the same rule
+— its target, link and cursors as cells on their own dimensions — when that record next changes.
+
+The model is a product of the walk summaries and is rebuilt from them; nothing else is stored. One
+thing is still open: the store grows by a run per settled run, which is slow but unbounded, so old
+summaries may need folding into one aggregate per slice (VU13).
 
 ### 7.9 The compass
 
@@ -2928,10 +2997,12 @@ re-prove that `text::fit()` fits. The third binary was `zigzag_test` in `tests/z
   including a name that has gone.
 - **Binding points.** A configured sixth point gets a slot, a compass arm and movement actions with
   no code change; a point whose role a view does not present still moves the cursor.
-- **Selector and ranking.** `rankDimensions` on hand-written histories: decay, the Markov order
-  after a given last dimension, the boost for present dimensions, and determinism. The selector's
-  layout and cursor for each tier; arming an item and naming a point calls `bind` with that pair;
-  group edits in tier 1 are `ViewAxisSet` calls and undo.
+- **Selector and ranking.** `rankDimensions` on hand-written histories: decay and determinism; the
+  recorder's runs, slips, pauses and pair counts; summaries kept across a restart and refused when
+  malformed; no operation on the visited slice. When "most likely" is built, the Markov order after
+  a given last dimension and the boost for present dimensions. The selector's layout and cursor for
+  each tier; arming an item and naming a point calls `bind` with that pair; group edits in tier 1
+  are `ViewAxisSet` calls and undo.
 - **Each slice view.** Its acceptance list (§9.1.8, §9.2.11, §9.3.11).
 - **Each page view.** Its acceptance list (§10.3.4, §10.4.10), over hand-written catalogs.
 - **Purity.** `layout()` twice gives equal sinks; a layout with allocation counting on reports none
@@ -3270,10 +3341,10 @@ is the first member now. Settled by: use.
 dimensions, shared by every kept pack? Settled by: the first design of kept packs as content.
 
 **VU5.** What should the activity store hold for a slice? Walk summaries (§7.8) are the first thing:
-a record per settled run, with its counts. Their shape there — and whether a visit should also
-record the view and the bindings, so going back restores how the reader was looking — is that
-store's design to make. Either way the answer is more cells on its own dimensions, not a wider
-struct.
+a record per settled run, with its counts. Their shape is decided and built (E14): cells on their
+own dimensions, not a wider struct and not text. Still open: whether a visit should also record the
+view and the bindings, so going back restores how the reader was looking, and when `visit1` becomes
+cells by the same rule. Settled by: the next change to the visit record.
 
 **VU6.** Decided: the binary that links the library and `apps/common/ui/` is `ui_test`, with its
 tests in `tests/ui/`, renamed straight after the relocation. `tests/xudu/` keeps its name for now.
@@ -3459,3 +3530,11 @@ ______________________________________________________________________
 - 2026-10-08 — §8.2: `ViewManifold` exposes each arena's shadow, trail and space counts and whether
   a ref is current (plan G3); a violation of a whole arena, such as a trail on the derived one,
   names its layer and no cell, rather than a placeholder cell.
+- 2026-10-08 — §7.8 as built (E14), absorbing plan F10 and G6: only a `SliceStep` between real cells
+  along a real dimension is recorded; `WalkSummary` owns its counts, because spans into the recorder
+  dangled once it began the next run; `step()` and `poll()` answer the run a pause settles. VU5 is
+  answered for walk summaries: each is cells and dimensions in `system://activity` — a run cell, its
+  ends, a cell per dimension and per pair with its count — filed per slice, and a shape that does
+  not read back is refused loudly. `activity.settleMs`, `activity.bounceMs` and `rank.halfLife` are
+  in `system://settings`. "Most likely" is deferred as plan §4.1 says, with `rank.smoothing` and
+  `rank.presentBoost`; the pair counts it needs are already recorded (§16).

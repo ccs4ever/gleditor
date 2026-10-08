@@ -18,9 +18,11 @@ namespace {
 constexpr std::string_view kVisits  = "d.activity-visits";
 constexpr std::string_view kCurrent = "d.activity-current";
 
-std::string bytesOf(const DocumentId &id) { return id.str().substr(6); }
+} // namespace
 
-DocumentId parseId(const std::string &hex) {
+std::string activityIdText(const DocumentId &id) { return id.str().substr(6); }
+
+DocumentId parseActivityId(const std::string_view hex) {
   if (hex.size() != 32) throw std::runtime_error("activity: bad document id");
   std::array<char, 16> bytes{};
   for (std::size_t i = 0; i < bytes.size(); ++i) {
@@ -42,6 +44,32 @@ DocumentId parseId(const std::string &hex) {
   return id;
 }
 
+void appendActivityRecord(Store &store, const std::filesystem::path &directory,
+                          const std::string_view dimension,
+                          const std::string_view text) {
+  auto at = store.latest();
+  if (store.homeCell() == zigzag::noCell) at = store.sliceGenesis(at);
+  auto dim = store.rebuildManifold(at).dimensionNamed(dimension, store);
+  if (!dim) {
+    const auto made = store.makeDimension(at, dimension);
+    at              = made.version;
+    dim             = made.dim;
+  }
+  auto manifold = store.rebuildManifold(at);
+  auto tail     = store.homeCell();
+  for (auto next = manifold.linked(tail, *dim); next != zigzag::noCell;
+       next      = manifold.linked(tail, *dim)) {
+    tail = next;
+  }
+  at              = store.makeCell(at, text);
+  const auto cell = store.cellRefOf(at);
+  at              = store.setLink(at, tail, *dim, zigzag::DimVector::POS, cell);
+  std::filesystem::create_directories(directory);
+  store.save(directory.string());
+}
+
+namespace {
+
 std::int64_t indexOf(const std::optional<std::uint32_t> index) {
   return index ? static_cast<std::int64_t>(*index) : -1;
 }
@@ -62,12 +90,13 @@ std::string encode(const Visit &visit) {
       [&out](const auto &site) {
         using Site = std::decay_t<decltype(site)>;
         if constexpr (std::is_same_v<Site, DocumentSite>) {
-          out << "doc " << bytesOf(site.store) << ' ' << site.version.str()
-              << ' ' << site.range.start << ' ' << site.range.end << " 0 ";
+          out << "doc " << activityIdText(site.store) << ' '
+              << site.version.str() << ' ' << site.range.start << ' '
+              << site.range.end << " 0 ";
         } else {
-          out << "cell " << bytesOf(site.store) << ' ' << site.version.str()
-              << ' ' << site.range.start << ' ' << site.range.end << ' '
-              << site.cell << ' ';
+          out << "cell " << activityIdText(site.store) << ' '
+              << site.version.str() << ' ' << site.range.start << ' '
+              << site.range.end << ' ' << site.cell << ' ';
         }
       },
       visit.target);
@@ -75,8 +104,8 @@ std::string encode(const Visit &visit) {
       << static_cast<bool>(visit.link);
   if (visit.link) {
     const auto &link = *visit.link;
-    out << ' ' << bytesOf(link.key.authority) << ' ' << link.key.id << ' '
-        << static_cast<unsigned int>(link.active) << ' '
+    out << ' ' << activityIdText(link.key.authority) << ' ' << link.key.id
+        << ' ' << static_cast<unsigned int>(link.active) << ' '
         << indexOf(link.left.member) << ' ' << indexOf(link.left.occurrence)
         << ' ' << indexOf(link.right.member) << ' '
         << indexOf(link.right.occurrence) << ' '
@@ -97,7 +126,7 @@ Visit decode(const std::string &data) {
       arrival > 1 || linked > 1 || end < start) {
     throw std::runtime_error("activity: malformed visit");
   }
-  const auto siteStore = parseId(storeId);
+  const auto siteStore = parseActivityId(storeId);
   const auto at        = MicroversionId::parse(version);
   Visit visit;
   if (parent) visit.parent = VisitId{parent};
@@ -120,7 +149,8 @@ Visit decode(const std::string &data) {
       throw std::runtime_error("activity: malformed link context");
     }
     visit.link = LinkVisitContext{
-        .key    = {parseId(authority), static_cast<zigzag::CellRef>(linkId)},
+        .key    = {parseActivityId(authority),
+                   static_cast<zigzag::CellRef>(linkId)},
         .active = static_cast<LinkSide>(side),
         .left   = {cursorIndex(lm), cursorIndex(lo)},
         .right  = {cursorIndex(rm), cursorIndex(ro)},
@@ -170,33 +200,9 @@ StoreActivityLog::StoreActivityLog(Store *aStore,
   }
 }
 
-void StoreActivityLog::appendRecord(const std::string_view dimension,
-                                    const std::string_view text) {
-  if (!store) return;
-  auto at = store->latest();
-  if (store->homeCell() == zigzag::noCell) at = store->sliceGenesis(at);
-  auto dim = store->rebuildManifold(at).dimensionNamed(dimension, *store);
-  if (!dim) {
-    const auto made = store->makeDimension(at, dimension);
-    at              = made.version;
-    dim             = made.dim;
-  }
-  auto manifold = store->rebuildManifold(at);
-  auto tail     = store->homeCell();
-  for (auto next = manifold.linked(tail, *dim); next != zigzag::noCell;
-       next      = manifold.linked(tail, *dim)) {
-    tail = next;
-  }
-  at              = store->makeCell(at, text);
-  const auto cell = store->cellRefOf(at);
-  at = store->setLink(at, tail, *dim, zigzag::DimVector::POS, cell);
-  std::filesystem::create_directories(directory);
-  store->save(directory.string());
-}
-
 VisitId StoreActivityLog::append(Visit visit) {
   visit.id = VisitId{visits.size() + 1};
-  appendRecord(kVisits, encode(visit));
+  if (store) appendActivityRecord(*store, directory, kVisits, encode(visit));
   visits.push_back(std::move(visit));
   select(visits.back().id);
   return visits.back().id;
@@ -219,7 +225,9 @@ std::vector<VisitId> StoreActivityLog::children(const VisitId parent) const {
 
 void StoreActivityLog::select(const VisitId id) {
   if (!find(id)) throw std::runtime_error("activity: unknown visit");
-  appendRecord(kCurrent, std::to_string(id.value));
+  if (store) {
+    appendActivityRecord(*store, directory, kCurrent, std::to_string(id.value));
+  }
   selected = id;
 }
 

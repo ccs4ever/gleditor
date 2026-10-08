@@ -232,7 +232,7 @@ invisible in every scene that does not.
 | E11 | Dimensional pack view, `promotePack` (G4), occurrence highlighting (G7)                                                                                                                                          | E7, E8, S5 | §9.3.11                                                                      | L    |
 | E12 | `view_gesture`: drag to rebind and to reorder the ring, as a state machine                                                                                                                                       | E10        | every transition; cancel changes nothing                                     | S    |
 | E13 | `selector`: tiers, cursor, layout                                                                                                                                                                                | E5, E9     | each tier; arming and naming a point binds                                   | M    |
-| E14 | `dimension_ranking`: `WalkRecorder`, summaries kept in the activity store, ranking (G6)                                                                                                                          | —          | decay; Markov order; slips dropped; determinism; summaries survive a restart | M    |
+| E14 | `dimension_ranking`: `WalkRecorder`, summaries kept in the activity store, ranking (G6)                                                                                                                          | —          | decay; pair tallies; slips dropped; determinism; summaries survive a restart | M    |
 | E15 | `builtin_views`: one registration call. Each view's descriptor, with its own settings and chords, ships in that view's package, so a view is reachable the day it lands.                                         | E3         | the keymap conflict test passes as each view is added                        | S    |
 | E16 | The `u` and `t` roles' cursor rules                                                                                                                                                                              | E5, S3     | step in and out of a subspace; a step on `t` against two built states        | M    |
 
@@ -575,3 +575,6 @@ Three challengers attacked the first draft. What each said that mattered, and wh
 - 2026-10-08 — §6: `compare-backends.sh` needs no `xvfb-run`; offscreen SDL over llvmpipe renders GL
   and GLES without a display. A Vulkan capture under SDL2 is the one case that still needs one.
 - 2026-10-08 — §3.1: the spikes' results and what each changes in the packages that follow.
+- 2026-10-08 — E14's tests: the deferral table of §4.1 puts "most likely" after M6, and E14 is in
+  M6, so E14 builds "most used" only and tests that the summaries count which dimension followed
+  which, the input the deferred Markov order reads. The row's "Markov order" predated the deferral.
