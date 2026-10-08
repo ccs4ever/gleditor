@@ -152,6 +152,17 @@ void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving);
 
+/// Exact visible occurrences, staged in O(left + right) attachments. The
+/// counterpart in each row is only an anchor-resolution representative.
+void placeGroupedLinks(const std::map<zigzag::CellRef, Link> &links,
+                       const UniversalViewContext &ctx,
+                       std::vector<LinkedPair> &between,
+                       std::vector<HalfLink> &leaving);
+void placeGroupedLinks(const std::map<zigzag::CellRef, Link> &links,
+                       const std::vector<const Version *> &views,
+                       std::vector<LinkedPair> &between,
+                       std::vector<HalfLink> &leaving);
+
 /**
  * @brief Colour a link of @p type and @p tier is shown in, as packed RGBA8.
  *

@@ -1,8 +1,12 @@
 #include "../lib/mocks/world_device.hpp"
 #include "common/ui/xanadoc/beams.hpp"
 #include "common/ui/xanadoc/link_context.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
+#include <gleditor/beams.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text_source.hpp>
 #include <gtest/gtest.h>
@@ -160,5 +164,77 @@ TEST_F(ReaderPackageUiTest, RestoringPreferencesRefusesNativeAuthorityOverlap) {
   EXPECT_THROW(restored.readerLinkPackages(), ReaderLinkPackagesUnreadable);
   std::ifstream after(preferences);
   EXPECT_EQ(std::string(std::istreambuf_iterator<char>(after), {}), retained);
+}
+TEST_F(ReaderPackageUiTest,
+       MissingRepresentativeDoesNotHideVisibleLinkMembers) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Session session((root / "workspace").string(), perma);
+  auto &store       = session.store();
+  const auto leftA  = store.makeCell({}, "left A");
+  const auto leftB  = store.makeCell(leftA, "left B");
+  const auto rightA = store.makeCell(leftB, "right A");
+  const auto rightB = store.makeCell(rightA, "right B");
+  const auto before = store.rebuildManifold(rightB);
+  const auto a = store.cellRefOf(leftA), b = store.cellRefOf(leftB);
+  const auto missing = store.cellRefOf(rightA),
+             visible = store.cellRefOf(rightB);
+  Link link;
+  link.left       = {before.contentOf(a).front(), before.contentOf(b).front()};
+  link.right      = {before.contentOf(missing).front(),
+                     before.contentOf(visible).front()};
+  const auto head = store.addLink(rightB, link);
+  store.repointCurrentVersion(head);
+  const auto manifold   = store.rebuildManifold(head);
+  const auto operations = store.opCount();
+  WorldRecordingDevice device;
+  std::vector<gleditor::Beams::Row> rows;
+  ON_CALL(device, drawGlyphs)
+      .WillByDefault([&](const render::DrawUniforms &,
+                         render::BufferHandle buffer, std::size_t offset,
+                         std::uint32_t count) {
+        const auto &bytes = device.buffers.at(buffer.id);
+        ASSERT_LE(offset + count * sizeof(gleditor::Beams::Row), bytes.size());
+        for (std::uint32_t i = 0; i < count; ++i) {
+          gleditor::Beams::Row row;
+          std::memcpy(&row, bytes.data() + offset + i * sizeof(row),
+                      sizeof(row));
+          rows.push_back(row);
+        }
+      });
+  RenderState state{&device};
+  LinkBeams beams(session, nullptr);
+  beams.setManifoldViews({&manifold});
+  beams.setCellRadius(-1);
+  beams.setCellAnchorResolver([&](zigzag::CellRef cell)
+                                  -> std::optional<CellAnchor> {
+    if (cell == a)
+      return CellAnchor{.position = {-100, -20, 0}, .width = 20, .height = 14};
+    if (cell == b)
+      return CellAnchor{.position = {-100, 20, 0}, .width = 20, .height = 14};
+    if (cell == visible)
+      return CellAnchor{.position = {100, 0, 0}, .width = 20, .height = 14};
+    return std::nullopt;
+  });
+  beams.deviceReady(device, {});
+  ch::Timeline timeline;
+  glm::mat4 projection{1};
+  gleditor::FrameContext frame{.state          = state,
+                               .viewProjection = projection,
+                               .screenWidth    = 800,
+                               .screenHeight   = 600,
+                               .timeline       = timeline};
+  beams.drawFrame(frame);
+  ASSERT_FALSE(rows.empty());
+  const auto touches = [&](float x, float y) {
+    return std::ranges::any_of(rows, [&](const auto &row) {
+      return (std::abs(row.from[0] - x) < .01F &&
+              std::abs(row.from[1] - y) < 10.F) ||
+             (std::abs(row.to[0] - x) < .01F && std::abs(row.to[1] - y) < 10.F);
+    });
+  };
+  EXPECT_TRUE(touches(-90, -20));
+  EXPECT_TRUE(touches(-90, 20));
+  EXPECT_TRUE(touches(90, 0));
+  EXPECT_EQ(store.opCount(), operations);
 }
 } // namespace

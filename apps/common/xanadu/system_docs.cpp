@@ -164,8 +164,16 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "behind. Default is -20.0.\n"
            "  bypassDepthLimit: Deepest Z offset for bypass routing. Default "
            "is -120.0.\n"
-           "  bypassSegments: Curve subdivision segment count for bypass "
-           "routing. Default is 9.\n"
+           "  curveSegments: Curve subdivision segment count for NURBS "
+           "routing. Default is 32, bounded 8 to 256.\n"
+           "  curveHandleShare: Endpoint tangent reach as a share of the gap. "
+           "Default 0.3.\n"
+           "  inactiveLinkAlpha: Other links recede while one is selected. "
+           "Default 0.35.\n"
+           "  curveWeight: Rational weight of the inner controls. Default "
+           "1.0.\n"
+           "  gatheringShare: Endset hubs gather at this fraction of the gap. "
+           "Default 0.32.\n"
            "  loomBundlingEnabled: Group contiguous rank transclusion strands "
            "into unified laminar looms. Default is true.\n"
            "  loomAlpha: Semi-transparent resting alpha for golden "
@@ -622,10 +630,25 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kBeamsBypassDepthLimit),
          .notes   = "Max Z-depth limit for bypasses",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {-120.0}}}},
-        {.name    = std::string(settings::kBeamsBypassSegments),
-         .notes   = "Spline subdivisions for bypass curves",
+        {.name    = "beams.curveHandleShare",
+         .notes   = "Endpoint tangent reach as a fraction of horizontal "
+                    "separation; bounded 0.05 to 0.45",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.3}}}},
+        {.name  = "beams.inactiveLinkAlpha",
+         .notes = "Other link opacity while one link is selected; bounded 0.15 "
+                  "to 0.8",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.35}}}},
+        {.name    = "beams.curveWeight",
+         .notes   = "Positive rational weight of the inner NURBS controls; "
+                    "bounded 0.25 to 4",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {1.0}}}},
+        {.name    = "beams.gatheringShare",
+         .notes   = "Each endset hub's fraction of the gap; bounded 0.1 to 0.4",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.32}}}},
+        {.name    = "beams.curveSegments",
+         .notes   = "Bounded NURBS subdivisions per ribbon, 8 to 256",
          .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {std::int64_t{9}}}}},
+                      .defaultValues = {std::int64_t{32}}}}},
         {.name    = std::string(settings::kBeamsLoomBundlingEnabled),
          .notes   = "Whether loom cables bundle together",
          .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {true}}}},
@@ -3065,6 +3088,23 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
 
+  const auto curveNumber = [&](std::string_view key, float fallback, float low,
+                               float high) {
+    const double value = model.getDouble(key, fallback);
+    return std::isfinite(value) ? static_cast<float>(std::clamp(
+                                      value, double(low), double(high)))
+                                : fallback;
+  };
+  cfg.beams.inactiveLinkAlpha = curveNumber(
+      "beams.inactiveLinkAlpha", cfg.beams.inactiveLinkAlpha, .15F, .8F);
+  cfg.beams.curveHandleShare = curveNumber(
+      "beams.curveHandleShare", cfg.beams.curveHandleShare, .05F, .45F);
+  cfg.beams.curveWeight =
+      curveNumber("beams.curveWeight", cfg.beams.curveWeight, .25F, 4.F);
+  cfg.beams.gatheringShare =
+      curveNumber("beams.gatheringShare", cfg.beams.gatheringShare, .1F, .4F);
+  cfg.beams.curveSegments   = static_cast<std::size_t>(std::clamp<std::int64_t>(
+      model.getInt64("beams.curveSegments", 32), 8, 256));
   cfg.beams.bandStrandLimit = static_cast<std::uint32_t>(
       model.getInt64(settings::kBeamsBandStrandLimit,
                      static_cast<std::int64_t>(cfg.beams.bandStrandLimit)));
@@ -3088,9 +3128,6 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.beams.bypassDepthLimit = static_cast<float>(
       model.getDouble(settings::kBeamsBypassDepthLimit,
                       static_cast<double>(cfg.beams.bypassDepthLimit)));
-  cfg.beams.bypassSegments = static_cast<std::uint32_t>(
-      model.getInt64(settings::kBeamsBypassSegments,
-                     static_cast<std::int64_t>(cfg.beams.bypassSegments)));
   cfg.beams.loomBundlingEnabled = model.getBool(
       settings::kBeamsLoomBundlingEnabled, cfg.beams.loomBundlingEnabled);
   cfg.beams.loomAlpha      = static_cast<float>(model.getDouble(

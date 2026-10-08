@@ -6,15 +6,11 @@
 
 #include <algorithm>
 #include <cmath>
-#include <span>
 #include <utility>
-#include <vector>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
-
-#include <gleditor/cpp26_inplace_vector.hpp>
 
 namespace xanadu {
 
@@ -74,20 +70,6 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   const std::size_t segments =
       segments_ > 0 ? segments_ : defaultTessellationSegments;
 
-  // The default curve fits inline; larger user-configured curves retain the
-  // dynamic path rather than changing their tessellation.
-  gleditor::cpp26::inplace_vector<glm::vec3, defaultTessellationSegments + 1>
-      inlineCurve;
-  std::vector<glm::vec3> largeCurve;
-  std::span<glm::vec3> curve;
-  if (segments <= defaultTessellationSegments) {
-    inlineCurve.resize(segments + 1);
-    curve = std::span(inlineCurve.data(), inlineCurve.size());
-  } else {
-    largeCurve.resize(segments + 1);
-    curve = std::span(largeCurve.data(), largeCurve.size());
-  }
-
   for (const auto &t : tethers_) {
     if (!t.active) {
       continue;
@@ -96,13 +78,13 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const glm::vec3 ctrl =
         computeControlPoint(t.originPos, t.currentPos, controlDepth_);
 
-    for (std::size_t i = 0; i <= segments; ++i) {
-      const float param = static_cast<float>(i) / static_cast<float>(segments);
-      curve[i] = evaluateBezier(t.originPos, ctrl, t.currentPos, param);
-    }
-
-    // 1. Tenuous connecting ribbon
-    beams_->addPath(curve, 0.40F, t.colour, 0);
+    const std::array poles{t.originPos, ctrl, t.currentPos};
+    const std::array weights{1.F, 1.F, 1.F};
+    const std::array knots{0.F, 0.F, 0.F, 1.F, 1.F, 1.F};
+    beams_->addNurbs(gleditor::NurbsPath(poles, weights, knots, 2),
+                     static_cast<unsigned>(std::min<std::size_t>(
+                         segments, gleditor::NurbsSamples::maxSegments)),
+                     .40F, t.colour, 0, 0, gleditor::Beams::Surface::Filament);
 
     // 2. Origin footprint blueprint quad outline in background plane
     const float halfW  = 0.5F * t.width;

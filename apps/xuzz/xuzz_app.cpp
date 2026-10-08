@@ -1176,11 +1176,12 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&wireframeHullOverlay);
   renderer->addFrameContributor(&images);
   renderer->addFrameContributor(&views);
-  renderer->addFrameContributor(&linkPanel);
   renderer->addSpanDecorator(&linkPanel);
   renderer->addPickObserver(&linkPanel);
   renderer->addFrameContributor(&overview);
   renderer->addPickObserver(&overview);
+  // Link choices must remain above the overview at large UI scales.
+  renderer->addFrameContributor(&linkPanel);
   renderer->addFrameContributor(radialMenu.get());
   renderer->addFrameContributor(&publishForm);
   renderer->addFrameContributor(&pouchDrawer);

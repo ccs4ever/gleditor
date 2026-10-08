@@ -1,5 +1,5 @@
 GLEDITOR_IN(0) vec2 curveFrom;
-GLEDITOR_IN(1) vec2 curveControl;
+GLEDITOR_IN(1) vec4 curveNormals;
 GLEDITOR_IN(2) vec2 curveTo;
 GLEDITOR_IN(3) vec2 curveWidths;
 GLEDITOR_IN(4) vec2 curveInterval;
@@ -16,15 +16,11 @@ GLEDITOR_OUT_FLAT(5) vec4 vSurface;
 GLEDITOR_OUT_FLAT(6) vec3 vHole;
 GLEDITOR_OUT_FLAT(7) uvec2 vTag;
 void main() {
-  int corner   = GLEDITOR_VERTEX_INDEX;
-  float t      = (corner & 2) != 0 ? curveInterval.y : curveInterval.x;
-  float side   = (corner & 1) != 0 ? 1.0 : -1.0;
-  vec2 tangent = mix(curveControl - curveFrom, curveTo - curveControl, t);
-  if (dot(tangent, tangent) < 0.000001) tangent = curveTo - curveFrom;
-  if (dot(tangent, tangent) < 0.000001) tangent = vec2(1.0, 0.0);
-  vec2 normal = normalize(vec2(-tangent.y, tangent.x));
-  vec2 centre =
-      mix(mix(curveFrom, curveControl, t), mix(curveControl, curveTo, t), t);
+  int corner  = GLEDITOR_VERTEX_INDEX;
+  float t     = (corner & 2) != 0 ? curveInterval.y : curveInterval.x;
+  float side  = (corner & 1) != 0 ? 1.0 : -1.0;
+  vec2 normal = (corner & 2) != 0 ? curveNormals.zw : curveNormals.xy;
+  vec2 centre = (corner & 2) != 0 ? curveTo : curveFrom;
   float halfWidth =
       mix(curveWidths.x, curveWidths.y, smoothstep(0.0, 1.0, t)) * 0.5;
   float across = side * (halfWidth + curveSurface.x);

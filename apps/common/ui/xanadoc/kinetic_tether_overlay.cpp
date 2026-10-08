@@ -75,14 +75,19 @@ void KineticTetherOverlay::drawTether(const glm::vec2 &from,
     const auto to = pointer - run / distance * clearance;
     const float sag =
         std::min(metrics.px(cfg.sagPx), glm::length(to - from) * cfg.sagShare);
-    const auto control = (from + to) * .5F + glm::vec2(0, -sag);
-    ribbons_->add(from, control, to,
-                  {.startWidth      = metrics.px(cfg.rootWidthPx),
-                   .endWidth        = metrics.px(cfg.tipWidthPx),
-                   .edgeSoftness    = 1.F,
-                   .texturePeriod   = metrics.px(cfg.texturePeriodPx),
-                   .textureStrength = cfg.textureStrength},
-                  colour, 0, pointer, radius);
+    const auto reach = (to - from) / 3.F;
+    const std::array poles{
+        glm::vec3(from, 0), glm::vec3(from + reach + glm::vec2(0, -sag), 0),
+        glm::vec3(to - reach + glm::vec2(0, -sag), 0), glm::vec3(to, 0)};
+    const std::array weights{1.F, 1.F, 1.F, 1.F};
+    const std::array knots{0.F, 0.F, 0.F, 0.F, 1.F, 1.F, 1.F, 1.F};
+    ribbons_->addNurbs(gleditor::NurbsPath(poles, weights, knots, 3),
+                       {.startWidth      = metrics.px(cfg.rootWidthPx),
+                        .endWidth        = metrics.px(cfg.tipWidthPx),
+                        .edgeSoftness    = 1.F,
+                        .texturePeriod   = metrics.px(cfg.texturePeriodPx),
+                        .textureStrength = cfg.textureStrength},
+                       colour, 0, pointer, radius);
   }
   ribbons_->commit();
   canvas_->clear();

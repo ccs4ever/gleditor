@@ -1219,3 +1219,37 @@ TEST(FramingTest, OverviewFitKeepsAspectAndRoundTrips) {
                                               {0.0F, 0.0F}, {100.0F, 100.0F});
   EXPECT_FLOAT_EQ(point.toPanel({5.0F, 5.0F}).x, 50.0F);
 }
+
+TEST(LinkLayout, GroupedAttachmentsKeepDisjointMembersAndAvoidCartesianFanout) {
+  Store store;
+  const auto a  = store.insert({}, 0, "alpha gap gamma");
+  const auto b  = store.insert({}, 0, "one gap two gap three");
+  const auto av = store.rebuild(a), bv = store.rebuild(b);
+  Link link;
+  link.left  = {av.spansFor(0, 5).front(), av.spansFor(10, 5).front()};
+  link.right = {bv.spansFor(0, 3).front(), bv.spansFor(8, 3).front(),
+                bv.spansFor(16, 5).front()};
+  store.addLink(a, link);
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  const std::vector<const Version *> views{&av, &bv};
+  xanadu::placeGroupedLinks(store.links(), views, placed, unplaced);
+  ASSERT_EQ(placed.size(), 4U);
+  std::set<std::pair<unsigned, unsigned>> left, right;
+  for (const auto &row : placed) {
+    EXPECT_EQ(row.link, placed.front().link);
+    if (row.drawFrom) left.emplace(row.from.start, row.from.end);
+    if (row.drawTo) right.emplace(row.to.start, row.to.end);
+  }
+  EXPECT_EQ(left, (std::set<std::pair<unsigned, unsigned>>{{0, 5}, {10, 15}}));
+  EXPECT_EQ(right, (std::set<std::pair<unsigned, unsigned>>{
+                       {0, 3}, {8, 11}, {16, 21}}));
+  // Repeated occurrences remain separate. Rendering grows by attachment
+  // count, rather than the product of the two endsets.
+  Link large;
+  large.left.assign(1000, link.left.front());
+  large.right.assign(1000, link.right.front());
+  std::map<zigzag::CellRef, Link> links{{42, large}};
+  xanadu::placeGroupedLinks(links, views, placed, unplaced);
+  EXPECT_EQ(placed.size(), 1999U);
+}

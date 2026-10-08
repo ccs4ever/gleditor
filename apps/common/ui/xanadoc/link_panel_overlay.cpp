@@ -181,8 +181,8 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
   }
   auto next = std::make_shared<common_ui::LinkPanelPresentation>(
       common_ui::linkPanelPresentation(lines, buttons, ids, builtMetrics,
-                                       ctx.theme, config, anchor,
-                                       measurements));
+                                       ctx.theme, config, anchor, measurements,
+                                       protectedContent));
   panel.setModel(next->model);
   panel.setBounds(next->bounds);
   panel.setVisible(true);
@@ -265,13 +265,68 @@ void LinkPanelOverlay::drawFrame(gleditor::FrameContext &ctx) {
       }
     }
   }
-  const Stamp stamp{.selection = context.revision(),
-                    .views     = session.generation(),
-                    .config    = configRevision,
-                    .width     = ctx.screenWidth,
-                    .height    = ctx.screenHeight,
-                    .reading   = context.readingStamp(),
-                    .anchors   = panelAnchors};
+  protectedContent.reset();
+  auto protectedSite = context.reading().here;
+  if (const auto selected = context.selection();
+      selected && selected->occurrences) {
+    const auto &cursor  = selected->cursor(selected->active);
+    const auto &members = selected->occurrences->members(selected->active);
+    if (cursor.member && cursor.occurrence && *cursor.member < members.size() &&
+        *cursor.occurrence < members[*cursor.member].occurrences.size())
+      protectedSite =
+          members[*cursor.member].occurrences[*cursor.occurrence].site;
+  }
+  if (protectedSite)
+    if (const auto *site = std::get_if<DocumentSite>(&*protectedSite)) {
+      const auto view = context.viewIndexOf(*site);
+      if (view && *view < ctx.state.docs.size() && ctx.state.docs[*view]) {
+        const auto &doc  = *ctx.state.docs[*view];
+        const auto first = doc.anchorFor(site->range.start);
+        const auto last  = doc.anchorFor(site->range.end > site->range.start
+                                             ? site->range.end - 1
+                                             : site->range.start);
+        if (first && last) {
+          glm::vec2 low(std::numeric_limits<float>::max()),
+              high(std::numeric_limits<float>::lowest());
+          bool complete = true;
+          for (const auto &anchor : {*first, *last})
+            for (const auto corner :
+                 {glm::vec2(-.5F, -.5F), glm::vec2(-.5F, .5F),
+                  glm::vec2(.5F, -.5F), glm::vec2(.5F, .5F)}) {
+              const auto world = doc.worldPoint(
+                  anchor.pageIndex, anchor.x + corner.x * anchor.height,
+                  anchor.y + corner.y * anchor.height);
+              if (!world ||
+                  (ctx.viewProjection * glm::vec4(*world, 1)).w <= .0001F) {
+                complete = false;
+                continue;
+              }
+              const auto point = gleditor::spatial::projectToScreen(
+                  ctx.viewProjection, *world,
+                  static_cast<float>(ctx.screenWidth),
+                  static_cast<float>(ctx.screenHeight));
+              low  = glm::min(low, point);
+              high = glm::max(high, point);
+            }
+          if (complete)
+            protectedContent = {low.x, low.y, high.x - low.x, high.y - low.y};
+        }
+      }
+    }
+  const Stamp stamp{
+      .selection = context.revision(),
+      .views     = session.generation(),
+      .config    = configRevision,
+      .width     = ctx.screenWidth,
+      .height    = ctx.screenHeight,
+      .reading   = context.readingStamp(),
+      .anchors   = panelAnchors,
+      .protectedContent =
+          protectedContent
+              ? std::optional<std::array<float, 4>>(
+                    {protectedContent->left, protectedContent->bottom,
+                     protectedContent->width, protectedContent->height})
+              : std::nullopt};
   auto metrics         = ctx.metrics;
   metrics.screenWidth  = ctx.screenWidth;
   metrics.screenHeight = ctx.screenHeight;

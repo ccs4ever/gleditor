@@ -31,6 +31,7 @@
 #include <glm/ext/vector_float3.hpp>
 
 #include <gleditor/buffer_pool.hpp>
+#include <gleditor/nurbs.hpp>
 #include <gleditor/render/types.hpp>
 
 struct RenderState;
@@ -49,6 +50,7 @@ namespace gleditor {
  */
 class Beams {
 public:
+  enum class Surface { Filament, Glass };
   /**
    * @brief One beam, as the vertex stage reads it.
    *
@@ -74,6 +76,8 @@ public:
      * times over and means none of them.
      */
     std::array<float, 2> along{0.0F, 1.0F};
+    std::array<float, 3> fromNormal{}, toNormal{};
+    float surface{1};
   };
 
   /// Per-instance layout describing Row to the device.
@@ -135,6 +139,10 @@ public:
    */
   void addPath(std::span<const glm::vec3> through, float width,
                std::uint32_t colour, std::uint32_t tag);
+
+  void addNurbs(const NurbsPath &, unsigned segments, float width,
+                std::uint32_t colour, std::uint32_t tag, float phase = 0,
+                Surface surface = Surface::Glass);
 
   /// Hand what has been added to the device. Nothing is drawn until this.
   void commit();

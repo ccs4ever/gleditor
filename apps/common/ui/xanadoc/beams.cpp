@@ -163,16 +163,18 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     uctx.manifoldViews = manifoldViews_;
     uctx.manifoldFoci  = manifoldFoci_;
     uctx.cellRadius    = cellRadius_;
-    placeLinks(session.store().links(), uctx, placed, unplaced);
+    placeGroupedLinks(session.store().links(), uctx, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
     for (const auto &one : placed) {
       strands.push_back(Strand{
-          .link = one.link,
-          .type = one.type,
-          .tier = one.tier,
-          .from = one.from,
-          .to   = one.to,
+          .link     = one.link,
+          .type     = one.type,
+          .tier     = one.tier,
+          .from     = one.from,
+          .to       = one.to,
+          .drawFrom = one.drawFrom,
+          .drawTo   = one.drawTo,
       });
     }
     dangling.clear();
@@ -217,16 +219,18 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   } else {
     looms_.clear();
     strandToLoom_.clear();
-    placeLinks(session.store().links(), versions, placed, unplaced);
+    placeGroupedLinks(session.store().links(), versions, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
     for (const auto &one : placed) {
       strands.push_back(Strand{
-          .link = one.link,
-          .type = one.type,
-          .tier = one.tier,
-          .from = one.from,
-          .to   = one.to,
+          .link     = one.link,
+          .type     = one.type,
+          .tier     = one.tier,
+          .from     = one.from,
+          .to       = one.to,
+          .drawFrom = one.drawFrom,
+          .drawTo   = one.drawTo,
       });
     }
     dangling.clear();
@@ -284,16 +288,20 @@ void LinkBeams::rebuildStrands(RenderState &state) {
       const auto right = endpoints(resolved.right);
       if (left.empty() || right.empty()) continue;
       const auto id     = session.packageRenderId(resolved.key);
-      const auto append = [&](const LinkEnd &a, const LinkEnd &b) {
-        strands.push_back(Strand{.link = id,
-                                 .type = resolved.link.type,
-                                 .tier = ProminenceTier::Curated,
-                                 .from = a,
-                                 .to   = b});
+      const auto append = [&](const LinkEnd &a, const LinkEnd &b, bool drawFrom,
+                              bool drawTo) {
+        strands.push_back(Strand{.link     = id,
+                                 .type     = resolved.link.type,
+                                 .tier     = ProminenceTier::Curated,
+                                 .from     = a,
+                                 .to       = b,
+                                 .drawFrom = drawFrom,
+                                 .drawTo   = drawTo});
       };
-      for (const auto &end : left) append(end, right.front());
+      for (std::size_t i = 0; i < left.size(); ++i)
+        append(left[i], right.front(), true, i == 0);
       for (std::size_t i = 1; i < right.size(); ++i)
-        append(left.front(), right[i]);
+        append(left.front(), right[i], false, true);
     }
   }
 
@@ -514,7 +522,8 @@ std::uint32_t LinkBeams::fade(const std::uint32_t colour, const float factor) {
 void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const std::size_t documentsApart,
                      const std::uint32_t colour, const std::uint32_t tag,
-                     const float phase, const float zNudge) {
+                     const float phase, const float zNudge,
+                     gleditor::Beams::Surface surface) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
   const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
@@ -570,24 +579,21 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                                   ? colour
                                   : fade(colour, beamConfig_.bandFillAlpha);
 
-    if (useMorphic) {
-      const glm::vec3 fromTan(p2.x >= p1.x ? 1.0F : -1.0F, 0.0F, 0.0F);
-      const glm::vec3 toTan(p2.x >= p1.x ? 1.0F : -1.0F, 0.0F, 0.0F);
-      const auto path =
-          morphicRoute(p1, p2, fromTan, toTan, beamConfig_.bypassSegments);
-      beams->addPath(path, baseWidth, strandColour, tag);
-      continue;
-    }
-
-    if (documentsApart <= 1) {
-      beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - phase,
-                 1.0F - phase);
-      continue;
-    }
-    // A document stands between these two, so the beam goes behind it rather
-    // than through its text; see bypassRoute().
-    beams->addPath(bypassRoute(p1, p2, depth, beamConfig_.bypassSegments),
-                   baseWidth, strandColour, tag);
+    // Clamped cubic NURBS retain horizontal endpoint tangents. The middle
+    // controls carry bypass depth without moving the document attachments.
+    const float dx        = p2.x - p1.x;
+    const float handle    = std::abs(dx) * beamConfig_.curveHandleShare;
+    const float direction = dx >= 0 ? 1.F : -1.F;
+    const float dip =
+        documentsApart > 1 && !useMorphic ? depth * (4.F / 3.F) : 0.F;
+    const std::array poles{p1, p1 + glm::vec3(direction * handle, 0, dip),
+                           p2 - glm::vec3(direction * handle, 0, -dip), p2};
+    const std::array weights{1.F, beamConfig_.curveWeight,
+                             beamConfig_.curveWeight, 1.F};
+    const std::array knots{0.F, 0.F, 0.F, 0.F, 1.F, 1.F, 1.F, 1.F};
+    beams->addNurbs(gleditor::NurbsPath(poles, weights, knots, 3),
+                    static_cast<unsigned>(beamConfig_.curveSegments), baseWidth,
+                    strandColour, tag, phase, surface);
   }
 }
 
@@ -1496,6 +1502,15 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
   }
 
+  const auto selected = linkContext_ != nullptr ? linkContext_->selection()
+                                                : gleditor::cpp26::nullopt;
+  activeLink          = selected
+                            ? std::optional<std::uint64_t>(
+                         selected->key.authority == session.store().documentId()
+                             ? static_cast<std::uint64_t>(selected->key.id)
+                             : session.packageRenderId(selected->key))
+                            : std::nullopt;
+
   // Advance pulse phase every frame for live photonic traveling wave packets
   pulsePhase = std::fmod(pulsePhase + 0.02F, 1.0F);
 
@@ -1528,8 +1543,65 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     allAnchors_.reserve((strands.size() + transclusionStrands.size()) * 2);
     auto &allAnchors = allAnchors_;
 
+    gatherings_.clear();
+    gatherings_.reserve(strands.size());
+    for (std::size_t i = 0; i < strands.size(); ++i) {
+      const auto &st = strands[i];
+      if (gatherings_.empty() || gatherings_.back().link != st.link)
+        gatherings_.push_back({.link = st.link});
+      auto &group         = gatherings_.back();
+      const auto position = [&](const LinkEnd &end, const auto &cell) {
+        return end.isCell() && cell ? cell->position
+               : end.isDocument() && end.doc < state.docs.size()
+                   ? glm::vec3(state.docs[end.doc]->getModel()[3])
+                   : glm::vec3(0);
+      };
+      const bool rightwards = position(st.to, st.toCellAnchor).x >=
+                              position(st.from, st.fromCellAnchor).x;
+      const auto edge = [&](bool left) -> std::optional<Edge> {
+        const auto &end  = left ? st.from : st.to;
+        const auto &cell = left ? st.fromCellAnchor : st.toCellAnchor;
+        if (end.isCell())
+          return cell ? edgeOf(*cell, left ? rightwards : !rightwards)
+                      : std::nullopt;
+        if (end.doc >= state.docs.size() || !state.docs[end.doc] ||
+            state.docs[end.doc]->currentOpacity() <= .001F)
+          return std::nullopt;
+        return edgeOf(*state.docs[end.doc], left ? st.fromAnchor : st.toAnchor,
+                      left ? st.fromEndAnchor : st.toEndAnchor,
+                      left ? rightwards : !rightwards);
+      };
+      if (st.drawFrom)
+        if (const auto e = edge(true)) {
+          group.left += (e->top + e->bottom) * .5F;
+          ++group.leftCount;
+          group.lineHeight = std::max(group.lineHeight, e->lineHeight);
+        }
+      if (st.drawTo)
+        if (const auto e = edge(false)) {
+          group.right += (e->top + e->bottom) * .5F;
+          ++group.rightCount;
+          group.lineHeight = std::max(group.lineHeight, e->lineHeight);
+        }
+    }
+    for (auto &group : gatherings_) {
+      if (!group.leftCount || !group.rightCount) continue;
+      group.left /= static_cast<float>(group.leftCount);
+      group.right /= static_cast<float>(group.rightCount);
+      const auto run  = group.right - group.left;
+      const auto left = group.left;
+      group.left += run * beamConfig_.gatheringShare;
+      group.right = left + run * (1.F - beamConfig_.gatheringShare);
+    }
+    std::size_t gathering = 0;
+
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];
+      while (gathering + 1 < gatherings_.size() &&
+             gatherings_[gathering].link != strand.link)
+        ++gathering;
+      auto &group        = gatherings_[gathering];
+      const bool grouped = group.leftCount > 1 || group.rightCount > 1;
 
       const bool fromValid =
           strand.from.isCell()
@@ -1549,32 +1621,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
             (!strand.toAnchor && endpointStillLoading(strand.to))) {
           anyStrandStillLoading = true;
         }
-        continue;
+        if (!grouped || !group.leftCount || !group.rightCount) continue;
       }
 
-      const glm::vec3 fromPos =
-          strand.from.isCell()
-              ? strand.fromCellAnchor->position
-              : glm::vec3(state.docs[strand.from.doc]->getModel()[3]);
-      const glm::vec3 toPos =
-          strand.to.isCell()
-              ? strand.toCellAnchor->position
-              : glm::vec3(state.docs[strand.to.doc]->getModel()[3]);
-
-      const bool rightwards = toPos.x >= fromPos.x;
+      const auto position = [&](const LinkEnd &end, const auto &cell) {
+        if (end.isCell()) return cell ? cell->position : glm::vec3(0);
+        return end.doc < state.docs.size() && state.docs[end.doc]
+                   ? glm::vec3(state.docs[end.doc]->getModel()[3])
+                   : glm::vec3(0);
+      };
+      const bool rightwards =
+          grouped ? group.right.x >= group.left.x
+                  : position(strand.to, strand.toCellAnchor).x >=
+                        position(strand.from, strand.fromCellAnchor).x;
       const auto nearEdge =
-          strand.from.isCell()
+          !fromValid ? std::optional<Edge>{}
+          : strand.from.isCell()
               ? edgeOf(*strand.fromCellAnchor, rightwards)
               : edgeOf(*state.docs[strand.from.doc], strand.fromAnchor,
                        strand.fromEndAnchor, rightwards);
       const auto farEdge =
-          strand.to.isCell()
+          !toValid ? std::optional<Edge>{}
+          : strand.to.isCell()
               ? edgeOf(*strand.toCellAnchor, !rightwards)
               : edgeOf(*state.docs[strand.to.doc], strand.toAnchor,
                        strand.toEndAnchor, !rightwards);
-      if (!nearEdge || !farEdge) {
-        continue;
-      }
+      if ((fromValid && !nearEdge) || (toValid && !farEdge)) continue;
 
       std::size_t docSpan = 1;
       if (strand.from.isDocument() && strand.to.isDocument()) {
@@ -1584,9 +1656,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
 
       const float fromOpacity =
-          strand.from.isCell() ? 1.0F
-                               : state.docs[strand.from.doc]->currentOpacity();
-      const float toOpacity = strand.to.isCell()
+          (!fromValid || strand.from.isCell())
+              ? 1.0F
+              : state.docs[strand.from.doc]->currentOpacity();
+      const float toOpacity = (!toValid || strand.to.isCell())
                                   ? 1.0F
                                   : state.docs[strand.to.doc]->currentOpacity();
       const auto docAlpha   = std::min(fromOpacity, toOpacity);
@@ -1595,8 +1668,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           docAlpha);
       const auto tagId = static_cast<std::uint32_t>(i);
       const bool isAct = (activeLink && *activeLink == strand.link);
-      const float linkPhase =
-          std::fmod(pulsePhase + linkPhaseOffset(strand.link), 1.0F);
+
       // The active/selected link's beam always wins any depth tie against a
       // crossing one rather than joining the jitter that resolves everyone
       // else's, and its opacity is boosted the same way the margin anchor
@@ -1604,12 +1676,39 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       const float zNudge =
           isAct ? beamConfig_.activeZBoost
                 : linkZJitter(strand.link) * beamConfig_.zFightJitterAmplitude;
-      const auto beamColour = isAct ? (colour | 0xFFU) : colour;
+      const auto beamColour = isAct ? (colour | 0xFFU)
+                              : activeLink
+                                  ? fade(colour, beamConfig_.inactiveLinkAlpha)
+                                  : colour;
 
-      band(*nearEdge, *farEdge, docSpan, beamColour, tagId, linkPhase, zNudge);
-      recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
+      if (grouped && group.leftCount && group.rightCount) {
+        const auto hub = [&](const glm::vec3 &centre) {
+          const float half =
+              group.lineHeight * Doc::pixelsToWorld * beamWidthOfLine * .5F;
+          return Edge{.top        = centre + glm::vec3(0, half, 0),
+                      .bottom     = centre - glm::vec3(0, half, 0),
+                      .lineHeight = group.lineHeight};
+        };
+        const auto left = hub(group.left), right = hub(group.right);
+        if (strand.drawFrom && nearEdge)
+          band(*nearEdge, left, docSpan, beamColour, tagId, 0, zNudge,
+               gleditor::Beams::Surface::Filament);
+        if (strand.drawTo && farEdge)
+          band(right, *farEdge, docSpan, beamColour, tagId, 0, zNudge,
+               gleditor::Beams::Surface::Filament);
+        if (!group.trunkStaged) {
+          group.trunkStaged = true;
+          band(left, right, docSpan, beamColour, tagId, 0, zNudge,
+               gleditor::Beams::Surface::Filament);
+          recordFirstBeamCrossing(ctx, left, right);
+        }
+      } else {
+        band(*nearEdge, *farEdge, docSpan, beamColour, tagId, 0, zNudge,
+             gleditor::Beams::Surface::Filament);
+        recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
+      }
 
-      if (strand.from.isDocument()) {
+      if (strand.drawFrom && nearEdge && strand.from.isDocument()) {
         const std::uint32_t marginCol =
             strand.to.isCell() ? 0x38BDF8FF : colour;
         allAnchors.push_back(MarginAnchor{
@@ -1626,7 +1725,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         });
       }
 
-      if (strand.to.isDocument()) {
+      if (strand.drawTo && farEdge && strand.to.isDocument()) {
         const std::uint32_t marginCol =
             strand.from.isCell() ? 0x38BDF8FF : colour;
         allAnchors.push_back(MarginAnchor{
@@ -1655,6 +1754,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           beams->add(originPos, currentPos, 1.6F, tetherCol, tagId, 0.0F, 1.0F);
         }
       }
+
+      if (!fromValid || !toValid) continue;
 
       // Every strand of this link between these two documents, anchored at
       // both ends of both extents before any of them aligns -- see

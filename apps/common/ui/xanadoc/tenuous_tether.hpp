@@ -6,8 +6,8 @@
  * When a linked passage or document flies forward out of the background plane
  * (Z = -40) into collinear reading alignment (Z = 0), it remains anchored to
  * its origin slot via a faint, semi-transparent elastic tether ribbon
- * (quadratic Bezier arc with alpha ~ 0.25), preventing visual disorientation
- * and maintaining Nelsonian deep provenance.
+ * (clamped quadratic NURBS arc with alpha ~ 0.25), preventing visual
+ * disorientation and maintaining Nelsonian deep provenance.
  */
 #ifndef XUDU_TENUOUS_TETHER_HPP
 #define XUDU_TENUOUS_TETHER_HPP
@@ -61,7 +61,7 @@ struct FlyingTetherAnchor {
 
 /**
  * @class TenuousTetherOverlay
- * @brief FrameContributor that stages and draws quadratic Bezier ribbons and
+ * @brief FrameContributor that stages and draws NURBS ribbons and
  * origin footprints.
  */
 class TenuousTetherOverlay : public gleditor::FrameContributor {

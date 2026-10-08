@@ -26,6 +26,7 @@ struct LinkPanelPresentation {
     std::span<const gleditor::ui::WidgetId> actionIds,
     const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &,
     const xanadu::LinkPanelConfig &, std::optional<gleditor::ui::Rect> anchor,
-    gleditor::text::ShapingCache &);
+    gleditor::text::ShapingCache &,
+    std::optional<gleditor::ui::Rect> protectedContent = {});
 } // namespace common_ui
 #endif

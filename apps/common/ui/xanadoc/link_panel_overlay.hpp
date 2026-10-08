@@ -110,6 +110,7 @@ private:
     int height{};
     LinkContext::ReadingStamp reading;
     std::optional<std::array<glm::vec2, 2>> anchors;
+    std::optional<std::array<float, 4>> protectedContent;
     bool operator==(const Stamp &) const = default;
   };
 
@@ -147,6 +148,7 @@ private:
   std::optional<std::uint64_t> framedSelection;
   std::optional<AnchorPair> framedAnchors;
   std::optional<std::array<glm::vec2, 2>> panelAnchors;
+  std::optional<gleditor::ui::Rect> protectedContent;
   /// The buttons drawn, in tag order, so a pick can be mapped back.
   std::vector<xanadu::PanelButton> buttons;
 };

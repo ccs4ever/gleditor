@@ -1,6 +1,7 @@
 #include "link_panel_presentation.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -19,7 +20,8 @@ LinkPanelPresentation linkPanelPresentation(
     std::span<const xanadu::PanelButton> buttons,
     std::span<const ui::WidgetId> actionIds, const ui::UiMetrics &metrics,
     const ui::Theme &sourceTheme, const xanadu::LinkPanelConfig &config,
-    std::optional<ui::Rect> anchor, gleditor::text::ShapingCache &cache) {
+    std::optional<ui::Rect> anchor, gleditor::text::ShapingCache &cache,
+    std::optional<ui::Rect> protectedContent) {
   if (buttons.size() != actionIds.size())
     throw std::invalid_argument("Link panel action identity count mismatch");
   LinkPanelPresentation result;
@@ -43,9 +45,57 @@ LinkPanelPresentation linkPanelPresentation(
   const auto share = [](float value) {
     return std::isfinite(value) ? std::clamp(value, .1F, 1.0F) : .9F;
   };
-  const auto maxWidth  = std::floor(safe.width * share(config.maxWidthShare));
-  const auto maxHeight = std::floor(safe.height * share(config.maxHeightShare));
-  const auto rows      = (buttons.size() + 2) / 3;
+  const auto fullMaxWidth =
+      std::floor(safe.width * share(config.maxWidthShare));
+  const auto fullMaxHeight =
+      std::floor(safe.height * share(config.maxHeightShare));
+  auto panelArea = safe;
+  if (protectedContent) {
+    const auto at    = *protectedContent;
+    const float gap  = metrics.px(config.marginPx);
+    const auto right = safe.left + safe.width, top = safe.bottom + safe.height;
+    const float leftCut = std::clamp(at.left - gap, safe.left, right);
+    const float rightCut =
+        std::clamp(at.left + at.width + gap, safe.left, right);
+    const float bottomCut = std::clamp(at.bottom - gap, safe.bottom, top);
+    const float topCut =
+        std::clamp(at.bottom + at.height + gap, safe.bottom, top);
+    const std::array candidates{
+        ui::Rect{safe.left, safe.bottom, leftCut - safe.left, safe.height},
+        ui::Rect{rightCut, safe.bottom, right - rightCut, safe.height},
+        ui::Rect{safe.left, safe.bottom, safe.width, bottomCut - safe.bottom},
+        ui::Rect{safe.left, topCut, safe.width, top - topCut}};
+    const float minimumHeight =
+        (lines.size() + (buttons.size() + 2) / 3) * (std::ceil(line) + 2);
+    float best = 0;
+    for (const auto &candidate : candidates) {
+      if (candidate.width < metrics.px(sourceTheme.type.minTouchPx) * 3 ||
+          candidate.height < minimumHeight)
+        continue;
+      const float area = std::min(fullMaxWidth, candidate.width) *
+                         std::min(fullMaxHeight, candidate.height);
+      if (area > best) {
+        best      = area;
+        panelArea = candidate;
+      }
+    }
+  }
+  const auto maxWidth  = std::floor(std::min(fullMaxWidth, panelArea.width));
+  const auto maxHeight = std::floor(std::min(fullMaxHeight, panelArea.height));
+  float longestButton  = 0;
+  for (const auto &button : buttons)
+    longestButton =
+        std::max(longestButton, cache.fitted(button.label, font, {}).widthPx);
+  const float wantedPadding = std::max(0.F, metrics.px(config.paddingPx));
+  auto columns              = static_cast<unsigned>(
+      std::clamp(std::floor(std::max(0.F, maxWidth - wantedPadding * 2) /
+                                         std::max(1.F, longestButton + wantedPadding * 2)),
+                              1.F, 3.F));
+  if ((lines.size() + (buttons.size() + columns - 1) / columns) *
+          (std::ceil(line) + 2) >
+      maxHeight)
+    columns = 3;
+  const auto rows       = (buttons.size() + columns - 1) / columns;
   const auto labelCount = static_cast<float>(lines.size());
   const auto rowCount   = static_cast<float>(rows);
   // Reserve visible text before decorative spacing or minimum touch heights.
@@ -75,19 +125,20 @@ LinkPanelPresentation linkPanelPresentation(
   result.theme.colours.disabled      = colour(config.mutedColour);
   result.theme.colours.buttonSurface = colour(config.buttonColour);
 
-  float desiredWidth = metrics.px(sourceTheme.type.minTouchPx) * 3 + pad * 4;
+  float desiredWidth =
+      metrics.px(sourceTheme.type.minTouchPx) * columns + pad * 4;
   for (const auto &entry : lines)
     desiredWidth = std::max(
         desiredWidth, cache.fitted(entry.text, font, {}).widthPx + pad * 2);
   for (const auto &button : buttons)
-    desiredWidth =
-        std::max(desiredWidth,
-                 (cache.fitted(button.label, font, {}).widthPx + pad * 2) * 3 +
-                     pad * 4 + gap * 2);
+    desiredWidth = std::max(
+        desiredWidth,
+        (cache.fitted(button.label, font, {}).widthPx + pad * 2) * columns +
+            pad * 4 + gap * 2);
   const auto width         = std::floor(std::min(maxWidth, desiredWidth));
   const auto interiorWidth = std::max(0.0F, width - pad * 2);
-  const auto buttonWidth =
-      std::floor(std::max(0.0F, (interiorWidth - pad * 2 - gap * 2) / 3));
+  const auto buttonWidth   = std::floor(std::max(
+      0.0F, (interiorWidth - pad * 2 - gap * (columns - 1)) / columns));
   const auto availableRows = std::max(0.0F, maxHeight - labelCount * lineSlot -
                                                 pad * 4 - gap * gapCount);
   const auto rowHeight =
@@ -150,11 +201,13 @@ LinkPanelPresentation linkPanelPresentation(
   }
   result.model.children.push_back(std::move(flow));
   const auto margin = std::max(0.0F, metrics.px(config.marginPx));
-  result.bounds = anchor ? ui::placeNear(*anchor, width, height, safe, margin)
-                         : ui::Rect{safe.left + safe.width - width - margin,
-                                    safe.bottom + safe.height - height - margin,
-                                    width, height};
-  result.bounds = ui::clampToSafeArea(metrics.rounded(result.bounds), safe);
+  result.bounds =
+      anchor ? ui::placeNear(*anchor, width, height, panelArea, margin)
+             : ui::Rect{panelArea.left + panelArea.width - width - margin,
+                        panelArea.bottom + panelArea.height - height - margin,
+                        width, height};
+  result.bounds =
+      ui::clampToSafeArea(metrics.rounded(result.bounds), panelArea);
   return result;
 }
 } // namespace common_ui

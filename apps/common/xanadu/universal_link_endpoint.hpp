@@ -232,6 +232,9 @@ struct UniversalLinkedPair {
   ProminenceTier tier{ProminenceTier::Author};
   UniversalLinkEnd from; ///< Left end list.
   UniversalLinkEnd to;   ///< Right end list.
+  // Grouped staging carries representatives for anchor resolution, never
+  // authored pairs. Each visible attachment is drawn exactly once.
+  bool drawFrom{true}, drawTo{true};
 
   [[nodiscard]] constexpr zigzag::CellRef linkId() const noexcept {
     return link;

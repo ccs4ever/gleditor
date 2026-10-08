@@ -31,7 +31,7 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 
 render::VertexLayout Beams::layout() {
   using render::AttributeType;
-  static_assert(sizeof(Beams::Row) == 44,
+  static_assert(sizeof(Beams::Row) == 72,
                 "the beam record is read by a shader that names its fields by "
                 "offset; padding it would silently shift every attribute");
 
@@ -68,6 +68,21 @@ render::VertexLayout Beams::layout() {
        .type       = AttributeType::Float,
        .components = 2,
        .offset     = offsetof(Row, along)},
+      {.name       = "beamFromNormal",
+       .location   = 6,
+       .type       = AttributeType::Float,
+       .components = 3,
+       .offset     = offsetof(Row, fromNormal)},
+      {.name       = "beamToNormal",
+       .location   = 7,
+       .type       = AttributeType::Float,
+       .components = 3,
+       .offset     = offsetof(Row, toNormal)},
+      {.name       = "beamSurface",
+       .location   = 8,
+       .type       = AttributeType::Float,
+       .components = 1,
+       .offset     = offsetof(Row, surface)},
   };
   return out;
 }
@@ -75,7 +90,10 @@ render::VertexLayout Beams::layout() {
 Beams::Beams(render::RenderDevice *const aDevice,
              const std::uint32_t initialRows)
     : device(aDevice),
-      pool(std::make_unique<BufferPool>(aDevice, sizeof(Row), initialRows)) {}
+      pool(std::make_unique<BufferPool>(aDevice, sizeof(Row), initialRows)) {
+  rows.reserve(initialRows);
+  backing = pool->reserve(initialRows);
+}
 
 Beams::~Beams() = default;
 
@@ -131,16 +149,34 @@ void Beams::addPath(const std::span<const glm::vec3> through, const float width,
   }
 }
 
+void Beams::addNurbs(const NurbsPath &path, unsigned segments, float width,
+                     std::uint32_t colour, std::uint32_t tag, float phase,
+                     Surface surface) {
+  const auto sampled = sampleNurbs(path, segments);
+  if (sampled.length <= 0) return;
+  const auto normal = [](glm::vec3 tangent, glm::vec3 fallback) {
+    auto n = glm::cross(tangent, glm::vec3(0, 0, 1));
+    if (glm::dot(n, n) < 1e-6F) n = glm::cross(fallback, glm::vec3(0, 0, 1));
+    return glm::dot(n, n) > 1e-6F ? glm::normalize(n) : glm::vec3(0);
+  };
+  for (unsigned i = 1; i < sampled.count; ++i) {
+    const auto &a = sampled.points[i - 1], &b = sampled.points[i];
+    const auto fallback = b.position - a.position;
+    const auto na       = normal(a.tangent, fallback),
+               nb       = normal(b.tangent, fallback);
+    add(a.position, b.position, width, colour, tag, a.along - phase,
+        b.along - phase);
+    rows.back().fromNormal = {na.x, na.y, na.z};
+    rows.back().toNormal   = {nb.x, nb.y, nb.z};
+    rows.back().surface    = surface == Surface::Glass ? 1.F : 0.F;
+  }
+}
+
 void Beams::commit() {
-  if (!backing.empty()) {
-    pool->release(backing);
-    backing = {};
-  }
   committedRows = static_cast<std::uint32_t>(rows.size());
-  if (0 == committedRows) {
-    return;
-  }
-  backing = pool->reserve(committedRows);
+  if (0 == committedRows) return;
+  if (pool->rowCount(backing) < committedRows)
+    pool->resize(backing, committedRows, BufferPool::Contents::Discard);
   pool->write(backing, 0,
               std::as_bytes(std::span<const Row>(rows.data(), rows.size())));
 }

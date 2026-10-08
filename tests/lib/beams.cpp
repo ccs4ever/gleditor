@@ -39,6 +39,7 @@ namespace {
 class RecordingDevice : public NiceMock<MockRenderDevice> {
 public:
   std::vector<std::byte> contents;
+  std::size_t writeOffset{};
 
   RecordingDevice() {
     ON_CALL(*this, createBuffer)
@@ -57,6 +58,7 @@ public:
         .WillByDefault([this](const render::BufferHandle,
                               const std::size_t offset,
                               const std::span<const std::byte> data) {
+          writeOffset = offset;
           if (offset + data.size() > contents.size()) {
             contents.resize(offset + data.size(), std::byte{});
           }
@@ -67,7 +69,7 @@ public:
   /// The row at @p byteOffset, as the vertex stage would read it.
   [[nodiscard]] Beams::Row rowAt(const std::size_t byteOffset) const {
     Beams::Row row{};
-    std::memcpy(&row, contents.data() + byteOffset, sizeof(row));
+    std::memcpy(&row, contents.data() + writeOffset + byteOffset, sizeof(row));
     return row;
   }
 };
@@ -97,11 +99,11 @@ protected:
 
 TEST_F(BeamsTest, theRecordIsWhatTheShaderDeclares) {
   using Row = Beams::Row;
-  EXPECT_EQ(sizeof(Row), 44U);
+  EXPECT_EQ(sizeof(Row), 72U);
 
   const auto layout = Beams::layout();
   EXPECT_EQ(layout.stride, sizeof(Row));
-  ASSERT_EQ(layout.attributes.size(), 6U);
+  ASSERT_EQ(layout.attributes.size(), 9U);
   EXPECT_EQ(layout.attributes[0].offset, offsetof(Row, from));
   EXPECT_EQ(layout.attributes[1].offset, offsetof(Row, width));
   EXPECT_EQ(layout.attributes[2].offset, offsetof(Row, to));
@@ -320,4 +322,24 @@ TEST_F(BeamsTest, drawingWithoutAPipelineIsQuiet) {
   beams.add({0.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}, 1.0F, 0xFFFFFFFF, 1);
   beams.commit();
   EXPECT_CALL(*device, drawGlyphs(_, _, _, _)).Times(0);
+}
+
+TEST_F(BeamsTest, NurbsJoinsKeepNormalsAndPickingIdentity) {
+  const std::array poles{glm::vec3(0), glm::vec3(5, 0, 0), glm::vec3(5, 10, 0),
+                         glm::vec3(10, 10, 0)};
+  const std::array weights{1.F, .75F, .75F, 1.F};
+  const std::array knots{0.F, 0.F, 0.F, 0.F, 1.F, 1.F, 1.F, 1.F};
+  Beams beams(device.get(), 32);
+  beams.addNurbs(gleditor::NurbsPath(poles, weights, knots, 3), 32, 1,
+                 0xABCDEF12, 99);
+  beams.commit();
+  ASSERT_EQ(beams.committed(), 32U);
+  for (unsigned i = 1; i < beams.committed(); ++i) {
+    const auto a = device->rowAt((i - 1) * sizeof(Beams::Row));
+    const auto b = device->rowAt(i * sizeof(Beams::Row));
+    EXPECT_EQ(a.to, b.from);
+    EXPECT_EQ(a.toNormal, b.fromNormal);
+    EXPECT_EQ(a.along[1], b.along[0]);
+    EXPECT_EQ(b.tag, 99U);
+  }
 }

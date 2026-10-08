@@ -10,6 +10,7 @@ GLEDITOR_IN(1) float vAcross;
 GLEDITOR_IN(2) float vAlong;
 GLEDITOR_IN_FLAT(3) uvec2 vTag;
 GLEDITOR_IN(4) float vOpacity;
+GLEDITOR_IN_FLAT(5) float vSurface;
 
 GLEDITOR_FRAG_OUT(0) vec4 outColour;
 GLEDITOR_FRAG_OUT(1) uvec4 outTag;
@@ -18,6 +19,18 @@ void main() {
   // Soften the outer long edges over roughly one pixel with fwidth
   float pixelAcross = min(fwidth(vAcross), 0.9);
   float edge        = 1.0 - smoothstep(1.0 - pixelAcross, 1.0, abs(vAcross));
+
+  // Quiet stationary filament shading preserves the path's hue. Optical
+  // glass remains a separate surface for broad ribbons.
+  if (vSurface < 0.5) {
+    if (edge <= 0.0) discard;
+    float core = exp(-pow(abs(vAcross) * 3.2, 2.0));
+    vec3 colour =
+        mix(vColour.rgb * (0.78 + 0.22 * core), vec3(1.0), core * 0.12);
+    outColour = vec4(colour, vColour.a * edge * vOpacity);
+    outTag    = uvec4(vTag, 0u, 0u);
+    return;
+  }
 
   // 1. Polished Glass Optical Core:
   // Concentrated bright transmission channel down the centerline

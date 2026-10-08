@@ -120,7 +120,7 @@ notifications. `--strict-diagnostics` makes them fatal for automated checks.
 Programs extend the library through `TextSource`, `DocumentObserver`, `SpanDecorator`,
 `FrameContributor`, `PickObserver`, and the application/command interfaces in `include/gleditor/`.
 `Canvas` draws text and geometry in world or screen coordinates through the same glyph pipeline.
-`CurveRibbons` draws tapered quadratic strokes with continuous normals, soft edges and optional
+`CurveRibbons` draws tapered NURBS strokes with continuous normals, soft edges and optional
 stationary filament shading through a portable shader; a circular exclusion can preserve a pointer
 picking target beneath transient feedback. `runWithState()` moves commands onto the render thread.
 Xuzz uses these hooks for versioned text, shared-span shading, and links, and contributes ZigZag

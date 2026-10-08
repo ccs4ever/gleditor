@@ -170,7 +170,7 @@ inline constexpr std::string_view kBeamsBypassDepthPerDoc =
     "beams.bypassDepthPerDoc";
 inline constexpr std::string_view kBeamsBypassDepthLimit =
     "beams.bypassDepthLimit";
-inline constexpr std::string_view kBeamsBypassSegments = "beams.bypassSegments";
+inline constexpr std::string_view kBeamsCurveSegments = "beams.curveSegments";
 inline constexpr std::string_view kBeamsLoomBundlingEnabled =
     "beams.loomBundlingEnabled";
 inline constexpr std::string_view kBeamsLoomAlpha      = "beams.loomAlpha";
@@ -1012,6 +1012,9 @@ struct PhysicsConfig {
 };
 
 struct BeamConfig {
+  float curveHandleShare{0.3F}, curveWeight{1.F}, gatheringShare{0.32F};
+  float inactiveLinkAlpha{0.35F};
+  std::size_t curveSegments{32};
   std::size_t bandStrandLimit{7};
   float bandStrandPitch{2.2F};
   float bandFillAlpha{0.85F};
@@ -1020,7 +1023,6 @@ struct BeamConfig {
   float marginKerf{0.04F};
   float bypassDepthPerDoc{-20.0F};
   float bypassDepthLimit{-120.0F};
-  std::size_t bypassSegments{9};
   bool loomBundlingEnabled{true};
   float loomAlpha{0.35F};
   float loomHoverAlpha{1.0F};

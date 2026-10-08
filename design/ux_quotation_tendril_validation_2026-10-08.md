@@ -85,6 +85,10 @@ release and Escape use native pointer events and keymap actions.
 
 ## Remaining scope
 
+The subsequent [NURBS validation](ux_nurbs_link_validation_2026-10-08.md) replaces the quadratic
+drag path with a shared cubic NURBS route and adds grouped authored-link rendering. This report
+continues to describe the preceding quotation and Vulkan ownership batch.
+
 This batch validates the quotation feedback and the observed pouch resource race. It does not claim
 that all Vulkan callers are thread-safe, certify the complete publication swarm, or redesign the
 oversized quotation card and dense pouch controls. Saved cell source-return and the existing

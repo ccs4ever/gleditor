@@ -3038,3 +3038,90 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
   EXPECT_THAT(cancelled.output,
               testing::Not(testing::HasSubstr("spawned transcluded document")));
 }
+
+// Prepared native content is a starting fixture, not proof of UI link
+// authoring. Every inspection, member choice and entry below uses real input.
+TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_nurbs_link";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  const auto perma = permascrollAt(root / "data/xudu/permascroll/default");
+  Store left(perma), right(perma);
+  const auto a = left.insert(
+      {}, 0, "ALPHA left member\nUnlinked gap\nOMEGA left member\n");
+  const auto b  = right.insert({}, 0,
+                               "ONE right member\nUnlinked gap\nTWO right "
+                                "member\nUnlinked gap\nTHREE right member\n");
+  const auto av = left.rebuild(a), bv = right.rebuild(b);
+  Link link;
+  link.type         = LinkType::Comment;
+  link.owner        = "Fixture author";
+  link.left         = {av.spansFor(0, 17).front(), av.spansFor(31, 17).front()};
+  link.right        = {bv.spansFor(0, 16).front(), bv.spansFor(30, 16).front(),
+                       bv.spansFor(60, 18).front()};
+  const auto linked = left.addLink(a, link);
+  Link overlapping;
+  overlapping.type  = LinkType::Disagreement;
+  overlapping.owner = "Second author";
+  overlapping.left  = {link.left.front()};
+  overlapping.right = {link.right.front()};
+  left.addLink(linked, overlapping);
+  left.save((root / "left").string());
+  right.save((root / "right").string());
+  // Scale is diagnostic setup; editing a preference through the UI is a
+  // separate journey. All navigation below uses the same visible controls.
+  if (const auto *scale = std::getenv("XUDU_NURBS_UI_SCALE")) {
+    Store ui(perma);
+    xanadu::initializeSystemStore(ui, xanadu::SystemDocKind::UI);
+    const auto head =
+        xanadu::setSetting(ui, ui.primaryCurrentVersion(),
+                           xanadu::settings::kUiScale, std::stod(scale));
+    ui.setCurrentVersions({head});
+    ui.save((root / "config/xudu/system/ui").string());
+  }
+  const auto beforeLeft = left.opCount(), beforeRight = right.opCount();
+  const auto capture = [&](std::string_view name) {
+    return " --capture " + (root / (std::string(name) + ".ppm")).string();
+  };
+  const auto result = executeProcess(
+      "XDG_DATA_HOME=" + (root / "data").string() +
+      " XDG_CONFIG_HOME=" + (root / "config").string() + " timeout 120 " +
+      binary.string() + " --backend " + activeBackend() +
+      " --strict-diagnostics --profile " + (root / "left").string() +
+      " --chord Ctrl+Alt+1 --chord Ctrl+O --chord Tab --type '" +
+      (root / "right").string() + "' --chord Return" + capture("both") +
+      " --select 0,0 --chord Alt+Shift+N --dump-a11y" + capture("selected") +
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Alt+Shift+X"
+      " --chord Alt+Shift+J --chord Alt+Shift+J --chord Alt+Shift+J "
+      "--chord Alt+Shift+L --dump-a11y" +
+      capture("independent") +
+      " --click-label 'Cross' --click-label 'member ›' --click-label 'Cross' "
+      "--dump-a11y" +
+      capture("pointer") + " --click-label 'Enter' --dump-a11y" +
+      capture("entered") + " --click-label 'Origin' --dump-a11y" +
+      capture("origin") + " --chord Alt+Shift+N --dump-a11y" +
+      capture("other-link") + " --chord Alt+Shift+P --dump-a11y" +
+      capture("reselected"));
+  std::ofstream(root / "transcript.log") << result.output;
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("2 left and 3 right members"));
+  EXPECT_THAT(result.output, testing::HasSubstr("Left 2/2"));
+  EXPECT_THAT(result.output, testing::HasSubstr("Right 3/3"));
+  EXPECT_THAT(
+      result.output,
+      testing::HasSubstr("disagreement link, 1 left and 1 right members"));
+  Store savedLeft(perma), savedRight(perma);
+  savedLeft.load((root / "left").string());
+  savedRight.load((root / "right").string());
+  EXPECT_EQ(savedLeft.opCount(), beforeLeft);
+  EXPECT_EQ(savedRight.opCount(), beforeRight);
+  for (const auto name : {"both", "selected", "independent", "pointer",
+                          "entered", "origin", "other-link", "reselected"}) {
+    const auto path = root / (std::string(name) + ".ppm");
+    ASSERT_TRUE(fs::exists(path));
+    exportToPng(path, path.parent_path() / (std::string(name) + ".png"));
+  }
+}

@@ -26,6 +26,9 @@ GLEDITOR_IN(4) uint beamTag;    // which beam this is, for picking
 // bends carries its own share, so the fade below runs once end to end instead
 // of restarting at every joint.
 GLEDITOR_IN(5) vec2 beamAlong;
+GLEDITOR_IN(6) vec3 beamFromNormal;
+GLEDITOR_IN(7) vec3 beamToNormal;
+GLEDITOR_IN(8) float beamSurface;
 
 GLEDITOR_OUT(0) vec4 vColour;
 // Distance across the ribbon, -1 at one edge and 1 at the other, so the
@@ -39,6 +42,7 @@ GLEDITOR_OUT(1) float vAcross;
 GLEDITOR_OUT(2) float vAlong;
 GLEDITOR_OUT_FLAT(3) uvec2 vTag;
 GLEDITOR_OUT(4) float vOpacity;
+GLEDITOR_OUT_FLAT(5) float vSurface;
 
 vec4 unpackColour(uint bits) {
   return vec4(float((bits >> 24) & 255u), float((bits >> 16) & 255u),
@@ -47,6 +51,7 @@ vec4 unpackColour(uint bits) {
 }
 
 void main() {
+  vSurface     = beamSurface;
   int corner   = GLEDITOR_VERTEX_INDEX;
   float along  = (0 != (corner & 2)) ? 1.0 : 0.0;
   float across = (0 != (corner & 1)) ? 1.0 : -1.0;
@@ -55,7 +60,9 @@ void main() {
   // Perpendicular to the beam, in the plane of the pages. A beam of no
   // length has no direction to be perpendicular to; collapse it outside clip
   // space rather than dividing by zero.
-  vec3 sideways = cross(run, vec3(0.0, 0.0, 1.0));
+  vec3 sideways = (corner & 2) != 0 ? beamToNormal : beamFromNormal;
+  if (dot(sideways, sideways) <= 0.0)
+    sideways = cross(run, vec3(0.0, 0.0, 1.0));
   if (dot(sideways, sideways) <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     vColour     = vec4(0.0);

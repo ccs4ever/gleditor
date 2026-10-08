@@ -437,7 +437,7 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
                             xanadu::settings::kBeamsStubWidthOfBeam, 0.45);
   head = xanadu::setSetting(store, head, xanadu::settings::kBeamsStubMinOfLine,
                             0.95);
-  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsBypassSegments,
+  head = xanadu::setSetting(store, head, xanadu::settings::kBeamsCurveSegments,
                             static_cast<std::int64_t>(18));
   head = xanadu::setSetting(store, head,
                             xanadu::settings::kBeamsZFightJitterAmplitude, 1.2);
@@ -455,7 +455,7 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
   EXPECT_FLOAT_EQ(cfg.beams.bandFillAlpha, 0.15F);
   EXPECT_FLOAT_EQ(cfg.beams.stubWidthOfBeam, 0.45F);
   EXPECT_FLOAT_EQ(cfg.beams.stubMinOfLine, 0.95F);
-  EXPECT_EQ(cfg.beams.bypassSegments, 18U);
+  EXPECT_EQ(cfg.beams.curveSegments, 18U);
   EXPECT_FLOAT_EQ(cfg.beams.zFightJitterAmplitude, 1.2F);
   EXPECT_FLOAT_EQ(cfg.beams.activeZBoost, 9.0F);
 
@@ -926,4 +926,22 @@ TEST(SystemDocsTest, QuotationTetherSettingsAreLiveAndBounded) {
   EXPECT_FLOAT_EQ(config.sagShare, 0);
   EXPECT_FLOAT_EQ(config.textureStrength, .5F);
   EXPECT_TRUE(config.reducedMotion);
+}
+
+TEST(SystemDocsTest, BeamNurbsSettingsAreLiveAndBounded) {
+  xanadu::Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Layout);
+  auto head = store.primaryCurrentVersion();
+  head      = xanadu::setSetting(store, head, "beams.curveWeight", 2.0);
+  head      = xanadu::setSetting(store, head, "beams.curveHandleShare", 99.0);
+  head      = xanadu::setSetting(store, head, "beams.gatheringShare", -1.0);
+  head      = xanadu::setSetting(store, head, "beams.curveSegments",
+                                 std::int64_t{10000});
+  store.repointCurrentVersion(head);
+  const auto config = xanadu::LayoutConfig::fromStore(store);
+  EXPECT_EQ(config.beams.curveWeight, 2.F);
+  EXPECT_EQ(config.beams.curveHandleShare, .45F);
+  EXPECT_EQ(config.beams.gatheringShare, .1F);
+  EXPECT_EQ(config.beams.curveSegments, 256U);
 }

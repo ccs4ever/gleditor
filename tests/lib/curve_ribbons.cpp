@@ -39,3 +39,21 @@ TEST(CurveRibbonsTest, RefusesNonFiniteGeometryAndInvalidStyle) {
                std::invalid_argument);
   EXPECT_TRUE(ribbons.pending().empty());
 }
+
+TEST(CurveRibbonsTest, SegmentJoinsShareNormalsAndDistanceBasedTaper) {
+  testing::NiceMock<MockRenderDevice> device;
+  ON_CALL(device, createBuffer)
+      .WillByDefault(testing::Return(render::BufferHandle{1}));
+  gleditor::CurveRibbons ribbons(&device);
+  ribbons.add({0, 0}, {10, 200}, {300, 20}, {}, 0, 7);
+  const auto &rows = ribbons.pending();
+  ASSERT_GT(rows.size(), 2U);
+  for (std::size_t i = 1; i < rows.size(); ++i) {
+    EXPECT_EQ(rows[i - 1].to, rows[i].from);
+    EXPECT_EQ(rows[i - 1].normals[2], rows[i].normals[0]);
+    EXPECT_EQ(rows[i - 1].normals[3], rows[i].normals[1]);
+    EXPECT_EQ(rows[i - 1].interval[1], rows[i].interval[0]);
+  }
+  EXPECT_LT(rows.front().interval[1] - rows.front().interval[0],
+            rows.back().interval[1] - rows.back().interval[0]);
+}

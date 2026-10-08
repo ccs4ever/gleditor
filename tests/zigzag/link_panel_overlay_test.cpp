@@ -398,3 +398,39 @@ TEST(LinkPanelPresentationTest,
   EXPECT_FALSE(ui::fontRoleNamed("unknown").has_value());
 }
 } // namespace
+
+TEST(LinkPanelPresentationTest, ReadingContentRemainsClearWhenThereIsRoom) {
+  const auto lines   = contextLines();
+  const auto buttons = xanadu::linkPanelButtons({}, false);
+  const auto ids     = actionIds();
+  gleditor::text::ShapingCache measurements;
+  const ui::Theme theme;
+  const xanadu::LinkPanelConfig config;
+  for (const float scale : {1.F, 1.5F}) {
+    const ui::UiMetrics metrics{
+        .userScale = scale, .screenWidth = 800, .screenHeight = 600};
+    for (const auto reading :
+         {ui::Rect{400, 260, 220, 20}, ui::Rect{110, 260, 220, 20},
+          ui::Rect{950, 260, 220, 20}}) {
+      const auto leaf =
+          common_ui::linkPanelPresentation(lines, buttons, ids, metrics, theme,
+                                           config, {}, measurements, reading);
+      contained(leaf.bounds, metrics.pixelSafeArea());
+      const auto &panel = leaf.bounds;
+      EXPECT_TRUE(panel.left + panel.width <= reading.left ||
+                  panel.left >= reading.left + reading.width ||
+                  panel.bottom + panel.height <= reading.bottom ||
+                  panel.bottom >= reading.bottom + reading.height);
+      ui::ScreenOverlay overlay(leaf.model);
+      overlay.setBounds(panel);
+      const auto scene = overlay.prepare(metrics, leaf.theme);
+      ASSERT_NE(scene, nullptr);
+      for (const auto id : ids) {
+        const auto *box = scene->layout.find(id);
+        ASSERT_NE(box, nullptr);
+        EXPECT_GT(box->rect.height, 0);
+        contained(box->rect, panel);
+      }
+    }
+  }
+}

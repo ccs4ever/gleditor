@@ -265,6 +265,7 @@ private:
     ProminenceTier tier{ProminenceTier::Author};
     LinkEnd from;
     LinkEnd to;
+    bool drawFrom{true}, drawTo{true};
     std::optional<Doc::Anchor> fromAnchor;
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
@@ -293,6 +294,15 @@ private:
     std::optional<CellAnchor> toCellAnchor;
     bool aligned{};
   };
+
+  struct Gathering {
+    std::uint64_t link{};
+    glm::vec3 left{}, right{};
+    float lineHeight{};
+    std::size_t leftCount{}, rightCount{};
+    bool trunkStaged{};
+  };
+  std::vector<Gathering> gatherings_;
 
   std::vector<TransclusionStrand> transclusionStrands;
 
@@ -435,7 +445,8 @@ private:
    */
   void band(const Edge &nearSide, const Edge &farSide,
             std::size_t documentsApart, std::uint32_t colour, std::uint32_t tag,
-            float phase = 0.0F, float zNudge = 0.0F);
+            float phase = 0.0F, float zNudge = 0.0F,
+            gleditor::Beams::Surface surface = gleditor::Beams::Surface::Glass);
 
   /**
    * @brief Mark one end of a link down its document's margin.

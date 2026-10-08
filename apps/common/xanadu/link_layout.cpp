@@ -92,10 +92,10 @@ struct ViewPiece {
 
 } // namespace
 
-void placeLinks(const std::map<zigzag::CellRef, Link> &links,
-                const UniversalViewContext &ctx,
-                std::vector<LinkedPair> &between,
-                std::vector<HalfLink> &leaving) {
+static void placeLinkAttachments(const std::map<zigzag::CellRef, Link> &links,
+                                 const UniversalViewContext &ctx,
+                                 std::vector<LinkedPair> &between,
+                                 std::vector<HalfLink> &leaving, bool grouped) {
   between.clear();
   leaving.clear();
 
@@ -112,13 +112,22 @@ void placeLinks(const std::map<zigzag::CellRef, Link> &links,
       if (nullptr == ctx.docViews[doc]) {
         continue;
       }
-      if (const auto extent = coveringExtent(*ctx.docViews[doc], link.left)) {
-        lefts.push_back(
-            UniversalLinkEnd::forDocument(doc, extent->first, extent->second));
-      }
-      if (const auto extent = coveringExtent(*ctx.docViews[doc], link.right)) {
-        rights.push_back(
-            UniversalLinkEnd::forDocument(doc, extent->first, extent->second));
+      if (grouped) {
+        const auto append = [&](const auto &ends, auto &out) {
+          for (const auto &span : ends)
+            for (const auto &extent : ctx.docViews[doc]->occurrencesOf(span))
+              out.push_back(
+                  UniversalLinkEnd::forDocument(doc, extent.start, extent.end));
+        };
+        append(link.left, lefts);
+        append(link.right, rights);
+      } else {
+        if (const auto extent = coveringExtent(*ctx.docViews[doc], link.left))
+          lefts.push_back(UniversalLinkEnd::forDocument(doc, extent->first,
+                                                        extent->second));
+        if (const auto extent = coveringExtent(*ctx.docViews[doc], link.right))
+          rights.push_back(UniversalLinkEnd::forDocument(doc, extent->first,
+                                                         extent->second));
       }
     }
 
@@ -133,34 +142,80 @@ void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                                  : zigzag::noCell;
       const auto allowed   = manifold.cellsWithinRadius(focus, ctx.cellRadius);
       for (const auto cell : allowed) {
-        if (const auto endPt = cellCoveringExtent(manifold, cell, link.left)) {
-          lefts.push_back(*endPt);
-        }
-        if (const auto endPt = cellCoveringExtent(manifold, cell, link.right)) {
-          rights.push_back(*endPt);
+        if (grouped) {
+          const auto append = [&](const auto &ends, auto &out) {
+            for (const auto &end : ends) {
+              std::uint32_t offset = 0;
+              const auto content   = manifold.contentOf(cell);
+              for (std::size_t i = 0; i < content.size(); ++i) {
+                const auto &part = content[i];
+                const auto start = std::max(end.start, part.start);
+                const auto stop  = std::min(end.end(), part.end());
+                if (!end.empty() && !isReservedScroll(end.scroll) &&
+                    end.scroll == part.scroll && stop > start) {
+                  const auto first =
+                      offset + static_cast<std::uint32_t>(start - part.start);
+                  out.push_back(UniversalLinkEnd::forCell(
+                      cell, first,
+                      first + static_cast<std::uint32_t>(stop - start),
+                      static_cast<std::uint16_t>(i)));
+                }
+                offset += static_cast<std::uint32_t>(part.length);
+              }
+            }
+          };
+          append(link.left, lefts);
+          append(link.right, rights);
+        } else {
+          if (const auto endPt = cellCoveringExtent(manifold, cell, link.left))
+            lefts.push_back(*endPt);
+          if (const auto endPt = cellCoveringExtent(manifold, cell, link.right))
+            rights.push_back(*endPt);
         }
       }
     }
 
-    for (const auto &left : lefts) {
-      for (const auto &right : rights) {
-        if (left == right) {
-          continue;
+    if (grouped && !lefts.empty() && !rights.empty()) {
+      between.push_back({.link = id,
+                         .type = link.type,
+                         .tier = link.tier,
+                         .from = lefts.front(),
+                         .to   = rights.front()});
+      for (std::size_t i = 1; i < lefts.size(); ++i)
+        between.push_back({.link   = id,
+                           .type   = link.type,
+                           .tier   = link.tier,
+                           .from   = lefts[i],
+                           .to     = rights.front(),
+                           .drawTo = false});
+      for (std::size_t i = 1; i < rights.size(); ++i)
+        between.push_back({.link     = id,
+                           .type     = link.type,
+                           .tier     = link.tier,
+                           .from     = lefts.front(),
+                           .to       = rights[i],
+                           .drawFrom = false});
+    } else {
+      for (const auto &left : lefts) {
+        for (const auto &right : rights) {
+          if (left == right) {
+            continue;
+          }
+          if (left.isDocument() && right.isDocument() &&
+              left.doc == right.doc) {
+            continue;
+          }
+          if (left.isCell() && right.isCell() && left.cell() == right.cell()) {
+            continue;
+          }
+          between.push_back(LinkedPair{.link = id,
+                                       .type = link.type,
+                                       .tier = link.tier,
+                                       .from = left,
+                                       .to   = right});
         }
-        if (left.isDocument() && right.isDocument() && left.doc == right.doc) {
-          continue;
-        }
-        if (left.isCell() && right.isCell() && left.cell() == right.cell()) {
-          continue;
-        }
-        between.push_back(LinkedPair{.link = id,
-                                     .type = link.type,
-                                     .tier = link.tier,
-                                     .from = left,
-                                     .to   = right});
       }
     }
-
     if (lefts.empty() != rights.empty()) {
       leaving.push_back(
           HalfLink{.link      = id,
@@ -170,6 +225,26 @@ void placeLinks(const std::map<zigzag::CellRef, Link> &links,
                    .elsewhere = lefts.empty() ? link.left : link.right});
     }
   }
+}
+
+void placeLinks(const std::map<zigzag::CellRef, Link> &links,
+                const UniversalViewContext &ctx,
+                std::vector<LinkedPair> &between,
+                std::vector<HalfLink> &leaving) {
+  placeLinkAttachments(links, ctx, between, leaving, false);
+}
+void placeGroupedLinks(const std::map<zigzag::CellRef, Link> &links,
+                       const UniversalViewContext &ctx,
+                       std::vector<LinkedPair> &between,
+                       std::vector<HalfLink> &leaving) {
+  placeLinkAttachments(links, ctx, between, leaving, true);
+}
+void placeGroupedLinks(const std::map<zigzag::CellRef, Link> &links,
+                       const std::vector<const Version *> &views,
+                       std::vector<LinkedPair> &between,
+                       std::vector<HalfLink> &leaving) {
+  placeGroupedLinks(links, UniversalViewContext{.docViews = views}, between,
+                    leaving);
 }
 
 void placeLinks(const std::map<zigzag::CellRef, Link> &links,
