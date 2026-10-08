@@ -67,3 +67,7 @@ assets/shaders/vulkan/*.spv
 .worktrees/
 .agents/worktrees/
 .agents/*.lock
+
+# Written into the fixture tree when a sample permascroll is opened; private
+# publication state, not part of the fixture.
+/tests/samples/**/publication-state/
