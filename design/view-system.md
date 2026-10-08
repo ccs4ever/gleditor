@@ -391,8 +391,9 @@ quads, glyphs, beams and accessibility nodes needs the library, so it sits in `a
 apps/common/xanadu/view/                 engine; linked by xuzz_test and the language tools
   view.hpp               View, ViewDescriptor, ViewRegistry, ViewSubject
   view_error.hpp         ViewError
-  view_records.hpp       SubjectId, PlacedItem, PlacedEdge, PlacedFrame, DropTarget,
-                         MotionHint, LayoutSink, PaneFrame, ContentExtent
+  view_ids.hpp           ViewEpoch, ViewAxisId: the numbers the records share with the space
+  view_records.{hpp,cpp} SubjectId, PlacedItem, PlacedEdge, PlacedFrame, DropTarget,
+                         MotionHint, LayoutSink, PaneFrame, ContentExtent, placedPose
   view_manifold.{hpp,cpp}  ViewManifold, ViewCellRef, verifyViewSpace
   view_binding.{hpp,cpp}   ViewAxisSet: axes, occurrences, groups, ring order, undo
   slice_view.hpp         SliceView, SliceCursor, SlicePrepareInput, SliceLayoutInput
@@ -1242,6 +1243,7 @@ struct PlacedEdge {
   EdgeKind kind{};
   std::uint64_t relation{}; // DimRef, or the link's cell
   float opacity{1.0F};
+  std::uint32_t dashClass{}; // the second cue beside colour (plan G13)
   std::optional<std::uint32_t> label; // the PlacedItem that names this edge
   /// Strands of one bundle share an id and pass through the same two points
   /// between their ends, where the bundle is gathered.
@@ -1293,6 +1295,20 @@ public:
   [[nodiscard]] std::span<const MotionHint> hints() const noexcept;
 };
 ```
+
+`SubjectId` is made by its factories — `cell(ref, slot)`, `viewCell(ref, epoch, slot)`,
+`page(document, page, slot)`, `document`, `label`, `badge`, `marker` — the one way a layout makes
+one, so a real cell is never given an epoch and a view cell never loses its own; `std::hash` is
+specialised for the animation layer's map. `ViewEpoch` and `ViewAxisId` live in `view_ids.hpp`,
+which `view_manifold.hpp` and `view_binding.hpp` include, because the records carry both and must
+not depend on either class: a raster or a presenter reads records with no view space in sight.
+`placedPose(sink, record)` composes a record's frames (V30) and answers nothing when a frame index
+is out of range or the frames form a cycle, rather than placing the record at the origin. A
+`PlacedEdge`'s `dashClass` is the second cue beside colour (plan G13, §5.2 of the plan): one class
+per dimension, like its colour, unbounded, so the presenter cycles its stroke patterns rather than
+the layout capping how many dimensions can be told apart. The sink logs growth at debug level, so a
+layout that keeps outgrowing it, and so allocates every frame, can be found with
+`SPDLOG_LEVEL=view.layout=debug`.
 
 Every record is a position in the world and nothing else: a cell, a page, a label and a pack frame
 are all planes with a centre, an orientation and a size. `Facing::Camera` asks the presenter to turn
@@ -3390,3 +3406,5 @@ ______________________________________________________________________
 - 2026-10-08 — Plan G8 absorbed: messages have their own key enumeration, `ViewMessage`, and
   `messageKey()` maps a `ViewError` into it; the refusals §12.2 left unworded have words (§8.11,
   §12.2).
+- 2026-10-08 — Plan G13 absorbed: `PlacedEdge` carries a dash class. `SubjectId` factories,
+  `placedPose()` and `view_ids.hpp` added to §8.4 and §5.2 with the records (E1).
