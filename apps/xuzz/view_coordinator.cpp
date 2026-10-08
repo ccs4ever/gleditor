@@ -10,10 +10,11 @@
 namespace xuzz {
 
 ViewCoordinator::ViewCoordinator(
-    xanadu::Views &views, std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
+    xanadu::Views &views,
+    std::shared_ptr<xanadu::view::SlicePresentation> slice,
     xanadu::BridgeCoordinator &bridgeCoordinator, RendererRef renderer,
     AppStateRef state)
-    : views_(views), visualizer_(std::move(visualizer)),
+    : views_(views), slice_(std::move(slice)),
       bridgeCoordinator_(bridgeCoordinator), renderer_(std::move(renderer)),
       state_(std::move(state)) {}
 
@@ -40,17 +41,17 @@ void ViewCoordinator::cycleViewMode() {
 }
 
 void ViewCoordinator::apply() {
-  if (!visualizer_) {
+  if (!slice_) {
     return;
   }
 
   switch (mode_) {
   case ViewMode::Unified: {
-    visualizer_->setPresentationVisible(true);
-    visualizer_->setPresentationTransformResolver(
+    slice_->setPresentationVisible(true);
+    slice_->setPresentationTransformResolver(
         [this] { return views_.presentationTransform(); });
     if (!bridgeCoordinator_.attached()) {
-      bridgeCoordinator_.attach(*visualizer_);
+      bridgeCoordinator_.attach(*slice_);
     }
     if (state_) {
       state_->usesDocPages = true;
@@ -62,8 +63,8 @@ void ViewCoordinator::apply() {
   }
 
   case ViewMode::XanadocOnly: {
-    visualizer_->setPresentationVisible(false);
-    visualizer_->setPresentationTransformResolver({});
+    slice_->setPresentationVisible(false);
+    slice_->setPresentationTransformResolver({});
     if (state_) {
       state_->usesDocPages = true;
       state_->showDialog(
@@ -75,9 +76,9 @@ void ViewCoordinator::apply() {
   }
 
   case ViewMode::ZigzagOnly: {
-    visualizer_->setPresentationVisible(true);
-    visualizer_->setPresentationTransformResolver({});
-    visualizer_->setPresentationOrigin(glm::vec3{0.0F, 0.0F, 0.0F});
+    slice_->setPresentationVisible(true);
+    slice_->setPresentationTransformResolver({});
+    slice_->setPresentationOrigin(glm::vec3{0.0F, 0.0F, 0.0F});
     if (state_) {
       state_->usesDocPages = false;
       state_->showDialog(render::DiagnosticSeverity::Info, "View Mode: ZigZag",

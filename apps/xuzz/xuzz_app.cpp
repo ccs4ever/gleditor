@@ -52,6 +52,8 @@
 
 #include "common/ui/hypertime_graph.hpp"
 #include "common/ui/slice/zigzag_commands.hpp"
+#include "common/ui/slice/zigzag_visualizer.hpp"
+#include "common/ui/view/slice_presentation.hpp"
 #include "common/ui/xanadoc/batch_orchestrator.hpp"
 #include "common/ui/xanadoc/beams.hpp"
 #include "common/ui/xanadoc/bridge_coordinator.hpp"
@@ -82,7 +84,7 @@ constexpr float kBackgroundDepthZ = -500.0F;
 
 void applyKeymap(
     gleditor::CommandTable &commands, const xanadu::Store &store,
-    const std::shared_ptr<zigzag::ZigzagVisualizer> &zigzagPresentation =
+    const std::shared_ptr<xanadu::view::SlicePresentation> &zigzagPresentation =
         nullptr,
     const std::shared_ptr<zigzag::vortex::VortexHost> &vHost = nullptr) {
   if (vHost) {
@@ -877,14 +879,18 @@ int XuzzApp::run(const int argc, char **argv) {
   satelloidOverlay.setLinkContext(&linkContext);
 
   // 5. Zigzag presentation & BridgeCoordinator
-  auto zigzagPresentation = std::make_shared<zigzag::ZigzagVisualizer>("");
-  auto &bridgeStore       = session->store(0);
+  // The application talks to the slice through the seam; only the Vortex host
+  // and the visualizer's own commands still need the concrete type.
+  const auto zigzagVisualizer = std::make_shared<zigzag::ZigzagVisualizer>("");
+  const std::shared_ptr<xanadu::view::SlicePresentation> zigzagPresentation =
+      zigzagVisualizer;
+  auto &bridgeStore = session->store(0);
   zigzagPresentation->bindXuduStore(bridgeStore,
                                     bridgeStore.primaryCurrentVersion());
   const auto initialLayout = xanadu::LayoutConfig::fromStore(
       session->systemStore(xanadu::SystemDocKind::Layout));
   zigzagPresentation->setPresentationConfig(initialLayout.zigzag);
-  if (auto vHost = zigzagPresentation->vortexHost()) {
+  if (auto vHost = zigzagVisualizer->vortexHost()) {
     vHost->loadConfigFromStore(
         session->systemStore(xanadu::SystemDocKind::Settings));
     vHost->loadMacrosFromStore(
@@ -1385,7 +1391,7 @@ int XuzzApp::run(const int argc, char **argv) {
   std::vector<gleditor::ui::FocusManager::ScopeHandle> modalScopes;
   for (gleditor::ui::FocusScope *scope :
        std::initializer_list<gleditor::ui::FocusScope *>{
-           zigzagPresentation.get(), &swarmTelescope, &publishForm,
+           zigzagPresentation->focusScope(), &swarmTelescope, &publishForm,
            &quotationOverlay, &storeObjectManager, &pouchDrawer, &map,
            radialMenu.get()}) {
     modalScopes.push_back(state->focusManager.registerScope(
@@ -2418,7 +2424,7 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // B. Zigzag & Bridging Commands
   zigzag::registerZigzagCommands(
-      app.commands(), zigzagPresentation,
+      app.commands(), zigzagVisualizer,
       {.activateFocus =
            [&keyboardPane, zigzagPresentation, &bridgeCoordinator] {
              keyboardPane.leaveZigzag(false);
@@ -2779,8 +2785,9 @@ int XuzzApp::run(const int argc, char **argv) {
        &views, &overview, &storeObjectManager, &quotationOverlay,
        &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
        &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
-       &bridgeCoordinator, &showKeyHints, state, applyTypography](
-          const xanadu::SystemDocKind kind, const xanadu::Store &store) {
+       zigzagVisualizer, &bridgeCoordinator, &showKeyHints, state,
+       applyTypography](const xanadu::SystemDocKind kind,
+                        const xanadu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xanadu::systemDocUri(kind)
                   << ")\n";
         const auto model = xanadu::SystemStoreModel::fromStore(store);
@@ -2793,7 +2800,7 @@ int XuzzApp::run(const int argc, char **argv) {
         switch (kind) {
         case xanadu::SystemDocKind::Keymap: {
           const auto vHost =
-              zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
+              zigzagVisualizer ? zigzagVisualizer->vortexHost() : nullptr;
           state->focusManager.setGlobalCommandAllowList(
               xanadu::KeymapConfig::fromStore(store).modalGlobalCommands);
           applyKeymap(app.commands(), store, zigzagPresentation, vHost);
@@ -2803,7 +2810,7 @@ int XuzzApp::run(const int argc, char **argv) {
         case xanadu::SystemDocKind::Settings: {
           session->setAutoSave(std::chrono::seconds(
               xanadu::SettingsConfig::fromStore(store).autoSaveSeconds));
-          if (auto vHost = zigzagPresentation->vortexHost()) {
+          if (auto vHost = zigzagVisualizer->vortexHost()) {
             vHost->loadConfigFromStore(store);
           }
           break;
@@ -2858,7 +2865,7 @@ int XuzzApp::run(const int argc, char **argv) {
         xanadu::KeymapConfig::fromStore(kmStore).modalGlobalCommands);
     if (kmStore.opCount() > 0) {
       const auto vHost =
-          zigzagPresentation ? zigzagPresentation->vortexHost() : nullptr;
+          zigzagVisualizer ? zigzagVisualizer->vortexHost() : nullptr;
       applyKeymap(app.commands(), kmStore, zigzagPresentation, vHost);
     }
     showKeyHints();

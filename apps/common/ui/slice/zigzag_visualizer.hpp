@@ -6,6 +6,7 @@
 #define ZIGZAG_VISUALIZER_HPP
 
 #include "common/ui/slice/unified_transclusion_engine.hpp"
+#include "common/ui/view/slice_presentation.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/quoted_structure.hpp"
 #include "common/xanadu/store.hpp"
@@ -114,7 +115,7 @@ class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
                          public gleditor::a11y::Source,
                          public gleditor::ui::FocusScope,
-                         public xanadu::ZigzagPresentationSurface {
+                         public xanadu::view::SlicePresentation {
 public:
   void cancel() override {
     keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None);
@@ -175,7 +176,7 @@ public:
   void adoptXuduStore(const xanadu::Store &store,
                       const std::vector<xanadu::MicroversionId> &versions);
   void bindXuduStore(xanadu::Store &store,
-                     const xanadu::MicroversionId &version);
+                     const xanadu::MicroversionId &version) override;
   void reloadStoreVersion(const xanadu::MicroversionId &version,
                           zigzag::CellRef newFocus = zigzag::noCell);
   ZigzagVisualizer *setOnOpenQuoteBuilder(std::function<void()> cb) {
@@ -218,8 +219,8 @@ public:
   ZigzagVisualizer *toggleViewMode();
 
   /// Xuzz may hide the slice without unbinding its store or losing focus.
-  ZigzagVisualizer *setPresentationVisible(bool visible);
-  [[nodiscard]] bool presentationVisible() const noexcept {
+  ZigzagVisualizer *setPresentationVisible(bool visible) override;
+  [[nodiscard]] bool presentationVisible() const noexcept override {
     return presentation_visible_;
   }
 
@@ -242,7 +243,7 @@ public:
   ZigzagVisualizer *attachVortexHost(std::shared_ptr<vortex::VortexHost> host);
   [[nodiscard]] std::shared_ptr<vortex::VortexHost> vortexHost() noexcept;
   ZigzagVisualizer *ensureVortexHost();
-  bool dispatchAction(std::string_view actionName);
+  bool dispatchAction(std::string_view actionName) override;
 
   // -- Opcode & Library Palette HUD -----------------------------------------
   ZigzagVisualizer *togglePalette();
@@ -289,7 +290,7 @@ public:
   compileVQL(std::string_view vqlQuery) const;
 
   /// The version of the store the slice shown was folded at; zero for none.
-  [[nodiscard]] xanadu::MicroversionId sliceHead() const {
+  [[nodiscard]] xanadu::MicroversionId sliceHead() const override {
     return engine_ ? engine_->head() : xanadu::MicroversionId{};
   }
 
@@ -299,10 +300,11 @@ public:
    *        bindings it actually has: @p here while ZigZag has the keyboard,
    *        @p elsewhere while another pane does.
    */
-  ZigzagVisualizer *setKeyHints(std::string here, std::string elsewhere);
+  ZigzagVisualizer *setKeyHints(std::string here,
+                                std::string elsewhere) override;
   /// Whether ZigZag has the keyboard; always, in a program with no other
   /// pane.
-  ZigzagVisualizer *setHasKeyboard(bool has) noexcept {
+  ZigzagVisualizer *setHasKeyboard(bool has) noexcept override {
     // Counted rather than folded into revision_, which the render thread
     // owns: this is called from the event thread.
     if (keyboardHere_.exchange(has) != has) {
@@ -381,9 +383,9 @@ public:
   /// Apply one validated system-slice snapshot between frames. The store is
   /// never consulted while drawing.
   ZigzagVisualizer *
-  setPresentationConfig(xanadu::ZigzagPresentationConfig config);
+  setPresentationConfig(xanadu::ZigzagPresentationConfig config) override;
   [[nodiscard]] const xanadu::ZigzagPresentationConfig &
-  presentationConfig() const noexcept {
+  presentationConfig() const noexcept override {
     return presentation_config_;
   }
 
@@ -397,13 +399,9 @@ public:
 
   /// Place this presentation beside its host document without changing the
   /// manifold's intrinsic neighbourhood coordinates.
-  ZigzagVisualizer *setPresentationOrigin(glm::vec3 origin);
-  /// Resolve the exact host-page transform once per frame. A null result keeps
-  /// the surface hidden while its host page has not been built yet.
-  using PresentationTransformResolver =
-      std::function<std::optional<glm::mat4>()>;
-  ZigzagVisualizer *
-  setPresentationTransformResolver(PresentationTransformResolver resolver) {
+  ZigzagVisualizer *setPresentationOrigin(glm::vec3 origin) override;
+  ZigzagVisualizer *setPresentationTransformResolver(
+      PresentationTransformResolver resolver) override {
     presentationTransformResolver_ = std::move(resolver);
     return this;
   }
@@ -422,7 +420,8 @@ public:
                     const std::string &role = "text");
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            DimVector dir = DimVector::POS);
-  bool insertConnectedTransclusion(std::span<const xanadu::PrimediaSpan> spans);
+  bool insertConnectedTransclusion(
+      std::span<const xanadu::PrimediaSpan> spans) override;
   bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            bool positive) {
     return insertConnectedCell(text, dimension,
@@ -458,7 +457,7 @@ public:
   cellAnchor(CellRef cell) const override;
   /// Show a chosen link occurrence outside the focused neighborhood without
   /// changing the reader's cell focus or recording a visit.
-  ZigzagVisualizer *setPreviewCell(std::optional<CellRef> cell);
+  ZigzagVisualizer *setPreviewCell(std::optional<CellRef> cell) override;
 
   // -- Embedded presentation surface ---------------------------------------
   [[nodiscard]] const Manifold &manifold() const noexcept override {
@@ -476,8 +475,7 @@ public:
       override {
     cellActivationCallback_ = std::move(callback);
   }
-  ZigzagVisualizer *
-  setExternInspector(std::function<std::string(CellRef)> inspector) {
+  ZigzagVisualizer *setExternInspector(ExternInspector inspector) override {
     externInspector_ = std::move(inspector);
     invalidateAccessibility();
     return this;
@@ -533,6 +531,9 @@ public:
   accessibilitySource() noexcept override {
     return this;
   }
+  [[nodiscard]] gleditor::ui::FocusScope *focusScope() noexcept override {
+    return this;
+  }
 
   /// How many operations this slice has recorded. The document's size in
   /// hypertime, and what a test watches to catch an edit that records more
@@ -542,7 +543,7 @@ public:
   [[nodiscard]] const std::string &structureName() const {
     return structure_name_;
   }
-  [[nodiscard]] const ViewAxisBinding &currentView() const {
+  [[nodiscard]] const ViewAxisBinding &currentView() const override {
     return current_view_;
   }
   [[nodiscard]] ZzStructureDocument document() const;
@@ -550,7 +551,9 @@ public:
   [[nodiscard]] UnifiedTransclusionEngine *engine() const noexcept {
     return engine_.get();
   }
-  [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
+  [[nodiscard]] xanadu::Store *store() const noexcept override {
+    return store_;
+  }
   [[nodiscard]] const std::unordered_map<CellID, RenderStateCell> &
   visibleCells() const noexcept {
     return visible_cells_;
@@ -695,7 +698,7 @@ private:
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};
   xanadu::ZigzagPresentationSurface::CellActivationCallback
       cellActivationCallback_;
-  std::function<std::string(CellRef)> externInspector_;
+  ExternInspector externInspector_;
 
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};

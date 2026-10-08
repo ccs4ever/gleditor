@@ -13,7 +13,7 @@
 #include <gleditor/state.hpp>
 
 #include "cli.hpp"
-#include "common/ui/slice/zigzag_visualizer.hpp"
+#include "common/ui/view/slice_presentation.hpp"
 #include "common/ui/xanadoc/bridge_coordinator.hpp"
 #include "common/ui/xanadoc/views.hpp"
 
@@ -22,7 +22,7 @@ namespace xuzz {
 class ViewCoordinator {
 public:
   ViewCoordinator(xanadu::Views &views,
-                  std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
+                  std::shared_ptr<xanadu::view::SlicePresentation> slice,
                   xanadu::BridgeCoordinator &bridgeCoordinator,
                   RendererRef renderer, AppStateRef state);
 
@@ -34,7 +34,7 @@ public:
 
 private:
   xanadu::Views &views_;
-  std::shared_ptr<zigzag::ZigzagVisualizer> visualizer_;
+  std::shared_ptr<xanadu::view::SlicePresentation> slice_;
   xanadu::BridgeCoordinator &bridgeCoordinator_;
   RendererRef renderer_;
   AppStateRef state_;
