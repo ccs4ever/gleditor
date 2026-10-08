@@ -5,8 +5,8 @@
 Alice, Bob, Carl and Devin must be able to publish, discover, quote, revise and curate a shared work
 through Xuzz. These seven journeys specify the acceptance contract; they are not a report that the
 current build passes. Validate them with
-[`xuzz-ux-validation`](../.claude/skills/xuzz-ux-validation/SKILL.md), alongside the creation,
-transclusion and navigation journeys in [real work](ux_workflow_real_work.md).
+[`ux-validation`](../.claude/skills/ux-validation/SKILL.md), alongside the creation, transclusion
+and navigation journeys in [real work](ux_workflow_real_work.md).
 
 Only identity enrollment and Oracle verification are mocked. Torrent transfer, mutable DHT
 publication and resolution, signatures, global address translation, history reconstruction,

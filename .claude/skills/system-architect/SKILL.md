@@ -13,8 +13,8 @@ This skill defines the multi-agent architecture and operational protocols for ma
 code quality, modular architectural layering, empirical performance optimization, and clean
 layer-appropriate configuration across **`gleditor`** (core library and plain editor) and
 **`xuzz`**, the one application for xanadocs and ZigZag slices. `xudu` and `zigzag` are retired as
-applications and nothing should live in `apps/xudu/` or `apps/zigzag/`. The library stays generic
-(the plain editor uses it and has no Xanadu reference); xanalogical code goes in `apps/common/` —
+applications and there is no `apps/xudu/` or `apps/zigzag/`. The library stays generic (the plain
+editor uses it and has no Xanadu reference); xanalogical code goes in `apps/common/` —
 `apps/common/xanadu/` without a graphics device, `apps/common/ui/` with one — and `apps/xuzz/` holds
 only what is unique to that program. Library tests live in `tests/lib/` and are not repeated in
 `xuzz_test`.
@@ -38,7 +38,7 @@ only what is unique to that program. Library tests live in `tests/lib/` and are 
        +-------------------------------------------------------------+
        |             Layer-Appropriate Configuration                 |
        |  - Xanadocs: Live System Xanadocs (Format Links, no MD)     |
-       |  - Slices: Dynamic System Slices (d.schema, d.notes)        |
+       |  - Slices: Dynamic System Slices (d.schemas, d.notes)       |
        |  - Gleditor: Plain YAML Configs (user_notes block)          |
        |  - src/ / include/: Fallback structs, typed constexpr       |
        +-------------------------------------------------------------+
@@ -55,7 +55,7 @@ ______________________________________________________________________
 - **Key Responsibilities**:
   - Detect layer inversions: ensure `include/` and `src/` never include headers from `apps/`.
   - Identify duplicated utility functions, mathematical helpers, or parsing routines across
-    `apps/xuzz`, `apps/xudu`, `apps/zigzag`, and the engine in `apps/common/xanadu`.
+    `apps/xuzz`, `apps/common/ui`, and the engine in `apps/common/xanadu`.
   - Locate hardcoded literals (e.g. physics spring stiffness, rendering margins, packet timeouts,
     font sizes) that belong in user configuration.
   - Audit system configuration structures for compliance with the supplemental metadata invariant
@@ -68,8 +68,6 @@ ______________________________________________________________________
 - **Key Responsibilities**:
   - Design migration plans for moving reusable components developed in `apps/` down to `src/` and
     `include/gleditor/`.
-  - Ensure zero raw text duplication in live collaboration operations (preserving 48-byte
-    descriptors and canonical `GlobalSpan` references).
   - Enforce clean interface boundaries: keep domain logic cleanly separated from rendering backends
     (OpenGL, Vulkan).
   - Design system xanadoc and system slice schemas, ensuring header styling uses native format links
@@ -81,7 +79,7 @@ ______________________________________________________________________
   data.
 - **Key Responsibilities**:
   - Verify that structs in hot rendering/physics loops are cache-line aligned (64 bytes) and packed
-    efficiently (e.g. `CompactOpNode`, `CompactZZCell`).
+    efficiently (e.g. `CompactOpNode`).
   - Measure layout latency and memory allocations using dedicated probe tools (e.g.
     `tools/layout-latency-probe.cpp`, `tools/benchmark-kjv-load.py`).
   - Enforce zero-copy principles: zero dynamic allocations on hot interactive render loops and zero
@@ -133,10 +131,10 @@ zigzag slices**.
 
 Every system slice cell must link along standard orthogonal dimensions to its metadata:
 
-1. **`d.schema` Rank**: Links the configuration cell to a cell specifying its field schema, valid
+1. **`d.schemas` Rank**: Links the configuration cell to a cell specifying its field schema, valid
    value ranges, and physical units.
-1. **`d.notes` Rank**: Links the configuration cell to a cell headed with a `Notes` title (styled
-   via `d.format` without markdown syntax) for user observations and custom settings history.
+1. **`d.notes` Rank**: Links the configuration cell to a cell headed with a `Notes` title (no
+   markdown syntax) for user observations and custom settings history.
 
 ### 2.3 `apps/gleditor` (Plain Editor): YAML Configuration
 
@@ -157,9 +155,9 @@ ______________________________________________________________________
 
 ## 3. Layer Promotion Protocol
 
-When code in `apps/xuzz`, in the legacy component directories `apps/xudu` and `apps/zigzag`, or in
-`apps/gleditor` matures or proves generally useful, it must be promoted — xanalogical code to the
-engine (`apps/common/xanadu/`), everything else to the core library — following this protocol:
+When code in `apps/xuzz`, `apps/common/ui` or `apps/gleditor` matures or proves generally useful, it
+must be promoted — xanalogical code to the engine (`apps/common/xanadu/`), everything else to the
+core library — following this protocol:
 
 1. **Isolation Audit**: Ensure the candidate component has no implicit dependencies on application
    singletons, application-specific UI, or other apps.
@@ -176,32 +174,7 @@ ______________________________________________________________________
 
 ## 4. Multi-Agent Orchestration & Dialectic
 
-When conducting a project-level code quality or refactoring review, invoke the architect agents
-concurrently:
-
-```json
-{
-  "Subagents": [
-    {
-      "TypeName": "code_quality_auditor",
-      "Role": "Code Quality & Configuration Auditor",
-      "Prompt": "Audit <target_module_or_feature> for magic numbers, DRY duplication, layer inversions, and compliance with system xanadoc/slice configuration rules.",
-      "Model": "tier-fast"
-    },
-    {
-      "TypeName": "arch_synthesizer",
-      "Role": "Architectural Synthesizer",
-      "Prompt": "Design the clean refactoring or layer-promotion interface for <target_module_or_feature>, ensuring proper format links and zero-copy data flow.",
-      "Model": "tier-smart"
-    },
-    {
-      "TypeName": "systems_profiler",
-      "Role": "Systems & Performance Profiler",
-      "Prompt": "Evaluate the memory layout (64B cache lines), allocation profile, and interactive performance characteristics for <target_module_or_feature> with empirical data.",
-      "Model": "tier-fast"
-    }
-  ]
-}
-```
-
-The orchestrator synthesizes findings into an actionable plan before implementing changes.
+For a project-level code quality or refactoring review, give each of the three personas in §1 its
+own subagent when subagents are available, run them concurrently on the same target module or
+feature with that persona's mission as the brief, and synthesize their findings into one plan before
+implementing changes. Without subagents, work through the three roles in turn.

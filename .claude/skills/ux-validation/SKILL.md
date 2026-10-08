@@ -1,11 +1,11 @@
 ---
-name: xuzz-ux-validation
+name: ux-validation
 description: >-
   Validate, from the user's seat, that xuzz, vquery, vpl and vprolog can be used for real work
   through their interfaces: creating documents and slices, switching views, following links to
   distant cells, transcluding content, querying stores, calculating over numeric cells, making
   rule-based decisions, passing data between programs, and resuming work. Use to audit the user
-  experience or to verify a UX fix; use the xudu, ZigZag or link-navigation skills to design or
+  experience or to verify a UX fix; use the xuzz-ui-design skill to design or
   build those features.
 ---
 
@@ -42,7 +42,7 @@ does; code that looks as if it should work is not a pass.
   `--drag X1,Y1:X2,Y2`, `--right-click X,Y`, `--capture FILE`, `--screenshot FILE` and
   `--dump-a11y`. Prefer `--chord` with the default binding to `--do NAME`; use `--do` only for an
   action whose binding is confirmed in `system://keymap` (run once with
-  `SPDLOG_LEVEL=xudu.keymap=debug`, which logs each binding made and warns about any that do not
+  `SPDLOG_LEVEL=xuzz.keymap=debug`, which logs each binding made and warns about any that do not
   parse), and record the chord. An action with no binding and no control is *No affordance* however
   well `--do` drives it.
 
@@ -73,9 +73,8 @@ does; code that looks as if it should work is not a pass.
 ## Agentic workflow
 
 For a full audit, assign independent roles when subagents are available. Run at most three subagents
-concurrently, using `gpt-6-luna` for each delegated role. Queue remaining journeys and reviews until
-a slot is free; the lead stays in the parent agent. Each subagent works in its own run directory and
-edits no product code.
+concurrently. Queue remaining journeys and reviews until a slot is free; the lead stays in the
+parent agent. Each subagent works in its own run directory and edits no product code.
 
 1. **Harness engineer (first, alone).** Inventory the automation (`xuzz --help-all`, the script step
    kinds in `src/renderer.cpp`) against every gesture J1–J16 needs, close the gaps, and prove each

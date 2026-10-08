@@ -144,9 +144,10 @@ process exiting zero while drawing nothing is not a rendering test.
 
 ## Xanadu store and application
 
-The xanalogical engine lives in `apps/common/xanadu/`, in namespace `xanadu`. `apps/xudu/` holds
-xuzz's xanadoc presentation components and `apps/zigzag/` its cell visualizer; both are linked into
-`xuzz` and neither is a program. Pages and cells are two presentations of the same store.
+The xanalogical engine lives in `apps/common/xanadu/`, in namespace `xanadu`, and needs no graphics
+device. `apps/common/ui/xanadoc/` holds xuzz's xanadoc presentation components and
+`apps/common/ui/slice/` its cell visualizer; both are linked into `xuzz`, and `apps/xuzz/` holds
+only the program's own wiring. Pages and cells are two presentations of the same store.
 
 ### Content, operations, and hypertime
 
@@ -205,8 +206,7 @@ link context. The wider interaction contract is described in the
 Publication signs an authorship record, seals content and operations for sharing, and can publish
 mutable names through BEP 46. Global spans and operation references map published identities back to
 local stores. A Merkle identity ledger and BEP 10 extensions support author lookup and peer
-verification; Hashcash gates costly requests. Live collaboration exchanges operation descriptors and
-global spans rather than injecting raw remote text into an author's local permascroll. See the
+verification; Hashcash gates costly requests. See the
 [publication and discovery design](design/bep46-publication-and-discovery.md) and
 [identity model](design/oracle-identity-model.md) for protocol details.
 
@@ -395,7 +395,7 @@ for its build scope.
 | `src/`, `include/gleditor/`                                 | Public library implementation and headers.                               |
 | `apps/common/xanadu/`                                       | Shared Xanadu store, identity, enfilades, ZigZag manifold, and runtimes. |
 | `apps/gleditor/`, `apps/xuzz/`                              | The plain editor and the Xanadu/ZigZag application.                      |
-| `apps/xudu/`, `apps/zigzag/`                                | Xanadoc and cell presentation components linked into `xuzz`.             |
+| `apps/common/ui/`                                           | Xanadoc and cell presentation components linked into `xuzz`.             |
 | `apps/vquery*`, `apps/vpl*`, `apps/vprolog/`                | Language and query front ends.                                           |
 | `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` | GoogleTest suites.                                                       |
 | `assets/shaders/`, `tools/`                                 | Shader sources and build, fixture, and diagnostic tools.                 |

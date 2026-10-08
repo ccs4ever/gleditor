@@ -4,7 +4,8 @@ description: >-
   Multi-agent deep reasoning workflow in Xanadulogical architecture.
   Orchestrates a tripartite dialectic between an Ideological Purist (Nelsonian principles),
   a Systems Realist (hardware/graphics/networking constraints), and a Codebase Expert
-  (gleditor/xuzz C++23 implementation details).
+  (gleditor/xuzz C++23 implementation details). Use when first starting or elaborating on a new
+  idea, to test it for both xanadulogical purity and practical feasibility.
 ---
 
 # Xanadulogical Deep Reasoning: The Tripartite Dialectic
@@ -45,7 +46,7 @@ application for xanadocs and ZigZag slices.
        |  - `Resolver` & `SwarmContentSource` async piece streaming  |
        |  - Zero-Cairo/Zero-Pango FreeType2+HarfBuzz text engine     |
        |  - `StreamBufferGL` ring uploader & Vulkan 1.3 pipelines    |
-       |  - `ZZSpace` / `ZZCell` / `rapidyaml` slice architecture    |
+       |  - `zigzag::Manifold` / `ArenaManifold` slice model         |
        |  - 3-Way Spring Physics Canvas & AccessKit A11y Tree        |
        +-------------------------------------------------------------+
 ```
@@ -138,13 +139,13 @@ follows a 4-phase cycle:
 
 - **Agent**: `codebase_expert`
 - **Goal**: Map the debate directly onto `gleditor`, `apps/common/xanadu` and `apps/xuzz`. Where do
-  existing structures (e.g. `CompactOpNode`, `SwarmContentSource`, `ZZSpace`, `StreamBufferGL`)
+  existing structures (e.g. `CompactOpNode`, `SwarmContentSource`, `Manifold`, `StreamBufferGL`)
   already solve the problem? What precise C++23 structs, APIs, or database schemas bridge the pure
   ideal with practical hardware constraints?
 
 ### Phase 4: Unified Architectural Convergence
 
-- **Leader**: Orchestrator (Antigravity)
+- **Leader**: the orchestrating agent
 - **Goal**: Formulate the final engineering specification that maximizes Xanadulogical fidelity
   while maintaining responsive, empirically verified performance and rock-solid system stability.
 
@@ -152,32 +153,6 @@ ______________________________________________________________________
 
 ## 3. How to Invoke the Tripartite Agents
 
-The agents can be invoked concurrently using `invoke_subagent`:
-
-```json
-{
-  "Subagents": [
-    {
-      "TypeName": "xanadu_purist",
-      "Role": "Xanadulogical Ideological Purist",
-      "Prompt": "<Design challenge or architectural question>",
-      "Model": "inherit"
-    },
-    {
-      "TypeName": "systems_realist",
-      "Role": "Systems & Hardware Realist",
-      "Prompt": "<Design challenge or architectural question>",
-      "Model": "inherit"
-    },
-    {
-      "TypeName": "codebase_expert",
-      "Role": "Gleditor Codebase Expert",
-      "Prompt": "<Design challenge or architectural question>",
-      "Model": "inherit"
-    }
-  ]
-}
-```
-
-The orchestrator sends cross-critiques between agents using `send_message` until consensus and
-optimal synthesis are reached.
+Give each persona its own subagent when subagents are available: run the three concurrently on the
+same design challenge, each briefed with its section of §1, then pass each one's critique to the
+other two until the positions converge. Without subagents, argue the three positions in turn.

@@ -134,9 +134,9 @@ specified here.
 
 ## Implementation workflow
 
-The reusable agent workflow is
-[`xuzz-link-navigation`](../.claude/skills/xuzz-link-navigation/SKILL.md). Use it when implementing
-the interaction contract below.
+The reusable agent workflow is the "Links and navigation" section of
+[`xuzz-ui-design`](../.claude/skills/xuzz-ui-design/SKILL.md). Use it when implementing the
+interaction contract below.
 
 The three review roles work in this order for each increment. The **Xanadulogical reviewer** checks
 that one link remains addressable through both complete endsets, that spans retain provenance, and

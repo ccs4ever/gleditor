@@ -1,219 +1,194 @@
 ---
 name: bittorrent-expert
 description: >-
-  Expert protocol runbook and architectural guide for BitTorrent swarms, BEP 10 wire extensions,
-  BEP 46 mutable DHT naming, Merkle identity ledgers, and Transcopyright micropayments in the
-  xanalogical engine and xuzz. Use when designing, debugging, or implementing P2P swarm transport, author discovery,
-  live collaboration, identity consensus, and micropayment state channels.
+  Guide to the BitTorrent layer of the xanalogical engine and xuzz as the code implements it: the
+  libtorrent session, the four BEP 10 wire extensions, BEP 46 mutable names and topic rendezvous,
+  the Merkle identity ledger with Hashcash and oracle votes, and transcopyright holes and key
+  delivery. Use when designing, debugging, or implementing swarm transport, publication and
+  discovery, peer authentication, identity consensus, or transcopyright.
 ---
 
-# BitTorrent & Sovereign Swarm Protocol Architecture
+# BitTorrent in the xanalogical engine
 
-This skill defines the technical specifications, packet formats, cryptographic state machines, and
-performance guidelines for BitTorrent peer-to-peer protocols in the xanalogical engine
-(`apps/common/xanadu/`) and `xuzz`. The `xudu_` prefix on wire extension names and the `xudu:topic:`
-rendezvous prefix are protocol identifiers, not references to a program.
+Everything here lives in `apps/common/xanadu/` and needs no graphics device. The `xudu_` prefix on
+extension names and the `xudu:topic:` rendezvous prefix are protocol identifiers, not references to
+a program. This file describes what the code does; the reasoning is in `design/`:
 
-```
-       +-------------------------------------------------------------------------+
-       |                  BitTorrent Peer Wire Transport (uTP / TCP)             |
-       |                   (Zero Additional Ports, MSE/PE Encrypted)             |
-       +-------------------------------------------------------------------------+
-             │                    │                    │                   │
-             v                    v                    v                   v
-     [ BEP 10 Plugins ]    [ BEP 46 Mutable ]   [ Merkle Ledger ]   [ Transcopyright ]
-     - xudu_live_op        - Author Catalogs    - PGP Fingerprints  - Per-Byte Invoicing
-     - xudu_identity       - Topic Rendezvous   - DKIM Attestation  - CEK Key Delivery
-     - xudu_oracle_vote    - Monotonic seq      - O(log N) Proofs   - Coordinate Holes
-```
+- [`bep10-wire-extensions.md`](../../../design/bep10-wire-extensions.md)
+- [`bep46-publication-and-discovery.md`](../../../design/bep46-publication-and-discovery.md)
+- [`oracle-identity-model.md`](../../../design/oracle-identity-model.md)
+- [`permascroll-holes-and-transcopyright.md`](../../../design/permascroll-holes-and-transcopyright.md)
+- [`swarm-topic-ledger-and-search.md`](../../../design/swarm-topic-ledger-and-search.md)
+- [`btfs-and-permascrolls.md`](../../../design/btfs-and-permascrolls.md)
 
-______________________________________________________________________
+A design document can describe more than is built. Check the code before relying on a behaviour.
 
-## 1. The Swarm as a Sovereign Transport Layer
+## Where things are
 
-In traditional decentralized systems, identity, collaborative editing, and micropayments are
-delegated to auxiliary HTTP servers, sidecars, or blockchain RPCs. In `xuzz`, **the BitTorrent peer
-wire is the sole transport layer**:
+| Concern                                         | Code                                                                         |
+| ----------------------------------------------- | ---------------------------------------------------------------------------- |
+| libtorrent session, DHT, mutable items, topics  | `swarm.hpp` / `swarm.cpp` (`SwarmContentSource`)                             |
+| Which bytes an address names, and checking them | `resolver.hpp` (`ContentSource`, `Resolver`, `VerifiedPieceCache`)           |
+| Background swarms and their lifecycle           | `managed_torrent.hpp` (`SystemTorrentManager`)                               |
+| Wire layouts, message types, limits             | `identity/identity_layout.hpp`                                               |
+| Bencode encode and decode of every message      | `identity/identity_serialization.hpp`                                        |
+| Peer and torrent plugins, the controller        | `identity/identity_network_controller.hpp`                                   |
+| Ledger pipeline, oracle rules, Hashcash         | `identity/identity_validation.hpp`                                           |
+| The seam where payment would be checked         | `identity/payment_verifier.hpp`                                              |
+| Append-only identity ledger                     | `merkle_ledger.hpp`                                                          |
+| Author catalogs and topic targets               | `author_catalog.hpp`, `publication_discovery.cpp`                            |
+| Full-text search over what the swarm announced  | `swarm_catalog_index.hpp` (SQLite FTS5), `swarm_catalog.hpp`                 |
+| Publish, adopt, outbox, subscriptions           | `publication.hpp`, `publication_outbox.cpp`, `publication_subscriptions.cpp` |
+| Holes                                           | `scroll.hpp` (`HoleReason`), `enfilade/holefilade.cpp`                       |
+| Transcopyright encryption and pricing           | `transcopyright_crypto.hpp`, `transcopyright_logic.hpp`                      |
+| Verified piece and span cache                   | `lmdb_cache.hpp` (`LMDBContentCache`)                                        |
 
-1. **Zero Additional Ports**: All metadata, identity handshakes, live operational transforms, and
-   payment settlement travel over the single established BitTorrent TCP/uTP socket.
-1. **Unified NAT Traversal & Encryption**: All traffic inherits libtorrent's built-in hole punching,
-   UPnP, NAT-PMP, and MSE/PE stream encryption.
-1. **Swarm Locality**: Peers collaborating on a specific Xanadoc or quoting the same permascroll
-   interact directly over the swarm carrying that content.
+## The session
 
-______________________________________________________________________
+`SwarmContentSource` owns one libtorrent session and is the only thing that talks to it.
 
-## 2. BEP 10 Wire Extension Protocol Runbook
+- **One socket.** Payload transfer, the wire extensions and metadata rendezvous all use the
+  session's BitTorrent listener (`listenInterfaces`, default `0.0.0.0:0`). No auxiliary port is
+  opened.
+- **No port mapping.** UPnP and NAT-PMP are switched off in the session settings. Do not describe
+  the transport as inheriting them.
+- **Limits.** 128 connections for the session and 16 per torrent. `maximumPublicationTopics`
+  defaults to 128. A read waits `readTimeout` (30 s) for its pieces and a magnet waits
+  `metadataTimeout` (60 s) for metadata. There is no upload or download rate limit in the code.
+- **Alerts.** The alert mask is narrowed to the categories the code acts on. `poll()` drains them
+  and is meant to be driven by an owning background worker; torrent handle calls stay on that owner
+  thread. Keep libtorrent calls and alert processing off the render thread.
+- **Options for closed swarms.** `restrictDhtToDistinctNetworks` and
+  `allowManyConnectionsPerAddress` exist because the network-namespace tests share a few addresses;
+  leave the defaults alone for real use.
+- **Metadata first.** `addMagnet(..., metadataOnly)` followed by `startDownload()` lets the host
+  check a torrent's file list and resource budget before any payload is fetched.
 
-### 2.1 Handshake Negotiation (`on_extension_handshake`)
+## BEP 10 wire extensions
 
-Clients negotiate supported extensions in the standard BEP 10 extension handshake dictionary (`"m"`
-mapping):
+Four extensions are advertised in the extension handshake's `m` dictionary, with fixed local ids:
 
-```json
-{
-  "m": {
-    "xudu_live_op": 1,
-    "xudu_identity_lookup": 2,
-    "xudu_oracle_vote": 3,
-    "xudu_oracle_verify": 4,
-    "xudu_transcopyright": 5
-  }
-}
-```
+| Extension              | Local id | Message range |
+| ---------------------- | -------- | ------------- |
+| `xudu_identity_lookup` | 2        | `0x01`–`0x0F` |
+| `xudu_oracle_vote`     | 3        | `0x10`–`0x1F` |
+| `xudu_oracle_verify`   | 4        | `0x20`–`0x2F` |
+| `xudu_transcopyright`  | 5        | `0x30`–`0x3F` |
 
-### 2.2 Packet Framing Format
+A frame on the wire is a 4-byte big-endian length, the BitTorrent extended message id (20), the
+remote peer's id for the extension, then the payload. The payload is one `MessageType` byte followed
+by a bencoded dictionary, at most `kMaxPayloadBytes` (64 KiB). `on_extended` drops a frame whose
+length disagrees with its body, and a peer that has been isolated is not listened to.
 
-Every extended packet follows standard 4-byte big-endian length prefix framing:
+| `MessageType`             | Code   | Payload struct or purpose                                 |
+| ------------------------- | ------ | --------------------------------------------------------- |
+| `IdentityQuery`           | `0x01` | `IdentityQueryMsg`: a fingerprint or an email to look up  |
+| `IdentityResponse`        | `0x02` | `IdentityResponseMsg`: the entry with its inclusion proof |
+| `PeerAuthChallenge`       | `0x03` | `PeerChallenge`                                           |
+| `PeerAuthResponse`        | `0x04` | `PeerChallengeResponse`                                   |
+| `ConnectionDenial`        | `0x05` | the peer is refused                                       |
+| `OracleVoteBroadcast`     | `0x10` | `VoteEntry`                                               |
+| `OracleConsensusQuery`    | `0x11` |                                                           |
+| `OracleConsensusResponse` | `0x12` |                                                           |
+| `EmailVerifyRequest`      | `0x20` | `EmailVerifyRequestMsg`, carrying a Hashcash stamp        |
+| `EmailVerifyChallengeAck` | `0x21` |                                                           |
+| `EmailVerifyAttestation`  | `0x22` | `OracleAttestation`                                       |
+| `TcInvoiceQuery`          | `0x30` | `TcInvoiceQueryMsg`: `keyId`, `requestedBytes`            |
+| `TcInvoiceResponse`       | `0x31` | `TcInvoiceResponseMsg`: price, wallet, payment challenge  |
+| `TcSettleRequest`         | `0x32` | `TcSettleRequestMsg`: the ticket and the payer's KEM key  |
+| `TcKeyDelivery`           | `0x33` | `TcKeyDeliveryMsg`: the wrapped CEK, signed by the author |
 
-```
-┌───────────────────────────────┬───────────────────────────────┐
-│ Length Prefix (4 bytes, BE)   │ Total bytes following length  │
-├───────────────────────────────┼───────────────────────────────┤
-│ Message ID (1 byte)           │ 20 (0x14 = kBtMsgExtended)    │
-├───────────────────────────────┼───────────────────────────────┤
-│ Extended Message ID (1 byte)  │ Remote Extension ID (1..5)    │
-├───────────────────────────────┼───────────────────────────────┤
-│ Payload (Variable bytes)      │ MessageType (1B) || Bencode   │
-└───────────────────────────────┴───────────────────────────────┘
-```
+Rules that hold across the layer:
 
-### 2.3 Extended Envelope & Message Types (`identity_serialization.hpp`)
+- **Decoders return `std::expected`.** Every decode names its failure in `SerializationError`; a
+  malformed frame is refused, never read as an empty message.
+- **An entry without a proof is discarded.** An identity and its Merkle proof travel as one message
+  because either alone is useless, and an entry whose proof does not check is not kept with a
+  caveat.
+- **A new message** needs its `MessageType` value in the right range, a layout struct with
+  `isValid()`, an encode and decode pair, a case in `IdentityPeerPlugin::on_extended`, and a
+  round-trip test. Extend the tables above in the same change.
 
-Payloads begin with a 1-byte `MessageType` followed by canonical Bencoded payload dictionaries:
+## Peer authentication
 
-| Message Type             | Hex Code | Payload Schema & Purpose                                                                                                        |
-| :----------------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------ |
-| `IdentityQuery`          | `0x01`   | `{"fp": <fingerprint>, "nonce": <int64>}` — Query remote peer's PGP binding.                                                    |
-| `IdentityResponse`       | `0x02`   | `{"entry": <bencoded IdentityEntry>, "proof": <merkle_audit_path>}` — Returns verified record with $O(\log N)$ inclusion proof. |
-| `PeerAuthChallenge`      | `0x03`   | `{"challenge": <32-byte random bytes>, "epoch": <timestamp>}` — Mutually authenticates peer wire connection.                    |
-| `PeerAuthResponse`       | `0x04`   | `{"sig": <pgp/ed25519 signature>, "device_salt": <salt>}` — Cryptographic response proving identity ownership.                  |
-| `OracleVoteBroadcast`    | `0x10`   | `{"vote": <bencoded VoteEntry>}` — Gossips weighted consensus vote for Oracle quorums.                                          |
-| `EmailVerifyRequest`     | `0x20`   | `{"email": <address>, "pubkey": <armored_key>}` — Submits out-of-band email attestation task.                                   |
-| `EmailVerifyAttestation` | `0x22`   | `{"token": <signed_dkim_attestation>}` — Oracle signs verified email attestation token.                                         |
-| `TcInvoiceQuery`         | `0x30`   | `{"span_start": <u64>, "span_len": <u64>, "scroll": <str>}` — Requests per-byte transcopyright price invoice.                   |
-| `TcInvoiceResponse`      | `0x31`   | `{"invoice_id": <str>, "nano_xu_per_byte": <u64>, "total_cost": <u64>, "pay_addr": <str>}` — Author pricing terms.              |
-| `TcSettleRequest`        | `0x32`   | `{"invoice_id": <str>, "receipt": <signed state channel ticket>}` — Submits micropayment settlement.                            |
-| `TcKeyDelivery`          | `0x33`   | `{"invoice_id": <str>, "wrapped_cek": <AES key wrapped under reader public key>}` — Author unlocks encrypted hole.              |
+A connection is challenged with a random nonce and answers with a signature from its device key. The
+challenge is unpredictable, not secret. A peer that fails is isolated and disconnected, and the
+controller tracks quarantined peers. `DeviceDelegation` (`user_permascroll.hpp`) is how a master
+OpenPGP fingerprint hands signing authority to a device key; the controller records a delegation
+only when it verifies against the master's public key.
 
-### 2.4 Collaborative Live Editing (`xudu_live_op`)
+## BEP 46 mutable names and discovery
 
-Real-time collaborative typing operates with **zero raw text in live ops**:
+- **A name is a public key and a salt.** `createMutableKeys()` mints an identity without asking
+  anyone. `MutablePointer` is an infohash and a sequence number, and the higher sequence is the
+  later answer; that is all "current" means.
+- **Signing.** `mutableSigningBuffer()`, `signMutableItem()` and `verifyMutableItem()` are the only
+  route. An item returned by the DHT is verified before it is recorded.
+- **Publication is not done until acknowledged.** `publicationAcknowledged()` is true only after a
+  DHT node acknowledged that exact signed put. A value read back from the local DHT cache is not
+  completion.
+- **Author catalogs** are published under the salt `catalog`. Each entry has its own salt (at most
+  64 bytes, never `catalog`, in ascending order), a title, an infohash and a sequence. The catalog
+  is signed; the host checks the signature.
+- **Topic rendezvous.** A topic's DHT target is the SHA-1 of `xudu:topic:` followed by the canonical
+  topic: one topic, at most 128 bytes, no control characters. `joinPublicationTopic()` uses the
+  session's socket, with no payload torrent.
 
-- Transmits compact 48-byte `CompactOpNode` descriptors referencing canonical `GlobalSpan`
-  addresses.
-- Eliminates local spool pollution, prevents merge-conflict fragmentation, and guarantees
-  convergence across distributed peers.
+## The identity ledger
 
-______________________________________________________________________
+- **`MerkleLedger`** is an append-only log linking an OpenPGP fingerprint to a verified email
+  address, hashed with SHA-256 into an incremental Merkle tree (merklecpp). A revocation is another
+  entry, not an edit. The ledger can be sealed into a torrent and announced through a mutable name.
+- **`EnginePipeline`** validates what arrives: it stages blocks, appends votes, generates and
+  verifies inclusion proofs, and decides whether an oracle is authorised. A voter must be at least
+  30 days old (`kMinVoterAgeSeconds`), and timestamps may be off by at most 300 s
+  (`kMaxClockSkewSeconds`).
+- **`HashcashEngine`** mines and verifies stamps and tracks replays. The default difficulty is 20
+  bits. Costly requests, email verification among them, carry a stamp.
+- **Email verification** is an oracle's job: request, challenge acknowledgement, attestation. The
+  attestation confirms an SMTP challenge. There is no DKIM verification in the code.
 
-## 3. BEP 46 Mutable Naming & Topic Rendezvous
+## Holes and transcopyright
 
-### 3.1 Permanent Content Addresses
+An address is a scroll and an offset, and the address space never contracts. A span that cannot be
+shown is a hole with a reason (`HoleReason`): `Withheld`, `Revoked`, `Takedown`,
+`TranscopyrightLock`, or `Unsealed` for local primedia not yet sealed into a torrent. Spans that
+reference a hole stay valid.
 
-Content addressing creates an append-only paradox: modifying or appending to a document alters the
-infohash. BEP 46 solves this by introducing cryptographic public key indirection on the Mainline
-DHT:
+- **Encryption.** ChaCha20-Poly1305 over a whole segment, span keys derived by HKDF-SHA256 from the
+  segment master key, and CEKs wrapped to the reader with an X25519 KEM (a 104-byte payload).
+- **One keyId, one segment.** The nonce is derived from the keyId so none has to be shipped. Reusing
+  a keyId for a second segment reuses a keystream. Mint a fresh keyId per sealed span.
+- **The purchase.** Invoice query, invoice response with a single-use payment challenge, settle
+  request, key delivery. An invoice stands for 300 s. A challenge that was never issued for that
+  keyId, or was already spent, is refused.
+- **Payment is a seam, on purpose.** There is no currency, state channel or settlement system.
+  `PaymentVerifier` is where one would plug in. The default is `RefusingVerifier`: a node not told
+  how it is paid gives nothing away. `AlwaysAcceptVerifier` says what it is on every call. Do not
+  write as though per-byte settlement happens.
+- **Keys stay put.** A CEK leaves the author's machine only wrapped under a paying reader's public
+  key, and the reader's private KEM key never leaves its process.
 
-$$
-\text{Permanent Docuverse Name} = (\text{Publisher Ed25519 Public Key}, \text{Salt})
-$$
+## Storage, and which arena is which
 
-- $\text{Target} = \text{SHA-1}(\text{PublicKey} \parallel \text{Salt})$: The 20-byte DHT routing
-  slot.
-- $\text{Seq}$: Monotonically increasing 64-bit integer preventing rollback attacks.
-- $\text{Sig} = \text{Ed25519\_Sign}_{\text{PrivKey}}(\text{Salt}, \text{Seq}, \text{InfoHash})$:
-  Author signature over current publication root.
+- **`LMDBContentCache`** holds verified pieces once, keyed by infohash and piece index, with
+  reference counts. Two lookup tables point into them without copying: `vspans` for scroll
+  coordinates and `ext_spans` for external torrent streams. A piece is evicted when its last
+  reference goes.
+- **`VirtualMemoryArena`** (`virtual_memory_arena.hpp`) is not swarm storage. It reserves a range of
+  address space and maps file segments into it at fixed addresses, falling back to anonymous memory
+  where `MAP_FIXED` is unavailable. `SegmentedOpsSpool` and `SegmentedPrimediaSpool` use it so a
+  spool can grow without moving. It has nothing to do with LMDB.
+- **`ArenaManifold`** is unrelated to both: it is the ephemeral cell arena of the slice model.
 
-### 3.2 Author Catalogs (`bep46:<pubkey>/catalog`)
+## Testing
 
-Authors publish their lifetime works under their root catalog (`salt="catalog"`):
-
-- Bencoded manifest containing document titles, canonical salts (`doc:philosophy-notes`), root
-  microversions, and Merkle roots.
-- Downstream readers follow authors by pinning their 32-byte Ed25519 public key.
-
-### 3.3 Deterministic DHT Topic Rendezvous Swarms
-
-Topic discovery requires no centralized indexers:
-
-```math
-\text{Topic Rendezvous Target} = \text{SHA-1}("xudu:topic:" \parallel \text{canonicalize}(\text{topic}))
-```
-
-- Curators and readers announce signed link packages to the topic's DHT infohash.
-- Peers discover relevant documents, annotations, and backlink packages directly from the topic
-  swarm.
-
-______________________________________________________________________
-
-## 4. Decentralized Merkle Identity Ledger
-
-Implemented via `microsoft/merklecpp` in
-[`apps/common/xanadu/merkle_ledger.hpp`](../../../apps/common/xanadu/merkle_ledger.hpp):
-
-1. **Append-Only Tree Structure**:
-   - Leaf nodes hold verified `IdentityEntry` records and `VoteEntry` consensus endorsements.
-   - Internal nodes maintain SHA-256 binary hash trees.
-1. **$O(\log N)$ Inclusion Proofs**:
-   - Peers verify author identity authenticity in $< 1\,\text{ms}$ using lightweight Merkle audit
-     paths without syncing the entire global ledger.
-1. **Sybil Resistance via Dynamic Hashcash PoW**:
-   - Peer registration and oracle voting require solving dynamic Hashcash proof-of-work challenges
-     calibrated against network difficulty.
-1. **DKIM Out-of-Band Attestation**:
-   - Oracles verify domain ownership and email control via cryptographic SMTP/DKIM
-     challenge-response and sign ephemeral attestation tokens.
-
-______________________________________________________________________
-
-## 5. Permascroll Holes & Transcopyright Economics
-
-### 5.1 Coordinate Space Invariance
-
-In Project Xanadu, primedia is addressed by immutable coordinates:
-
-$$
-\text{Address} = (\text{ScrollId}, \text{Offset})
-$$
-
-If an author withholds, embargos, or redacts a passage, the address space must **never contract or
-collapse**:
-
-- Withheld spans remain permanent **Holes** in the coordinate fabric.
-- Downstream Edit Decision Lists (EDLs) maintain 100% stable references.
-
-### 5.2 Transcopyright Locks (`HoleReason::TranscopyrightLock`)
-
-- **Permissionless Quotation**: Anyone can quote or transclude any passage without prior
-  negotiation.
-- **Reader-to-Author Settlement**: When a reader views a document, the client pays the origin author
-  directly per byte rendered.
-- **In-Memory Decryption**: Content Encryption Keys (CEKs) are delivered over BEP 10
-  `xudu_transcopyright` and decrypted directly into the GPU text layout buffer without leaking
-  plaintext to disk.
-
-______________________________________________________________________
-
-## 6. Systems Realist Implementation Rules
-
-To keep render-thread work predictable and responsive:
-
-1. **Zero Libtorrent Calls on Render Thread**:
-   - `libtorrent::session`, `handle.status()`, and alert processing MUST live exclusively on a
-     background worker thread.
-   - Render thread (`drawFrame`) performs zero syscalls, zero mutex acquisitions, and zero heap
-     allocations.
-1. **64-Byte Cache-Line Aligned Atomic Telemetry**:
-   - Telemetry snapshots exchanged between network and render threads must be `alignas(64)` and
-     updated via lock-free atomic pointer exchange (`std::memory_order_release` /
-     `std::memory_order_acquire`).
-1. **Zero-Copy Memory-Mapped Storage**:
-   - Inode exhaustion is prevented by writing downloaded pieces into LMDB database pages using
-     `VirtualMemoryArena` (`mmap(MAP_FIXED)`).
-   - Text layout reads string views directly from mapped pages without copying.
-1. **Dynamic Rate Limiting**:
-   - Background seeding is throttled to 512 KiB/s during active user interaction and expands to
-     network capacity only when quiescent.
-   - Total active peer connections capped at 128 (16 per swarm) to prevent NAT table exhaustion.
+- Unit and wire tests are in `tests/xudu/`: `swarm.cpp`, `torrent.cpp`, `identity_test.cpp`,
+  `merkle_ledger_test.cpp`, `managed_torrent_test.cpp`, `author_catalog_test.cpp`,
+  `swarm_catalog_index_test.cpp`, the `publication*` files and the three `transcopyright_*` files.
+- `make test/swarm` and `make test/publication-swarm` run `tools/swarm-netns-test.sh`, which puts
+  two peers on separate network stacks with `build/xudu-swarm-peer`. They need unprivileged user
+  namespaces and the `veth` kernel module. `make test/publication-local` drives `build/xuzz` across
+  three local processes and covers sealing and restart, not DHT discovery.
+- A peer plugin can be given a frame sink in place of a connection, which is how the wire tests run
+  without a network.

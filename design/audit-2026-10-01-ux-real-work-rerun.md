@@ -1,6 +1,6 @@
 # UX Audit 2026-10-01: Real Work in Xuzz and VQuery, Rerun
 
-The second run of the [`xuzz-ux-validation`](../.claude/skills/xuzz-ux-validation/SKILL.md) workflow
+The second run of the [`xuzz-ux-validation`](../.claude/skills/ux-validation/SKILL.md) workflow
 against [`ux_workflow_real_work.md`](ux_workflow_real_work.md), repeating J1–J6 after the fixes for
 [the first audit](audit-2026-09-26-ux-real-work.md). Build 0.0.1.806 (source at `0fbe106` on
 `feature/xuzz-link-context`; the version string names its parent, `9394c6e`, because the binary was

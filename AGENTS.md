@@ -21,12 +21,11 @@ section before a non-trivial change in that area.
 ## Xuzz navigation workflow
 
 For changes to Xuzz link selection, many-to-many endpoint browsing, activation, or movement between
-xanadoc text and ZigZag cell content, use
-[`xuzz-link-navigation`](.claude/skills/xuzz-link-navigation/SKILL.md). Its interaction contract and
-acceptance criteria are in
-[`design/ui_workflow_xuzz_navigation.md`](design/ui_workflow_xuzz_navigation.md). Keep one link
-identity and both endsets in view while the reader explores either side. Completed reader
-transitions form branching walks in the private `system://activity` store; live view movement
+xanadoc text and ZigZag cell content, use the "Links and navigation" section of
+[`xuzz-ui-design`](.claude/skills/xuzz-ui-design/SKILL.md). The interaction contract and acceptance
+criteria are in [`design/ui_workflow_xuzz_navigation.md`](design/ui_workflow_xuzz_navigation.md).
+Keep one link identity and both endsets in view while the reader explores either side. Completed
+reader transitions form branching walks in the private `system://activity` store; live view movement
 appends no operations to visited documents or slices. See the R8 activity-store extension in
 [`store-slice-convergence.md`](design/store-slice-convergence.md).
 
@@ -34,7 +33,7 @@ appends no operations to visited documents or slices. See the R8 activity-store 
 
 To check that `xuzz`, `vquery`, `vpl` and `vprolog` can be used for real work through their
 interfaces — editing documents and slices, querying, calculating, reasoning, closing and resuming —
-use [`xuzz-ux-validation`](.claude/skills/xuzz-ux-validation/SKILL.md) against the journeys in
+use [`ux-validation`](.claude/skills/ux-validation/SKILL.md) against the journeys in
 [`design/ux_workflow_real_work.md`](design/ux_workflow_real_work.md). A step reachable only by a
 flag, script or file is a finding, not a pass.
 
@@ -85,18 +84,20 @@ has explicitly asked for visual confirmation.** A window stealing focus interrup
 keyboard, and a run that depends on a real display cannot be reproduced in CI or over SSH.
 
 `make` handles it: the Makefile exports `SDL_VIDEODRIVER=offscreen`, `SDL_AUDIODRIVER=dummy`,
-`LIBGL_ALWAYS_SOFTWARE=1`, plus `XDG_DATA_HOME`/`XDG_CONFIG_HOME` pointed into `build/xdg/`, so
-every target, script and child process inherits them. The XDG pair matters: a store holds no
-primedia, so what tests type goes into the author's permascroll under `$XDG_DATA_HOME`, and the
-system xanadocs live under `$XDG_CONFIG_HOME` — without the redirect a test run pollutes your real
-permascroll and overwrites your real settings. All five are `?=`, so an explicit override survives
+`LIBGL_ALWAYS_SOFTWARE=1`, plus `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` pointed into
+`build/xdg/`, so every target, script and child process inherits them. The XDG three matter: a store
+holds no primedia, so what tests type goes into the author's permascroll under `$XDG_DATA_HOME`, the
+system xanadocs live under `$XDG_CONFIG_HOME`, and the LMDB content cache lives under
+`$XDG_CACHE_HOME` — without the redirect a test run pollutes your real permascroll and cache and
+overwrites your real settings. All six are `?=`, so an explicit override survives
 (`SDL_VIDEODRIVER=wayland make test` still means it).
 
 Outside `make` it is yours to set, in order of preference:
 
 ```sh
 SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
-  XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config <command>   # 1. almost always enough
+  XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config \
+  XDG_CACHE_HOME=$PWD/build/xdg/cache <command>                                        # 1. almost always enough
 xvfb-run -s "-screen 0 1024x768x24" <command>                                          # 2. when something insists on a display
 xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh                        # 3. both; what compare-backends wants
 ```
@@ -265,13 +266,12 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   and has no Xanadu reference by design). Everything xanalogical goes in `apps/common/`:
   `apps/common/xanadu/` if it needs no graphics device, `apps/common/ui/` if it draws or takes
   input. `apps/xuzz/` is for what is truly unique to the xuzz program, which should be rare.
-- `apps/xudu/` and `apps/zigzag/` — **nothing should live here.** They still hold xuzz's xanadoc UI
-  components (`beams.cpp`, `session.cpp`, `bridge_coordinator.cpp`, `views.cpp`, overlays; in
-  namespace `xanadu`) and its visualizer (`zigzag_visualizer.cpp`,
-  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`) until they are moved;
-  `design/view-system.md` §17 step 1 says where each file goes. Add no file to either, and move a
-  file when you change it. The xanadoc components emit no Structure operations directly (only
-  `batch_orchestrator.cpp` does); the editor is text-ops only.
+- There is no `apps/xudu/` or `apps/zigzag/`; do not create either.
+- `apps/common/ui/xanadoc/` — xuzz's xanadoc UI components (`beams.cpp`, `session.cpp`,
+  `bridge_coordinator.cpp`, `views.cpp`, overlays; in namespace `xanadu`). They emit no Structure
+  operations directly (only `batch_orchestrator.cpp` does); the editor is text-ops only.
+- `apps/common/ui/slice/` — the slice visualizer (`zigzag_visualizer.cpp`,
+  `unified_transclusion_engine.cpp`, `zigzag_commands.cpp`).
 - `apps/common/ui/` — xanalogical UI shared by any graphical front end: `hypertime_graph.cpp`,
   `quotation_builder_overlay.cpp`, `store_object_manager.cpp`, the link-panel and page-break
   presentations.
@@ -285,7 +285,8 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
   `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,
   `xudu-swarm-peer.cpp`, `code-quality-audit.py`, and the scene/showcase generators.
-- `packaging/` (arch, debian, fedora, macos, windows, nix), `design/` (the *why*), `thirdparty/`.
+- `packaging/` (arch, debian, fedora, macos, windows, nix, android, wasm, docker), `design/` (the
+  *why*), `thirdparty/`.
 
 ### The engine's load-bearing types
 
@@ -356,7 +357,7 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
   OpenPGP / BEP 46 identity, in 64 KiB page-aligned segments (Merkle piece stability, zero-copy
   `mmap(MAP_FIXED)` growth). A `Store` is an edit decision list over slot 0 (local) or external
   scrolls (`ScrollId > 0`). `DeviceDelegation` maps master GPG fingerprints to device-salted BEP 46
-  keys. Live collaboration carries **no raw text**: 48-byte descriptors and `GlobalSpan`s.
+  keys.
 - **Merkle identity ledger.** `MerkleLedger` (merklecpp) holds verified fingerprints and email
   mappings; BEP 10 plugins `xudu_identity_lookup`, `xudu_oracle_vote`, `xudu_oracle_verify` do
   challenge-response and peer gating; `HashcashEngine` PoW resists Sybil/DoS.
@@ -410,10 +411,10 @@ Rules:
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation and a slice is a replay product. Fourteen rulings (R1–R14) with prices, the migration
-  (complete through step 21, `ArenaManifold`), open questions U1–U3. Read before touching
-  `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (view movement does not mutate a visited
-  store; a proposed separate activity store records completed reader visits), R11 and R12 are the
-  ones most often needed.
+  (complete through `ArenaManifold`, the ephemeral arena), open questions U1–U3. Read before
+  touching `CompactOpNode`, `Manifold`, or the zigzag sync path. R8 (view movement does not mutate a
+  visited store; a proposed separate activity store records completed reader visits), R11 and R12
+  are the ones most often needed.
 - [`view-system.md`](design/view-system.md) — proposal, unbuilt: xuzz's pluggable View system over
   the store. Slice views (stretch vanishing, all-dim walk, dimensional pack) over a `ViewManifold`
   with cell-based bindings and an O(1) toss; page views (base, stacked vanishing); scenes and panes;
@@ -431,7 +432,7 @@ Rules:
   placed planes and a page arrangement seam. Records the backends' clip-space conventions, Vulkan's
   reversed Z included.
 - [`structure-hyperop-vision.md`](design/structure-hyperop-vision.md) — what else Structure can
-  carry, grounded: the wire defect above, and a prerequisite-ordered proposal list.
+  carry, grounded: the wire defect it documents, and a prerequisite-ordered proposal list.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md),
   [`vql-query-language.md`](design/vql-query-language.md),
   [`vpl-array-language.md`](design/vpl-array-language.md) — the runtime and the two front-end

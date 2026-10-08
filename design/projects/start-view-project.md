@@ -26,9 +26,8 @@ In this order, in full, before you change anything:
    (`01-engine`, `02-rendering`, `03-build`, `04-aesthetics`) and three challenges (`05` to `07`).
    Read `03-build.md` before the relocation and `04-aesthetics.md` before anything is drawn. They
    are advice from reviewers, not rulings: where a report and the plan differ, the plan decided.
-1. `design/store-slice-convergence.md` R8 and R12, and the `xuzz-ux-validation`,
-   `xuzz-link-navigation`, `zigzag-ui-design` and `xudu-ui-design` skills, when you reach the work
-   they govern.
+1. `design/store-slice-convergence.md` R8 and R12, and the `ux-validation` and `xuzz-ui-design`
+   skills, when you reach the work they govern.
 
 ## 2. Decisions already made
 
@@ -152,7 +151,7 @@ before you rely on it. Tell every subagent the placement rules of §2, and that 
 | **Implementer**       | a package, or a run of packages in one track                                           | Given the package's row from the plan, the spec sections it implements, and the tests it must add. Works in its own worktree. Returns a diff that passes that package's gate.           |
 | **Red-team reviewer** | before each milestone closes                                                           | Reads the milestone's commits against the spec and the plan and tries to break them: a requirement with no test, a test that passes while the feature is broken, a rule of §2 violated. |
 | **Frame inspector**   | at every milestone from the spine onward, and whenever a package changes what is drawn | Below.                                                                                                                                                                                  |
-| **UX validator**      | at M2, M4 and M6                                                                       | Runs the milestone's journey from the user's seat, as the `xuzz-ux-validation` skill says. A step reachable only by a flag, a script or a file is a finding.                            |
+| **UX validator**      | at M2, M4 and M6                                                                       | Runs the milestone's journey from the user's seat, as the `ux-validation` skill says. A step reachable only by a flag, a script or a file is a finding.                                 |
 
 **The frame inspector** is the only judge of how things look. Give it:
 

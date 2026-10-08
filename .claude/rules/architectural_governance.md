@@ -19,9 +19,8 @@ zero naked magic numbers, and data-backed performance across the `gleditor` libr
     share it; `apps/common/ui/` for code that draws or takes input through the library.
   - `apps/xuzz/` holds only what is truly unique to the xuzz program — `main.cpp`, the command line,
     the application wiring. That should be rare.
-  - **Nothing lives in `apps/xudu/` or `apps/zigzag/`.** Add no file there. The code still in them
-    is to be moved to the places above (`design/view-system.md` §17 step 1 has the table); any
-    change that touches one of those files should move it.
+  - **There is no `apps/xudu/` or `apps/zigzag/`.** Do not create either: the xanadoc components are
+    in `apps/common/ui/xanadoc/` and the slice visualizer in `apps/common/ui/slice/`.
 - **Engine Purity**: `apps/common/xanadu/` must **never** include `apps/xuzz/`, `apps/common/ui/` or
   a library header that needs a graphics device. Header-only, device-free library headers
   (`<gleditor/cpp26*.hpp>`, `<gleditor/spatial.hpp>`, `<gleditor/draw_budget.hpp>`) are allowed.
@@ -60,8 +59,8 @@ application algorithms, layout routines, physics, and networking.
     format is deprecated in favor of stores.
   - Configurable parameters (cell spacing, camera projections, cycler speeds) must be resolved
     dynamically from **system zigzag slices** backed by sovereign stores.
-  - No markdown syntax in cells; metadata must link along orthogonal dimensions: `d.schema` (purpose
-    and schema) and `d.notes` (user notes).
+  - No markdown syntax in cells; metadata must link along orthogonal dimensions: `d.schemas`
+    (purpose and schema) and `d.notes` (user notes).
 - **In `apps/gleditor`**:
   - Configurable parameters must be loaded from a **plain YAML configuration file** with descriptive
     comments and a `user_notes:` section.
@@ -73,8 +72,7 @@ application algorithms, layout routines, physics, and networking.
 ## 3. Systems Realism & Empirical Verification
 
 - Hot rendering loops must have **zero dynamic memory allocations**.
-- Critical hot structs must be 64-byte aligned and cache-friendly (e.g. `CompactOpNode`,
-  `CompactZZCell`).
+- Critical hot structs must be 64-byte aligned and cache-friendly (e.g. `CompactOpNode`).
 - Performance claims and optimizations must be supported by empirical data using probe tools
   (`tools/layout-latency-probe.cpp`, `tools/benchmark-kjv-load.py`).
 - This system is not in production yet, no need to preserve backwards compatibility of any format

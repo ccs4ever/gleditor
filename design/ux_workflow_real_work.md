@@ -5,9 +5,9 @@
 A person should be able to open `xuzz`, `vquery`, `vpl` or `vprolog` and do real work in them —
 write, gather, arrange, calculate, reason, navigate, stop and come back — without reading source,
 passing command-line flags or editing files by hand. This document is the contract the
-[`xuzz-ux-validation`](../.claude/skills/xuzz-ux-validation/SKILL.md) workflow validates against. It
-describes journeys a user takes and what counts as done; it is not evidence that any of them works
-today. Every validation run reports what the current build actually does.
+[`ux-validation`](../.claude/skills/ux-validation/SKILL.md) workflow validates against. It describes
+journeys a user takes and what counts as done; it is not evidence that any of them works today.
+Every validation run reports what the current build actually does.
 
 A journey passes only when every step is reachable through the program's own interface:
 

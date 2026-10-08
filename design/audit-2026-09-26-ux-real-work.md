@@ -1,6 +1,6 @@
 # UX Audit 2026-09-26: Real Work in Xuzz and VQuery
 
-The first run of the [`xuzz-ux-validation`](../.claude/skills/xuzz-ux-validation/SKILL.md) workflow
+The first run of the [`xuzz-ux-validation`](../.claude/skills/ux-validation/SKILL.md) workflow
 against [`ux_workflow_real_work.md`](ux_workflow_real_work.md), on build 0.0.1.755
 (`feature/xuzz-link-context`), headless, OpenGL only. Five journey runners covered J1+J2, J3, J4, J5
 and J6; the lead merged their reports. Evidence is under `/tmp/ux-j12/`, `/tmp/ux-j3/`,
