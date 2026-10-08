@@ -651,6 +651,8 @@ int XuzzApp::run(const int argc, char **argv) {
       [&views](const xanadu::PouchItem &item) { views.swingBackToSpan(item); });
 
   xanadu::KineticTetherEngine kineticTetherEngine;
+  pouchDrawer.setDismissHandler(
+      [&kineticTetherEngine] { kineticTetherEngine.cancelDrag(); });
   xanadu::KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine);
   xanadu::WireframeHullOverlay wireframeHullOverlay(renderer);
   views.setWireframeOverlay(&wireframeHullOverlay);
@@ -742,6 +744,10 @@ int XuzzApp::run(const int argc, char **argv) {
     state->showDialog(render::DiagnosticSeverity::Warning,
                       "Link endpoint unavailable", std::move(message));
   });
+  views.sourceLeaving = [&linkContext] { linkContext.recordReadingOrigin(); };
+  views.sourceEntered = [&linkContext](const xanadu::OccurrenceSite &site) {
+    linkContext.recordSourceArrival(site);
+  };
   views.selectIndependentLink = [&linkContext](const xanadu::LinkKey &key) {
     std::ignore = linkContext.execute(xanadu::nav::SelectLink{.key = key});
   };
@@ -1167,7 +1173,6 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(&tenuousTetherOverlay);
   renderer->addFrameContributor(&satelloidOverlay);
   renderer->addPickObserver(&satelloidOverlay);
-  renderer->addFrameContributor(&kineticTetherOverlay);
   renderer->addFrameContributor(&wireframeHullOverlay);
   renderer->addFrameContributor(&images);
   renderer->addFrameContributor(&views);
@@ -1179,6 +1184,7 @@ int XuzzApp::run(const int argc, char **argv) {
   renderer->addFrameContributor(radialMenu.get());
   renderer->addFrameContributor(&publishForm);
   renderer->addFrameContributor(&pouchDrawer);
+  renderer->addFrameContributor(&kineticTetherOverlay);
   renderer->addFrameContributor(&swarmTelescope);
   renderer->addFrameContributor(&quotationOverlay);
   renderer->addFrameContributor(&storeObjectManager);
@@ -1415,21 +1421,22 @@ int XuzzApp::run(const int argc, char **argv) {
     if (nullptr == caret || docIdx >= session->views().size()) {
       return false;
     }
+    session->flushUncommitted(docIdx);
     const auto selStart  = caret->selectionStart();
     const auto selEnd    = caret->selectionEnd();
     const auto &openView = session->views()[docIdx];
     const auto &st       = session->store(openView.storeIndex);
-    const auto spans =
-        st.rebuild(openView.version).spansFor(selStart, selEnd - selStart);
+    const auto spans     = st.rebuild(openView.version, openView.focusedBirth)
+                           .spansFor(selStart, selEnd - selStart);
     if (spans.empty()) {
       return false;
     }
-    const auto text    = st.textOf(openView.version);
+    const auto text    = st.textOf(openView.version, openView.focusedBirth);
     const auto screenX = static_cast<float>(mx);
     const auto screenY = static_cast<float>(state->view.screenHeight - my);
     kineticTetherEngine.startDrag(
         xanadu::TetherPayload{
-            .span             = spans.front(),
+            .spans            = spans,
             .previewText      = selStart < text.size()
                                     ? text.substr(selStart, selEnd - selStart)
                                     : std::string{},
@@ -1444,6 +1451,11 @@ int XuzzApp::run(const int argc, char **argv) {
             .originRankCoord  = {},
             .originOpRef      = std::nullopt,
             .originDocState   = std::nullopt,
+            .originSource =
+                xanadu::PouchOrigin::Source{
+                    st.documentId().str(), openView.version, selStart, selEnd,
+                    std::nullopt, openView.focusedBirth},
+            .sourceStoreIndex = openView.storeIndex,
         },
         screenX, screenY);
     return true;
@@ -1456,44 +1468,62 @@ int XuzzApp::run(const int argc, char **argv) {
     if (button != 1 || 0 == (SDL_GetModState() & SDL_KMOD_ALT)) {
       return false;
     }
-    renderer->runWithState([&kineticTetherEngine, &session, renderer, mx, my,
-                            state, zigzagPresentation,
-                            &zigzagStoreIndex](RenderState &) {
-      const auto screenX = static_cast<float>(mx);
-      const auto screenY = static_cast<float>(state->view.screenHeight - my);
-      if (!renderer->lastPick || !renderer->lastPick->semanticTarget ||
-          !renderer->lastPick->semanticTarget->cellRef) {
-        return;
-      }
-      const auto cellRef = static_cast<zigzag::CellRef>(
-          *renderer->lastPick->semanticTarget->cellRef);
-      if (zigzag::isEphemeral(cellRef)) {
-        return;
-      }
-      const auto &manifold = zigzagPresentation->manifold();
-      const auto spans     = manifold.contentOf(cellRef);
-      if (spans.empty()) {
-        return;
-      }
-      const auto &bridgeStore = session->store(zigzagStoreIndex);
-      kineticTetherEngine.startDrag(
-          xanadu::TetherPayload{
-              .span            = spans.front(),
-              .previewText     = manifold.textOf(cellRef, bridgeStore),
-              .originVersion   = zigzagPresentation->sliceHead(),
-              .originDocIndex  = 0,
-              .originCharStart = 0,
-              .originCharEnd = static_cast<std::uint32_t>(spans.front().length),
-              .originScreenPos  = glm::vec2(screenX, screenY),
-              .originKind       = xanadu::PouchOriginKind::ZigzagCell,
-              .originCell       = cellRef,
-              .originSliceIndex = static_cast<std::uint32_t>(zigzagStoreIndex),
-              .originRankCoord  = "d.1: #" + std::to_string(cellRef),
-              .originOpRef      = std::nullopt,
-              .originDocState   = std::nullopt,
-          },
-          screenX, screenY);
-    });
+    const auto generation = kineticTetherEngine.generation();
+    renderer->pickThen(
+        mx, my,
+        [&kineticTetherEngine, &session, mx, my, state, zigzagPresentation,
+         &zigzagStoreIndex,
+         generation](RenderState &, const render::PickingResult &pick) {
+          if (kineticTetherEngine.generation() != generation) return;
+          const auto screenX = static_cast<float>(mx);
+          const auto screenY =
+              static_cast<float>(state->view.screenHeight - my);
+          if (!pick.semanticTarget || !pick.semanticTarget->cellRef) {
+            return;
+          }
+          const auto cellRef =
+              static_cast<zigzag::CellRef>(*pick.semanticTarget->cellRef);
+          if (zigzag::isEphemeral(cellRef)) {
+            return;
+          }
+          const auto &manifold = zigzagPresentation->manifold();
+          const auto spans     = manifold.contentOf(cellRef);
+          if (spans.empty()) {
+            return;
+          }
+          const auto &bridgeStore = session->store(zigzagStoreIndex);
+          const auto &target      = *pick.semanticTarget;
+          if (target.documentId != bridgeStore.documentId().str() ||
+              target.microversion != zigzagPresentation->sliceHead().str())
+            return;
+          kineticTetherEngine.startDrag(
+              xanadu::TetherPayload{
+                  .spans           = {spans.begin(), spans.end()},
+                  .previewText     = manifold.textOf(cellRef, bridgeStore),
+                  .originVersion   = zigzagPresentation->sliceHead(),
+                  .originDocIndex  = 0,
+                  .originCharStart = 0,
+                  .originCharEnd   = static_cast<std::uint32_t>(
+                      manifold.textOf(cellRef, bridgeStore).size()),
+                  .originScreenPos = glm::vec2(screenX, screenY),
+                  .originKind      = xanadu::PouchOriginKind::ZigzagCell,
+                  .originCell      = cellRef,
+                  .originSliceIndex =
+                      static_cast<std::uint32_t>(zigzagStoreIndex),
+                  .originRankCoord = "d.1: #" + std::to_string(cellRef),
+                  .originOpRef     = std::nullopt,
+                  .originDocState  = std::nullopt,
+                  .originSource =
+                      xanadu::PouchOrigin::Source{
+                          bridgeStore.documentId().str(),
+                          zigzagPresentation->sliceHead(), 0,
+                          static_cast<std::uint32_t>(
+                              manifold.textOf(cellRef, bridgeStore).size()),
+                          cellRef},
+                  .sourceStoreIndex = zigzagStoreIndex,
+              },
+              screenX, screenY);
+        });
     return true;
   };
 
@@ -1505,12 +1535,11 @@ int XuzzApp::run(const int argc, char **argv) {
 
     if (kineticTetherEngine.isDragging()) {
       kineticTetherEngine.updateDrag(screenX, screenY);
-      if (pouchDrawer.isOpen()) {
-        const auto &payload = kineticTetherEngine.payload();
-        pouchDrawer.forge().setDragGuide(payload.originScreenPos.x,
-                                         payload.originScreenPos.y, screenX,
-                                         screenY, true);
-      }
+      kineticTetherEngine.setCollecting(
+          pouchDrawer.isOpen() &&
+          (pouchDrawer.zoneAt(screenX, screenY).has_value() ||
+           pouchDrawer.forge().containsLeft(screenX, screenY) ||
+           pouchDrawer.forge().containsRight(screenX, screenY)));
       return true;
     }
     pouchDrawer.forge().setDragGuide(0.0F, 0.0F, 0.0F, 0.0F, false);
@@ -1529,96 +1558,132 @@ int XuzzApp::run(const int argc, char **argv) {
 
     // 1. If kinetic tether is currently dragging:
     if (kineticTetherEngine.isDragging()) {
-      if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
+      if (pouchDrawer.isOpen()) {
         const bool hitZone = pouchDrawer.zoneAt(screenX, screenY).has_value();
         const bool hitLeft = pouchDrawer.forge().containsLeft(screenX, screenY);
         const bool hitRight =
             pouchDrawer.forge().containsRight(screenX, screenY);
         if (hitZone || hitLeft || hitRight) {
           const auto &payload = kineticTetherEngine.payload();
-          if (payload.originKind == xanadu::PouchOriginKind::ZigzagCell) {
-            pouchDrawer.handleCellDrop(
-                payload.span, payload.previewText, payload.originCell,
-                payload.originRankCoord, screenX, screenY,
-                payload.originSliceIndex, payload.originOpRef);
-          } else {
-            pouchDrawer.handleGhostDrop(
-                payload.span, payload.previewText, payload.originVersion,
-                screenX, screenY, payload.originDocIndex,
-                payload.originCharStart, payload.originCharEnd);
-          }
+          if (!pouchDrawer.handleQuotationDrop(payload, screenX, screenY))
+            state->showDialog(
+                render::DiagnosticSeverity::Warning,
+                "Quotation source unavailable",
+                "The selected quotation could not be placed in the pouch.");
           kineticTetherEngine.cancelDrag();
           return true;
         }
+        if (pouchDrawer.contains(screenX, screenY)) {
+          kineticTetherEngine.cancelDrag();
+          state->showDialog(render::DiagnosticSeverity::Warning,
+                            "Choose a quotation destination",
+                            "Drop into a pouch zone or onto a bench.");
+          return true;
+        }
       }
-      renderer->pickThen(
-          mx, my,
-          [&kineticTetherEngine, &views, screenX,
-           screenY](RenderState &rState, const render::PickingResult &pick) {
-            const auto payload = kineticTetherEngine.payload();
-            if ((render::tagKindGlyph == pick.tag.kind ||
-                 render::tagKindPage == pick.tag.kind) &&
-                pick.tag.docIndex < rState.docs.size()) {
-              const auto doc = pick.tag.docIndex;
-              if (const auto at = rState.docs[doc]->offsetForPick(pick.tag)) {
-                const bool ontoItself =
-                    xanadu::PouchOriginKind::Document == payload.originKind &&
-                    doc == payload.originDocIndex &&
-                    *at >= payload.originCharStart &&
-                    *at <= payload.originCharEnd;
-                kineticTetherEngine.cancelDrag();
-                if (!ontoItself) {
-                  views.insertSpanAt(rState, doc, *at, payload.span);
-                }
+      const auto payload    = kineticTetherEngine.payload();
+      const auto generation = kineticTetherEngine.generation();
+      renderer->runWithState([&kineticTetherEngine, &views, &session, renderer,
+                              state, payload, generation, mx, my, screenX,
+                              screenY](RenderState &before) {
+        struct Destination {
+          std::shared_ptr<Doc> doc;
+          std::size_t store;
+          xanadu::MicroversionId version;
+          std::uint32_t birth;
+          std::uint64_t edits;
+        };
+        std::vector<Destination> destinations;
+        for (std::size_t i = 0;
+             i < before.docs.size() && i < session->views().size(); ++i) {
+          const auto &view = session->views()[i];
+          destinations.push_back({before.docs[i], view.storeIndex, view.version,
+                                  view.focusedBirth,
+                                  before.docs[i]->editGeneration()});
+        }
+        renderer->pickThen(
+            mx, my,
+            [&kineticTetherEngine, &views, &session, state, payload, generation,
+             destinations = std::move(destinations), screenX,
+             screenY](RenderState &rState, const render::PickingResult &pick) {
+              if (!kineticTetherEngine.isDragging() ||
+                  kineticTetherEngine.generation() != generation)
                 return;
+              if ((render::tagKindGlyph == pick.tag.kind ||
+                   render::tagKindPage == pick.tag.kind) &&
+                  pick.tag.docIndex < rState.docs.size()) {
+                const auto doc = pick.tag.docIndex;
+                if (doc >= destinations.size() ||
+                    doc >= session->views().size() ||
+                    rState.docs[doc] != destinations[doc].doc ||
+                    session->storeIndexOf(doc) != destinations[doc].store ||
+                    session->versionOf(doc) != destinations[doc].version ||
+                    session->views()[doc].focusedBirth !=
+                        destinations[doc].birth ||
+                    rState.docs[doc]->editGeneration() !=
+                        destinations[doc].edits) {
+                  kineticTetherEngine.cancelDrag();
+                  state->showDialog(
+                      render::DiagnosticSeverity::Warning,
+                      "Quotation destination changed",
+                      "Choose where to place the quotation again.");
+                  return;
+                }
+                if (const auto at = rState.docs[doc]->offsetForPick(pick.tag)) {
+                  const bool ontoItself =
+                      xanadu::PouchOriginKind::Document == payload.originKind &&
+                      payload.originSource &&
+                      session->store(session->storeIndexOf(doc))
+                              .documentId()
+                              .str() == payload.originSource->authority &&
+                      session->versionOf(doc) ==
+                          payload.originSource->version &&
+                      session->views()[doc].focusedBirth ==
+                          payload.originSource->focusedBirth &&
+                      *at >= payload.originCharStart &&
+                      *at <= payload.originCharEnd;
+                  kineticTetherEngine.cancelDrag();
+                  if (!ontoItself) {
+                    if (payload.originSource) {
+                      if (const auto source = payload.sourceStoreIndex) {
+                        views.transcludeSpansAt(rState, doc, *at,
+                                                session->store(*source),
+                                                payload.spans);
+                      } else {
+                        state->showDialog(
+                            render::DiagnosticSeverity::Warning,
+                            "Quotation source unavailable",
+                            "The source store is no longer open.");
+                      }
+                    }
+                  }
+                  return;
+                }
               }
-            }
-            kineticTetherEngine.endDrag(screenX, screenY);
-          });
+              kineticTetherEngine.endDrag(screenX, screenY);
+            });
+      });
       return true;
     }
 
-    // 2. Direct drop into open pouch drawer from selection:
-    if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
-      return false;
-    }
-    const bool hitZone  = pouchDrawer.zoneAt(screenX, screenY).has_value();
-    const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
-    const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
-
-    if (!hitZone && !hitLeft && !hitRight) {
-      return false;
-    }
-
-    renderer->runWithState([&pouchDrawer, &session, screenX,
-                            screenY](RenderState &rState) {
-      auto *const caret = rState.caret;
-      if (!caret || !caret->hasSelection()) {
-        return;
-      }
-      const auto selStart = caret->selectionStart();
-      const auto selEnd   = caret->selectionEnd();
-      const auto docIdx   = caret->documentIndex();
-      if (docIdx >= session->views().size() || selEnd <= selStart) {
-        return;
-      }
-      const auto &openView = session->views()[docIdx];
-      const auto &st       = session->store(openView.storeIndex);
-      const auto ver       = st.rebuild(openView.version);
-      const auto spans     = ver.spansFor(selStart, selEnd - selStart);
-      if (spans.empty()) {
-        return;
-      }
-      const auto text = st.textOf(openView.version);
-      std::string preview;
-      if (selStart < text.size()) {
-        preview = text.substr(selStart, selEnd - selStart);
-      }
-      pouchDrawer.handleGhostDrop(spans.front(), preview, openView.version,
-                                  screenX, screenY, docIdx, selStart, selEnd);
-    });
-    return true;
+    kineticTetherEngine.cancelDrag();
+    return false;
   };
+  pouchDrawer.setDragHandler([&kineticTetherEngine,
+                              state](const gleditor::ui::PointerEvent &event) {
+    if (!kineticTetherEngine.isDragging()) return false;
+    if (event.phase == gleditor::ui::PointerPhase::Move)
+      return state->mouseMotionHandler(static_cast<int>(event.x),
+                                       static_cast<int>(event.y), 0);
+    if (event.phase == gleditor::ui::PointerPhase::Release && event.button == 1)
+      return state->mouseUpHandler(static_cast<int>(event.x),
+                                   static_cast<int>(event.y), event.button);
+    if (event.phase == gleditor::ui::PointerPhase::Cancel) {
+      kineticTetherEngine.cancelDrag();
+      return true;
+    }
+    return false;
+  });
 
   std::optional<xanadu::ReadingPlace> resuming;
   if (!opts.hasExplicitStore && opts.askedVersion.empty() &&
@@ -1988,9 +2053,16 @@ int XuzzApp::run(const int argc, char **argv) {
       "selection -- in this document or any other open one",
       [&views] { views.linkSelection(); });
   app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapCancelQuotation),
+      "cancel a quotation pickup or pending drop",
+      [&kineticTetherEngine] { kineticTetherEngine.cancelDrag(); });
+  app.commands().registerAction(
       std::string(xanadu::settings::kKeymapCancelLink),
       "forget a xanalink that was begun and not finished",
-      [&views] { views.cancelLink(); });
+      [&views, &kineticTetherEngine] {
+        kineticTetherEngine.cancelDrag();
+        views.cancelLink();
+      });
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapBeams),
       "show or hide the links and transclusions between documents",
@@ -2194,9 +2266,19 @@ int XuzzApp::run(const int argc, char **argv) {
                                 "connect selection with an xanalink",
                                 [&views] { views.linkSelection(); });
   app.commands().registerAction("cancel-link", "drop link begun earlier",
-                                [&views] { views.cancelLink(); });
+                                [&views, &kineticTetherEngine] {
+                                  if (kineticTetherEngine.busy())
+                                    kineticTetherEngine.cancelDrag();
+                                  else
+                                    views.cancelLink();
+                                });
   app.commands().registerAction("cancel link", "drop link begun earlier",
-                                [&views] { views.cancelLink(); });
+                                [&views, &kineticTetherEngine] {
+                                  if (kineticTetherEngine.busy())
+                                    kineticTetherEngine.cancelDrag();
+                                  else
+                                    views.cancelLink();
+                                });
   app.commands().registerAction("beams",
                                 "show or hide the ribbons connecting documents",
                                 [&links] { links.toggle(); });
@@ -2248,8 +2330,10 @@ int XuzzApp::run(const int argc, char **argv) {
       const auto docIdx   = where.doc;
       const auto storeIdx = session->storeIndexOf(docIdx);
       const auto ver      = session->versionOf(docIdx);
-      const auto spans    = session->store(storeIdx).rebuild(ver).spansFor(
-          where.start, where.end - where.start);
+      const auto spans =
+          session->store(storeIdx)
+              .rebuild(ver, session->views()[docIdx].focusedBirth)
+              .spansFor(where.start, where.end - where.start);
       if (spans.empty()) {
         return;
       }
@@ -2260,7 +2344,8 @@ int XuzzApp::run(const int argc, char **argv) {
         return;
       }
       auto start      = where.start;
-      const auto text = session->store(storeIdx).textOf(ver);
+      const auto text = session->store(storeIdx).textOf(
+          ver, session->views()[docIdx].focusedBirth);
       for (const auto &span : *carried) {
         xanadu::PouchItem item;
         item.span            = span;
@@ -2270,6 +2355,13 @@ int XuzzApp::run(const int argc, char **argv) {
         item.originCharStart = start;
         start += static_cast<std::uint32_t>(span.length);
         item.originCharEnd = start;
+        item.originSource  = xanadu::PouchOrigin::Source{
+            session->store(storeIdx).documentId().str(),
+            ver,
+            item.originCharStart,
+            start,
+            std::nullopt,
+            session->views()[docIdx].focusedBirth};
         if (isLeft)
           pouchDrawer.forge().dropLeft(std::move(item));
         else
@@ -2292,8 +2384,10 @@ int XuzzApp::run(const int argc, char **argv) {
           const auto docIdx   = where.doc;
           const auto storeIdx = session->storeIndexOf(docIdx);
           const auto ver      = session->versionOf(docIdx);
-          const auto spans    = session->store(storeIdx).rebuild(ver).spansFor(
-              where.start, where.end - where.start);
+          const auto spans =
+              session->store(storeIdx)
+                  .rebuild(ver, session->views()[docIdx].focusedBirth)
+                  .spansFor(where.start, where.end - where.start);
           if (spans.empty()) {
             return;
           }
@@ -2303,12 +2397,17 @@ int XuzzApp::run(const int argc, char **argv) {
             std::cout << "xuzz: " << carried.error() << "\n";
             return;
           }
-          const auto text = session->store(storeIdx).textOf(ver);
-          auto start      = where.start;
+          const auto text = session->store(storeIdx).textOf(
+              ver, session->views()[docIdx].focusedBirth);
+          auto start = where.start;
           for (const auto &span : *carried) {
             const auto item = pouchDrawer.manager().dropSpan(
-                zoneId, span, text.substr(start, span.length), ver, docIdx,
-                start, start + static_cast<std::uint32_t>(span.length));
+                zoneId, span, text.substr(start, span.length),
+                xanadu::PouchOrigin{
+                    .source = xanadu::PouchOrigin::Source{
+                        session->store(storeIdx).documentId().str(), ver, start,
+                        start + static_cast<std::uint32_t>(span.length),
+                        std::nullopt, session->views()[docIdx].focusedBirth}});
             start += static_cast<std::uint32_t>(span.length);
             std::cout << "xuzz: dropped span into pouch zone '" << zoneId
                       << "' (item " << item.itemId << ")\n";
@@ -2446,7 +2545,11 @@ int XuzzApp::run(const int argc, char **argv) {
              keyboardPane.leaveZigzag(false);
              bridgeCoordinator.activateCell(zigzagPresentation->focusCell());
            },
-       .leave = [&keyboardPane] { keyboardPane.leaveZigzag(true); },
+       .leave =
+           [&keyboardPane, &kineticTetherEngine] {
+             kineticTetherEngine.cancelDrag();
+             keyboardPane.leaveZigzag(true);
+           },
        .focusMoved =
            [&keyboardPane, &showZigzagFocus] {
              keyboardPane.enterZigzag();

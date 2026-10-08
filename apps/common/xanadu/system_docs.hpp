@@ -382,6 +382,8 @@ inline constexpr std::string_view kKeymapScrubBackward =
     "std:xudu/scrub_backward";
 inline constexpr std::string_view kKeymapTransclude = "std:xudu/transclude";
 inline constexpr std::string_view kKeymapXanalink   = "std:xudu/xanalink";
+inline constexpr std::string_view kKeymapCancelQuotation =
+    "std:edit/cancel_quotation";
 inline constexpr std::string_view kKeymapCancelLink = "std:xudu/cancel_link";
 inline constexpr std::string_view kKeymapBeams      = "std:xudu/beams";
 inline constexpr std::string_view kKeymapSworph     = "std:xudu/sworph";

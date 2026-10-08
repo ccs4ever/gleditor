@@ -102,6 +102,8 @@ public:
   packagePresentation(int cellRadius) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
+  void recordReadingOrigin() { noteOrigin(); }
+  void recordSourceArrival(const OccurrenceSite &site);
   LinkContext *setUnavailableHandler(std::function<void(std::string)> handler) {
     unavailable = std::move(handler);
     return this;

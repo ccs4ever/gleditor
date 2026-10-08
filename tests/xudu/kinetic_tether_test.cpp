@@ -27,7 +27,7 @@ TEST_F(KineticTetherTest, DefaultStateIsIdle) {
 TEST_F(KineticTetherTest, DetachmentThresholdCancelsUnder120Px) {
   KineticTetherEngine tether;
   TetherPayload payload{
-      .span            = PrimediaSpan{0, 0, 14},
+      .spans           = {PrimediaSpan{0, 0, 14}},
       .previewText     = "Project Xanadu",
       .originVersion   = MicroversionId{},
       .originDocIndex  = 0,
@@ -57,7 +57,7 @@ TEST_F(KineticTetherTest, DetachmentThresholdCancelsUnder120Px) {
 TEST_F(KineticTetherTest, DetachmentThresholdSucceedsOver120Px) {
   KineticTetherEngine tether;
   TetherPayload payload{
-      .span            = PrimediaSpan{0, 0, 14},
+      .spans           = {PrimediaSpan{0, 0, 14}},
       .previewText     = "Project Xanadu",
       .originVersion   = MicroversionId{},
       .originDocIndex  = 0,
@@ -104,7 +104,7 @@ TEST_F(KineticTetherTest, VoidReleaseSpawnsNewDocumentWithTranscludeOp) {
   ASSERT_FALSE(spans.empty());
 
   TetherPayload payload{
-      .span            = spans.front(),
+      .spans           = spans,
       .previewText     = "Project Xanadu",
       .originVersion   = v0,
       .originDocIndex  = 0,
@@ -129,8 +129,25 @@ TEST_F(KineticTetherTest, VoidReleaseSpawnsNewDocumentWithTranscludeOp) {
 
   // Verify that Version::occurrencesOf confirms address identity
   const auto spawnedPieces = store.rebuild(spawnedVer);
-  const auto occs          = spawnedPieces.occurrencesOf(payload.span);
+  const auto occs          = spawnedPieces.occurrencesOf(payload.spans.front());
   ASSERT_FALSE(occs.empty());
   EXPECT_EQ(occs.front().start, 0U);
   EXPECT_EQ(occs.front().end, 14U);
+}
+
+TEST_F(KineticTetherTest,
+       CancelInvalidatesAPendingPickupWithoutStartingAGhost) {
+  KineticTetherEngine engine;
+  const auto generation = engine.generation();
+  engine.cancelDrag();
+  EXPECT_GT(engine.generation(), generation);
+  EXPECT_FALSE(engine.busy());
+  TetherPayload payload;
+  payload.spans = {{0, 0, 5}, {1, 7, 8}, {0, 5, 5}};
+  engine.startDrag(payload, 0, 0);
+  const auto press = engine.generation();
+  EXPECT_EQ(engine.payload().spans, payload.spans);
+  engine.cancelDrag();
+  EXPECT_GT(engine.generation(), press);
+  EXPECT_FALSE(engine.isDragging());
 }

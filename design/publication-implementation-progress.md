@@ -424,6 +424,20 @@ signed cached-fixture interaction, saved global-address checks and independently
 Carrier retention across restart, pointer/F9/origin-navigation paths and populated-bench legibility
 remain gaps. This prerequisite is not a complete P4/P5 or P1–P7 acceptance pass.
 
+## Complete quotation runs and saved source locations (2026-10-08)
+
+Quotation carriers now survive normal offline restarts; see
+[the retention report](ux_publication_retention_validation_2026-10-08.md). Pointer pickup freezes
+complete span runs and source identity, document drops share keyboard address translation, and
+empty-space release creates a reader-owned store. Pouch pointer drops save all members with exact
+native source locations; the visible Open source action returns to the saved document version and
+range, recording the completed visit privately. Escape invalidates pending pickups and drops.
+
+[The quotation report](ux_publication_quotation_validation_2026-10-08.md) records focused interface
+validation and the remaining modal pickup, cell-return and presentation limits. Authorial editions
+and native formats are unchanged. Full commentary publication/reply and P1–P7 acceptance remain
+outstanding.
+
 ## Remaining work
 
 Investigate the

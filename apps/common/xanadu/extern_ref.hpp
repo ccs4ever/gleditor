@@ -78,6 +78,18 @@ struct GlobalOpRef {
 struct PouchOrigin {
   std::optional<GlobalDocumentState> document;
   std::optional<GlobalOpRef> cell;
+  // Native store identity and an exact reader location, separate from a sealed
+  // global document state. Scroll deployment slots are never source identities.
+  struct Source {
+    std::string authority;
+    MicroversionId version;
+    std::uint32_t start{};
+    std::uint32_t end{};
+    std::optional<std::uint32_t> cell;
+    std::uint32_t focusedBirth{};
+    bool operator==(const Source &) const = default;
+  };
+  std::optional<Source> source;
 };
 
 /**

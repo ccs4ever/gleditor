@@ -327,15 +327,15 @@ TEST(PouchTest, cancelledDragWritesNothing) {
 
   KineticTetherEngine engine;
   TetherPayload payload{
-      .span             = PrimediaSpan{.scroll = 0, .start = 10, .length = 20},
-      .previewText      = "Ephemeral drag payload",
-      .originVersion    = store.primaryCurrentVersion(),
-      .originDocIndex   = 0,
-      .originCharStart  = 10,
-      .originCharEnd    = 30,
-      .originScreenPos  = glm::vec2(100.0F, 100.0F),
-      .originKind       = PouchOriginKind::Document,
-      .originCell       = 0,
+      .spans           = {PrimediaSpan{.scroll = 0, .start = 10, .length = 20}},
+      .previewText     = "Ephemeral drag payload",
+      .originVersion   = store.primaryCurrentVersion(),
+      .originDocIndex  = 0,
+      .originCharStart = 10,
+      .originCharEnd   = 30,
+      .originScreenPos = glm::vec2(100.0F, 100.0F),
+      .originKind      = PouchOriginKind::Document,
+      .originCell      = 0,
       .originSliceIndex = 0,
       .originRankCoord  = {},
       .originOpRef      = std::nullopt,
@@ -513,4 +513,54 @@ TEST(PouchTest, BackedBySystemStore) {
   const auto item = pm.dropSpan("notes", span, "Notes excerpt", store.latest());
   EXPECT_EQ(item.previewText, "Notes excerpt");
   EXPECT_EQ(pm.zoneById("notes")->items().size(), 1U);
+}
+
+TEST(PouchTest, ExactSourceIdentityAndRepeatedRangeSurviveReload) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Store source(perma);
+  auto version    = source.insert({}, 0, "same -");
+  version         = source.insertSpan(version, 6,
+                                      source.rebuild(version).spansFor(0, 5).front());
+  const auto span = source.rebuild(version).spansFor(6, 5).front();
+  Store pouch(perma);
+  PouchManager manager(pouch);
+  manager.loadManifest();
+  const PouchOrigin origin{
+      .source = PouchOrigin::Source{.authority = source.documentId().str(),
+                                    .version   = version,
+                                    .start     = 6,
+                                    .end       = 11,
+                                    .cell      = std::nullopt}};
+  const auto item = manager.dropSpan("notes", span, "same ", origin);
+  ASSERT_EQ(item.originSource, origin.source);
+  PouchManager reloaded(pouch);
+  reloaded.loadManifest();
+  const auto &restored = reloaded.zoneById("notes")->items().front();
+  EXPECT_EQ(restored.originSource, origin.source);
+  EXPECT_EQ(restored.originVersion, version);
+  EXPECT_EQ(restored.originCharStart, 6U);
+  EXPECT_EQ(restored.originCharEnd, 11U);
+  EXPECT_EQ(restored.span, span);
+  EXPECT_EQ(source.rebuild(version).occurrencesOf(span).size(), 2U);
+}
+
+TEST(PouchTest, SavedSourceCellRemainsDistinctFromPouchItemBirth) {
+  Store store;
+  const auto head = store.makeCell(store.sliceGenesis({}), "cell text");
+  Store pouch(store.userPermascrollPtr());
+  PouchManager manager(pouch);
+  manager.loadManifest();
+  const PouchOrigin origin{
+      .source = PouchOrigin::Source{.authority = store.documentId().str(),
+                                    .version   = head,
+                                    .start     = 0,
+                                    .end       = 9,
+                                    .cell      = store.cellRefOf(head)}};
+  const auto span =
+      store.rebuildManifold(head).contentOf(*origin.source->cell).front();
+  manager.dropSpan("notes", span, "cell text", origin);
+  PouchManager reloaded(pouch);
+  reloaded.loadManifest();
+  EXPECT_EQ(reloaded.zoneById("notes")->items().front().originSource,
+            origin.source);
 }

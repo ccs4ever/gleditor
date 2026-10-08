@@ -344,45 +344,78 @@ std::optional<glm::mat4> Views::presentationTransform() const {
 }
 
 void Views::swingBackToSpan(const PouchItem &item) {
-  renderer->runWithState([this, item](RenderState &rState) {
-    if (session.views().empty()) {
+  renderer->runWithState([this, item](RenderState &) {
+    const auto unavailable = [this](std::string reason) {
+      state->showDialog(render::DiagnosticSeverity::Warning,
+                        "Quotation source unavailable", std::move(reason));
+    };
+    if (!item.originSource) {
+      unavailable("This quotation has no saved source location.");
       return;
     }
-    std::optional<std::size_t> foundDocIdx;
+    const auto &source = *item.originSource;
+    const auto storeIndex =
+        session.storeIndexForAuthority(source.authority, source.version);
+    if (!storeIndex) {
+      unavailable("Open the original source store to return to this quotation. "
+                  "The saved quotation can still be inserted.");
+      return;
+    }
+    if (source.cell) {
+      unavailable("Returning to a saved cell quotation is not available yet.");
+      return;
+    }
+    const auto &store = session.store(*storeIndex);
+    if (!store.segmentedOps().contains(source.version)) {
+      unavailable("The saved source version is unavailable.");
+      return;
+    }
+    const auto spans = store.rebuild(source.version, source.focusedBirth)
+                           .spansFor(source.start, source.end - source.start);
+    const auto &pouch  = session.systemStore(SystemDocKind::Pouches);
+    const auto matches = [&](const PrimediaSpan &span) {
+      if (span.scroll == localScroll && item.span.scroll == localScroll &&
+          span == item.span &&
+          &store.userPermascroll() == &pouch.userPermascroll())
+        return true;
+      const auto a = globalise(store, span);
+      const auto b = globalise(pouch, item.span);
+      return a && b && *a == *b;
+    };
+    if (spans.size() != 1 || !matches(spans.front())) {
+      unavailable("The saved source range does not match this quotation.");
+      return;
+    }
+    if (sourceLeaving) sourceLeaving();
+    std::optional<std::size_t> docIndex;
     for (std::size_t i = 0; i < session.views().size(); ++i) {
-      if (session.views()[i].version == item.originVersion) {
-        foundDocIdx = i;
+      const auto &view = session.views()[i];
+      if (view.storeIndex == *storeIndex && view.version == source.version &&
+          view.focusedBirth == source.focusedBirth) {
+        docIndex = i;
         break;
       }
     }
-
-    if (!foundDocIdx.has_value()) {
-      showAlongside(item.originVersion, 0.0F, 0);
-      foundDocIdx = session.views().size() - 1;
+    if (!docIndex) {
+      docIndex = session.views().size();
+      showAlongside(source.version, 0.0F, *storeIndex, source.focusedBirth);
     }
-
-    const auto docIdx = *foundDocIdx;
-    if (onionSkinMode_) {
-      activeOnionIdx_ = docIdx;
-      arrangeOnionSkin(rState);
-    }
-
-    if (docIdx >= session.views().size()) {
-      return;
-    }
-
-    const auto &st  = session.store(session.views()[docIdx].storeIndex);
-    const auto ver  = st.rebuild(item.originVersion);
-    const auto occs = ver.occurrencesOf(item.span);
-
-    if (!occs.empty()) {
-      const auto &occ   = occs.front();
-      auto *const caret = renderer->editCaret();
-      if (caret) {
-        caret->placeAt(static_cast<std::uint32_t>(docIdx), occ.start);
-        caret->extendTo(occ.end);
-      }
-    }
+    renderer->runWithState([this, source, storeIndex = *storeIndex,
+                            doc = *docIndex](RenderState &rState) {
+      if (doc >= rState.docs.size() || !rState.docs[doc] ||
+          !renderer->editCaret() || doc >= session.views().size() ||
+          session.storeIndexOf(doc) != storeIndex ||
+          session.versionOf(doc) != source.version ||
+          session.views()[doc].focusedBirth != source.focusedBirth)
+        return;
+      activateDocument(rState, static_cast<std::uint32_t>(doc));
+      focusSpanAt(rState, doc, source.start, source.end);
+      if (sourceEntered)
+        sourceEntered(
+            DocumentSite{.store   = session.store(storeIndex).documentId(),
+                         .version = source.version,
+                         .range   = {source.start, source.end}});
+    });
   });
 }
 
@@ -448,28 +481,32 @@ void Views::focusSpan(const std::size_t docIndex, const std::uint32_t charStart,
                       const std::uint32_t charEnd) {
   renderer->runWithState(
       [this, docIndex, charStart, charEnd](RenderState &rState) {
-        if (docIndex >= session.views().size()) {
-          return;
-        }
-        auto *const caret = renderer->editCaret();
-        if (caret) {
-          caret->placeAt(static_cast<std::uint32_t>(docIndex), charStart);
-          caret->extendTo(charEnd);
-        }
-        if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
-          const auto &doc = rState.docs[docIndex];
-          if (const auto anch = doc->anchorFor(charStart)) {
-            if (const auto wp =
-                    doc->worldPoint(anch->pageIndex, anch->x, anch->y)) {
-              if (state) {
-                std::scoped_lock locker(state->view);
-                state->view.pos.x = wp->x;
-                state->view.pos.y = wp->y;
-              }
-            }
-          }
-        }
+        focusSpanAt(rState, docIndex, charStart, charEnd);
       });
+}
+
+void Views::focusSpanAt(RenderState &rState, const std::size_t docIndex,
+                        const std::uint32_t charStart,
+                        const std::uint32_t charEnd) {
+  if (docIndex >= session.views().size() || docIndex >= rState.docs.size() ||
+      !rState.docs[docIndex])
+    return;
+  auto *const caret = renderer->editCaret();
+  if (caret) {
+    caret->placeAt(static_cast<std::uint32_t>(docIndex), charStart);
+    caret->extendTo(charEnd);
+  }
+  const auto &doc = rState.docs[docIndex];
+  if (const auto anchor = doc->anchorFor(charStart)) {
+    if (const auto point =
+            doc->worldPoint(anchor->pageIndex, anchor->x, anchor->y)) {
+      if (state) {
+        std::scoped_lock lock(state->view);
+        state->view.pos.x = point->x;
+        state->view.pos.y = point->y;
+      }
+    }
+  }
 }
 
 void Views::focusContent(std::vector<PrimediaSpan> content) {
@@ -1204,22 +1241,43 @@ void Views::restorePlace(const xanadu::ReadingPlace &place,
 void Views::spawnTranscludedDocument(const TetherPayload &payload,
                                      const float /*screenX*/,
                                      const float /*screenY*/) {
-  if (payload.originCharEnd <= payload.originCharStart) {
+  if (!payload.originSource || payload.spans.empty()) return;
+  const auto source = payload.sourceStoreIndex;
+  if (!source || *source >= session.storeCount() ||
+      session.store(*source).documentId().str() !=
+          payload.originSource->authority) {
+    state->showDialog(render::DiagnosticSeverity::Warning,
+                      "Quotation source unavailable",
+                      "The source store is no longer open.");
     return;
   }
-  const auto len        = payload.originCharEnd - payload.originCharStart;
-  const auto sIdx       = PouchOriginKind::Document == payload.originKind &&
-                            payload.originDocIndex < session.views().size()
-                              ? session.storeIndexOf(payload.originDocIndex)
-                              : std::size_t{0};
-  const auto spawnedVer = session.store(sIdx).transclude(
-      MicroversionId{}, 0, payload.originVersion, payload.originCharStart, len);
-  showAlongside(spawnedVer, 0.0F, sIdx);
-  activateNewest();
-  std::cout << "xudu: spawned transcluded document version " << spawnedVer.str()
-            << " from origin version " << payload.originVersion.str() << " ["
-            << payload.originCharStart << ", " << payload.originCharEnd
-            << ")\n";
+  try {
+    const auto destination = session.createNewStore("");
+    auto &store            = session.store(destination);
+    const auto carried =
+        carrySpans(session.store(*source), store, payload.spans);
+    if (!carried) {
+      state->showDialog(render::DiagnosticSeverity::Warning,
+                        "Quotation source unavailable", carried.error());
+      return;
+    }
+    auto version     = store.latest();
+    std::uint32_t at = 0;
+    for (const auto &span : *carried) {
+      version = store.insertSpan(version, at, span);
+      at += static_cast<std::uint32_t>(span.length);
+    }
+    session.save(destination);
+    showAlongside(version, 0.0F, destination);
+    activateNewest();
+    std::cout << "xudu: spawned transcluded document version " << version.str()
+              << " from origin version " << payload.originVersion.str() << " ["
+              << payload.originCharStart << ", " << payload.originCharEnd
+              << ")\n";
+  } catch (const std::exception &error) {
+    state->showDialog(render::DiagnosticSeverity::Warning,
+                      "Quotation unavailable", error.what());
+  }
 }
 
 void Views::summonPublication(const PublicationEntry &entry) {
@@ -1609,19 +1667,26 @@ void Views::transcludeSpansAtCaret(std::vector<PrimediaSpan> spans,
                                    const Store &source) {
   withCaret([this, source = &source, spans = std::move(spans)](
                 RenderState &rState, const Where &where, Caret *) {
-    const auto carried = carrySpans(
-        *source, session.store(session.storeIndexOf(where.doc)), spans);
-    if (!carried) {
-      state->showDialog(render::DiagnosticSeverity::Warning,
-                        "Quotation source unavailable", carried.error());
-      return;
-    }
-    auto at = where.start;
-    for (const auto &span : *carried) {
-      insertSpanAt(rState, where.doc, at, span);
-      at += static_cast<std::uint32_t>(span.length);
-    }
+    transcludeSpansAt(rState, where.doc, where.start, *source, spans);
   });
+}
+
+void Views::transcludeSpansAt(RenderState &rState, const std::uint32_t doc,
+                              const std::uint32_t at, const Store &source,
+                              const std::span<const PrimediaSpan> spans) {
+  if (doc >= session.views().size()) return;
+  const auto carried =
+      carrySpans(source, session.store(session.storeIndexOf(doc)), spans);
+  if (!carried) {
+    state->showDialog(render::DiagnosticSeverity::Warning,
+                      "Quotation source unavailable", carried.error());
+    return;
+  }
+  auto position = at;
+  for (const auto &span : *carried) {
+    insertSpanAt(rState, doc, position, span);
+    position += static_cast<std::uint32_t>(span.length);
+  }
 }
 
 void Views::insertSpanAt(RenderState &rState, const std::uint32_t doc,

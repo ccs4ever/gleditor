@@ -53,6 +53,7 @@ struct PouchItem {
   // Section 5.8:
   std::optional<GlobalOpRef> originOpRef;
   std::optional<GlobalDocumentState> originDocState;
+  std::optional<PouchOrigin::Source> originSource;
 };
 
 /**

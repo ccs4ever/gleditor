@@ -200,6 +200,11 @@ xanadu::ReadingPosition LinkContext::reading() const {
   return position;
 }
 
+void LinkContext::recordSourceArrival(const OccurrenceSite &site) {
+  navigator.recordArrival(site);
+  ++changes;
+}
+
 void LinkContext::noteOrigin() {
   const auto here = caretSite();
   if (!here) {

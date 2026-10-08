@@ -1128,6 +1128,17 @@ MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
   return produced;
 }
 
+std::optional<std::size_t>
+Session::storeIndexForAuthority(const std::string_view authority,
+                                const MicroversionId &version) const {
+  for (std::size_t i = 0; i < storeCount(); ++i) {
+    if (store(i).documentId().str() == authority &&
+        store(i).segmentedOps().contains(version))
+      return i;
+  }
+  return std::nullopt;
+}
+
 Store &Session::store(const std::size_t index) {
   if (index >= stores.size()) {
     throw std::out_of_range("store index out of range: " +

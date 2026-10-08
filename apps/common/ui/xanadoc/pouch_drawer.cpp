@@ -301,7 +301,7 @@ void PouchDrawer::rebuildModels(const gleditor::ui::UiMetrics &metrics,
       list.rows.push_back({.id   = actionId("item:" + key, {.tag  = kTagItemBase,
                                                             .item = item.itemId,
                                                             .zone = zone->id()}),
-                           .text = item.previewText,
+                           .text = "Open source: " + item.previewText,
                            .action = "origin"});
       list.rows.push_back({.id = actionId("use:" + key, {.tag = kTagItemUseBase,
                                                          .item = item.itemId,
@@ -356,6 +356,55 @@ void PouchDrawer::rebuildModels(const gleditor::ui::UiMetrics &metrics,
   preparedMetrics_ = metrics;
   preparedTheme_   = theme;
   ++a11yRevision_;
+}
+
+bool PouchDrawer::handleQuotationDrop(const TetherPayload &payload,
+                                      const float screenX,
+                                      const float screenY) {
+  const std::scoped_lock lock(guard_);
+  if (!isOpen_ || !payload.originSource) return false;
+  const auto source = payload.sourceStoreIndex;
+  if (!source || *source >= session_.storeCount() ||
+      session_.store(*source).documentId().str() !=
+          payload.originSource->authority)
+    return false;
+  const bool left  = forgeWidget_.containsLeft(screenX, screenY);
+  const bool right = forgeWidget_.containsRight(screenX, screenY);
+  const auto zone  = zoneAt(screenX, screenY);
+  if (!left && !right && (!zone || zone->width() <= 0 || zone->height() <= 0))
+    return false;
+  const auto carried =
+      carrySpans(session_.store(*source), pouchManager_.store(), payload.spans);
+  if (!carried) return false;
+  auto origin           = *payload.originSource;
+  std::size_t previewAt = 0;
+  for (const auto &span : *carried) {
+    origin.end = origin.start + static_cast<std::uint32_t>(span.length);
+    PouchOrigin provenance{.document = payload.originDocState,
+                           .cell     = payload.originOpRef,
+                           .source   = origin};
+    const auto preview = payload.previewText.substr(previewAt, span.length);
+    PouchItem item;
+    item.span            = span;
+    item.previewText     = preview;
+    item.originVersion   = origin.version;
+    item.originCharStart = origin.start;
+    item.originCharEnd   = origin.end;
+    item.originKind      = payload.originKind;
+    item.originCell      = payload.originCell;
+    item.originOpRef     = payload.originOpRef;
+    item.originDocState  = payload.originDocState;
+    item.originSource    = origin;
+    if (left)
+      forgeWidget_.dropLeft(std::move(item));
+    else if (right)
+      forgeWidget_.dropRight(std::move(item));
+    else
+      pouchManager_.dropSpan(zone->id(), span, preview, provenance);
+    origin.start = origin.end;
+    previewAt += span.length;
+  }
+  return true;
 }
 
 bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
@@ -850,9 +899,16 @@ bool PouchDrawer::activateNode(std::uint32_t id) {
     if (entry.overlay->activateNode(id)) return true;
   return forgeWidget_.presentation().activateNode(id);
 }
+bool PouchDrawer::contains(const float x, const float y) const {
+  const std::scoped_lock lock(guard_);
+  return isOpen_ && drawerW_ > 0 && drawerH_ > 0 && x >= drawerX_ &&
+         x <= drawerX_ + drawerW_ && y >= drawerY_ && y <= drawerY_ + drawerH_;
+}
+
 bool PouchDrawer::pointerEvent(const gleditor::ui::PointerEvent &event) {
   const std::scoped_lock lock(guard_);
   if (!isOpen_) return false;
+  if (dragHandler_ && dragHandler_(event)) return true;
   using gleditor::ui::PointerPhase;
   if (resize_) {
     if (event.pointerId != resize_->pointer) return false;
@@ -945,6 +1001,7 @@ bool PouchDrawer::keyPressed(gleditor::Key key, gleditor::KeyMods mods) {
   const std::scoped_lock lock(guard_);
   if (!isOpen_) return false;
   if (key == gleditor::Key::Escape) {
+    if (dismissHandler_) dismissHandler_();
     setOpen(false);
     return true;
   }

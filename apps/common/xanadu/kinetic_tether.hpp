@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <glm/vec2.hpp>
 
@@ -34,7 +35,7 @@ enum class TetherState : std::uint8_t {
  * @brief Spatio-temporal descriptor of the span being detached into the void.
  */
 struct TetherPayload {
-  PrimediaSpan span{};
+  std::vector<PrimediaSpan> spans;
   std::string previewText;
   MicroversionId originVersion;
   std::uint32_t originDocIndex{0};
@@ -50,6 +51,8 @@ struct TetherPayload {
 
   std::optional<GlobalOpRef> originOpRef;
   std::optional<GlobalDocumentState> originDocState;
+  std::optional<PouchOrigin::Source> originSource;
+  std::optional<std::size_t> sourceStoreIndex;
 };
 
 /**
@@ -94,6 +97,11 @@ public:
   [[nodiscard]] const TetherPayload &payload() const noexcept {
     return payload_;
   }
+  void setCollecting(bool collecting) noexcept { collecting_ = collecting; }
+  [[nodiscard]] bool collecting() const noexcept { return collecting_; }
+  [[nodiscard]] std::uint64_t generation() const noexcept {
+    return generation_;
+  }
   [[nodiscard]] glm::vec2 currentPos() const noexcept { return currentPos_; }
   [[nodiscard]] glm::vec2 targetPos() const noexcept { return targetPos_; }
   [[nodiscard]] glm::vec2 originPos() const noexcept {
@@ -103,6 +111,8 @@ public:
 private:
   TetherState state_{TetherState::Idle};
   TetherPayload payload_{};
+  std::uint64_t generation_{};
+  bool collecting_{};
 
   glm::vec2 currentPos_{0.0F, 0.0F};
   glm::vec2 targetPos_{0.0F, 0.0F};

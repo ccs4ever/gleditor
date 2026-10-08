@@ -30,10 +30,12 @@
 
 #include "common/xanadu/link_package.hpp"
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "common/xanadu/publication.hpp"
 #include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/store_tables.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
@@ -2221,6 +2223,37 @@ TEST(E2EBinaryOrchestrationTest,
   }
   ASSERT_TRUE(commentary) << result.output;
   EXPECT_TRUE(checkedSource);
+  const auto returnCommand =
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() +
+      " XDG_CACHE_HOME=" + (root / "cache").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(readerPerma) + " --backend " +
+      activeBackend() + " --profile " + commentary->string() +
+      " --chord Ctrl+O --chord Tab --type '" + manifest.string() +
+      "' --chord Return --chord Ctrl+1 --chord F2"
+      " --click-label Zones --click-label Zones"
+      " --click-label 'Open source: ALPHA' --dump-a11y --capture " +
+      (root / "returned-source.ppm").string() + " --chord Escape";
+  const auto returned = executeProcess(returnCommand);
+  std::ofstream(root / "returned-source.log") << returned.output;
+  ASSERT_EQ(returned.exitCode, 0) << returned.output;
+  EXPECT_THAT(returned.output,
+              testing::Not(testing::HasSubstr("Quotation source unavailable")));
+  // A completed source return belongs to private reader activity, never Alice's
+  // spool.
+  const auto activityPath = root / "data/xudu/activity";
+  ASSERT_TRUE(fs::exists(activityPath)) << returned.output;
+  Store activity(reader);
+  activity.load(activityPath.string());
+  xanadu::StoreActivityLog log(&activity, activityPath);
+  ASSERT_TRUE(log.current());
+  const auto visit = log.find(*log.current());
+  ASSERT_TRUE(visit);
+  ASSERT_TRUE(std::holds_alternative<xanadu::DocumentSite>(visit->target));
+  const auto site = std::get<xanadu::DocumentSite>(visit->target);
+  EXPECT_EQ(site.store, alice.documentId());
+  EXPECT_EQ(site.version, head);
+  EXPECT_EQ(site.range, (xanadu::Extent{0, 5}));
   // Hide both the original seed closure and Alice's installed publication.
   // The commentary and the private pouch must each own what they need offline.
   fs::remove_all(seeds);
@@ -2243,9 +2276,16 @@ TEST(E2EBinaryOrchestrationTest,
       " --chord Ctrl+Alt+1 --dump-a11y --capture " +
       (root / "offline-before.ppm").string() +
       " --select 23,23 --chord F2 --click-label Zones --click-label Zones"
-      " --click-label 'Notes ›' --click-label 'Insert: ALPHA' --chord Escape"
+      " --click-label 'Open source: ALPHA'"
+      " --capture " +
+      (root / "unavailable-source.ppm").string() +
+      " --click-label 'Notes ›' --click-label 'Insert: ALPHA' "
+      "--chord Escape"
       " --dump-a11y --capture " +
       (root / "offline-after.ppm").string());
+  std::ofstream(root / "offline-source.log") << reopened.output;
+  EXPECT_THAT(reopened.output,
+              testing::HasSubstr("Quotation source unavailable"));
   ASSERT_EQ(reopened.exitCode, 0) << reopened.output;
   EXPECT_THAT(reopened.output,
               testing::HasSubstr("Bob: ALPHARESEARCHOMEGAALPHA"));
@@ -2834,3 +2874,124 @@ TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
 }
 
 } // namespace
+
+TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_foreign_drag";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  Store alice(permascrollAt(root / "alice-permascroll"));
+  const auto birth = alice.makeXanadoc({}, "Story Ideas");
+  auto head        = alice.insert(birth, 0, "ALPHAOMEGA", birth);
+  const std::vector<xanadu::TorrentContent> files{
+      {.path = "research", .data = "RESEARCH"}};
+  const auto research = makeTorrent(files, "research");
+  const auto seeds    = root / "seeds";
+  (void)xanadu::writeTorrentSeed(seeds, research, files);
+  head = alice.insertSpan(head, 5,
+                          {alice.addScroll(Scroll::ofTorrentFile(
+                               research.hash, 0, "research", 0, 8)),
+                           0, 8},
+                          birth);
+  alice.setCurrentVersions({head});
+  alice.sealMetadata();
+  const auto keys   = createMutableKeys();
+  const auto sealed = xanadu::sealLocalSpool(
+      alice, keys, "permascroll", seeds.string(),
+      {.tsv = "temporary fixture provenance", .signature = "mock"});
+  const auto publication =
+      publish(alice, head, keys, "doc:ideas", "Story Ideas", 1, 1,
+              &sealed.scroll, {*sealed.opsSegment});
+  const auto manifest = seeds / "source.xanadoc";
+  std::ofstream(manifest) << encodePublication(publication);
+  const auto authorOps = alice.opCount();
+  const auto original  = alice.rebuild(head).spansFor(0, 18);
+  ASSERT_EQ(original.size(), 3U);
+  const auto run = [&](const std::string &name, const std::string &hands) {
+    const auto dir = root / name;
+    fs::create_directories(dir);
+    const auto result = executeProcess(
+        "XDG_CONFIG_HOME=" + (dir / "config").string() +
+        " XDG_DATA_HOME=" + (dir / "data").string() +
+        " XDG_CACHE_HOME=" + (dir / "cache").string() + " timeout 120 " +
+        binary.string() + permascrollFlag(dir / "permascroll") + " --backend " +
+        activeBackend() + " --profile " + (dir / "workspace").string() +
+        " --chord Ctrl+O --chord Tab --type '" + manifest.string() +
+        "' --chord Return --select 0,18 " + hands + " --dump-a11y");
+    std::ofstream(dir / "transcript.log") << result.output;
+    return result;
+  };
+  const auto calibration =
+      run("calibration", "--capture " + (root / "selection.ppm").string());
+  ASSERT_EQ(calibration.exitCode, 0) << calibration.output;
+  const auto bounds = selectionBounds(root / "selection.ppm");
+  ASSERT_TRUE(bounds);
+  const auto &[left, top, right, bottom] = *bounds;
+  const auto start = std::to_string((left + right) / 2) + "," +
+                     std::to_string((top + bottom) / 2);
+  const auto spawned = run("spawn", "--mouse-down " + start +
+                                        " --mouse-move 770,300 --capture " +
+                                        (root / "detached.ppm").string() +
+                                        " --mouse-up 770,300 --capture " +
+                                        (root / "spawned.ppm").string());
+  ASSERT_EQ(spawned.exitCode, 0) << spawned.output;
+  EXPECT_THAT(spawned.output,
+              testing::HasSubstr("spawned transcluded document"));
+  bool foundReaderStore = false;
+  auto reader           = permascrollAt(root / "spawn/permascroll");
+  for (const auto &entry :
+       fs::directory_iterator(root / "spawn/data/xudu/xanadocs")) {
+    Store store(reader);
+    store.load(entry.path().string());
+    if (entry.path().filename().string().starts_with("publication-")) {
+      EXPECT_EQ(store.documentId(), alice.documentId());
+      EXPECT_EQ(store.opCount(), authorOps);
+      continue;
+    }
+    if (!entry.path().filename().string().starts_with("untitled-")) continue;
+    foundReaderStore = true;
+    EXPECT_NE(store.documentId(), alice.documentId());
+    EXPECT_EQ(store.textOf(store.latest()), "ALPHARESEARCHOMEGA");
+    const auto spans = store.rebuild(store.latest()).spansFor(0, 18);
+    ASSERT_EQ(spans.size(), 3U);
+    for (std::size_t i = 0; i < spans.size(); ++i)
+      EXPECT_EQ(xanadu::globalise(alice, original[i], &sealed.scroll),
+                xanadu::globalise(store, spans[i]));
+  }
+  EXPECT_TRUE(foundReaderStore);
+  const auto collected =
+      run("pouch", "--chord F2 --click-label Zones --click-label Zones --chord "
+                   "Escape --mouse-down " +
+                       start + " --chord F2 --mouse-move 632,300 --capture " +
+                       (root / "pouch-hover.ppm").string() +
+                       " --mouse-up 632,300 --capture " +
+                       (root / "pouch-dropped.ppm").string());
+  ASSERT_EQ(collected.exitCode, 0) << collected.output;
+  Store pouch(permascrollAt(root / "pouch/permascroll"));
+  pouch.load((root / "pouch/config/xudu/system/pouches").string());
+  xanadu::PouchManager manager(pouch);
+  manager.loadManifest();
+  const auto &items = manager.zoneById("notes")->items();
+  ASSERT_EQ(items.size(), 3U) << collected.output;
+  std::uint32_t startAt = 0;
+  for (std::size_t i = 0; i < items.size(); ++i) {
+    EXPECT_EQ(xanadu::globalise(alice, original[i], &sealed.scroll),
+              xanadu::globalise(pouch, items[i].span));
+    ASSERT_TRUE(items[i].originSource);
+    EXPECT_EQ(items[i].originSource->authority, alice.documentId().str());
+    EXPECT_EQ(items[i].originSource->version, head);
+    EXPECT_EQ(items[i].originSource->start, startAt);
+    startAt += static_cast<std::uint32_t>(items[i].span.length);
+    EXPECT_EQ(items[i].originSource->end, startAt);
+  }
+  const auto cancelled = run(
+      "cancel",
+      "--mouse-down " + start +
+          " --mouse-move 770,300 --chord Escape --mouse-up 770,300 --capture " +
+          (root / "cancelled.ppm").string());
+  ASSERT_EQ(cancelled.exitCode, 0) << cancelled.output;
+  EXPECT_THAT(cancelled.output,
+              testing::Not(testing::HasSubstr("spawned transcluded document")));
+}

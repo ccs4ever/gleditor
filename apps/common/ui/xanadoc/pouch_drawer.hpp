@@ -27,6 +27,7 @@
 #include <gleditor/ui/focus_manager.hpp>
 
 #include "clasp_link_forge.hpp"
+#include "common/xanadu/kinetic_tether.hpp"
 #include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
@@ -112,6 +113,9 @@ public:
     useHandler_ = std::move(handler);
     return this;
   }
+  void setDismissHandler(std::function<void()> handler) {
+    dismissHandler_ = std::move(handler);
+  }
   void setSwingBackHandler(SwingBackHandler handler) {
     swingBackHandler_ = std::move(handler);
   }
@@ -148,7 +152,15 @@ public:
     return forgeWidget_;
   }
 
+  void setDragHandler(
+      std::function<bool(const gleditor::ui::PointerEvent &)> handler) {
+    dragHandler_ = std::move(handler);
+  }
+  [[nodiscard]] bool contains(float x, float y) const;
+
   // Drag Interaction Hook
+  bool handleQuotationDrop(const TetherPayload &payload, float screenX,
+                           float screenY);
   bool handleGhostDrop(const PrimediaSpan &span, const std::string &preview,
                        const MicroversionId &sourceVer, float screenX,
                        float screenY, std::uint32_t docIndex = 0,
@@ -246,6 +258,8 @@ private:
   PouchManager pouchManager_;
   LinkForgeWidget forgeWidget_;
 
+  std::function<bool(const gleditor::ui::PointerEvent &)> dragHandler_;
+  std::function<void()> dismissHandler_;
   SwingBackHandler swingBackHandler_;
   SwingBackHandler useHandler_;
   std::uint64_t a11yRevision_{1};

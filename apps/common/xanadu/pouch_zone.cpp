@@ -263,20 +263,27 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
       .span        = span,
       .previewText = std::move(previewText),
       .originVersion =
-          origin.document ? origin.document->version : currentVersion_,
+          origin.source
+              ? origin.source->version
+              : (origin.document ? origin.document->version : currentVersion_),
       .originDocIndex  = 0,
-      .originCharStart = 0,
-      .originCharEnd   = static_cast<std::uint32_t>(span.length),
+      .originCharStart = origin.source ? origin.source->start : 0,
+      .originCharEnd   = origin.source ? origin.source->end
+                                       : static_cast<std::uint32_t>(span.length),
       .timestampUtc    = static_cast<std::uint64_t>(
           std::chrono::duration_cast<std::chrono::seconds>(
               std::chrono::system_clock::now().time_since_epoch())
               .count()),
-      .originKind       = PouchOriginKind::Document,
-      .originCell       = res.itemCell,
+      .originKind = origin.source && origin.source->cell
+                        ? PouchOriginKind::ZigzagCell
+                        : PouchOriginKind::Document,
+      .originCell = origin.source && origin.source->cell ? *origin.source->cell
+                                                         : res.itemCell,
       .originSliceIndex = 0,
       .originRankCoord  = "d.items: #" + std::to_string(res.itemCell),
       .originOpRef      = origin.cell,
       .originDocState   = origin.document,
+      .originSource     = origin.source,
   };
 
   zone->addItem(item);
@@ -477,6 +484,49 @@ PouchManager *PouchManager::loadManifest() {
           PouchOriginKind originKind = PouchOriginKind::Document;
           std::optional<GlobalOpRef> originOpRef;
           std::optional<GlobalDocumentState> originDocState;
+          std::optional<PouchOrigin::Source> originSource;
+          if (const auto dim =
+                  manifold.dimensionNamed("d.origin-store", store())) {
+            const auto sourceCell =
+                manifold.linked(itemCell, *dim, zigzag::DimVector::POS);
+            if (sourceCell != zigzag::noCell) {
+              const auto target = [&](std::string_view name) {
+                const auto dimension = manifold.dimensionNamed(name, store());
+                return dimension ? static_cast<zigzag::CellRef>(
+                                       manifold.linked(sourceCell, *dimension,
+                                                       zigzag::DimVector::POS))
+                                 : zigzag::noCell;
+              };
+              const auto number =
+                  [&](std::string_view name) -> std::optional<std::uint32_t> {
+                const auto slot = manifold.slot(target(name));
+                if (!slot ||
+                    slot->valueKind !=
+                        static_cast<std::uint8_t>(ValueKind::Int64) ||
+                    slot->valueBits > UINT32_MAX)
+                  return std::nullopt;
+                return static_cast<std::uint32_t>(slot->valueBits);
+              };
+              const auto start       = number("d.origin-start");
+              const auto end         = number("d.origin-end");
+              const auto document    = number("d.origin-document");
+              const auto versionCell = target("d.origin-version");
+              if (!start || !end || !document || *end < *start ||
+                  versionCell == zigzag::noCell)
+                throw std::runtime_error(
+                    "pouch source descriptor is incomplete");
+              originSource = PouchOrigin::Source{
+                  .authority = manifold.textOf(sourceCell, store()),
+                  .version   = MicroversionId::parse(
+                      manifold.textOf(versionCell, store())),
+                  .start        = *start,
+                  .end          = *end,
+                  .cell         = number("d.origin-birth"),
+                  .focusedBirth = *document};
+              if (originSource->authority.empty())
+                throw std::runtime_error("pouch source authority is empty");
+            }
+          }
 
           if (dimOriginCellOpt) {
             const auto phCell = manifold.linked(itemCell, *dimOriginCellOpt,
@@ -514,17 +564,26 @@ PouchManager *PouchManager::loadManifest() {
               .itemId           = itemCell,
               .span             = span,
               .previewText      = std::move(previewText),
-              .originVersion    = store().segmentedOps().idOf(slot->birthOp),
+              .originVersion    = originSource
+                                      ? originSource->version
+                                      : store().segmentedOps().idOf(slot->birthOp),
               .originDocIndex   = 0,
-              .originCharStart  = 0,
-              .originCharEnd    = static_cast<std::uint32_t>(span.length),
+              .originCharStart  = originSource ? originSource->start : 0,
+              .originCharEnd    = originSource
+                                      ? originSource->end
+                                      : static_cast<std::uint32_t>(span.length),
               .timestampUtc     = 0,
-              .originKind       = originKind,
-              .originCell       = itemCell,
+              .originKind       = originSource && originSource->cell
+                                      ? PouchOriginKind::ZigzagCell
+                                      : originKind,
+              .originCell       = originSource && originSource->cell
+                                      ? *originSource->cell
+                                      : itemCell,
               .originSliceIndex = 0,
               .originRankCoord  = "d.items: #" + std::to_string(itemCell),
               .originOpRef      = originOpRef,
               .originDocState   = originDocState,
+              .originSource     = originSource,
           };
           zone->addItem(std::move(item));
         }

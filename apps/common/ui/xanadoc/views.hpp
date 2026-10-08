@@ -122,6 +122,8 @@ public:
   void focusSpan(zigzag::CellRef cell, const PrimediaSpan &span);
   void focusSpan(std::size_t docIndex, std::uint32_t charStart,
                  std::uint32_t charEnd);
+  void focusSpanAt(RenderState &state, std::size_t docIndex,
+                   std::uint32_t start, std::uint32_t end);
   void focusContent(std::vector<PrimediaSpan> content);
 
   void back();
@@ -172,6 +174,9 @@ public:
   void insertSpanAtCaret(const PrimediaSpan &span);
   void transcludeSpansAtCaret(std::vector<PrimediaSpan> spans,
                               const Store &source);
+  void transcludeSpansAt(RenderState &rState, std::uint32_t doc,
+                         std::uint32_t at, const Store &source,
+                         std::span<const PrimediaSpan> spans);
   void insertSpanAt(RenderState &rState, std::uint32_t doc, std::uint32_t at,
                     const PrimediaSpan &span);
 
@@ -188,6 +193,8 @@ public:
   void reviewIndependentLinks(const std::string &id, std::size_t selected = 0);
   std::function<void(const LinkKey &)> selectIndependentLink;
   std::function<void()> packageVisibilityChanged;
+  std::function<void()> sourceLeaving;
+  std::function<void(const OccurrenceSite &)> sourceEntered;
   std::optional<Publication> packageFilterSource;
   std::map<std::string, Publication> packageQuerySources;
   void publicationUpdates(const std::string &subscription = {},

@@ -2484,6 +2484,9 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
   if (zigzag::noCell == zone) {
     throw std::invalid_argument("cannot append pouch item to noCell zone");
   }
+  if (origin.source && (origin.source->authority.empty() ||
+                        origin.source->end < origin.source->start))
+    throw std::invalid_argument("invalid pouch source identity or range");
 
   std::optional<zigzag::Manifold> folded;
   const zigzag::Manifold *currentFold = nullptr;
@@ -2561,6 +2564,32 @@ Store::AppendedPouchItem Store::appendPouchItemWithRef(
     curHead = setLink(curHead, itemCell, dimOriginState, zigzag::DimVector::POS,
                       descCell);
     updateFold(curHead);
+  }
+
+  if (origin.source) {
+    const auto &source    = *origin.source;
+    const auto originDim  = ensureDim("d.origin-store");
+    curHead               = makeCell(curHead, source.authority);
+    const auto sourceCell = cellRefOf(curHead);
+    curHead = setLink(curHead, itemCell, originDim, zigzag::DimVector::POS,
+                      sourceCell);
+    updateFold(curHead);
+    const auto versionDim = ensureDim("d.origin-version");
+    curHead               = makeCell(curHead, source.version.str());
+    curHead = setLink(curHead, sourceCell, versionDim, zigzag::DimVector::POS,
+                      cellRefOf(curHead));
+    updateFold(curHead);
+    const auto addNumber = [&](std::string_view name, std::uint32_t value) {
+      const auto dim = ensureDim(name);
+      curHead = makeScalarCell(curHead, static_cast<std::int64_t>(value));
+      curHead = setLink(curHead, sourceCell, dim, zigzag::DimVector::POS,
+                        cellRefOf(curHead));
+      updateFold(curHead);
+    };
+    addNumber("d.origin-start", source.start);
+    addNumber("d.origin-end", source.end);
+    addNumber("d.origin-document", source.focusedBirth);
+    if (source.cell) addNumber("d.origin-birth", *source.cell);
   }
 
   return AppendedPouchItem{

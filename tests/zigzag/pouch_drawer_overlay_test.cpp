@@ -156,9 +156,9 @@ TEST(PouchDrawerOverlayTest, fullItemIdsDispatchAndRetiredActionsDoNotMutate) {
   });
   fixture.frame(metrics);
   auto tree = fixture.tree();
-  auto node =
-      std::ranges::find(tree.nodes, std::string("Full-width identifier"),
-                        &gleditor::a11y::Node::label);
+  auto node = std::ranges::find(
+      tree.nodes, std::string("Open source: Full-width identifier"),
+      &gleditor::a11y::Node::label);
   ASSERT_NE(node, tree.nodes.end());
   const auto oldId = node->id;
   EXPECT_TRUE(
@@ -355,9 +355,10 @@ TEST(PouchDrawerOverlayTest, wheelUpdatesAccessibleRowsAndOwnerRevision) {
         {.itemId = id, .previewText = "Preview " + std::to_string(id)});
   const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   fixture.frame(metrics);
-  auto tree      = fixture.tree();
-  const auto row = std::ranges::find(tree.nodes, std::string("Preview 1"),
-                                     &gleditor::a11y::Node::label);
+  auto tree = fixture.tree();
+  const auto row =
+      std::ranges::find(tree.nodes, std::string("Open source: Preview 1"),
+                        &gleditor::a11y::Node::label);
   ASSERT_NE(row, tree.nodes.end());
   ASSERT_TRUE(row->bounds);
   const float x =
@@ -372,10 +373,10 @@ TEST(PouchDrawerOverlayTest, wheelUpdatesAccessibleRowsAndOwnerRevision) {
   fixture.frame(metrics);
   EXPECT_NE(fixture.drawer.accessibilityRevision(), pending);
   tree = fixture.tree();
-  EXPECT_EQ(std::ranges::find(tree.nodes, std::string("Preview 1"),
+  EXPECT_EQ(std::ranges::find(tree.nodes, std::string("Open source: Preview 1"),
                               &gleditor::a11y::Node::label),
             tree.nodes.end());
-  EXPECT_NE(std::ranges::find(tree.nodes, std::string("Preview 2"),
+  EXPECT_NE(std::ranges::find(tree.nodes, std::string("Open source: Preview 2"),
                               &gleditor::a11y::Node::label),
             tree.nodes.end());
 }
@@ -390,9 +391,9 @@ TEST(PouchDrawerOverlayTest, registeredModalForwardsSpaceToCardsAndSelectors) {
   FocusManager focus;
   auto registration = focus.registerScope(fixture.drawer);
   auto tree         = fixture.tree();
-  auto row =
-      std::ranges::find(tree.nodes, std::string("Space activates origin"),
-                        &gleditor::a11y::Node::label);
+  auto row          = std::ranges::find(
+      tree.nodes, std::string("Open source: Space activates origin"),
+      &gleditor::a11y::Node::label);
   ASSERT_NE(row, tree.nodes.end());
   ASSERT_TRUE(focus.focusNode(
       static_cast<std::uint32_t>(gleditor::a11y::Ids::localOf(row->id))));

@@ -131,10 +131,13 @@ void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   metrics.chrome       = ctx.chrome;
   p.card.configure(metrics, ctx.theme, p.config, fontName_);
   const bool detached = engine_.isDetached();
-  p.card.content(detached ? "Spawn xanadoc" : "Blueprint card",
+  p.card.content(engine_.collecting()
+                     ? "Collect quotation"
+                     : (detached ? "Spawn xanadoc" : "Blueprint card"),
                  engine_.payload().previewText,
-                 detached ? "Release to materialize"
-                          : std::string_view(p.attachedStatus));
+                 engine_.collecting() ? "Release into the pouch"
+                 : detached           ? "Release to materialize"
+                                      : std::string_view(p.attachedStatus));
   p.card.prepare();
   const auto pos    = engine_.currentPos();
   const auto bounds = world_cards::awayFromPointer(

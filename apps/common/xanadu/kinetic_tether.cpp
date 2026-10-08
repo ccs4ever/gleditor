@@ -14,6 +14,8 @@ namespace xanadu {
 
 void KineticTetherEngine::startDrag(TetherPayload payload, const float startX,
                                     const float startY) noexcept {
+  ++generation_;
+  collecting_ = false;
   payload_    = std::move(payload);
   currentPos_ = {startX, startY};
   targetPos_  = {startX, startY};
@@ -52,6 +54,9 @@ bool KineticTetherEngine::endDrag(const float endX, const float endY) noexcept {
 }
 
 void KineticTetherEngine::cancelDrag() noexcept {
+  ++generation_;
+  collecting_ = false;
+  if (state_ == TetherState::Idle) return;
   state_     = TetherState::SnappingBack;
   targetPos_ = payload_.originScreenPos;
 }

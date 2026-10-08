@@ -491,6 +491,9 @@ public:
    */
   MicroversionId addLink(std::uint32_t docIndex, Link link);
 
+  [[nodiscard]] std::optional<std::size_t>
+  storeIndexForAuthority(std::string_view authority,
+                         const MicroversionId &version) const;
   [[nodiscard]] std::size_t storeCount() const { return stores.size(); }
   [[nodiscard]] Store &store(std::size_t index = 0);
   [[nodiscard]] const Store &store(std::size_t index = 0) const;
