@@ -2381,7 +2381,8 @@ When the link is released everything returns home.
 // page/coalesce.hpp
 struct CoalesceBody {
   PageRef page;
-  glm::vec3 home{}, position{}; // position: in, the start; out, the result
+  glm::vec3 home{};     // where it stands in the row
+  glm::vec3 position{}; // out: the result; a solve never reads it
   float width{}, height{};
   bool pinned{}; // the anchor page
 };
@@ -2399,11 +2400,31 @@ public:
 };
 ```
 
-The built-in strategy is today's: it loads the bodies and ties into a `TensionLayoutEngine` as
-`TensionBody` and `TensionConstraint` and steps it `page.base.coalesceSteps` times at a fixed time
-step, exactly as `LinkBeams` does now with 25 steps. It is a fixed number of steps and not "until
-settled", and it never reads a clock, so it is a pure function and can run inside `layout()`. A
-closed-form solver can replace it through the same interface.
+The built-in strategy (`TensionCoalesce`) loads the bodies and ties into a fresh
+`TensionLayoutEngine` as `TensionBody` and `TensionConstraint`. Spike S2 (plan §3.1) found that
+today's 25 steps stop mid-flight, 220 to 1,473 px from rest, and that `LinkBeams` aligns a link with
+many ends one pair per frame, each seeded from where the last left the documents. So it differs from
+today's in five ways:
+
+- every solve starts from the bodies' homes, never from a current position or destination;
+- every tie of the link is solved at once;
+- heights are not left to the springs: each passage is set level with the one it is tied to, outward
+  from the pinned page, so ties are level exactly, not within a tolerance;
+- the engine is stepped at `physics.timeStep` until every body moves slower than
+  `physics.settleVelocityThreshold`, or `page.base.coalesceStepCap` steps (600; the slowest of
+  today's scenes took 478), with the physics settings read in their own units through
+  `page.base.physicsUnitPx`;
+- a last pass pushes each page away from the anchor, in the order the row had them, until it is
+  `page.base.coalesceGap` clear of every page already placed that shares any of its height, so no
+  two participants overlap and no page crosses another.
+
+A tie draws its far page to the side of the near one that its home is on (`AlignSide` on
+`TensionConstraint`), so a document left of the reader's is not dragged across the row. It never
+reads a clock and stops on a test of its own state, so it is still a pure function and can run
+inside `layout()`. With one body per document, every document of the row a body and the anchor
+pinned, it reproduces the row `LinkBeams` shows today with physics off (the default, `cli.hpp`):
+documents keep their `docSlots` and tied ones move only up or down. A closed-form solver can replace
+it through the same interface.
 
 Today the unit that moves is the whole document. The base view's unit is the page: when every page
 of a document takes part, or it has one page, the document moves as before; otherwise only the pages
@@ -2839,7 +2860,8 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `page.backgroundDepth`, `page.backgroundOpacity`       | 720, 0.42    | where and how dim a context document is                                   |
 | `page.base.documentGap`, `page.base.pageGap`           | 432, 32      | between documents; between pages                                          |
 | `page.base.coalesceGap`, `liftDepth`                   | 432, 90      | gap between coalesced pages; how far they come forward                    |
-| `page.base.coalesceSteps`                              | 25           | fixed solver steps                                                        |
+| `page.base.coalesceStepCap`                            | 600          | most solver steps; it stops sooner once settled                           |
+| `page.base.physicsUnitPx`                              | 18           | pixels in one unit of the `physics.*` settings                            |
 | `page.base.bandContext`                                | 2            | lines shown either side of a passage in a windowed page                   |
 | `page.base.contextOpacity`                             | 0.42         | pages not taking part while a link is active                              |
 | `page.base.levelTolerance`                             | 2            | how level tied passages must end up                                       |
@@ -3538,3 +3560,8 @@ ______________________________________________________________________
   not read back is refused loudly. `activity.settleMs`, `activity.bounceMs` and `rank.halfLife` are
   in `system://settings`. "Most likely" is deferred as plan §4.1 says, with `rank.smoothing` and
   `rank.presentBoost`; the pair counts it needs are already recorded (§16).
+- 2026-10-08 — §10.3.2 and §12.3 as built (P2), after spike S2: the tension strategy starts from the
+  homes, solves every tie at once, levels heights from the anchors, steps until settled or
+  `page.base.coalesceStepCap`, and ends with an order-keeping non-overlap pass.
+  `page.base.coalesceSteps` is gone; `coalesceStepCap` and `physicsUnitPx` are new, and
+  `CoalesceBody::position` is output only.

@@ -157,6 +157,17 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "stability. Default is 1000.0.\n"
            "  timeStep: Default simulation time step in seconds. Default is "
            "0.016.\n"
+           "page.base: How the base page view brings the pages of an active "
+           "link together. Lengths are pixels.\n"
+           "  coalesceGap: Least gap left between two pages brought together. "
+           "Default is 432.\n"
+           "  coalesceStepCap: Most solver steps; the solver stops sooner once "
+           "every page moves slower than physics.settleVelocityThreshold. "
+           "Default is 600.\n"
+           "  levelTolerance: How far apart in height the two passages of a "
+           "tie may end up. Default is 2.\n"
+           "  physicsUnitPx: Pixels in one unit of the physics settings, which "
+           "are tuned in world units. Default is 18.\n"
            "beams:\n"
            "  bandStrandLimit: Maximum number of ribbon strands per link band. "
            "Default is 7.\n"
@@ -600,6 +611,26 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPhysicsTimeStep),
          .notes   = "Physics simulation time delta in seconds",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.016}}}},
+        {.name    = std::string(settings::kPageBaseCoalesceGap),
+         .notes   = "Least gap between pages a link brings together, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageBaseConfig{}.coalesceGap}}}}},
+        {.name    = std::string(settings::kPageBaseCoalesceStepCap),
+         .notes   = "Most solver steps when bringing linked pages together",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          PageBaseConfig{}.coalesceStepCap)}}}},
+        {.name    = std::string(settings::kPageBaseLevelTolerance),
+         .notes   = "How level linked passages must end up, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageBaseConfig{}.levelTolerance}}}}},
+        {.name    = std::string(settings::kPageBasePhysicsUnitPx),
+         .notes   = "Pixels in one unit of the physics settings",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageBaseConfig{}.physicsUnitPx}}}}},
         {.name    = std::string(settings::kBeamsBandStrandLimit),
          .notes   = "Max strands in a ribbon band",
          .schemas = {{.expectedTypes = {"integer"},
@@ -3091,6 +3122,19 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
                                   static_cast<double>(cfg.physics.maxVelocity)));
   cfg.physics.timeStep = static_cast<float>(model.getDouble(
       settings::kPhysicsTimeStep, static_cast<double>(cfg.physics.timeStep)));
+
+  cfg.pageBase.coalesceGap = static_cast<float>(
+      model.getDouble(settings::kPageBaseCoalesceGap,
+                      static_cast<double>(cfg.pageBase.coalesceGap)));
+  cfg.pageBase.coalesceStepCap = static_cast<std::uint32_t>(
+      model.getInt64(settings::kPageBaseCoalesceStepCap,
+                     static_cast<std::int64_t>(cfg.pageBase.coalesceStepCap)));
+  cfg.pageBase.levelTolerance = static_cast<float>(
+      model.getDouble(settings::kPageBaseLevelTolerance,
+                      static_cast<double>(cfg.pageBase.levelTolerance)));
+  cfg.pageBase.physicsUnitPx = static_cast<float>(
+      model.getDouble(settings::kPageBasePhysicsUnitPx,
+                      static_cast<double>(cfg.pageBase.physicsUnitPx)));
 
   cfg.beams.bandStrandLimit = static_cast<std::uint32_t>(
       model.getInt64(settings::kBeamsBandStrandLimit,

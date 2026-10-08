@@ -451,6 +451,33 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
   EXPECT_FLOAT_EQ(roundtrip.timeStep, 0.8F);
 }
 
+// The base page view's coalescing reads its own settings from
+// system://layout, seeded from the same defaults the config struct holds.
+TEST(SystemDocsTest, PageBaseCoalesceSettingsFromStore) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
+  EXPECT_EQ(LayoutConfig::fromStore(store).pageBase, xanadu::PageBaseConfig{});
+
+  auto head = store.primaryCurrentVersion();
+  head = xanadu::setSetting(store, head, xanadu::settings::kPageBaseCoalesceGap,
+                            300.0);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kPageBaseCoalesceStepCap,
+                            static_cast<std::int64_t>(90));
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kPageBaseLevelTolerance, 0.5);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kPageBasePhysicsUnitPx, 9.0);
+  store.repointCurrentVersion(head);
+
+  const auto page = LayoutConfig::fromStore(store).pageBase;
+  EXPECT_FLOAT_EQ(page.coalesceGap, 300.0F);
+  EXPECT_EQ(page.coalesceStepCap, 90U);
+  EXPECT_FLOAT_EQ(page.levelTolerance, 0.5F);
+  EXPECT_FLOAT_EQ(page.physicsUnitPx, 9.0F);
+}
+
 TEST(SystemDocsTest, GetSetVaryingCellValues) {
   Store store;
   store.setSystem(true);

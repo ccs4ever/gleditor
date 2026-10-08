@@ -26,6 +26,10 @@ void TensionLayoutEngine::setBody(TensionBody body) {
 }
 
 namespace {
+constexpr float sideSign(const AlignSide side) noexcept {
+  return AlignSide::Left == side ? -1.0F : 1.0F;
+}
+
 auto isBody(const std::size_t targetId, const LinkTargetKind kind) {
   return [=](const TensionBody &b) {
     return b.targetKind == kind && b.targetId == targetId;
@@ -189,7 +193,8 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
 
     // Collinear target position for far body
     const float targetX =
-        near.position.x + 0.5F * (near.width + far.width) + gap;
+        near.position.x +
+        sideSign(c.side) * (0.5F * (near.width + far.width) + gap);
     const float deltaAnchorY = c.nearAnchorY - c.farAnchorY;
     const float targetY      = near.position.y + deltaAnchorY;
     const float targetZ      = near.position.z;
@@ -381,7 +386,8 @@ void TensionLayoutEngine::solveEquilibrium() {
     if (far->isCell()) {
       const float gap = c.targetGap > 0.0F ? c.targetGap : params_.satelloidGap;
       far->position.x =
-          near->position.x + 0.5F * (near->width + far->width) + gap;
+          near->position.x +
+          sideSign(c.side) * (0.5F * (near->width + far->width) + gap);
       far->position.z = near->position.z;
       far->velocity   = glm::vec3(0.0F);
     }

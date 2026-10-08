@@ -157,6 +157,15 @@ inline constexpr std::string_view kPhysicsSettleVelocityThreshold =
 inline constexpr std::string_view kPhysicsMaxForce    = "physics.maxForce";
 inline constexpr std::string_view kPhysicsMaxVelocity = "physics.maxVelocity";
 inline constexpr std::string_view kPhysicsTimeStep    = "physics.timeStep";
+// The base page view's coalescing (design/view-system.md §10.3.2)
+inline constexpr std::string_view kPageBaseCoalesceGap =
+    "page.base.coalesceGap";
+inline constexpr std::string_view kPageBaseCoalesceStepCap =
+    "page.base.coalesceStepCap";
+inline constexpr std::string_view kPageBaseLevelTolerance =
+    "page.base.levelTolerance";
+inline constexpr std::string_view kPageBasePhysicsUnitPx =
+    "page.base.physicsUnitPx";
 inline constexpr std::string_view kBeamsBandStrandLimit =
     "beams.bandStrandLimit";
 inline constexpr std::string_view kBeamsBandStrandPitch =
@@ -1031,6 +1040,29 @@ struct PhysicsConfig {
   }
 };
 
+/**
+ * @brief How the base page view brings the pages of an active link together
+ *        (design/view-system.md §10.3.2). Lengths are Canvas pixels.
+ *
+ * The defaults here are the ones defaultSettingSpecs() seeds system://layout
+ * with, so the two cannot drift.
+ */
+struct PageBaseConfig {
+  /// Least room left between two pages brought together.
+  float coalesceGap{432.0F};
+  /// Most solver steps; the solver stops sooner once every page has settled
+  /// under physics.settleVelocityThreshold. Measured (plan §3.1, S2): the
+  /// slowest case of today's scenes took 478.
+  std::uint32_t coalesceStepCap{600};
+  /// How level the passages at either end of a tie must end up.
+  float levelTolerance{2.0F};
+  /// Pixels in one unit of the physics.* settings, which were tuned in world
+  /// units: Doc::pixelsToWorld is 1/18.
+  float physicsUnitPx{18.0F};
+
+  bool operator==(const PageBaseConfig &) const = default;
+};
+
 struct BeamConfig {
   std::size_t bandStrandLimit{7};
   float bandStrandPitch{2.2F};
@@ -1102,6 +1134,7 @@ struct LayoutConfig {
   bool transclusionLoom{true};
   bool xanalinkRibbons{true};
   PhysicsConfig physics{};
+  PageBaseConfig pageBase{};
   BeamConfig beams{};
   ZigzagPresentationConfig zigzag{};
   BridgeRuntimeConfig bridge{};
