@@ -96,10 +96,11 @@ failures report exhaustion of `DeviceVK`'s 64-pipeline descriptor pool when crea
 `canvas-image` pipeline; selection drag timed out after 120 seconds. The overall backend comparison
 therefore remains red. Package-specific interaction acceptance is OpenGL-only in this report.
 
-## Remaining work
+The [subsequent Vulkan validation](ux_publication_vulkan_validation_2026-10-07.md) resolves all four
+failures and passes the complete backend comparison. The results above remain the evidence for this
+earlier batch.
 
-- Resolve Vulkan descriptor-pool/pipeline lifetime exhaustion and investigate the selection-drag
-  timeout before claiming full backend orchestration parity.
+## Remaining work
 
 - Individual link selection/editing during package preparation and package creation independent of
   an existing signed source publication.

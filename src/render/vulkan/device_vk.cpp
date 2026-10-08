@@ -735,11 +735,11 @@ void DeviceVK::createCommandResources() {
   }
 }
 
-void DeviceVK::createDescriptorPool() {
+VkDescriptorPool DeviceVK::createPipelineDescriptorPool() {
   // One uniform buffer and one sampled image per set, and one set per frame in
   // flight for each pipeline: a set updated for the frame being recorded must
   // not disturb the frame the GPU is still reading, nor the other pipeline's.
-  constexpr std::uint32_t sets = maxPipelines * framesInFlight;
+  constexpr std::uint32_t sets = pipelinesPerDescriptorPool * framesInFlight;
   const std::array<VkDescriptorPoolSize, 2> sizes = {
       VkDescriptorPoolSize{.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
                            .descriptorCount = sets},
@@ -751,9 +751,18 @@ void DeviceVK::createDescriptorPool() {
   info.maxSets       = sets;
   info.poolSizeCount = sizes.size();
   info.pPoolSizes    = sizes.data();
-  check(vkCreateDescriptorPool(device, &info, nullptr, &descriptorPool),
+  // Reserve before creating the driver object so allocation failure cannot
+  // strand a pool outside the device's shutdown ownership.
+  descriptorPools.reserve(descriptorPools.size() + 1);
+  VkDescriptorPool pool = VK_NULL_HANDLE;
+  check(vkCreateDescriptorPool(device, &info, nullptr, &pool),
         "vkCreateDescriptorPool");
+  descriptorPools.push_back(pool);
+  return pool;
+}
 
+void DeviceVK::createDescriptorPool() {
+  (void)createPipelineDescriptorPool();
   VkSamplerCreateInfo samplerInfo{};
   samplerInfo.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
   samplerInfo.magFilter    = VK_FILTER_LINEAR;
@@ -828,7 +837,7 @@ void DeviceVK::shutdown() {
   textures.clear();
   // Safe unconditionally: the vkDeviceWaitIdle() above already confirmed
   // nothing on the device is still executing, regardless of frameActive.
-  drainPendingTextureDestroys();
+  for (auto &frame : frames) drainRetiredResources(frame);
 
   for (auto &[id, record] : buffers) {
     destroyBufferRecord(record);
@@ -839,10 +848,9 @@ void DeviceVK::shutdown() {
     vkDestroySampler(device, glyphSampler, nullptr);
     glyphSampler = VK_NULL_HANDLE;
   }
-  if (VK_NULL_HANDLE != descriptorPool) {
-    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-    descriptorPool = VK_NULL_HANDLE;
-  }
+  for (const auto pool : descriptorPools)
+    vkDestroyDescriptorPool(device, pool, nullptr);
+  descriptorPools.clear();
   for (auto &frame : frames) {
     if (VK_NULL_HANDLE != frame.imageAvailable) {
       vkDestroySemaphore(device, frame.imageAvailable, nullptr);
@@ -916,16 +924,9 @@ void DeviceVK::waitIdle() {
   if (VK_NULL_HANDLE != device) {
     vkDeviceWaitIdle(device);
     framesSubmitted = false;
-    // Only once this call is not itself running inside a still-open frame:
-    // vkDeviceWaitIdle() only waits for work already submitted to a queue,
-    // and a frame's own command buffers are not submitted until endFrame()
-    // runs. Draining here while frameActive were true would free a texture
-    // the still-recording frame might reference -- exactly what queuing it
-    // in destroyTexture() was for. The next waitIdle() after that frame ends
-    // -- reallocate() calls one unconditionally on every growth -- drains it
-    // once it is actually safe to.
+    // Submitted work is idle; the current recording still owns its resources.
     if (!frameActive) {
-      drainPendingTextureDestroys();
+      for (auto &frame : frames) drainRetiredResources(frame);
     }
   }
 }

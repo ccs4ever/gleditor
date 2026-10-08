@@ -4,6 +4,8 @@
  */
 #include <gleditor/render/vulkan/device_vk.hpp> // IWYU pragma: associated
 
+#include <gleditor/logging.hpp>
+
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -141,6 +143,17 @@ void DeviceVK::destroyBufferRecord(BufferRecord &record) const {
   }
 }
 
+void DeviceVK::retireBuffer(BufferRecord &record) {
+  // Waiting for the device cannot retire commands still being recorded.
+  // Overlay rebuilds may replace vertex storage after earlier UI draws.
+  if (frameActive) {
+    frames[frameIndex].retiredBuffers.push_back(record);
+    record = {};
+  } else {
+    destroyBufferRecord(record);
+  }
+}
+
 BufferHandle DeviceVK::createBuffer(const BufferKind kind,
                                     const std::size_t bytes) {
   // Host-visible coherent memory keeps updates to a memcpy. The data here is
@@ -162,7 +175,7 @@ void DeviceVK::destroyBuffer(const BufferHandle buffer) {
     return;
   }
   ensureIdleForMutation();
-  destroyBufferRecord(it->second);
+  retireBuffer(it->second);
   buffers.erase(it);
 }
 
@@ -220,6 +233,12 @@ BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
   }
   ensureIdleForMutation();
 
+  // Reserve before allocating driver resources so retirement cannot leak the
+  // replacement if vector growth fails.
+  if (frameActive) {
+    auto &retired = frames[frameIndex].retiredBuffers;
+    retired.reserve(retired.size() + 1);
+  }
   auto grown = allocateBuffer(bytes, it->second.usage,
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -228,7 +247,7 @@ BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
   // no longer fits, which the caller has said nothing is using.
   std::memcpy(grown.mapped, it->second.mapped,
               std::min(static_cast<VkDeviceSize>(bytes), it->second.bytes));
-  destroyBufferRecord(it->second);
+  retireBuffer(it->second);
   it->second = grown;
   return buffer;
 }
@@ -484,9 +503,9 @@ void DeviceVK::destroyTexture(const TextureHandle texture) {
     // chrome can trigger glyph atlas growth after beginFrame(), not only
     // Doc::buildPendingPages() before it) may already have this texture's
     // view bound into its descriptor set. Destroying the Vulkan objects now
-    // would invalidate that still-recording buffer; see
-    // pendingTextureDestroys' own comment for where they actually get freed.
-    pendingTextureDestroys.push_back(it->second);
+    // would invalidate that still-recording buffer. The slot fence covers
+    // its eventual submission before the retired texture is reclaimed.
+    frames[frameIndex].retiredTextures.push_back(it->second);
     textures.erase(it);
     return;
   }
@@ -497,13 +516,20 @@ void DeviceVK::destroyTexture(const TextureHandle texture) {
   textures.erase(it);
 }
 
-void DeviceVK::drainPendingTextureDestroys() {
-  for (auto &record : pendingTextureDestroys) {
+void DeviceVK::drainRetiredResources(FrameContext &frame) {
+  if (!frame.retiredBuffers.empty() || !frame.retiredTextures.empty())
+    GLEDITOR_LOG_TRACE(
+        "render.vulkan",
+        "Reclaiming {} buffers and {} textures after frame completion",
+        frame.retiredBuffers.size(), frame.retiredTextures.size());
+  for (auto &record : frame.retiredBuffers) destroyBufferRecord(record);
+  frame.retiredBuffers.clear();
+  for (auto &record : frame.retiredTextures) {
     vkDestroyImageView(device, record.view, nullptr);
     vkDestroyImage(device, record.image, nullptr);
     vkFreeMemory(device, record.memory, nullptr);
   }
-  pendingTextureDestroys.clear();
+  frame.retiredTextures.clear();
 }
 
 void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
@@ -674,16 +700,8 @@ DeviceVK::createShaderModule(const std::vector<std::uint32_t> &code) const {
 }
 
 PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
-  // Said plainly here rather than left to the validation layer, which reports
-  // it as an exhausted descriptor pool several calls later and only when the
-  // layers are loaded at all.
-  if (pipelines.size() >= maxPipelines) {
-    throw std::runtime_error(std::format(
-        "DeviceVK::createPipeline: {} is all this device's descriptor pool was "
-        "sized for, and \"{}\" would be one more. Vulkan pools are fixed at "
-        "creation; raise DeviceVK::maxPipelines.",
-        maxPipelines, desc.name));
-  }
+  if (pipelines.size() >= descriptorPools.size() * pipelinesPerDescriptorPool)
+    (void)createPipelineDescriptorPool();
 
   PipelineRecord record{};
 
@@ -867,7 +885,7 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
       record.setLayout, record.setLayout};
   VkDescriptorSetAllocateInfo setAlloc{};
   setAlloc.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  setAlloc.descriptorPool     = descriptorPool;
+  setAlloc.descriptorPool     = descriptorPools.back();
   setAlloc.descriptorSetCount = framesInFlight;
   setAlloc.pSetLayouts        = setLayouts.data();
   check(vkAllocateDescriptorSets(device, &setAlloc, record.sets.data()),

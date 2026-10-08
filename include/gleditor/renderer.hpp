@@ -332,6 +332,7 @@ protected:
   std::function<void(RenderState &)> shutdownHook;
   /// pickThen() requests still waiting on their answer.
   struct PendingPickAnswer {
+    std::optional<std::uint64_t> requestId;
     int x{};
     int y{};
     PickAnswer then;

@@ -1349,6 +1349,13 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
   EXPECT_THAT(inSpace.output,
               ::testing::HasSubstr("spawned transcluded document"));
+
+  // Outside the render target is also a no-hit drop; the rejected GPU read
+  // must complete the callback rather than keep the session busy forever.
+  const auto outside = dragTo("-5,-5");
+  ASSERT_EQ(outside.exitCode, 0) << outside.output;
+  EXPECT_THAT(outside.output,
+              ::testing::HasSubstr("spawned transcluded document"));
 }
 
 TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {

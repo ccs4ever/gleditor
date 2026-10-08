@@ -405,8 +405,11 @@ Make and WebAssembly collection use that shared tree. See
 and remaining limits. The namespace package journey and 12 transport cases passed. The image passed
 135 publication smoke cases plus both reader UI cases. Final focused tests, native UI suites,
 format-check and lint passed. Full commentary authoring and P1–P7 acceptance remain outstanding.
-Vulkan orchestration exposed descriptor-pool exhaustion and a drag timeout; its backend check
-remains red, as documented in the report.
+Vulkan orchestration exposed descriptor-pool exhaustion and a drag timeout in that batch. The
+[subsequent Vulkan fixes and validation](ux_publication_vulkan_validation_2026-10-07.md) add growing
+descriptor pools, fence-based resource retirement and queued callback picking. All 33 orchestration
+cases now pass on each backend, and screenshot checks pass with their existing tolerances. Author
+edition decisions are unchanged.
 
 ## Remaining work
 

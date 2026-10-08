@@ -138,28 +138,10 @@ private:
   /// work without letting latency grow.
   static constexpr std::uint32_t framesInFlight = 2;
 
-  /**
-   * @brief Pipelines the descriptor pool is sized for.
-   *
-   * Vulkan pools are fixed at creation, so this is a ceiling rather than a
-   * hint, and running into it is a driver error rather than a slow path -- so
-   * it has to allow for what a program adds as well as what the library
-   * creates. The library makes three (the shared document glyph pipeline,
-   * the toast overlay, the caret) and every Canvas::createPipeline() call
-   * makes *two* -- its own glyph pipeline plus an image pipeline, since the
-   * image atlas work gave every canvas an image-drawing pipeline alongside
-   * its text one, whether or not that particular canvas ever draws an image.
-   * Xudu's session-long overlays each own a Canvas -- the hypertime map,
-   * image overlay, document switcher, publish form, radial menu, pouch
-   * drawer, telescope, transcopyright badges, the selected-link panel and
-   * more -- at 2 each, plus Beams' own pipeline, and each open MediaWidget
-   * (audio or video) adds 2 more. The E2E scenarios reached 32 when the
-   * link panel was added (2026-09-24), with no media widget open, so 64
-   * restores the headroom for media the earlier sizing meant to leave. The
-   * price is descriptor sets, maxPipelines * framesInFlight of them, which
-   * is small beside any texture.
-   */
-  static constexpr std::uint32_t maxPipelines = 64;
+  /// Allocation batch, not a device-wide limit. Keeping old pools alive
+  /// preserves descriptor sets referenced by earlier canvases and in-flight
+  /// frames.
+  static constexpr std::uint32_t pipelinesPerDescriptorPool = 64;
 
   struct BufferRecord {
     VkBuffer buffer{VK_NULL_HANDLE};
@@ -325,6 +307,10 @@ private:
     std::vector<VkCommandBuffer> secondaries;
     /// The buffer draws issued one at a time are currently appending to.
     VkCommandBuffer openSecondary{VK_NULL_HANDLE};
+    // The slot fence covers these resources, including draws recorded before
+    // an overlay replaced them. Reclaim them when the slot is reused.
+    std::vector<BufferRecord> retiredBuffers;
+    std::vector<TextureRecord> retiredTextures;
   };
 
   // -- setup steps
@@ -340,6 +326,7 @@ private:
   void createFramebuffers();
   void createCommandResources();
   void createDescriptorPool();
+  [[nodiscard]] VkDescriptorPool createPipelineDescriptorPool();
 
   // -- helpers
   [[nodiscard]] std::uint32_t findMemoryType(std::uint32_t typeBits,
@@ -347,6 +334,7 @@ private:
   BufferRecord allocateBuffer(VkDeviceSize bytes, VkBufferUsageFlags usage,
                               VkMemoryPropertyFlags props) const;
   void destroyBufferRecord(BufferRecord &record) const;
+  void retireBuffer(BufferRecord &record);
   /// Begin a throwaway command buffer for a transfer, and submit + wait on it.
   [[nodiscard]] VkCommandBuffer beginOneShot() const;
   void endOneShot(VkCommandBuffer commands) const;
@@ -417,7 +405,7 @@ private:
   VkRenderPass renderPass{VK_NULL_HANDLE};
   VkFramebuffer framebuffer{VK_NULL_HANDLE};
   VkCommandPool commandPool{VK_NULL_HANDLE};
-  VkDescriptorPool descriptorPool{VK_NULL_HANDLE};
+  std::vector<VkDescriptorPool> descriptorPools;
   VkSampler glyphSampler{VK_NULL_HANDLE};
 
   std::array<FrameContext, framesInFlight> frames{};
@@ -480,29 +468,7 @@ private:
   std::uint32_t nextHandleId{1};
   bool initialised{};
 
-  /**
-   * @brief Textures destroyed while a frame was open, held until it is safe
-   *        to actually free them.
-   *
-   * A texture's VkImageView can already be bound into this frame's
-   * descriptor set and referenced by a secondary command buffer opened
-   * earlier in it -- glyph atlas growth triggered by Canvas::addText() for UI
-   * chrome (the tab bar, the floating toolbar) runs after beginFrame(), not
-   * only from Doc::buildPendingPages() before it. destroyTexture() cannot
-   * safely call vkDestroy* on such a texture: the command buffer holding the
-   * reference is still being recorded, and Vulkan requires every resource a
-   * command buffer references to outlive it until it is retired. Queuing the
-   * raw handles here and freeing them once waitIdle() has confirmed nothing
-   * is in flight -- which every path that could plausibly submit and
-   * complete this frame's work already calls before this can matter again --
-   * defers the free rather than the reallocation, so a still-open frame keeps
-   * sampling the old atlas without knowing it was ever replaced.
-   */
-  std::vector<TextureRecord> pendingTextureDestroys;
-  /// Actually destroy everything queued in pendingTextureDestroys. Only
-  /// safe to call once nothing on the device is still executing -- see
-  /// waitIdle(), the only caller.
-  void drainPendingTextureDestroys();
+  void drainRetiredResources(FrameContext &frame);
 };
 
 } // namespace render::vulkan

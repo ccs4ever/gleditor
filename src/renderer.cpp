@@ -129,8 +129,7 @@ void Renderer::reapFinishedDocLoads() {
 }
 
 void Renderer::pickThen(const int x, const int y, PickAnswer then) {
-  runWithState([this, x, y, then = std::move(then)](RenderState &state) {
-    requestPick(state, x, y);
+  runWithState([this, x, y, then = std::move(then)](RenderState &) {
     pickAnswers.push_back({.x = x, .y = y, .then = then});
   });
 }
@@ -513,6 +512,24 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // comment ("One step per settled frame at most"). When an edit has
   // scheduled a reflow, the script waits for the reflow to settle before
   // taking the next step.
+  // Callback picks can arrive through the render queue before beginFrame().
+  // Issue them against the completed scene while a frame is open, and retain
+  // a rejected request for retry rather than waiting for an answer forever.
+  if (const auto answer = std::ranges::find_if(
+          pickAnswers, [](const auto &one) { return !one.requestId; });
+      answer != pickAnswers.end()) {
+    if (answer->x < 0 || answer->y < 0 || answer->x >= screenWidth ||
+        answer->y >= screenHeight) {
+      // A drop outside the target is a completed no-hit, not backend pressure.
+      // Erase before calling user code, which may queue another request.
+      const render::PickingResult noHit{.x = answer->x, .y = answer->y};
+      auto then = std::move(answer->then);
+      pickAnswers.erase(answer);
+      then(state, noHit);
+    } else {
+      answer->requestId = requestPick(state, answer->x, answer->y);
+    }
+  }
   if (settled) {
     const auto serviceClickOrDrag = [&]() {
       if (const auto click = this->state->takePointerPick()) {
@@ -813,11 +830,9 @@ void Renderer::collectPickingResults(RenderState &state) {
           scene.mapped().scene.documents[resolvedPick.tag.docIndex];
     }
     lastPick = resolvedPick;
-    if (const auto asked = std::ranges::find_if(pickAnswers,
-                                                [&](const auto &one) {
-                                                  return one.x == pick->x &&
-                                                         one.y == pick->y;
-                                                });
+    if (const auto asked = std::ranges::find_if(
+            pickAnswers,
+            [&](const auto &one) { return one.requestId == pick->requestId; });
         asked != pickAnswers.end()) {
       auto then = std::move(asked->then);
       pickAnswers.erase(asked);

@@ -93,6 +93,7 @@ bool DeviceVK::beginFrame() {
   }
   frame.secondaries.clear();
   frame.openSecondary = VK_NULL_HANDLE;
+  drainRetiredResources(frame);
 
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
