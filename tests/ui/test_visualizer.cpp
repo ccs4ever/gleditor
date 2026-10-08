@@ -25,7 +25,7 @@ TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
 
 TEST(ZigzagVisualizerTest, EmbeddedPresentationSurfaceExposesLiveState) {
   ZigzagVisualizer viz("Sans 12");
-  xanadu::ZigzagPresentationSurface &surface = viz;
+  xanadu::view::SlicePresentation &surface = viz;
 
   EXPECT_EQ(&surface.manifold(), &viz.engine()->manifold());
   EXPECT_EQ(surface.focusCell(), viz.focusCellId());

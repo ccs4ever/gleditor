@@ -111,17 +111,6 @@ public:
   void setBridgeInvalidationCallback(InvalidationCallback callback) override {
     invalidationCb_ = std::move(callback);
   }
-  [[nodiscard]] gleditor::FrameContributor *
-  frameContributor() noexcept override {
-    return nullptr;
-  }
-  [[nodiscard]] gleditor::PickObserver *pickObserver() noexcept override {
-    return nullptr;
-  }
-  [[nodiscard]] gleditor::a11y::Source *
-  accessibilitySource() noexcept override {
-    return nullptr;
-  }
 };
 
 } // namespace

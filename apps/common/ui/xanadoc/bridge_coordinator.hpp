@@ -14,8 +14,8 @@
 #include <gleditor/renderer.hpp>
 
 #include "beams.hpp"
+#include "common/ui/view/slice_presentation.hpp"
 #include "common/xanadu/bridge_config.hpp"
-#include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "satelloid.hpp"
 
 namespace xanadu {
@@ -44,7 +44,7 @@ public:
   BridgeCoordinator &operator=(const BridgeCoordinator &) = delete;
 
   /// Attach and register @p surface. Returns false if already attached.
-  bool attach(xanadu::ZigzagPresentationSurface &surface);
+  bool attach(xanadu::view::SlicePresentation &surface);
   /// Route satelloid selection into the currently attached surface.
   void connectSatelloidNavigation(SatelloidOverlay &overlay);
   void setCellActivationHandler(CellActivationHandler handler) {
@@ -90,7 +90,7 @@ private:
   LinkBeams &links_;
   RendererRef renderer_;
   gleditor::a11y::Publisher &accessibility_;
-  xanadu::ZigzagPresentationSurface *surface_{nullptr};
+  xanadu::view::SlicePresentation *surface_{nullptr};
   std::uint64_t synchronizedRevision_{0};
   bool dirty_{false};
   xanadu::BridgeRuntimeConfig config_{};

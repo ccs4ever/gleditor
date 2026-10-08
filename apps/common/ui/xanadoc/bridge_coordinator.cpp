@@ -16,7 +16,7 @@ BridgeCoordinator::BridgeCoordinator(
 
 BridgeCoordinator::~BridgeCoordinator() { detach(); }
 
-bool BridgeCoordinator::attach(xanadu::ZigzagPresentationSurface &surface) {
+bool BridgeCoordinator::attach(xanadu::view::SlicePresentation &surface) {
   if (surface_ != nullptr) {
     return false;
   }

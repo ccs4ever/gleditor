@@ -14,6 +14,9 @@
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
 
+#include <gleditor/a11y/tree.hpp>
+#include <gleditor/frame_contributor.hpp>
+#include <gleditor/pick_observer.hpp>
 #include <gleditor/ui/focus_manager.hpp>
 
 #include "common/xanadu/microversion.hpp"
@@ -35,11 +38,12 @@ namespace xanadu::view {
  *        visualizer without the application knowing which one it holds
  *        (view-system-implementation-plan.md §4.6, U0).
  *
- * The bridge half -- focus, anchors, highlights, lock state and the drawing
- * roles -- is the ZigzagPresentationSurface a BridgeCoordinator attaches; this
- * adds what xuzz itself calls. The command bar, the palettes, cell editing and
- * the Vortex host are not here: they belong to the legacy visualizer until X0
- * carves them into components every presentation shares.
+ * The device-free half -- focus, anchors, highlights, lock state -- is the
+ * engine's ZigzagPresentationSurface; this adds the roles a BridgeCoordinator
+ * registers with the renderer and what xuzz itself calls. The command bar, the
+ * palettes, cell editing and the Vortex host are not here: they belong to the
+ * legacy visualizer until X0 carves them into components every presentation
+ * shares.
  */
 class SlicePresentation : public ZigzagPresentationSurface {
 public:
@@ -57,6 +61,13 @@ public:
   ~SlicePresentation() override                           = default;
 
   // -- Composition ----------------------------------------------------------
+  // Roles the host registers, rather than the concrete type, so composition
+  // stays one-way and the host includes no presentation's header.
+  [[nodiscard]] virtual gleditor::FrameContributor *
+  frameContributor() noexcept                                           = 0;
+  [[nodiscard]] virtual gleditor::PickObserver *pickObserver() noexcept = 0;
+  [[nodiscard]] virtual gleditor::a11y::Source *
+  accessibilitySource() noexcept = 0;
   /// The input scope the application registers with its focus manager.
   [[nodiscard]] virtual gleditor::ui::FocusScope *focusScope() noexcept = 0;
   /// Hides the slice without unbinding its store or losing its focus.
