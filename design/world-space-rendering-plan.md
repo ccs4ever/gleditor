@@ -441,26 +441,45 @@ batch; a banded page draws only the lines inside its band and is picked only the
 
 ```cpp
 namespace gleditor::ui {
-using PaneId = std::uint32_t;
+using PaneId    = std::uint32_t;
+using DividerId = std::uint32_t;
+enum class PaneError { UnknownPane, UnknownDivider, LastPane, NoDivider, InvalidShare };
+struct Divider { DividerId id; Axis axis; Rect span; Rect edge; };
 class PaneTree {
 public:
-  PaneId root() const noexcept;
-  PaneId split(PaneId pane, Axis axis, float firstShare = 0.5F); // returns the new pane
-  PaneTree *close(PaneId pane);
-  PaneTree *resize(PaneId pane, float share);
+  PaneTree(); // one pane
+  /// The pane keeps the first side; returns the new pane, which follows it.
+  std::expected<PaneId, PaneError> split(PaneId pane, Axis axis,
+                                         float firstShare = 0.5F);
+  std::expected<PaneTree *, PaneError> close(PaneId pane);
+  /// The pane's share of the divider that made it.
+  std::expected<PaneTree *, PaneError> resize(PaneId pane, float share);
+  std::expected<PaneTree *, PaneError> resizeDivider(DividerId divider,
+                                                     float firstShare);
   /// Leaf rectangles for the given bounds, edge-rounded so neighbours meet.
   void rects(Rect bounds,
              gleditor::cpp26::function_ref<void(PaneId, Rect)> visit) const;
+  void dividers(Rect bounds,
+                gleditor::cpp26::function_ref<void(const Divider &)> visit) const;
   std::span<const PaneId> order() const noexcept; // focus order
 };
 } // namespace gleditor::ui
 ```
 
 It draws nothing and knows nothing of focus; a host registers each leaf with
-`FocusManager::addPane()` and turns each rectangle into a `RenderRegion`.
+`FocusManager::addPane()` and turns each rectangle into a `RenderRegion`. Order is reading order — a
+split's first side (left, or top) before its second — and only adding or closing a pane changes it.
+Every change that can be refused returns `std::expected`, as `view-system.md` §8 requires: closing
+the last pane, resizing the only one, an unknown or closed id (ids are never reused), a share that
+is not finite. Finite shares are clamped to [0, 1].
+
+`resize(pane, …)` moves the divider that made a pane, which is the common case. It cannot reach a
+divider between two subtrees — two columns each split again — since that divider is next to no
+single pane; `dividers()` reports each one with the rectangle it divides, so a host can turn a drag
+into a share, and `resizeDivider()` moves it.
 
 *Tests:* `tests/lib/ui_pane_tree_test.cpp`: splits partition the bounds exactly; closing gives the
-space to the sibling; order is stable under resize.
+space to the sibling; order is stable under resize; refusals; a divider between subtrees.
 
 ## 8. Order of work
 
@@ -508,3 +527,9 @@ capture under SDL2 still wants `xvfb-run`).
   `tests/lib/draw_budget.cpp` for each of the six planes. `outsideFrustum`'s comment gave "Vulkan
   clips to [0, w]" as its reason for skipping depth; in the neutral clip space a contributor holds,
   both backends' volume is `−w ≤ z ≤ w`, as §1 says, so the comment now gives the real reason.
+- 2026-10-08 — Step 8 built (L8), and §7 amended to match: `root()` is gone, since after the first
+  split the root is a divider and the first pane may since have been closed; a new tree's pane is
+  `order().front()`. `split`, `close` and `resize` return `std::expected`, as every refusable setter
+  must. `dividers()` and `resizeDivider()` are added because `resize(pane, …)` cannot reach a
+  divider between two subtrees. `PaneTree` is in `src/ui/pane_tree.cpp`, not header-only, as
+  `ui::split()` (`src/ui/layout.cpp`) is not either.
