@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 
 #include <spdlog/cfg/env.h>
 #include <spdlog/sinks/stdout_sinks.h>
@@ -31,6 +32,20 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
   }
 }
 
+// Category names are string literals, so their address names them well
+// enough for a cache: a literal folded differently in another translation
+// unit only costs one more entry. Per thread, so a hit takes no lock and,
+// after the first call, allocates nothing on a render or edit path.
+inline spdlog::logger &cachedCategory(const char *name) {
+  thread_local std::unordered_map<const char *, std::shared_ptr<spdlog::logger>>
+      loggers;
+  auto found = loggers.find(name);
+  if (found == loggers.end()) {
+    found = loggers.emplace(name, category(name)).first;
+  }
+  return *found->second;
+}
+
 } // namespace gleditor::logging
 
 // The level guard also skips evaluation of costly formatting arguments when
@@ -43,10 +58,11 @@ inline std::shared_ptr<spdlog::logger> category(const char *name) {
 template <typename... Args>
 void constexpr log_at(const char *category_name, auto level_enum,
                       spdlog::format_string_t<Args...> fmt, Args &&...args) {
-  static const auto gleditorCategoryLogger =
-      gleditor::logging::category(category_name);
-  if (gleditorCategoryLogger->should_log(level_enum)) {
-    gleditorCategoryLogger->log(level_enum, fmt, std::forward<Args>(args)...);
+  // Not a function-local static: one would be shared by every category
+  // logging the same argument types, and the first name would take them all.
+  auto &logger = gleditor::logging::cachedCategory(category_name);
+  if (logger.should_log(level_enum)) {
+    logger.log(level_enum, fmt, std::forward<Args>(args)...);
   }
 }
 
