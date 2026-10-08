@@ -916,7 +916,7 @@ FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 # scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
 # into MimeType and SourceGrounder, which live under src/ rather than
-# apps/xudu/core/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
+# apps/common/xanadu/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
 # the same reason xudu-swarm-peer needs them below: anything linking the
 # engine now needs these two as well.
 FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_grounder.o

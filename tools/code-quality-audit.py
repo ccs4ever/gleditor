@@ -4,8 +4,8 @@ Code Quality & Architectural Layering Auditor for gleditor.
 
 Scans the workspace to enforce:
 1. Layer Purity: include/ and src/ must never depend on apps/
-2. Promotion Opportunities: Highlight areas where zigzag depends on xudu core engines,
-   identifying candidates to promote to src/ or include/gleditor/
+2. Placement and Engine Purity: nothing under the retired apps/xudu/ and
+   apps/zigzag/, and apps/common/xanadu/ never includes the UI layer or xuzz
 3. Supplemental Metadata & Format Invariants: Verify system xanadocs/slices adhere to
    linked Schema and Notes specifications (no markdown headers, format links).
 """
@@ -41,27 +41,28 @@ def check_layer_purity():
 
 def check_isolation_and_coupling():
     violations = []
-    zigzag_dir = APPS_DIR / "zigzag"
-    xudu_dir = APPS_DIR / "xudu"
-    
-    # Zigzag must not import xudu
-    if zigzag_dir.exists():
-        for p in zigzag_dir.rglob("*"):
-            if p.suffix in [".hpp", ".h", ".cpp"]:
-                content = p.read_text(encoding="utf-8", errors="ignore")
-                for line_no, line in enumerate(content.splitlines(), start=1):
-                    if re.search(r'#include\s*[<"](?:xudu/|apps/xudu/)', line):
-                        violations.append(f"{p.relative_to(WORKSPACE_ROOT)}:{line_no} Decoupling Violation: zigzag imports xudu directly (must use common/xanadu)")
-                        
-    # Xudu must not import zigzag
-    if xudu_dir.exists():
-        for p in xudu_dir.rglob("*"):
-            if p.suffix in [".hpp", ".h", ".cpp"]:
-                content = p.read_text(encoding="utf-8", errors="ignore")
-                for line_no, line in enumerate(content.splitlines(), start=1):
-                    if re.search(r'#include\s*[<"](?:zigzag/|apps/zigzag/)', line):
-                        violations.append(f"{p.relative_to(WORKSPACE_ROOT)}:{line_no} Decoupling Violation: xudu imports zigzag directly (must use common/xanadu)")
-                        
+    # apps/xudu/ and apps/zigzag/ were emptied into apps/common/ui/{xanadoc,slice}/.
+    # The Makefile's source lists are find-based globs, so a file left behind
+    # or added there would go on compiling silently.
+    for retired in ("xudu", "zigzag"):
+        retired_dir = APPS_DIR / retired
+        if retired_dir.exists():
+            for p in retired_dir.rglob("*"):
+                if p.is_file():
+                    violations.append(f"{p.relative_to(WORKSPACE_ROOT)} Placement Violation: apps/{retired}/ is retired; xanadoc UI goes in apps/common/ui/xanadoc/, slice UI in apps/common/ui/slice/")
+
+    # The engine is linked by targets that link no library and no UI, so it
+    # must not reach up into the UI layer or the program.
+    engine_dir = APPS_DIR / "common" / "xanadu"
+    ui_include_re = re.compile(r'#include\s*[<"](?:common/ui/|ui/|xuzz/|apps/)([^>"]+)[>"]')
+    for p in engine_dir.rglob("*"):
+        if p.suffix in [".hpp", ".h", ".cpp"]:
+            content = p.read_text(encoding="utf-8", errors="ignore")
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                m = ui_include_re.search(line)
+                if m:
+                    violations.append(f"{p.relative_to(WORKSPACE_ROOT)}:{line_no} Engine Purity: apps/common/xanadu includes '{m.group(0)}'")
+
     return violations
 
 def check_markdown_in_system_docs():
@@ -69,7 +70,7 @@ def check_markdown_in_system_docs():
     md_header_re = re.compile(r'^\s*#{1,6}\s+.*$')
     
     sample_system_docs = list(WORKSPACE_ROOT.glob("assets/system_*.xanadoc")) + \
-                         list(WORKSPACE_ROOT.glob("apps/xudu/**/system_*.xanadoc"))
+                         list(WORKSPACE_ROOT.glob("apps/common/**/system_*.xanadoc"))
     
     for p in sample_system_docs:
         content = p.read_text(encoding="utf-8", errors="ignore")
@@ -109,10 +110,10 @@ def run_audit():
         for v in layer_violations:
             print(f"  [FAIL] {v}")
             
-    print("\n--- 2. Application Decoupling (Xudu vs Zigzag Isolation via apps/common/xanadu) ---")
+    print("\n--- 2. Placement and Engine Purity (apps/common/xanadu below apps/common/ui) ---")
     if not coupling_violations:
-        print("  [PASS] Clean decoupling: Zigzag and Xudu have zero direct cross-includes.")
-        print("         All shared xanalogical models and engines live in apps/common/xanadu.")
+        print("  [PASS] apps/xudu/ and apps/zigzag/ are empty, and the engine includes")
+        print("         nothing from apps/common/ui/ or apps/xuzz/.")
     else:
         for v in coupling_violations:
             print(f"  [FAIL] {v}")

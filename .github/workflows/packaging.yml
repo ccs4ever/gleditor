@@ -714,8 +714,8 @@ jobs:
         test -f dist/wasm/gleditor.wasm
         test -f dist/wasm/gleditor.js
         test -f dist/wasm/gleditor.data
-        test -f dist/wasm/zigzag.html
-        test -f dist/wasm/zigzag.wasm
+        test -f dist/wasm/xuzz.html
+        test -f dist/wasm/xuzz.wasm
 
     - uses: actions/upload-artifact@v7
       with:

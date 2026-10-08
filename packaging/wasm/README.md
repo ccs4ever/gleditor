@@ -29,7 +29,7 @@ Run the build script:
 ./packaging/wasm/build.sh
 ```
 
-This compiles `gleditor` and `zigzag` and outputs the resulting `.html`, `.js`, `.wasm`, and `.data`
+This compiles `gleditor` and `xuzz` and outputs the resulting `.html`, `.js`, `.wasm`, and `.data`
 asset packages to `build/wasm/`.
 
 ## Running Locally
@@ -45,4 +45,4 @@ Then open `http://localhost:8080` in your web browser:
 
 - `http://localhost:8080/` — Suite landing portal
 - `http://localhost:8080/gleditor.html` — Plain editor
-- `http://localhost:8080/zigzag.html` — Project Xanadu Zigzag visualizer
+- `http://localhost:8080/xuzz.html` — Xanadu hypertext and ZigZag slices
