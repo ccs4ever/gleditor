@@ -1,11 +1,14 @@
-# What an AI coding session should not spend context on in this repository.
+# What a search, a file index or an AI coding session should skip in this
+# repository.
 #
-# gitignore syntax. Nothing listed here is secret. It is noise for a session
-# that pays for every file it lists, searches or reads: other checkouts,
-# generated output, vendored code nobody edits here, and binary fixtures that
-# are only meaningful through the tools that read them.
+# gitignore syntax. This is the `.ignore` file that ripgrep, fd and Claude
+# Code's file index read, in addition to .gitignore. It hides paths from
+# searching and listing; it does not stop anything being opened by its path.
+# To search everything anyway: `rg --no-ignore`, `fd --no-ignore`.
 #
-# If you need something listed here, open it deliberately by its path.
+# Nothing listed here is secret. It is noise: other checkouts, generated
+# output, vendored code nobody edits here, and binary fixtures that are only
+# meaningful through the tools that read them.
 
 # -- Other checkouts of this same repository ----------------------------------
 # Each worktree is a full copy of the tree; searching them returns every hit
