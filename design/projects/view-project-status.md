@@ -60,8 +60,8 @@ changed.
 
 ## Next
 
-1. **The remaining baseline reds** (below): the two E2E rendering tests and the inline-box advance,
-   which the store panel's cause makes worth re-reading as possible layout bugs rather than fonts.
+1. **The key-hint start-up race** that `compare-backends.sh`'s GL/GLES parity stage exposed (under
+   "Known reds").
 1. **The `config.h` race** (below), as its own commit.
 1. **M1**: the spikes, through spike runners. S1, S4, S5, S2 and S3 are engine-only and can run now.
    R1 to R5 can measure OpenGL and GLES headless; Vulkan needs `xvfb-run` or an SDL3 build here. V1
@@ -69,10 +69,13 @@ changed.
 
 ## Fixed along the way
 
-| Commit      | What                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `61c5b95`   | The store panel budgeted its button rows with the exact padding, but the layout rounds box edges to whole pixels; at a fractional padding a row came out a pixel too wide and its last button was laid out zero pixels tall. Not a font problem: it failed for every family. Fixed `StoreObjectManagerOverlayTest.FittedRows…` and `E2EBinaryOrchestrationTest.storePanelCreates…`.                      |
-| this commit | Keymap actions only the slice presentation knows were registered unscoped, after the start-up pass that scopes built-in commands, so `std:zigzag/save_store` lost Ctrl+Shift+S to the global `std:xudu/publish` even in the ZigZag pane: the chord published. The "same key" warning was true. New test `E2EBinaryOrchestrationTest.aPaneChordIsNotTakenByTheGlobalOneOnItsKey`, failing before the fix. |
+| Commit      | What                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `61c5b95`   | The store panel budgeted its button rows with the exact padding, but the layout rounds box edges to whole pixels; at a fractional padding a row came out a pixel too wide and its last button was laid out zero pixels tall. Not a font problem: it failed for every family. Fixed `StoreObjectManagerOverlayTest.FittedRows…` and `E2EBinaryOrchestrationTest.storePanelCreates…`.                                                                       |
+| `975a560`   | Keymap actions only the slice presentation knows were registered unscoped, after the start-up pass that scopes built-in commands, so `std:zigzag/save_store` lost Ctrl+Shift+S to the global `std:xudu/publish` even in the ZigZag pane: the chord published. The "same key" warning was true. New test `E2EBinaryOrchestrationTest.aPaneChordIsNotTakenByTheGlobalOneOnItsKey`, failing before the fix.                                                  |
+| `33488c8`   | Font descriptions ("Monospace 16", "Sans Bold 12") went to Fontconfig whole, which reads them as one non-existent family and falls back to the default face: no role got its face, anywhere. Parsed as Pango does now; the glyph cache's bold and italic variants open at the right size and are keyed by style. Fixed `TextLayoutTest.InlineBoxAdvances…` and `E2EBinaryOrchestrationTest.textSurvives…`. Documents now render in a true monospace face. |
+| `f5d7218`   | `rebuild()` walked the whole ancestry to find the active xanadoc in a store with none, so a checkpointed Chronofilade rebuild cost O(K) again (5 us at 500 operations against the documented 0.29). Now a per-operation lookup: 0.23 us. Fixed `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`.                                                                                                                                                         |
+| this commit | `aDraggedSelectionLandsWhereItIsDropped` dropped "into empty space" at a fixed x = 770, which a monospace page now covers. The drop point is found in the calibration frame, beside the page's right edge.                                                                                                                                                                                                                                                |
 
 ## Baseline
 
@@ -95,20 +98,22 @@ fails at its E2E stage on the three E2E reds below.
 
 ### Known reds, not this project's
 
-The four without "(sometimes)" reproduce alone, without any concurrent run. Two more were on this
-list and are fixed (see "Fixed along the way").
+Every test that failed at the baseline is fixed (see "Fixed along the way"). A full `make -k test`
+after them exits 0: `gleditor_test` 743, `xudu_test` 1301, `xuzz_test` 61, `ui_test` 192, both swarm
+runs.
 
-| Test                                                                | Failure                                           | Suspected cause                                                           |
-| ------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- |
-| `TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs`   | advance off by 0.77 px against a 0.5 px tolerance | installed fonts: here `Monospace` is DejaVu Sans Mono and `Sans` is Inter |
-| `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`                   | 5.4 µs against 3.96 µs at 500 operations          | a microsecond timing assertion                                            |
-| `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` (sometimes)  | a speedup assertion at millisecond scale          | timing; failed under `make -k test`, passed alone                         |
-| `VortexBenchmarkTest.MemoizedVsUnmemoizedExecution` (sometimes)     | a speedup assertion                               | timing; failed under `make -k test`, passed alone                         |
-| `E2EBinaryOrchestrationTest.textSurvivesAtWholePageDistance`        | 72 inked pixels, at least 100 expected            | fonts, unconfirmed                                                        |
-| `E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped` | the dropped text lands at the wrong offset        | glyph metrics, unconfirmed                                                |
+`compare-backends.sh` passes every image check, and its E2E stage now passes on both backends (34 of
+34), which lets it reach, for the first time here, the per-scenario OpenGL-against-GLES parity
+stage. There one run failed five scenarios of the transclusion lifecycle by about 6 % against a 3 %
+limit. The frames are drawn alike except that the GLES capture has no key-hint bar at the foot and
+everything sits 18 px lower: it was captured before the hints, posted to the render thread with
+`runWithState` during start-up, had arrived. Run alone, six times on each backend, the bar was
+always there. So it is a start-up race between that post and the first capture, surfaced rather than
+caused by these fixes; the fix belongs in how start-up hands the hints over, not in the tolerance.
 
-Forcing other fonts through a private `FONTCONFIG_FILE` did not take effect, so the font cause is
-not yet shown.
+Two speedup benchmarks failed once each under a loaded `make -k test` and passed in every run alone:
+`ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` and
+`VortexBenchmarkTest.MemoizedVsUnmemoizedExecution`. Watch them; neither is known to be a bug.
 
 ## Environment
 

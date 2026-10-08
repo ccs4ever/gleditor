@@ -26,6 +26,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/link_package.hpp"
@@ -222,6 +223,31 @@ std::size_t countInkOnPaper(const fs::path &path) {
     }
   }
   return ink;
+}
+
+// The rightmost white paper on row @p y and the frame's width. The empty
+// space beside a page is wherever that paper ends, which depends on the
+// document's font: a fixed coordinate held only while the page happened to
+// be narrow.
+std::optional<std::pair<int, int>> paperRightEdge(const fs::path &path,
+                                                  const int y) {
+  std::ifstream in(path, std::ios::binary);
+  std::string magic;
+  int width{}, height{}, maximum{};
+  in >> magic >> width >> height >> maximum;
+  in.get();
+  if (magic != "P6" || y < 0 || y >= height || maximum != 255)
+    return std::nullopt;
+  std::vector<unsigned char> rgb(static_cast<std::size_t>(width) * height * 3);
+  in.read(reinterpret_cast<char *>(rgb.data()),
+          static_cast<std::streamsize>(rgb.size()));
+  if (!in) return std::nullopt;
+  for (int x = width - 1; x >= 0; --x) {
+    const auto at = (static_cast<std::size_t>(y) * width + x) * 3;
+    if (rgb[at] > 235 && rgb[at + 1] > 235 && rgb[at + 2] > 235)
+      return std::pair{x, width};
+  }
+  return std::nullopt;
 }
 
 // The only saturated blue on this fixture is the selected text. Read its
@@ -1383,6 +1409,14 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto [left, top, right, bottom] = *selected;
   const auto y                          = (top + bottom) / 2;
   start = std::to_string((left + right) / 2) + "," + std::to_string(y);
+  const auto paper = paperRightEdge(capture, y);
+  ASSERT_TRUE(paper);
+  const auto [pageRight, frameWidth] = *paper;
+  ASSERT_LT(pageRight + 2, frameWidth - 2)
+      << "the page reaches the edge of the frame, so there is no empty space "
+         "beside it to drop into";
+  const auto emptySpace =
+      std::to_string((pageRight + frameWidth) / 2) + "," + std::to_string(y);
   // Onto the same line, past the final word, using the drawn selection's size.
   const auto onPage = dragTo(std::to_string(right + right - left + 2) + "," +
                              std::to_string(y));
@@ -1404,7 +1438,7 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   EXPECT_EQ(std::stoul(quoted[1].str()), std::stoul(typed[1].str()) + 6U);
 
   // Into the empty space right of the page.
-  const auto inSpace = dragTo("770,300");
+  const auto inSpace = dragTo(emptySpace);
   ASSERT_EQ(inSpace.exitCode, 0) << inSpace.output;
   EXPECT_THAT(inSpace.output,
               ::testing::HasSubstr("spawned transcluded document"));
