@@ -115,14 +115,15 @@ window. When visual confirmation is the point, the user will say so.
 ### Running them
 
 ```sh
-make -j$(nproc) test                  # gleditor_test, xudu_test, xuzz_test, zigzag_test, then the rootless swarm tests
+make -j$(nproc) test                  # gleditor_test, xudu_test, xuzz_test, ui_test, then the rootless swarm tests
 make test TEST_FILTER='MediaTest.*'   # gtest filter applied to all four
 make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against build/xudu
 ```
 
 - `gleditor_test` links the real shared library (catches export-boundary bugs). `xudu_test` and
-  `xuzz_test` link only the xanalogical engine, no graphics device, on purpose. `zigzag_test` covers
-  the slice model and the transclusion engine.
+  `xuzz_test` link only the xanalogical engine, no graphics device, on purpose. `ui_test` covers
+  `apps/common/ui/` — the slice visualizer, the transclusion engine, the overlays — and so links the
+  engine and the library both.
 - **A test sits with its code, once.** Generic library behaviour is tested in `tests/lib/` and
   nowhere else; `xuzz_test` is kept to xuzz's own code and must not repeat the library's battery
   (font, scale and backend sweeps belong to `tests/lib/`).
@@ -135,8 +136,8 @@ make test/e2e-orchestration           # tools/xudu-e2e-orchestration.sh against 
 - `./tools/compare-backends.sh` renders a sample through every compiled-in backend and diffs the
   PNGs — the real check that a backend still draws, since one that draws nothing exits 0.
 
-Unit tests live in `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` (GoogleTest/
-GoogleMock; match the style in place); fuzzers in `tests/fuzz/`.
+Unit tests live in `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/ui/` (GoogleTest/ GoogleMock;
+match the style in place); fuzzers in `tests/fuzz/`.
 
 ### Binary fixtures under `tests/samples/`
 
@@ -284,7 +285,7 @@ file `make lint` rejects; `tools/check-config-harmony.sh` (run by both targets) 
 - `apps/vquery`, `vqueryc`, `vpl`, `vplc`, `vprolog` — see the table at the top.
 - `assets/shaders/` — GLSL bodies; `vulkan/` holds generated SPIR-V. There is no `assets/zigzag/`
   any more: the YAML slice format is deleted and every slice is a store.
-- `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/`, `tests/fuzz/`, `tests/samples/`.
+- `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/ui/`, `tests/fuzz/`, `tests/samples/`.
 - `tools/` — `compare-backends.sh`, `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`,
   `swarm-netns-test.sh`, `xudu-e2e-orchestration.sh`, `check-config-harmony.sh`,
   `benchmark-kjv-load.{py,sh}`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, `xudu-dump.cpp`,

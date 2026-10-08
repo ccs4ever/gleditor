@@ -8,21 +8,23 @@ Last updated: 2026-10-08.
 
 ## Where it stands
 
-| Milestone                 | State                                                                         |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| M0, the tree in its shape | A1 done (this commit, on top of `66afa4b`); A2, the `ui_test` rename, is next |
-| M1, spikes                | not started                                                                   |
-| M2 onward                 | not started                                                                   |
+| Milestone                 | State                  |
+| ------------------------- | ---------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed |
+| M1, spikes                | not started            |
+| M2 onward                 | not started            |
 
 ## Done
 
-| Package or change              | Commit      | Notes                                                                                                                                                                                                                                                               |
-| ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1 moves                       | `66afa4b`   | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them. |
-| Build without ThorVG           | `a863fbe`   | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                      |
-| `compare-backends.sh` isolated | `5142e20`   | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                            |
-| No xvfb for GL and GLES        | `0d52fa3`   | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                              |
-| A1 remainder                   | this commit | See below.                                                                                                                                                                                                                                                          |
+| Package or change              | Commit    | Notes                                                                                                                                                                                                                                                               |
+| ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1 moves                       | `66afa4b` | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them. |
+| Build without ThorVG           | `a863fbe` | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                      |
+| `compare-backends.sh` isolated | `5142e20` | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                            |
+| No xvfb for GL and GLES        | `0d52fa3` | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                              |
+| A1 remainder                   | `3e48652` | See below.                                                                                                                                                                                                                                                          |
+
+| A2, `zigzag_test` to `ui_test` | this commit | See below. |
 
 What the A1 remainder changed:
 
@@ -39,10 +41,25 @@ What the A1 remainder changed:
 
 A1's gate: `find apps/xudu apps/zigzag -type f` prints nothing (neither directory exists).
 
+What A2 changed: `tests/zigzag/` is `tests/ui/` (`git mv`, 23 files) and the binary is `ui_test`, in
+the Makefile, both CI workflows' build and test steps, the swarm Dockerfile, `AGENTS.md`, the
+README, the spec's §16.1 (with a change-history line) and the design notes that link to a moved test
+file. The Makefile's `ZIGZAG_PKGS` and `ZIGZAG_LIBS` were a copy of `XUDU_PKGS` and `XUDU_LIBS`,
+`ZIGZAG_SHARED_CORE_OBJS` was `COMMON_XANADU_OBJS` under another name, and `ZIGZAG_CORE_OBJS` was
+never defined; all four are gone and `ui_test` links `XUDU_CORE_OBJS` and `XUDU_LIBS`, the same
+objects and libraries as before. The `zigzag` program symlink is unchanged. Mentions of
+`zigzag_test` in dated records of past runs, and one stale link to a test file that no longer exists
+(`test_system_projector.cpp`), are left as they were.
+
+A2's gate: `make` builds `build/ui_test` and no `zigzag_test`; `ui_test` passes 191 and fails 1, the
+same test `zigzag_test` failed; `gleditor_test`, `xudu_test` and `xuzz_test` are as at the baseline.
+`make test` stops at its first red binary, which is `gleditor_test`'s font failure, so the other
+three were run directly with the same environment; the swarm tests were therefore not reached.
+Format, lint and the audit are green. `compare-backends.sh` was not rerun: nothing it drives
+changed.
+
 ## Next
 
-1. **A2**: rename `zigzag_test` to `ui_test` and `tests/zigzag/` to `tests/ui/` in the Makefile, CI,
-   `AGENTS.md` and the README. Full gate; the same 192 tests under the new name.
 1. **The baseline reds** (below): settle the keymap clash first, since it may be real.
 1. **The `config.h` race** (below), as its own commit.
 1. **M1**: the spikes, through spike runners. S1, S4, S5, S2 and S3 are engine-only and can run now.
@@ -58,7 +75,7 @@ Taken at `a863fbe`, each binary run alone and headless, outside `make`:
 | `gleditor_test` | 738    | 1      | 3 (Vulkan resource tests; no Vulkan device) |
 | `xudu_test`     | 1296   | 4      | publication-network and swarm tests         |
 | `xuzz_test`     | 61     | 0      | 0                                           |
-| `zigzag_test`   | 191    | 1      | 0                                           |
+| `ui_test`       | 191    | 1      | 0 (was `zigzag_test`)                       |
 
 `make format-check` and `make lint` are green on the base. The full `make test`, with the rootless
 swarm tests, has not been run in this environment. `tools/compare-backends.sh`: OpenGL and GLES
@@ -106,6 +123,9 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
 
 ## Findings for the owner
 
+- **`make test` stops at the first red binary.** Its recipe runs the four binaries one after
+  another, so `gleditor_test`'s one font failure keeps the other three, and the swarm tests, from
+  running at all. Until the baseline reds are settled, every gate here runs the binaries one by one.
 - **CI's build job installs neither Poppler, libmagic, libvlc nor librnp**, all of which the
   Makefile requires, so it most likely fails at pkg-config. Not checked against a CI run.
 - **The `config.h` race.** `apps/xuzz/xuzz_app.cpp` includes the generated `config.h`, but only the

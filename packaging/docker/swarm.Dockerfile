@@ -34,7 +34,7 @@ ENV SDL_VIDEODRIVER=offscreen \
 # probe; no compiler or language standard is forced by this recipe.
 RUN make -j$(nproc) GLEDITOR_VERSION="${GLEDITOR_VERSION}" \
       CXXFLAGS="-isystem /usr/include/poppler -isystem /usr/include/poppler/cpp" \
-      xuzz xudu-dump xudu-swarm-peer xudu_test xuzz_test zigzag_test \
+      xuzz xudu-dump xudu-swarm-peer xudu_test xuzz_test ui_test \
     && ./build/xudu_test \
       --gtest_filter='PublicationTest.*:PublicationInventoryTest.*:StoreTablesTest.*:PublicationOutboxTest.*:PublicationInboxTest.*:PublicationSubscriptionsTest.*:AuthorCatalogTest.*:PublicationDiscoveryTest.*:BinaryOpsTest.*:MutableLinkTest.*:LinkPackageExchangeTest.*:ReaderLinkPackagesTest.*:LinkPackageTest.*:LinkPackageInteractionTest.*:SpanfiladeBenchmarkTest.ScaledOccurrencesOfSpeedup:HolefiladeBenchmarkTest.ScaledSpanDecompositionSpeedup'
 

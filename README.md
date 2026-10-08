@@ -356,8 +356,9 @@ make profile                         # library test coverage
 ```
 
 `gleditor_test` links the real shared library; `xudu_test` and `xuzz_test` exercise the engine
-without a graphics device; `zigzag_test` covers the slice model and transclusion engine. The swarm
-step uses rootless network namespaces and needs the `veth` kernel module. If it ends with
+without a graphics device; `ui_test` covers `apps/common/ui/` — the slice visualizer, the
+transclusion engine and the overlays — over both the engine and the library. The swarm step uses
+rootless network namespaces and needs the `veth` kernel module. If it ends with
 `Error: Unknown device type.`, inspect the four gtest summaries before diagnosing the failure. Run
 `./tools/compare-backends.sh` for the backend image and picking comparison; offscreen SDL over
 llvmpipe needs no X server, and only a Vulkan capture under SDL2 wants `xvfb-run`.
@@ -390,17 +391,17 @@ produces a source tarball with submodules included. Packaging definitions live u
 for Arch, Debian, Fedora, macOS, Windows, Nix, Android, and WebAssembly; see each target's own files
 for its build scope.
 
-| Path                                                        | Contents                                                                 |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `src/`, `include/gleditor/`                                 | Public library implementation and headers.                               |
-| `apps/common/xanadu/`                                       | Shared Xanadu store, identity, enfilades, ZigZag manifold, and runtimes. |
-| `apps/gleditor/`, `apps/xuzz/`                              | The plain editor and the Xanadu/ZigZag application.                      |
-| `apps/common/ui/`                                           | Xanadoc and cell presentation components linked into `xuzz`.             |
-| `apps/vquery*`, `apps/vpl*`, `apps/vprolog/`                | Language and query front ends.                                           |
-| `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/zigzag/` | GoogleTest suites.                                                       |
-| `assets/shaders/`, `tools/`                                 | Shader sources and build, fixture, and diagnostic tools.                 |
-| `design/`                                                   | Architecture, decisions, workflows, and interface prototypes.            |
-| `thirdparty/`                                               | Git submodules; do not edit their contents in place.                     |
+| Path                                                    | Contents                                                                 |
+| ------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `src/`, `include/gleditor/`                             | Public library implementation and headers.                               |
+| `apps/common/xanadu/`                                   | Shared Xanadu store, identity, enfilades, ZigZag manifold, and runtimes. |
+| `apps/gleditor/`, `apps/xuzz/`                          | The plain editor and the Xanadu/ZigZag application.                      |
+| `apps/common/ui/`                                       | Xanadoc and cell presentation components linked into `xuzz`.             |
+| `apps/vquery*`, `apps/vpl*`, `apps/vprolog/`            | Language and query front ends.                                           |
+| `tests/lib/`, `tests/xudu/`, `tests/xuzz/`, `tests/ui/` | GoogleTest suites.                                                       |
+| `assets/shaders/`, `tools/`                             | Shader sources and build, fixture, and diagnostic tools.                 |
+| `design/`                                               | Architecture, decisions, workflows, and interface prototypes.            |
+| `thirdparty/`                                           | Git submodules; do not edit their contents in place.                     |
 
 The [store/slice convergence](design/store-slice-convergence.md) is the central model for cell
 identity and hypertime. The [bridge design](design/xudu-zigzag-unified-hypermedia-bridge.md) covers

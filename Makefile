@@ -538,10 +538,6 @@ endif
 endif
 GLEDITOR_LIBS :=
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
-# Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
-# links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
-ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
@@ -611,7 +607,7 @@ XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUZZ_SRCS      := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null)
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
-ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
+UI_TEST_SRCS   := $(shell find tests/ui -name '*.cpp' 2>/dev/null)
 XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
 
 OBJDIR := build/
@@ -626,7 +622,7 @@ XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUZZ_OBJS       := $(call obj,$(XUZZ_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
-ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
+UI_TEST_OBJS    := $(call obj,$(UI_TEST_SRCS))
 XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
@@ -701,7 +697,7 @@ endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
-	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
+	$(UI_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) \
 	$(UI_TEXT_BASELINE_OBJS))
@@ -738,7 +734,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test ui_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -753,7 +749,7 @@ $(CHOREOGRAPH_OBJS): CXXFLAGS := $(filter-out -Werror, $(CXXFLAGS))
 
 $(ALL_OBJS): | $(ALL_OBJ_DIRS)
 $(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
-$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(ZIGZAG_TEST_OBJS) $(XUZZ_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
+$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(UI_TEST_OBJS) $(XUZZ_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
 MKCFG = $(SED) 's/\@\@VERS\@\@/$(VERS)/'
@@ -844,7 +840,6 @@ $(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
 	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
-ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag
@@ -876,7 +871,7 @@ sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-.PHONY: gleditor_test xudu_test xuzz_test zigzag_test
+.PHONY: gleditor_test xudu_test xuzz_test ui_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -899,9 +894,11 @@ xuzz_test: $(OBJDIR)/xuzz_test
 $(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(OBJDIR)/src/ui/focus_manager.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
-zigzag_test: $(OBJDIR)/zigzag_test
-$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
+# The binary for what draws or takes input: apps/common/ui/ over the engine
+# and the library, so unlike xudu_test and xuzz_test it links both.
+ui_test: $(OBJDIR)/ui_test
+$(OBJDIR)/ui_test: $(UI_TEST_OBJS) $(XUDU_CORE_OBJS) $(COMMON_UI_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS) $(TEST_LIBS)
 
 
 # Fuzzing needs its own copy of the engine, built with the sanitizers. Linking
@@ -1105,11 +1102,11 @@ TEST_PROGRAMS := $(addprefix $(OBJDIR)/,gleditor xudu xuzz zigzag xudu-dump \
 	xudu-swarm-peer vquery vpl vplc vprolog)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test
+test: $(TEST_PROGRAMS) $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/ui_test
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
-	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	$(OBJDIR)/ui_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|PublicationOutboxNetwork|\*'; then \
 		tools/swarm-netns-test.sh && \
 		XUDU_SWARM_TEST_FILTER='PublicationOutboxNetworkTest.*' tools/swarm-netns-test.sh; \
@@ -1425,9 +1422,9 @@ analyze: tidy scan-build
 check: format-check lint analyze
 .PHONY: check
 
-clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test w:xuzz w:xuzz_test w:zigzag w:zigzag_test
+clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test w:xuzz w:xuzz_test w:zigzag w:ui_test
 clean:
-	@$(RM) -rf gleditor gleditor_test xudu xudu_test xuzz xuzz_test zigzag zigzag_test build
+	@$(RM) -rf gleditor gleditor_test xudu xudu_test xuzz xuzz_test zigzag ui_test build
 
 # -- installation -------------------------------------------------------------
 

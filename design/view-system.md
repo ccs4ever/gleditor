@@ -2823,18 +2823,18 @@ ______________________________________________________________________
 
 A test sits with the code it tests and nothing is tested twice (V-R48).
 
-| Code                                                                                   | Test binary                                                                   | Directory             | Links                             |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------- | --------------------------------- |
-| library: unprojection, regions, `PlaneSet`, page matrices, `PaneTree`, `insideFrustum` | `gleditor_test`                                                               | `tests/lib/`          | the library only                  |
-| view framework and built-in views (engine)                                             | `xuzz_test`                                                                   | `tests/xuzz/`         | the engine; no library, no device |
-| presenter, host, chrome, commands                                                      | the binary that links `apps/common/ui/` and the library (`zigzag_test` today) | `tests/zigzag/` today | both                              |
+| Code                                                                                   | Test binary     | Directory     | Links                             |
+| -------------------------------------------------------------------------------------- | --------------- | ------------- | --------------------------------- |
+| library: unprojection, regions, `PlaneSet`, page matrices, `PaneTree`, `insideFrustum` | `gleditor_test` | `tests/lib/`  | the library only                  |
+| view framework and built-in views (engine)                                             | `xuzz_test`     | `tests/xuzz/` | the engine; no library, no device |
+| presenter, host, chrome, commands                                                      | `ui_test`       | `tests/ui/`   | both                              |
 
 `xuzz_test` holds xuzz's own code and no more. A view test supplies a fixed measurer and asserts on
 records; it does not sweep fonts, scales or backends, because fitting, shaping, projection, focus
 and clipping are the library's and are swept in `tests/lib/`. A presenter test asserts that the
 right library calls are made with the right boxes and roles, on one font and one size; it does not
-re-prove that `text::fit()` fits. With `apps/zigzag/` gone the third binary's name and directory no
-longer describe it; renaming them is VU6.
+re-prove that `text::fit()` fits. The third binary was `zigzag_test` in `tests/zigzag/` until
+`apps/zigzag/` was emptied; it is now `ui_test` in `tests/ui/` (VU6).
 
 ### 16.2 What is tested
 
@@ -3359,3 +3359,4 @@ ______________________________________________________________________
   operation (§7.3, VU12).
 - 2026-10-07 — Step 1's destinations corrected: nothing from `apps/xudu/` or `apps/zigzag/` can go
   to the engine. An implementation plan now orders the work and lists the amendments still to make.
+- 2026-10-08 — §16.1: the third test binary is `ui_test` in `tests/ui/` (VU6), renamed by A2.

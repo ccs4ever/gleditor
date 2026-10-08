@@ -1786,7 +1786,7 @@ came back byte-identical across every regenerated fixture.
    `ZzStructureDocument` and `zigzag::Cell` survive, demoted in their doc comments to the YAML DTO.
 
    **The two conversions have landed**, in `zz_xudu_projector.{hpp,cpp}` with five tests in
-   `tests/zigzag/test_xudu_convergence.cpp`. The heuristic and the synthetic scroll are still there;
+   `tests/ui/test_xudu_convergence.cpp`. The heuristic and the synthetic scroll are still there;
    this is the half that unblocks everything else.
 
    **The scope ruling that made this straightforward, recorded because it is a project fact and not
