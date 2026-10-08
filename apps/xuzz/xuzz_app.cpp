@@ -140,6 +140,11 @@ void applyKeymap(
             }
           },
           combo->first, combo->second);
+      // Registered after the start-up pass that scopes every built-in
+      // command, so it must take its scope here: left unscoped, a pane's
+      // action such as std:zigzag/save_store competes with the global one on
+      // its chord, and the global one wins even in that pane.
+      commands.setScope(act, std::string(xanadu::keymapScope(act)));
       GLEDITOR_LOG_DEBUG("xuzz.keymap", "dynamically registered {} bound to {}",
                          act, comboStr);
     } else {

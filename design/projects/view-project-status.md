@@ -60,11 +60,19 @@ changed.
 
 ## Next
 
-1. **The baseline reds** (below): settle the keymap clash first, since it may be real.
+1. **The remaining baseline reds** (below): the two E2E rendering tests and the inline-box advance,
+   which the store panel's cause makes worth re-reading as possible layout bugs rather than fonts.
 1. **The `config.h` race** (below), as its own commit.
 1. **M1**: the spikes, through spike runners. S1, S4, S5, S2 and S3 are engine-only and can run now.
    R1 to R5 can measure OpenGL and GLES headless; Vulkan needs `xvfb-run` or an SDL3 build here. V1
    and V2 also need the frame inspector.
+
+## Fixed along the way
+
+| Commit      | What                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `61c5b95`   | The store panel budgeted its button rows with the exact padding, but the layout rounds box edges to whole pixels; at a fractional padding a row came out a pixel too wide and its last button was laid out zero pixels tall. Not a font problem: it failed for every family. Fixed `StoreObjectManagerOverlayTest.FittedRows…` and `E2EBinaryOrchestrationTest.storePanelCreates…`.                      |
+| this commit | Keymap actions only the slice presentation knows were registered unscoped, after the start-up pass that scopes built-in commands, so `std:zigzag/save_store` lost Ctrl+Shift+S to the global `std:xudu/publish` even in the ZigZag pane: the chord published. The "same key" warning was true. New test `E2EBinaryOrchestrationTest.aPaneChordIsNotTakenByTheGlobalOneOnItsKey`, failing before the fix. |
 
 ## Baseline
 
@@ -87,18 +95,17 @@ fails at its E2E stage on the three E2E reds below.
 
 ### Known reds, not this project's
 
-The six without "(sometimes)" reproduce alone, without any concurrent run.
+The four without "(sometimes)" reproduce alone, without any concurrent run. Two more were on this
+list and are fixed (see "Fixed along the way").
 
-| Test                                                                           | Failure                                           | Suspected cause                                                                                                             |
-| ------------------------------------------------------------------------------ | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs`              | advance off by 0.77 px against a 0.5 px tolerance | installed fonts: here `Monospace` is DejaVu Sans Mono and `Sans` is Inter                                                   |
-| `StoreObjectManagerOverlayTest.FittedRowsShareSafeGeometryAndFullLabels`       | a control's fitted label has no glyphs            | fonts, unconfirmed                                                                                                          |
-| `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`                              | 5.4 µs against 3.96 µs at 500 operations          | a microsecond timing assertion                                                                                              |
-| `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` (sometimes)             | a speedup assertion at millisecond scale          | timing; failed under `make -k test`, passed alone                                                                           |
-| `VortexBenchmarkTest.MemoizedVsUnmemoizedExecution` (sometimes)                | a speedup assertion                               | timing; failed under `make -k test`, passed alone                                                                           |
-| `E2EBinaryOrchestrationTest.textSurvivesAtWholePageDistance`                   | 72 inked pixels, at least 100 expected            | fonts, unconfirmed                                                                                                          |
-| `E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped`            | the dropped text lands at the wrong offset        | glyph metrics, unconfirmed                                                                                                  |
-| `E2EBinaryOrchestrationTest.storePanelCreatesObjectsThroughNamedDrawnControls` | `xuzz` exits 1                                    | unknown; the log warns that `std:xudu/publish` and `std:zigzag/save_store` share a key, which may be a real keymap conflict |
+| Test                                                                | Failure                                           | Suspected cause                                                           |
+| ------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------- |
+| `TextLayoutTest.InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs`   | advance off by 0.77 px against a 0.5 px tolerance | installed fonts: here `Monospace` is DejaVu Sans Mono and `Sans` is Inter |
+| `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`                   | 5.4 µs against 3.96 µs at 500 operations          | a microsecond timing assertion                                            |
+| `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` (sometimes)  | a speedup assertion at millisecond scale          | timing; failed under `make -k test`, passed alone                         |
+| `VortexBenchmarkTest.MemoizedVsUnmemoizedExecution` (sometimes)     | a speedup assertion                               | timing; failed under `make -k test`, passed alone                         |
+| `E2EBinaryOrchestrationTest.textSurvivesAtWholePageDistance`        | 72 inked pixels, at least 100 expected            | fonts, unconfirmed                                                        |
+| `E2EBinaryOrchestrationTest.aDraggedSelectionLandsWhereItIsDropped` | the dropped text lands at the wrong offset        | glyph metrics, unconfirmed                                                |
 
 Forcing other fonts through a private `FONTCONFIG_FILE` did not take effect, so the font cause is
 not yet shown.

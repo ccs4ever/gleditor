@@ -34,6 +34,7 @@
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/version.hpp"
@@ -1178,6 +1179,63 @@ TEST(E2EBinaryOrchestrationTest,
                                [](const auto &birth) { return birth.kind; }),
             1);
   EXPECT_EQ(after.textOf(after.headOfStructure(birthIndex), birthIndex), text);
+}
+
+// The default keymap puts a pane's action and a global one on the same chord
+// in different scopes. An action only the slice presentation knows is
+// registered while the keymap is read, after the built-in commands were
+// scoped; registered unscoped, it lost its chord to the global action even in
+// its own pane. GNUPGHOME names an empty keyring, so a publish that does run
+// fails loudly here rather than signing with whoever's key is at hand.
+TEST(E2EBinaryOrchestrationTest, aPaneChordIsNotTakenByTheGlobalOneOnItsKey) {
+  const auto defaultChord = [](std::string_view action) {
+    for (const auto &spec :
+         xanadu::defaultSettingSpecs(xanadu::SystemDocKind::Keymap))
+      if (spec.name == action)
+        return std::get<std::string>(
+            spec.schemas.front().defaultValues.front());
+    return std::string{};
+  };
+  const auto save    = xanadu::settings::kKeymapSaveStore;
+  const auto publish = xanadu::settings::kKeymapPublish;
+  const auto chord   = defaultChord(save);
+  ASSERT_FALSE(chord.empty());
+  ASSERT_EQ(chord, defaultChord(publish))
+      << "the defaults no longer share a "
+         "chord, so this test proves nothing";
+  ASSERT_NE(xanadu::keymapScope(save), xanadu::keymapScope(publish));
+
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root = workspaceRoot() / "integration_workspace_scoped_chord";
+  fs::remove_all(root);
+  fs::create_directories(root / "gnupg");
+  fs::permissions(root / "gnupg", fs::perms::owner_all);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  Store original(permascrollAt(scroll));
+  std::ignore = original.insert({}, 0, "A document behind the slice pane.");
+  original.save(path.string());
+  const auto run = [&](const std::string &steps) {
+    return executeProcess("GNUPGHOME=" + (root / "gnupg").string() +
+                          " XDG_CONFIG_HOME=" + (root / "config").string() +
+                          " XDG_DATA_HOME=" + (root / "data").string() +
+                          " timeout 120 " + binary.string() +
+                          permascrollFlag(scroll) + " --backend " +
+                          activeBackend() + " --profile" + steps + " --chord " +
+                          chord + " --do std:xudu/quit " + path.string());
+  };
+
+  const auto inSlice = run(" --do std:xuzz/focus_toggle");
+  ASSERT_EQ(inSlice.exitCode, 0) << inSlice.output;
+  EXPECT_THAT(inSlice.output,
+              testing::Not(testing::HasSubstr("are on the same key")));
+  EXPECT_THAT(inSlice.output,
+              testing::Not(testing::HasSubstr("No signing key")));
+
+  // The same chord from the document still publishes.
+  const auto inDocument = run("");
+  EXPECT_THAT(inDocument.output, testing::HasSubstr("No signing key"));
 }
 
 TEST(E2EBinaryOrchestrationTest,
