@@ -501,3 +501,6 @@ capture under SDL2 still wants `xvfb-run`).
   parent planes and soft bands (§5).
 - 2026-10-07 — No sentinels, chaining setters and `function_ref` visitors throughout; a page pose
   can carry a band, so a page can be shown as a window round a passage.
+- 2026-10-08 — Step 1 built (L1): §2.1 as written, in `spatial.hpp`, tested by
+  `tests/lib/spatial_unproject_test.cpp`. The sub-viewport case compares a pane's camera with the
+  off-centre frustum (`glm::frustum`) that the same camera is when seen from the whole target.
