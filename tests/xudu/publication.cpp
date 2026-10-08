@@ -70,6 +70,44 @@ MicroversionId quoting(xanadu::Store &store, const Scroll &scroll,
   return store.transcludeExternal(MicroversionId{}, 0, scroll, from, length);
 }
 
+TEST(PublicationTest,
+     carriedRunPreservesGlobalAddressesAcrossConflictingSlots) {
+  const auto alice = xanadu::createMutableKeys();
+  auto shared      = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store source(shared), destination(shared);
+  const auto research   = namedScroll(alice.publicKey, "research", 100);
+  const auto words      = namedScroll(alice.publicKey, "permascroll", 100);
+  const auto researchId = source.addScroll(research);
+  const auto wordsId    = source.addScroll(words);
+  destination.addScroll(words);
+  destination.addScroll(namedScroll(alice.publicKey, "unrelated", 100));
+  const std::vector<xanadu::PrimediaSpan> selected{
+      {researchId, 8, 7}, {wordsId, 31, 9}, {researchId, 52, 4}};
+  const auto before  = source.opCount();
+  const auto carried = xanadu::carrySpans(source, destination, selected);
+  ASSERT_TRUE(carried) << carried.error();
+  ASSERT_EQ(carried->size(), selected.size());
+  EXPECT_NE((*carried)[0].scroll, selected[0].scroll);
+  for (std::size_t i = 0; i < selected.size(); ++i)
+    EXPECT_EQ(xanadu::globalise(source, selected[i]),
+              xanadu::globalise(destination, (*carried)[i]));
+  EXPECT_EQ(source.opCount(), before);
+  EXPECT_EQ(destination.userPermascroll().spool().size(), 0U);
+}
+
+TEST(PublicationTest, unreachableRunRefusesBeforeRegisteringOrWriting) {
+  const auto alice = xanadu::createMutableKeys();
+  xanadu::Store source, destination;
+  const auto id =
+      source.addScroll(namedScroll(alice.publicKey, "research", 100));
+  const std::vector<xanadu::PrimediaSpan> selected{{id, 4, 8}, {0, 0, 2}};
+  const auto carried = xanadu::carrySpans(source, destination, selected);
+  ASSERT_FALSE(carried);
+  EXPECT_TRUE(destination.scrolls().empty());
+  EXPECT_EQ(destination.opCount(), 0U);
+  EXPECT_EQ(destination.userPermascroll().spool().size(), 0U);
+}
+
 TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
   const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);

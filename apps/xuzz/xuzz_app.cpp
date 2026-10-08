@@ -636,6 +636,11 @@ int XuzzApp::run(const int argc, char **argv) {
     return false;
   };
 
+  pouchDrawer.setUseHandler([&views,
+                             &pouchDrawer](const xanadu::PouchItem &item) {
+    views.transcludeSpansAtCaret({item.span}, pouchDrawer.manager().store());
+  });
+
   pouchDrawer.setSwingBackHandler(
       [&views](const xanadu::PouchItem &item) { views.swingBackToSpan(item); });
 
@@ -1439,13 +1444,15 @@ int XuzzApp::run(const int argc, char **argv) {
   };
 
   state->mouseDownHandler =
-      [&kineticTetherEngine, &session, renderer, state, zigzagPresentation](
-          const int mx, const int my, const std::uint8_t button) -> bool {
+      [&kineticTetherEngine, &session, renderer, state, zigzagPresentation,
+       &zigzagStoreIndex](const int mx, const int my,
+                          const std::uint8_t button) -> bool {
     if (button != 1 || 0 == (SDL_GetModState() & SDL_KMOD_ALT)) {
       return false;
     }
     renderer->runWithState([&kineticTetherEngine, &session, renderer, mx, my,
-                            state, zigzagPresentation](RenderState &) {
+                            state, zigzagPresentation,
+                            &zigzagStoreIndex](RenderState &) {
       const auto screenX = static_cast<float>(mx);
       const auto screenY = static_cast<float>(state->view.screenHeight - my);
       if (!renderer->lastPick || !renderer->lastPick->semanticTarget ||
@@ -1462,19 +1469,19 @@ int XuzzApp::run(const int argc, char **argv) {
       if (spans.empty()) {
         return;
       }
-      const auto &bridgeStore = session->store(0);
+      const auto &bridgeStore = session->store(zigzagStoreIndex);
       kineticTetherEngine.startDrag(
           xanadu::TetherPayload{
               .span            = spans.front(),
               .previewText     = manifold.textOf(cellRef, bridgeStore),
-              .originVersion   = bridgeStore.primaryCurrentVersion(),
+              .originVersion   = zigzagPresentation->sliceHead(),
               .originDocIndex  = 0,
               .originCharStart = 0,
               .originCharEnd = static_cast<std::uint32_t>(spans.front().length),
               .originScreenPos  = glm::vec2(screenX, screenY),
               .originKind       = xanadu::PouchOriginKind::ZigzagCell,
               .originCell       = cellRef,
-              .originSliceIndex = 0,
+              .originSliceIndex = static_cast<std::uint32_t>(zigzagStoreIndex),
               .originRankCoord  = "d.1: #" + std::to_string(cellRef),
               .originOpRef      = std::nullopt,
               .originDocState   = std::nullopt,
@@ -2225,51 +2232,11 @@ int XuzzApp::run(const int argc, char **argv) {
 
   const auto dropSelectionToBench = [&views, &pouchDrawer,
                                      &session](const bool isLeft) {
-    views.withCaret(
-        [&pouchDrawer, &session,
-         isLeft](RenderState &, const xanadu::Views::Where &where, Caret *) {
-          if (!where.hasRange) {
-            std::cout << "xuzz: select text to drop onto bench first\n";
-            return;
-          }
-          const auto docIdx   = where.doc;
-          const auto storeIdx = session->storeIndexOf(docIdx);
-          const auto ver      = session->versionOf(docIdx);
-          const auto spans    = session->store(storeIdx).rebuild(ver).spansFor(
-              where.start, where.end - where.start);
-          if (spans.empty()) {
-            return;
-          }
-          const auto text    = session->store(storeIdx).textOf(ver);
-          const auto preview = text.substr(
-              where.start, std::min<std::size_t>(where.end - where.start, 64));
-          xanadu::PouchItem item;
-          item.itemId          = 0;
-          item.span            = spans.front();
-          item.previewText     = preview;
-          item.originVersion   = ver;
-          item.originDocIndex  = docIdx;
-          item.originCharStart = where.start;
-          item.originCharEnd   = where.end;
-          if (isLeft) {
-            pouchDrawer.forge().dropLeft(std::move(item));
-            std::cout << "xuzz: dropped span onto clasp left bench: '"
-                      << preview << "'\n";
-          } else {
-            pouchDrawer.forge().dropRight(std::move(item));
-            std::cout << "xuzz: dropped span onto clasp right bench: '"
-                      << preview << "'\n";
-          }
-        });
-  };
-
-  const auto dropSelectionToZone = [&views, &pouchDrawer,
-                                    &session](const std::string_view zoneId) {
     views.withCaret([&pouchDrawer, &session,
-                     zoneId](RenderState &, const xanadu::Views::Where &where,
+                     isLeft](RenderState &, const xanadu::Views::Where &where,
                              Caret *) {
       if (!where.hasRange) {
-        std::cout << "xuzz: select text to drop into pouch first\n";
+        std::cout << "xuzz: select text to drop onto bench first\n";
         return;
       }
       const auto docIdx   = where.doc;
@@ -2280,14 +2247,67 @@ int XuzzApp::run(const int argc, char **argv) {
       if (spans.empty()) {
         return;
       }
-      const auto text    = session->store(storeIdx).textOf(ver);
-      const auto preview = text.substr(
-          where.start, std::min<std::size_t>(where.end - where.start, 64));
-      const auto item = pouchDrawer.manager().dropSpan(
-          zoneId, spans.front(), preview, ver, docIdx, where.start, where.end);
-      std::cout << "xuzz: dropped span into pouch zone '" << zoneId
-                << "' (item " << item.itemId << ")\n";
+      const auto carried = xanadu::carrySpans(
+          session->store(storeIdx), pouchDrawer.manager().store(), spans);
+      if (!carried) {
+        std::cout << "xuzz: " << carried.error() << "\n";
+        return;
+      }
+      auto start      = where.start;
+      const auto text = session->store(storeIdx).textOf(ver);
+      for (const auto &span : *carried) {
+        xanadu::PouchItem item;
+        item.span            = span;
+        item.previewText     = text.substr(start, span.length);
+        item.originVersion   = ver;
+        item.originDocIndex  = docIdx;
+        item.originCharStart = start;
+        start += static_cast<std::uint32_t>(span.length);
+        item.originCharEnd = start;
+        if (isLeft)
+          pouchDrawer.forge().dropLeft(std::move(item));
+        else
+          pouchDrawer.forge().dropRight(std::move(item));
+      }
+      std::cout << "xuzz: dropped " << carried->size() << " spans onto clasp "
+                << (isLeft ? "left" : "right") << " bench\n";
     });
+  };
+
+  const auto dropSelectionToZone = [&views, &pouchDrawer,
+                                    &session](const std::string_view zoneId) {
+    views.withCaret(
+        [&pouchDrawer, &session,
+         zoneId](RenderState &, const xanadu::Views::Where &where, Caret *) {
+          if (!where.hasRange) {
+            std::cout << "xuzz: select text to drop into pouch first\n";
+            return;
+          }
+          const auto docIdx   = where.doc;
+          const auto storeIdx = session->storeIndexOf(docIdx);
+          const auto ver      = session->versionOf(docIdx);
+          const auto spans    = session->store(storeIdx).rebuild(ver).spansFor(
+              where.start, where.end - where.start);
+          if (spans.empty()) {
+            return;
+          }
+          const auto carried = xanadu::carrySpans(
+              session->store(storeIdx), pouchDrawer.manager().store(), spans);
+          if (!carried) {
+            std::cout << "xuzz: " << carried.error() << "\n";
+            return;
+          }
+          const auto text = session->store(storeIdx).textOf(ver);
+          auto start      = where.start;
+          for (const auto &span : *carried) {
+            const auto item = pouchDrawer.manager().dropSpan(
+                zoneId, span, text.substr(start, span.length), ver, docIdx,
+                start, start + static_cast<std::uint32_t>(span.length));
+            start += static_cast<std::uint32_t>(span.length);
+            std::cout << "xuzz: dropped span into pouch zone '" << zoneId
+                      << "' (item " << item.itemId << ")\n";
+          }
+        });
   };
 
   app.commands().registerAction(
@@ -2354,7 +2374,8 @@ int XuzzApp::run(const int argc, char **argv) {
                            caret->documentIndex() < session->views().size())
                               ? caret->documentIndex()
                               : 0U;
-      if (pouchDrawer.forge().forge(*session, docIdx)) {
+      if (pouchDrawer.forge().forge(*session, docIdx,
+                                    pouchDrawer.manager().store())) {
         std::cout << "xuzz: forged clasp link on active document " << docIdx
                   << "\n";
       }
@@ -2512,14 +2533,16 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapLinkAddCell),
       "add the focused cell to the pending document link",
-      [&renderer, &views, &bridgeCoordinator, zigzagPresentation] {
-        renderer->runWithState(
-            [&views, &bridgeCoordinator, zigzagPresentation](RenderState &) {
-              const auto *manifold = bridgeCoordinator.manifold();
-              const auto cell      = zigzagPresentation->focusCell();
-              if (manifold == nullptr || cell == zigzag::noCell) return;
-              views.addCellToPendingLink(manifold->contentOf(cell));
-            });
+      [&renderer, &views, &zigzagStoreIndex, &bridgeCoordinator,
+       zigzagPresentation] {
+        renderer->runWithState([&views, &zigzagStoreIndex, &bridgeCoordinator,
+                                zigzagPresentation](RenderState &) {
+          const auto *manifold = bridgeCoordinator.manifold();
+          const auto cell      = zigzagPresentation->focusCell();
+          if (manifold == nullptr || cell == zigzag::noCell) return;
+          views.addCellToPendingLink(manifold->contentOf(cell),
+                                     zigzagStoreIndex);
+        });
       });
 
   app.commands().registerAction(
@@ -2533,9 +2556,10 @@ int XuzzApp::run(const int argc, char **argv) {
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapTranscludeCellToDoc),
       "transclude the focused cell content at the document caret",
-      [&renderer, &views, &bridgeCoordinator, zigzagPresentation,
-       &quotedCellSpans] {
-        renderer->runWithState([&views, &bridgeCoordinator, zigzagPresentation,
+      [&renderer, &views, &session, &zigzagStoreIndex, &bridgeCoordinator,
+       zigzagPresentation, &quotedCellSpans] {
+        renderer->runWithState([&views, &session, &zigzagStoreIndex,
+                                &bridgeCoordinator, zigzagPresentation,
                                 &quotedCellSpans](RenderState &) {
           const auto *manifold = bridgeCoordinator.manifold();
           const auto cell      = zigzagPresentation->focusCell();
@@ -2547,7 +2571,8 @@ int XuzzApp::run(const int argc, char **argv) {
             return;
           }
           quotedCellSpans.assign(content.begin(), content.end());
-          views.transcludeSpansAtCaret(quotedCellSpans);
+          views.transcludeSpansAtCaret(quotedCellSpans,
+                                       session->store(zigzagStoreIndex));
         });
       });
 

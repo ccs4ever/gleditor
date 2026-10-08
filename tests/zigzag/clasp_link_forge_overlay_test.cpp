@@ -222,7 +222,7 @@ TEST(ClaspLinkForgeTest, forgePreservesEveryEndsetSpanTypeAndTier) {
       {.version = version, .pieces = store.rebuild(version)});
   const auto text = store.rebuild(version);
   xanadu::LinkForgeWidget forge;
-  EXPECT_FALSE(forge.forge(session, 0));
+  EXPECT_FALSE(forge.forge(session, 0, store));
   for (const auto &span : text.spansFor(0, 4)) forge.dropLeft({.span = span});
   for (const auto &span : text.spansFor(5, 6)) forge.dropLeft({.span = span});
   for (const auto &span : text.spansFor(12, 5)) forge.dropRight({.span = span});
@@ -230,7 +230,7 @@ TEST(ClaspLinkForgeTest, forgePreservesEveryEndsetSpanTypeAndTier) {
   forge.setProminenceTier(xanadu::ProminenceTier::Curated);
   const auto left  = forge.leftSpans().size();
   const auto right = forge.rightSpans().size();
-  ASSERT_TRUE(forge.forge(session, 0));
+  ASSERT_TRUE(forge.forge(session, 0, store));
   ASSERT_EQ(store.linkView().size(), 1U);
   const auto &link = *store.linkView().begin();
   EXPECT_EQ(link.type, xanadu::LinkType::Disagreement);

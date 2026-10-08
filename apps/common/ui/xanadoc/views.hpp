@@ -136,7 +136,8 @@ public:
   void linkSelection();
   void cancelLink();
 
-  void addCellToPendingLink(std::span<const PrimediaSpan> content);
+  void addCellToPendingLink(std::span<const PrimediaSpan> content,
+                            std::size_t sourceStoreIndex);
   void finishCellLink();
 
   void publishCurrent(const std::string &salt);
@@ -169,7 +170,8 @@ public:
   }
 
   void insertSpanAtCaret(const PrimediaSpan &span);
-  void transcludeSpansAtCaret(std::vector<PrimediaSpan> spans);
+  void transcludeSpansAtCaret(std::vector<PrimediaSpan> spans,
+                              const Store &source);
   void insertSpanAt(RenderState &rState, std::uint32_t doc, std::uint32_t at,
                     const PrimediaSpan &span);
 
@@ -228,6 +230,7 @@ public:
 private:
   struct Pending {
     std::uint32_t doc{};
+    std::size_t storeIndex{};
     std::uint32_t start{};
     std::uint32_t end{};
     std::vector<xanadu::PrimediaSpan> spans;

@@ -411,6 +411,19 @@ descriptor pools, fence-based resource retirement and queued callback picking. A
 cases now pass on each backend, and screenshot checks pass with their existing tolerances. Author
 edition decisions are unchanged.
 
+## Commentary quotation prerequisites (2026-10-08)
+
+The pouch's visible Insert action now reaches the active commentary caret. Keyboard staging keeps
+all selection runs and translates source spans through the pouch into the destination's scroll
+table. The drawn forge authors in the active commentary; document/cell link and quotation paths
+carry explicit source stores. Whole-run preflight refuses unreachable local-author addresses before
+writing destination operations. Author editions and formats are unchanged.
+
+[The commentary validation report](ux_publication_commentary_validation_2026-10-08.md) records
+signed cached-fixture interaction, saved global-address checks and independently reviewed captures.
+Carrier retention across restart, pointer/F9/origin-navigation paths and populated-bench legibility
+remain gaps. This prerequisite is not a complete P4/P5 or P1–P7 acceptance pass.
+
 ## Remaining work
 
 Investigate the

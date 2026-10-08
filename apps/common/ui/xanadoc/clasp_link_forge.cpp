@@ -119,8 +119,9 @@ bool LinkForgeWidget::containsRight(const float screenX,
 }
 
 bool LinkForgeWidget::forge(Session &session,
-                            const std::uint32_t activeDocIndex) {
-  if (!canForge()) {
+                            const std::uint32_t activeDocIndex,
+                            const Store &source) {
+  if (!canForge() || activeDocIndex >= session.views().size()) {
     return false;
   }
 
@@ -139,6 +140,16 @@ bool LinkForgeWidget::forge(Session &session,
     link.right.push_back(item.span);
   }
 
+  auto &destination = session.store(session.storeIndexOf(activeDocIndex));
+  // Preflight both sides together before carrying either: failed references
+  // keep the bench intact and mint no partially authored link.
+  auto all = link.left;
+  all.insert(all.end(), link.right.begin(), link.right.end());
+  const auto carried = carrySpans(source, destination, all);
+  if (!carried) return false;
+  const auto split = carried->begin() + link.left.size();
+  link.left.assign(carried->begin(), split);
+  link.right.assign(split, carried->end());
   session.addLink(activeDocIndex, std::move(link));
   clearLeft();
   clearRight();
@@ -147,7 +158,8 @@ bool LinkForgeWidget::forge(Session &session,
 }
 
 bool LinkForgeWidget::picked(const std::uint32_t tag, Session &session,
-                             const std::uint32_t activeDocIndex) {
+                             const std::optional<std::uint32_t> activeDocIndex,
+                             const Store &source) {
   switch (tag) {
   case kTagClaspTypeSelector:
     cycleType();
@@ -162,7 +174,7 @@ bool LinkForgeWidget::picked(const std::uint32_t tag, Session &session,
     clearRight();
     return true;
   case kTagClaspForgeButton:
-    return forge(session, activeDocIndex);
+    return activeDocIndex && forge(session, *activeDocIndex, source);
   default:
     return false;
   }

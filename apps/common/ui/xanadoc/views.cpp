@@ -620,10 +620,11 @@ void Views::linkSelection() {
         where.start, where.end - where.start);
 
     if (!pending) {
-      pending = Pending{.doc   = where.doc,
-                        .start = where.start,
-                        .end   = where.end,
-                        .spans = std::move(spans)};
+      pending = Pending{.doc        = where.doc,
+                        .storeIndex = sIdx,
+                        .start      = where.start,
+                        .end        = where.end,
+                        .spans      = std::move(spans)};
       std::cout << "xudu: xanalink from doc " << where.doc << " ["
                 << where.start << "," << where.end
                 << ") -- select the other end and press ctrl-l again\n";
@@ -631,9 +632,16 @@ void Views::linkSelection() {
     }
 
     xanadu::Link link;
-    link.type        = xanadu::LinkType::Comment;
-    link.owner       = "you";
-    link.left        = std::move(pending->spans);
+    link.type       = xanadu::LinkType::Comment;
+    link.owner      = "you";
+    const auto left = carrySpans(session.store(pending->storeIndex),
+                                 session.store(sIdx), pending->spans);
+    if (!left) {
+      state->showDialog(render::DiagnosticSeverity::Warning,
+                        "Link source unavailable", left.error());
+      return;
+    }
+    link.left        = *left;
     link.right       = std::move(spans);
     const auto after = session.addLink(where.doc, link);
     std::cout << "xudu: link doc " << pending->doc << " [" << pending->start
@@ -656,7 +664,8 @@ void Views::cancelLink() {
   });
 }
 
-void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content) {
+void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content,
+                                 const std::size_t sourceStoreIndex) {
   if (!pending) {
     std::cout << "xudu: select a document passage with Ctrl+L first\n";
     return;
@@ -665,13 +674,26 @@ void Views::addCellToPendingLink(const std::span<const PrimediaSpan> content) {
     std::cout << "xudu: focused cell has no content to link\n";
     return;
   }
-  pending->right.insert(pending->right.end(), content.begin(), content.end());
+  const auto carried = carrySpans(session.store(sourceStoreIndex),
+                                  session.store(pending->storeIndex), content);
+  if (!carried) {
+    state->showDialog(render::DiagnosticSeverity::Warning,
+                      "Link source unavailable", carried.error());
+    return;
+  }
+  pending->right.insert(pending->right.end(), carried->begin(), carried->end());
   ++pending->rightCells;
   std::cout << "xudu: added cell " << pending->rightCells
             << " to the pending link; choose another or finish the link\n";
 }
 
 void Views::finishCellLink() {
+  if (pending && (pending->doc >= session.views().size() ||
+                  session.storeIndexOf(pending->doc) != pending->storeIndex)) {
+    pending.reset();
+    std::cout << "xudu: link destination was closed; begin a new link\n";
+    return;
+  }
   if (!pending || pending->right.empty()) {
     std::cout << "xudu: select a passage and add at least one cell first\n";
     return;
@@ -681,7 +703,7 @@ void Views::finishCellLink() {
   link.owner       = "you";
   link.left        = std::move(pending->spans);
   link.right       = std::move(pending->right);
-  const auto after = session.addLink(0, std::move(link));
+  const auto after = session.addLink(pending->doc, std::move(link));
   std::cout << "xudu: linked document passage to " << pending->rightCells
             << " cell(s) at " << after.str() << "\n";
   pending.reset();
@@ -1046,6 +1068,7 @@ void Views::closeDocument(const std::uint32_t docIndex) {
   session.flushUncommitted(docIndex);
   renderer->push(RenderItemCloseDoc(docIndex));
   renderer->runWithState([this, docIndex](RenderState &rState) {
+    pending.reset();
     session.viewClosed(docIndex);
     if (!session.views().empty()) {
       map.setCurrent(session.views().front().version);
@@ -1568,11 +1591,19 @@ void Views::insertSpanAtCaret(const PrimediaSpan &span) {
   });
 }
 
-void Views::transcludeSpansAtCaret(std::vector<PrimediaSpan> spans) {
-  withCaret([this, spans = std::move(spans)](RenderState &rState,
-                                             const Where &where, Caret *) {
+void Views::transcludeSpansAtCaret(std::vector<PrimediaSpan> spans,
+                                   const Store &source) {
+  withCaret([this, source = &source, spans = std::move(spans)](
+                RenderState &rState, const Where &where, Caret *) {
+    const auto carried = carrySpans(
+        *source, session.store(session.storeIndexOf(where.doc)), spans);
+    if (!carried) {
+      state->showDialog(render::DiagnosticSeverity::Warning,
+                        "Quotation source unavailable", carried.error());
+      return;
+    }
     auto at = where.start;
-    for (const auto &span : spans) {
+    for (const auto &span : *carried) {
       insertSpanAt(rState, where.doc, at, span);
       at += static_cast<std::uint32_t>(span.length);
     }

@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -82,7 +83,7 @@ public:
                                       const gleditor::ui::Theme &,
                                       bool compact = false) const;
   bool picked(std::uint32_t tag, Session &session,
-              std::uint32_t activeDocIndex);
+              std::optional<std::uint32_t> activeDocIndex, const Store &source);
 
   void dropLeft(PouchItem item);
   void dropRight(PouchItem item);
@@ -113,7 +114,8 @@ public:
   [[nodiscard]] bool canForge() const noexcept {
     return !leftSpans_.empty() && !rightSpans_.empty();
   }
-  bool forge(Session &session, std::uint32_t activeDocIndex);
+  bool forge(Session &session, std::uint32_t activeDocIndex,
+             const Store &source);
 
   [[nodiscard]] bool containsLeft(float screenX, float screenY) const noexcept;
   [[nodiscard]] bool containsRight(float screenX, float screenY) const noexcept;

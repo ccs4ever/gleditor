@@ -14,6 +14,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 
 #include <gleditor/render/types.hpp>
+#include <gleditor/render_state.hpp>
 
 #include "common/xanadu/system_docs.hpp"
 
@@ -365,10 +366,14 @@ bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
                                   const std::uint32_t charStart,
                                   const std::uint32_t charEnd) {
   const std::scoped_lock lock(guard_);
-  if (!isOpen_) return false;
+  if (!isOpen_ || docIndex >= session_.views().size()) return false;
+  const auto carried =
+      carrySpan(session_.store(session_.storeIndexOf(docIndex)),
+                pouchManager_.store(), span);
+  if (!carried) return false;
   PouchItem item{
       .itemId          = 0,
-      .span            = span,
+      .span            = *carried,
       .previewText     = preview,
       .originVersion   = sourceVer,
       .originDocIndex  = docIndex,
@@ -392,7 +397,7 @@ bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
   // 3. Check Partitioned Drop Zones
   if (const auto zone = zoneAt(screenX, screenY);
       zone && zone->width() > 0 && zone->height() > 0) {
-    pouchManager_.dropSpan(zone->id(), span, preview, sourceVer, docIndex,
+    pouchManager_.dropSpan(zone->id(), *carried, preview, sourceVer, docIndex,
                            charStart, charEnd);
     return true;
   }
@@ -406,10 +411,13 @@ bool PouchDrawer::handleCellDrop(
     const float screenX, const float screenY, const std::uint32_t sliceIndex,
     const std::optional<GlobalOpRef> &originOpRef) {
   const std::scoped_lock lock(guard_);
-  if (!isOpen_) return false;
+  if (!isOpen_ || sliceIndex >= session_.storeCount()) return false;
+  const auto carried =
+      carrySpan(session_.store(sliceIndex), pouchManager_.store(), span);
+  if (!carried) return false;
   PouchItem item{
       .itemId           = 0,
-      .span             = span,
+      .span             = *carried,
       .previewText      = preview,
       .originVersion    = MicroversionId{},
       .originDocIndex   = 0,
@@ -438,7 +446,7 @@ bool PouchDrawer::handleCellDrop(
   // 3. Check Partitioned Drop Zones
   if (const auto zone = zoneAt(screenX, screenY);
       zone && zone->width() > 0 && zone->height() > 0) {
-    pouchManager_.dropCell(zone->id(), span, preview, cellRef, rankCoord,
+    pouchManager_.dropCell(zone->id(), *carried, preview, cellRef, rankCoord,
                            sliceIndex, originOpRef);
     return true;
   }
@@ -446,7 +454,7 @@ bool PouchDrawer::handleCellDrop(
   return false;
 }
 
-void PouchDrawer::drainActions() {
+void PouchDrawer::drainActions(RenderState &state) {
   if (widthCommit_) {
     const auto commit = *widthCommit_;
     widthCommit_.reset();
@@ -491,7 +499,11 @@ void PouchDrawer::drainActions() {
       if (action.forgeRevision != forgeWidget_.semanticRevision() ||
           action.sessionGeneration != session_.generation())
         continue;
-      forgeWidget_.picked(action.tag, session_, 0);
+      const auto destination = state.caret && state.caret->active()
+                                   ? std::optional{state.caret->documentIndex()}
+                                   : std::nullopt;
+      forgeWidget_.picked(action.tag, session_, destination,
+                          pouchManager_.store());
       continue;
     }
     const auto zone = pouchManager_.zoneById(action.zone);
@@ -523,7 +535,7 @@ void PouchDrawer::drainActions() {
 
 void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
   const std::scoped_lock lock(guard_);
-  drainActions();
+  drainActions(ctx.state);
   auto metrics         = ctx.metrics;
   metrics.screenWidth  = ctx.screenWidth;
   metrics.screenHeight = ctx.screenHeight;

@@ -897,6 +897,20 @@ std::optional<PrimediaSpan> carrySpan(const Store &from, Store &into,
                       .length = span.length};
 }
 
+std::expected<std::vector<PrimediaSpan>, std::string>
+carrySpans(const Store &from, Store &into,
+           const std::span<const PrimediaSpan> spans) {
+  for (const auto &span : spans) {
+    if (!canCarry(from, into, span))
+      return std::unexpected(
+          "Quotation source has no transferable scroll identity");
+  }
+  std::vector<PrimediaSpan> result;
+  result.reserve(spans.size());
+  for (const auto &span : spans) result.push_back(*carrySpan(from, into, span));
+  return result;
+}
+
 std::optional<PrimediaSpan>
 localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls) {

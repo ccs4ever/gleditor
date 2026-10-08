@@ -31,6 +31,7 @@
 #define XUDU_PUBLICATION_H
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -504,6 +505,11 @@ localise(Store &store, const GlobalSpan &span,
  */
 [[nodiscard]] std::optional<PrimediaSpan>
 carrySpan(const Store &from, Store &into, const PrimediaSpan &span);
+
+/// Carry a complete ordered run. An unreachable member refuses the run before
+/// any scroll registration, so a failed quote cannot silently truncate it.
+[[nodiscard]] std::expected<std::vector<PrimediaSpan>, std::string>
+carrySpans(const Store &from, Store &into, std::span<const PrimediaSpan> spans);
 
 /**
  * @brief The operation at @p opIndex, named so another machine can read it.

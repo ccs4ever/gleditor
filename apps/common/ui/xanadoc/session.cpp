@@ -264,13 +264,16 @@ MicroversionId Session::transclude(const std::uint32_t destDocIndex,
   if (destDocIndex >= open.size() || srcDocIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto srcVer    = open[srcDocIndex].pieces;
-  const auto spans     = srcVer.spansFor(srcStart, srcLength);
-  const auto destSIdx  = open[destDocIndex].storeIndex;
-  auto &st             = store(destSIdx);
+  const auto srcVer      = open[srcDocIndex].pieces;
+  const auto sourceSpans = srcVer.spansFor(srcStart, srcLength);
+  const auto destSIdx    = open[destDocIndex].storeIndex;
+  auto &st               = store(destSIdx);
+  const auto spans =
+      carrySpans(store(open[srcDocIndex].storeIndex), st, sourceSpans);
+  if (!spans) throw std::invalid_argument(spans.error());
   auto curVer          = open[destDocIndex].version;
   std::uint32_t curPos = destPos;
-  for (const auto &span : spans) {
+  for (const auto &span : *spans) {
     curVer = st.insertSpan(curVer, curPos, span);
     curPos += span.length;
   }

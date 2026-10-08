@@ -108,8 +108,9 @@ public:
 
   /// What a card's insert button does with its item: xudu transcludes it
   /// at the caret, which is how a pouch item is used later.
-  void setUseHandler(SwingBackHandler handler) {
+  PouchDrawer *setUseHandler(SwingBackHandler handler) {
     useHandler_ = std::move(handler);
+    return this;
   }
   void setSwingBackHandler(SwingBackHandler handler) {
     swingBackHandler_ = std::move(handler);
@@ -167,7 +168,7 @@ private:
   void layout(const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &);
   void rebuildModels(const gleditor::ui::UiMetrics &,
                      const gleditor::ui::Theme &);
-  void drainActions();
+  void drainActions(RenderState &state);
   float clampedWidth(float logical) const;
   void cancelResize();
   void requestWidth(float logical);

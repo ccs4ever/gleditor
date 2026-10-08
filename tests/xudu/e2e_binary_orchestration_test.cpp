@@ -31,6 +31,7 @@
 #include "common/xanadu/link_package.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/publication.hpp"
+#include "common/xanadu/publication_outbox.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_tables.hpp"
@@ -2117,6 +2118,117 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
                                             xanadu::FormatAttribute::Italic))
       << "--type '[bold,italic]...' should have recorded both as Format "
          "links over the typed text";
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     cachedForeignRunsAreQuotedAndLinkedIntoTheActiveCommentary) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary));
+  const auto root =
+      fs::current_path() / "build/integration_workspace_commentary";
+  fs::remove_all(root);
+  fs::create_directories(root);
+  auto authorScroll = permascrollAt(root / "alice-permascroll");
+  Store alice(authorScroll);
+  const auto birth = alice.makeXanadoc({}, "Story Ideas");
+  auto head        = alice.insert(birth, 0, "ALPHAOMEGA", birth);
+  const std::vector<xanadu::TorrentContent> files{
+      {.path = "research", .data = "RESEARCH"}};
+  const auto research = makeTorrent(files, "research");
+  const auto seeds    = root / "seeds";
+  (void)xanadu::writeTorrentSeed(seeds, research, files);
+  const auto researchScroll =
+      Scroll::ofTorrentFile(research.hash, 0, "research", 0, 8);
+  head =
+      alice.insertSpan(head, 5, {alice.addScroll(researchScroll), 0, 8}, birth);
+  alice.setCurrentVersions({head});
+  alice.sealMetadata();
+  const auto keys   = createMutableKeys();
+  const auto sealed = xanadu::sealLocalSpool(
+      alice, keys, "permascroll", seeds.string(),
+      {.tsv = "temporary fixture provenance", .signature = "mock"});
+  const auto publication =
+      publish(alice, head, keys, "doc:ideas", "Story Ideas", 1, 1,
+              &sealed.scroll, {*sealed.opsSegment});
+  const auto manifest = seeds / "source.xanadoc";
+  std::ofstream(manifest) << encodePublication(publication);
+  const auto authorOps   = alice.opCount();
+  const auto authorBytes = alice.userPermascroll().spool().size();
+  const auto sourceSpans = alice.rebuild(head).spansFor(0, 18);
+  ASSERT_EQ(sourceSpans.size(), 3U);
+  const auto readerPerma = root / "reader-permascroll";
+  const auto command =
+      "XDG_CONFIG_HOME=" + (root / "config").string() +
+      " XDG_DATA_HOME=" + (root / "data").string() +
+      " XDG_CACHE_HOME=" + (root / "cache").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(readerPerma) + " --backend " +
+      activeBackend() + " --profile " + (root / "workspace").string() +
+      " --chord Ctrl+O --chord Tab --type '" + manifest.string() +
+      "' --chord Return"
+      " --select 0,18 --chord Ctrl+Shift+3 --chord Ctrl+Alt+["
+      " --chord Ctrl+N --type 'Bob: ' --select 0,5 --chord Ctrl+Alt+] --select "
+      "5,5"
+      " --chord F2 --click-label Zones --click-label Zones --click-label "
+      "'Notes ›'"
+      " --click-label 'Insert: ALPHA' --click-label 'Notes ›'"
+      " --click-label 'Notes ›' --click-label 'Notes ›'"
+      " --click-label 'Insert: RESEARCH' --click-label 'Notes ›'"
+      " --click-label 'Notes ›' --click-label 'Notes ›'"
+      " --click-label 'Insert: OMEGA' --click-label 'Forge Clasp'"
+      " --dump-a11y --capture " +
+      (root / "quoted.ppm").string() + " --chord Escape --chord Ctrl+S";
+  const auto result = executeProcess(command);
+  ASSERT_EQ(result.exitCode, 0) << result.output;
+  EXPECT_THAT(result.output, testing::HasSubstr("Bob: ALPHARESEARCHOMEGA"));
+  std::optional<fs::path> commentary;
+  const auto reader = permascrollAt(readerPerma);
+  // This is a persisted-address check with verified carriers supplied. Offline
+  // reopening without the source publication is a separate journey requirement.
+  xanadu::DirectoryContentSource carriers;
+  for (const auto &seed :
+       xanadu::reviewPublicationDependencies(publication, {seeds}))
+    carriers.add(seed.metainfo, seed.savePath.string());
+  bool checkedSource = false;
+  for (const auto &entry :
+       fs::directory_iterator(root / "data/xudu/xanadocs")) {
+    Store loaded(reader);
+    loaded.load(entry.path().string());
+    if (entry.path().filename().string().starts_with("publication-")) {
+      EXPECT_EQ(loaded.documentId(), alice.documentId());
+      EXPECT_EQ(loaded.opCount(), authorOps);
+      EXPECT_TRUE(loaded.linkView().empty());
+      checkedSource = true;
+      continue;
+    }
+    if (!entry.path().filename().string().starts_with("untitled-")) continue;
+    loaded.setContentSource(&carriers);
+    if (loaded.textOf(loaded.latest()) == "Bob: ALPHARESEARCHOMEGA") {
+      commentary        = entry.path();
+      const auto quoted = loaded.rebuild(loaded.latest()).spansFor(5, 18);
+      ASSERT_EQ(quoted.size(), sourceSpans.size());
+      for (std::size_t j = 0; j < quoted.size(); ++j)
+        EXPECT_EQ(xanadu::globalise(alice, sourceSpans[j], &sealed.scroll),
+                  xanadu::globalise(loaded, quoted[j]));
+      ASSERT_EQ(loaded.linkView().size(), 1U);
+      const auto &link = *loaded.linkView().begin();
+      ASSERT_EQ(link.left.size(), 3U);
+      EXPECT_EQ(link.right.size(), 1U);
+      for (std::size_t j = 0; j < link.left.size(); ++j)
+        EXPECT_EQ(xanadu::globalise(alice, sourceSpans[j], &sealed.scroll),
+                  xanadu::globalise(loaded, link.left[j]));
+    }
+  }
+  ASSERT_TRUE(commentary) << result.output;
+  EXPECT_TRUE(checkedSource);
+  EXPECT_EQ(alice.opCount(), authorOps);
+  EXPECT_EQ(alice.userPermascroll().spool().size(), authorBytes);
+  // Only Bob's typing plus private system-doc text belongs in his permascroll.
+  const auto bytes = reader->bytes();
+  const std::string readerText(reinterpret_cast<const char *>(bytes.data()),
+                               bytes.size());
+  EXPECT_EQ(readerText.find("ALPHA"), std::string::npos);
+  EXPECT_EQ(readerText.find("RESEARCH"), std::string::npos);
+  EXPECT_EQ(readerText.find("OMEGA"), std::string::npos);
 }
 
 TEST(E2EBinaryOrchestrationTest,

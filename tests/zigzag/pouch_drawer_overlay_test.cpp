@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include <gleditor/caret.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/diagnostics.hpp>
 #include <unistd.h>
@@ -180,6 +181,7 @@ TEST(PouchDrawerOverlayTest, fullItemIdsDispatchAndRetiredActionsDoNotMutate) {
 
 TEST(PouchDrawerOverlayTest, dropUsesVisiblePartitionAndClosedDrawerRefuses) {
   PouchFixture fixture;
+  fixture.session.views().push_back({});
   const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
   fixture.frame(metrics);
   const auto &zone = *fixture.drawer.zones().front();
@@ -486,4 +488,49 @@ TEST(PouchDrawerOverlayTest, adaptiveWidthResizeStartsAtRenderedEdge) {
   fixture.frame(metrics, theme);
   EXPECT_FLOAT_EQ(fixture.drawer.currentWidth(), initial);
 }
+TEST(PouchDrawerOverlayTest, drawnForgeAuthorsIntoTheActiveCommentary) {
+  PouchFixture fixture;
+  auto &session            = fixture.session;
+  const auto sourceVersion = session.store().insert({}, 0, "Alice");
+  session.views().push_back({.version = sourceVersion,
+                             .pieces = session.store().rebuild(sourceVersion)});
+  auto commentary        = std::make_unique<xanadu::Store>(fixture.scroll);
+  const auto version     = commentary->insert({}, 0, "Bob");
+  const auto destination = session.addStore(std::move(commentary), "");
+  session.views().push_back(
+      {.version    = version,
+       .storeIndex = destination,
+       .pieces     = session.store(destination).rebuild(version)});
+  auto &pouch     = fixture.drawer.manager().store();
+  const auto left = xanadu::carrySpan(
+      session.store(), pouch,
+      session.store().rebuild(sourceVersion).spansFor(0, 5).front());
+  const auto right = xanadu::carrySpan(
+      session.store(destination), pouch,
+      session.store(destination).rebuild(version).spansFor(0, 3).front());
+  ASSERT_TRUE(left);
+  ASSERT_TRUE(right);
+  fixture.drawer.forge().dropLeft({.span = *left, .previewText = "Alice"});
+  fixture.drawer.forge().dropRight({.span = *right, .previewText = "Bob"});
+  Caret caret(&fixture.device);
+  fixture.state.caret = &caret;
+  caret.placeAt(1, 3);
+  const auto before = session.store().opCount();
+  const UiMetrics metrics{.screenWidth = 1024, .screenHeight = 768};
+  fixture.frame(metrics);
+  const auto tree   = fixture.tree();
+  const auto button = std::ranges::find(tree.nodes, "Forge Clasp",
+                                        &gleditor::a11y::Node::label);
+  ASSERT_NE(button, tree.nodes.end());
+  ASSERT_TRUE(fixture.drawer.performAction(button->id,
+                                           gleditor::a11y::Action::Click, {}));
+  fixture.frame(metrics);
+  EXPECT_EQ(session.store().opCount(), before);
+  EXPECT_TRUE(session.store().linkView().empty());
+  ASSERT_EQ(session.store(destination).linkView().size(), 1U);
+  const auto &link = *session.store(destination).linkView().begin();
+  EXPECT_EQ(link.left, (std::vector<xanadu::PrimediaSpan>{*left}));
+  EXPECT_EQ(link.right, (std::vector<xanadu::PrimediaSpan>{*right}));
+}
+
 } // namespace
