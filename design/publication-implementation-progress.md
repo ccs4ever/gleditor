@@ -438,6 +438,17 @@ validation and the remaining modal pickup, cell-return and presentation limits. 
 and native formats are unchanged. Full commentary publication/reply and P1–P7 acceptance remain
 outstanding.
 
+## Quotation tendril and Vulkan resource ownership (2026-10-08)
+
+The drag tether now uses a smooth tapered quadratic ribbon with quiet stationary fibre texture,
+scaled live UI settings and reduced-motion cancellation. The actual pointer remains clear for
+picking. Pouch close/reopen retains its device-backed divider instead of destroying GPU buffers on
+the event thread; strict Vulkan quotation runs check the previously observed idle-call race.
+
+See [the tendril validation report](ux_quotation_tendril_validation_2026-10-08.md) for backend
+frames, regression scope and remaining floating-card placement limitations. Publication formats and
+author edition decisions are unchanged.
+
 ## Remaining work
 
 Investigate the

@@ -14,6 +14,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/geometric.hpp>
 
+#include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/spatial.hpp>
 
@@ -21,6 +22,8 @@ namespace xanadu {
 struct KineticTetherOverlay::Presentation {
   world_cards::Card card;
   WorldCardConfig config{190, 88};
+  QuotationTetherConfig tether;
+  float scale{};
   glm::mat4 matrix{1};
   gleditor::ui::Size viewport;
   glm::vec2 origin{}, position{};
@@ -47,6 +50,9 @@ void KineticTetherOverlay::deviceReady(render::RenderDevice &device,
                    fontName_, gleditor::ui::FontRole::Body, {},
                    gleditor::ui::defaultTheme()));
   canvas_->createPipeline(pipeline, false);
+  ribbons_ = std::make_unique<gleditor::CurveRibbons>(&device);
+  ribbons_->createPipeline(gleditor::assetPath("shaders"),
+                           gleditor::assetPath("shaders/vulkan"));
   presentation_->card.panel.deviceReady(device, pipeline, false);
 }
 
@@ -54,43 +60,57 @@ bool KineticTetherOverlay::busy() const {
   return engine_.state() == TetherState::SnappingBack;
 }
 
-void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas,
-                                      RenderState & /*unused*/,
-                                      const glm::vec2 &p0, const glm::vec2 &p1,
-                                      const bool detached) {
-  const float dist    = glm::length(p1 - p0);
-  const float sag     = std::min(40.0F, dist * 0.18F);
-  const glm::vec2 mid = (p0 + p1) * 0.5F + glm::vec2(0.0F, -sag);
-
-  const std::uint32_t col =
-      detached ? 0xFFD700FF : 0xF59E0BCC; // Identity Gold vs Amber
-  const float thickness = detached ? 2.5F : 1.5F;
-
-  // Origin anchor point pip
-  canvas.setTag(render::tagKindOverlay, 0);
-  canvas.addRect(p0.x - 3.0F, p0.y - 3.0F, 6.0F, 6.0F, col);
-
-  // Subdivided quadratic Bezier, stopping short of the pointer: whatever is
-  // drawn under the pointer answers the pick that decides where a drop
-  // lands, and the tether is never what it was dropped on.
-  constexpr int kSegments = 16;
-  glm::vec2 prevPt        = p0;
-  for (int i = 1; i < kSegments; ++i) {
-    const float t = static_cast<float>(i) / static_cast<float>(kSegments);
-    const glm::vec2 pt =
-        gleditor::spatial::evaluateQuadraticBezier(p0, mid, p1, t);
-    canvas.addLine(prevPt.x, prevPt.y, pt.x, pt.y, thickness, col);
-    prevPt = pt;
+void KineticTetherOverlay::drawTether(const glm::vec2 &from,
+                                      const glm::vec2 &pointer,
+                                      const gleditor::ui::UiMetrics &metrics) {
+  const auto &cfg       = presentation_->tether;
+  const auto run        = pointer - from;
+  const float distance  = glm::length(run);
+  const float radius    = metrics.px(cfg.pointerRadiusPx);
+  const float gap       = metrics.px(cfg.pointerGapPx);
+  const float clearance = radius + gap;
+  const auto colour     = cfg.colour;
+  ribbons_->clear();
+  if (distance > clearance) {
+    const auto to = pointer - run / distance * clearance;
+    const float sag =
+        std::min(metrics.px(cfg.sagPx), glm::length(to - from) * cfg.sagShare);
+    const auto control = (from + to) * .5F + glm::vec2(0, -sag);
+    ribbons_->add(from, control, to,
+                  {.startWidth      = metrics.px(cfg.rootWidthPx),
+                   .endWidth        = metrics.px(cfg.tipWidthPx),
+                   .edgeSoftness    = 1.F,
+                   .texturePeriod   = metrics.px(cfg.texturePeriodPx),
+                   .textureStrength = cfg.textureStrength},
+                  colour, 0, pointer, radius);
   }
+  ribbons_->commit();
+  canvas_->clear();
+  canvas_->setTag(render::tagKindOverlay, 0);
+  const float root = metrics.px(cfg.rootWidthPx) * .5F;
+  // At short distances the anchor can coincide with the pointer; no feedback
+  // may cover its centre even when no stem fits between the endpoints.
+  if (distance > radius + root)
+    canvas_->addRect(from.x - root, from.y - root, root * 2, root * 2, colour);
+  const float stroke = std::min(radius * .5F, metrics.px(1.F));
+  canvas_->addRect(pointer.x - radius, pointer.y + radius - stroke, radius * 2,
+                   stroke, colour);
+  canvas_->addRect(pointer.x - radius, pointer.y - radius, radius * 2, stroke,
+                   colour);
+  canvas_->addRect(pointer.x - radius, pointer.y - radius, stroke, radius * 2,
+                   colour);
+  canvas_->addRect(pointer.x + radius - stroke, pointer.y - radius, stroke,
+                   radius * 2, colour);
+  canvas_->commit();
+}
 
-  // Cursor end: a hollow ring, for the same reason -- the pixel under the
-  // pointer stays whatever the drag is over.
-  constexpr float kRing = 6.0F;
-  constexpr float kBar  = 2.0F;
-  canvas.addRect(p1.x - kRing, p1.y + kRing - kBar, 2.0F * kRing, kBar, col);
-  canvas.addRect(p1.x - kRing, p1.y - kRing, 2.0F * kRing, kBar, col);
-  canvas.addRect(p1.x - kRing, p1.y - kRing, kBar, 2.0F * kRing, col);
-  canvas.addRect(p1.x + kRing - kBar, p1.y - kRing, kBar, 2.0F * kRing, col);
+void KineticTetherOverlay::setTetherConfig(
+    const QuotationTetherConfig &config) {
+  if (presentation_->tether != config) {
+    presentation_->tether        = config;
+    presentation_->geometryReady = false;
+    engine_.setReducedMotion(config.reducedMotion);
+  }
 }
 
 void KineticTetherOverlay::setConfig(const WorldCardConfig &config) {
@@ -139,7 +159,8 @@ void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
                  : detached           ? "Release to materialize"
                                       : std::string_view(p.attachedStatus));
   p.card.prepare();
-  const auto pos    = engine_.currentPos();
+  const auto pos =
+      engine_.isDragging() ? engine_.targetPos() : engine_.currentPos();
   const auto bounds = world_cards::awayFromPointer(
       p.card.presentation.size, pos, metrics,
       std::max(p.card.presentation.gap, metrics.px(1)));
@@ -156,17 +177,19 @@ void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
   p.viewport = {static_cast<float>(ctx.screenWidth),
                 static_cast<float>(ctx.screenHeight)};
   if (!p.geometryReady || p.origin != engine_.originPos() ||
-      p.position != pos || p.detached != detached) {
-    canvas_->clear();
-    drawTether(*canvas_, ctx.state, engine_.originPos(), pos, detached);
-    canvas_->commit();
+      p.position != pos || p.detached != detached ||
+      p.scale != metrics.px(1.F)) {
+    drawTether(engine_.originPos(), pos, metrics);
     p.geometryReady = true;
     p.origin        = engine_.originPos();
     p.position      = pos;
     p.detached      = detached;
+    p.scale         = metrics.px(1.F);
   }
-  canvas_->draw(ctx.state, glm::ortho(0.F, p.viewport.width, 0.F,
-                                      p.viewport.height, -1.F, 1.F));
+  const auto projection =
+      glm::ortho(0.F, p.viewport.width, 0.F, p.viewport.height, -1.F, 1.F);
+  ribbons_->draw(ctx.state, projection);
+  canvas_->draw(ctx.state, projection);
   p.card.panel.draw(ctx.state, p.matrix, p.viewport);
 }
 } // namespace xanadu

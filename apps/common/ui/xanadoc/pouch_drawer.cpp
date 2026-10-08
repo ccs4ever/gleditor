@@ -74,7 +74,10 @@ void PouchDrawer::setOpen(const bool open, const bool animated) noexcept {
   if (open != isOpen_) {
     cancelResize();
     ++resizeId_;
-    resizeHandle_.reset();
+    // Input may run on the event thread. Keep the device-backed presentation;
+    // the next render frame updates its identity and bounds without destroying
+    // GPU buffers concurrently with queue submission or capture.
+    if (resizeHandle_) resizeHandle_->setVisible(false);
     resizeBounds_.reset();
     forgeWidget_.setVisible(false);
     ++openEpoch_;
@@ -749,6 +752,7 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
     resizeHandle_->setBounds(handle);
     resizeBounds_ = handle;
   }
+  resizeHandle_->setVisible(true);
   draw(*resizeHandle_, handleTheme_);
   draw(*header_, theme);
   for (auto &entry : presentations_) {

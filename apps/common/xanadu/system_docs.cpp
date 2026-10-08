@@ -233,6 +233,13 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "overview.viewportColour, overview.markColour: Its colours as RGBA "
            "integers; marks show the selected link's chosen places and the "
            "focused ZigZag card.\n"
+           "tether: A temporary quotation tendril. rootWidthPx and tipWidthPx "
+           "default to 4.5 and 1 logical pixels. sagPx and sagShare bound "
+           "the curve (40 and 0.18). pointerRadiusPx and pointerGapPx keep "
+           "the target clear (6 and 2). texturePeriodPx and textureStrength "
+           "control stationary fibres (24 and 0.25). colour is packed RGBA "
+           "(0xDDB441DC). reducedMotion follows input directly and cancels "
+           "without a spring transition (false).\n"
            "satelloidCard, tetherCard and hullCard: Preferred widthPx and "
            "heightPx in logical pixels, defaults 200 by 180, 190 by 88 and "
            "260 by 46. Positive finite lengths grow for typography within "
@@ -814,6 +821,42 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{
                           modals.satelloidCard.maxLines}}}}},
+        lengthSpec(settings::kTetherRootWidth,
+                   "Root width in logical pixels, range 1 to 24",
+                   modals.tether.rootWidthPx),
+        lengthSpec(settings::kTetherTipWidth,
+                   "Tip width in logical pixels, range 0.5 to root width",
+                   modals.tether.tipWidthPx),
+        lengthSpec(settings::kTetherSag,
+                   "Maximum curve sag in logical pixels, range 0 to 200",
+                   modals.tether.sagPx),
+        lengthSpec(settings::kTetherSagShare,
+                   "Curve sag fraction of distance, range 0 to 0.5",
+                   modals.tether.sagShare),
+        lengthSpec(
+            settings::kTetherPointerRadius,
+            "Hollow pointer marker radius in logical pixels, range 3 to 24",
+            modals.tether.pointerRadiusPx),
+        lengthSpec(
+            settings::kTetherPointerGap,
+            "Clear gap beyond pointer marker in logical pixels, range 1 to 24",
+            modals.tether.pointerGapPx),
+        lengthSpec(
+            settings::kTetherTexturePeriod,
+            "Stationary fibre texture period in logical pixels, range 4 to 128",
+            modals.tether.texturePeriodPx),
+        lengthSpec(settings::kTetherTextureStrength,
+                   "Quiet fibre modulation, range 0 to 0.5",
+                   modals.tether.textureStrength),
+        {.name    = std::string(settings::kTetherColour),
+         .notes   = "Quotation tendril RGBA colour; distinct from persistent "
+                    "prism geometry",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{modals.tether.colour}}}}},
+        {.name    = std::string(settings::kTetherReducedMotion),
+         .notes   = "Follow the pointer directly and complete quotation "
+                    "cancellation immediately",
+         .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {false}}}},
         lengthSpec(settings::kTetherCardWidthPx,
                    "TetherCard preferred width in logical pixels",
                    modals.tetherCard.widthPx),
@@ -3240,6 +3283,33 @@ UIConfig UIConfig::fromStore(const Store &store) {
       std::clamp<std::int64_t>(model.getInt64(settings::kSatelloidCardMaxLines,
                                               cfg.satelloidCard.maxLines),
                                1, 10));
+  const auto tetherNumber = [&](std::string_view name, float fallback,
+                                float low, float high) {
+    const auto value = static_cast<float>(model.getDouble(name, fallback));
+    return std::isfinite(value) ? std::clamp(value, low, high) : fallback;
+  };
+  cfg.tether.rootWidthPx = tetherNumber(settings::kTetherRootWidth,
+                                        cfg.tether.rootWidthPx, 1.F, 24.F);
+  cfg.tether.tipWidthPx  = tetherNumber(settings::kTetherTipWidth,
+                                        cfg.tether.tipWidthPx, 0.5F, 24.F);
+  cfg.tether.sagPx =
+      tetherNumber(settings::kTetherSag, cfg.tether.sagPx, 0.F, 200.F);
+  cfg.tether.sagShare =
+      tetherNumber(settings::kTetherSagShare, cfg.tether.sagShare, 0.F, 0.5F);
+  cfg.tether.pointerRadiusPx = tetherNumber(
+      settings::kTetherPointerRadius, cfg.tether.pointerRadiusPx, 3.F, 24.F);
+  cfg.tether.pointerGapPx    = tetherNumber(settings::kTetherPointerGap,
+                                            cfg.tether.pointerGapPx, 1.F, 24.F);
+  cfg.tether.texturePeriodPx = tetherNumber(
+      settings::kTetherTexturePeriod, cfg.tether.texturePeriodPx, 4.F, 128.F);
+  cfg.tether.textureStrength = tetherNumber(
+      settings::kTetherTextureStrength, cfg.tether.textureStrength, 0.F, 0.5F);
+  cfg.tether.tipWidthPx =
+      std::min(cfg.tether.tipWidthPx, cfg.tether.rootWidthPx);
+  cfg.tether.colour = static_cast<std::uint32_t>(
+      model.getInt64(settings::kTetherColour, cfg.tether.colour));
+  cfg.tether.reducedMotion =
+      model.getBool(settings::kTetherReducedMotion, false);
   cfg.tetherCard.widthPx =
       panelLength(settings::kTetherCardWidthPx, cfg.tetherCard.widthPx);
   cfg.tetherCard.heightPx =

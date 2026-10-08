@@ -145,6 +145,7 @@ std::string assembleShaderSource(const Backend backend, const ShaderStage stage,
                      tagDocBits + tagPageBits);
   out += std::format("#define GLEDITOR_TAG_KIND_PAGE {}\n", tagKindPage);
   out += std::format("#define GLEDITOR_TAG_KIND_BEAM {}\n", tagKindBeam);
+  out += std::format("#define GLEDITOR_TAG_KIND_OVERLAY {}\n", tagKindOverlay);
   out += std::format("#define GLEDITOR_TAG_KIND_IMAGE {}\n", tagKindImage);
   out += interfaceMacros(backend, stage);
   out += uniformBlock(backend, stage);

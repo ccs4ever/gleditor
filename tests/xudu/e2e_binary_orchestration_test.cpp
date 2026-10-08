@@ -37,6 +37,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/store_activity_log.hpp"
 #include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/torrent.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/version.hpp"
@@ -2909,15 +2910,26 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
   const auto authorOps = alice.opCount();
   const auto original  = alice.rebuild(head).spansFor(0, 18);
   ASSERT_EQ(original.size(), 3U);
-  const auto run = [&](const std::string &name, const std::string &hands) {
+  const auto run = [&](const std::string &name, const std::string &hands,
+                       double uiScale = 1.0, bool reduced = false) {
     const auto dir = root / name;
     fs::create_directories(dir);
+    if (uiScale != 1.0 || reduced) {
+      Store ui(permascrollAt(dir / "permascroll"));
+      xanadu::initializeSystemStore(ui, xanadu::SystemDocKind::UI);
+      auto head = xanadu::setSetting(ui, ui.primaryCurrentVersion(),
+                                     xanadu::settings::kUiScale, uiScale);
+      head      = xanadu::setSetting(
+          ui, head, xanadu::settings::kTetherReducedMotion, reduced);
+      ui.setCurrentVersions({head});
+      ui.save((dir / "config/xudu/system/ui").string());
+    }
     const auto result = executeProcess(
         "XDG_CONFIG_HOME=" + (dir / "config").string() +
-        " XDG_DATA_HOME=" + (dir / "data").string() +
-        " XDG_CACHE_HOME=" + (dir / "cache").string() + " timeout 120 " +
-        binary.string() + permascrollFlag(dir / "permascroll") + " --backend " +
-        activeBackend() + " --profile " + (dir / "workspace").string() +
+        " XDG_DATA_HOME=" + (dir / "data").string() + " XDG_CACHE_HOME=" +
+        (dir / "cache").string() + " timeout 120 " + binary.string() +
+        permascrollFlag(dir / "permascroll") + " --backend " + activeBackend() +
+        " --strict-diagnostics --profile " + (dir / "workspace").string() +
         " --chord Ctrl+O --chord Tab --type '" + manifest.string() +
         "' --chord Return --select 0,18 " + hands + " --dump-a11y");
     std::ofstream(dir / "transcript.log") << result.output;
@@ -2986,6 +2998,37 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
     startAt += static_cast<std::uint32_t>(items[i].span.length);
     EXPECT_EQ(items[i].originSource->end, startAt);
   }
+  const auto directions =
+      run("directions", "--mouse-down " + start +
+                            " --mouse-move 50,320 --capture " +
+                            (root / "tendril-left.ppm").string() +
+                            " --mouse-move 180,180 --capture " +
+                            (root / "tendril-short.ppm").string() +
+                            " --mouse-move 700,130 --capture " +
+                            (root / "tendril-up.ppm").string() +
+                            " --mouse-move 700,460 --capture " +
+                            (root / "tendril-down.ppm").string() +
+                            " --chord Escape --mouse-up 700,460");
+  ASSERT_EQ(directions.exitCode, 0) << directions.output;
+  const auto scaleCalibration =
+      run("scale-calibration",
+          "--capture " + (root / "scaled-selection.ppm").string(), 1.5, true);
+  ASSERT_EQ(scaleCalibration.exitCode, 0) << scaleCalibration.output;
+  const auto scaledBounds = selectionBounds(root / "scaled-selection.ppm");
+  ASSERT_TRUE(scaledBounds);
+  const auto &[sl, st, sr, sb] = *scaledBounds;
+  const auto scaledStart =
+      std::to_string((sl + sr) / 2) + "," + std::to_string((st + sb) / 2);
+  const auto scaled =
+      run("scale",
+          "--mouse-down " + scaledStart + " --mouse-move 730,400 --capture " +
+              (root / "scaled-tendril.ppm").string() +
+              " --chord Escape --mouse-up 730,400 --capture " +
+              (root / "scaled-cancelled.ppm").string(),
+          1.5, true);
+  ASSERT_EQ(scaled.exitCode, 0) << scaled.output;
+  EXPECT_THAT(scaled.output,
+              testing::Not(testing::HasSubstr("spawned transcluded document")));
   const auto cancelled = run(
       "cancel",
       "--mouse-down " + start +

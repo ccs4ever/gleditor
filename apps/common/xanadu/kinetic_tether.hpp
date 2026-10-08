@@ -78,6 +78,7 @@ public:
                float endY) noexcept; // returns true if void spawn triggered
   void cancelDrag() noexcept;
   void stepPhysics() noexcept;
+  void setReducedMotion(bool reduced) noexcept { reducedMotion_ = reduced; }
 
   void setVoidSpawnHandler(VoidSpawnHandler handler) {
     voidSpawnHandler_ = std::move(handler);
@@ -113,6 +114,7 @@ private:
   TetherPayload payload_{};
   std::uint64_t generation_{};
   bool collecting_{};
+  bool reducedMotion_{};
 
   glm::vec2 currentPos_{0.0F, 0.0F};
   glm::vec2 targetPos_{0.0F, 0.0F};

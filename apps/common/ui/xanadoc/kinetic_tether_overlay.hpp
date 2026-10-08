@@ -14,6 +14,7 @@
 #include "common/xanadu/system_docs.hpp"
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
+#include <gleditor/curve_ribbons.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/ui/world_panel.hpp>
@@ -40,6 +41,7 @@ public:
   [[nodiscard]] bool busy() const override;
 
   void setConfig(const WorldCardConfig &);
+  void setTetherConfig(const QuotationTetherConfig &);
   void describe(gleditor::a11y::Builder &) override;
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
   bool performAction(std::uint64_t, gleditor::a11y::Action,
@@ -50,13 +52,13 @@ public:
 private:
   struct Presentation;
   std::unique_ptr<Presentation> presentation_;
-  static void drawTether(gleditor::Canvas &canvas, RenderState &state,
-                         const glm::vec2 &p0, const glm::vec2 &p1,
-                         bool detached);
+  void drawTether(const glm::vec2 &from, const glm::vec2 &pointer,
+                  const gleditor::ui::UiMetrics &metrics);
 
   KineticTetherEngine &engine_;
   std::string fontName_;
   std::unique_ptr<gleditor::Canvas> canvas_;
+  std::unique_ptr<gleditor::CurveRibbons> ribbons_;
 };
 
 } // namespace xanadu

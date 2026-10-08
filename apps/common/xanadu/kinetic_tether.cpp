@@ -62,6 +62,12 @@ void KineticTetherEngine::cancelDrag() noexcept {
 }
 
 void KineticTetherEngine::stepPhysics() noexcept {
+  if (reducedMotion_) {
+    currentPos_ = targetPos_;
+    velocity_   = {};
+    if (state_ == TetherState::SnappingBack) state_ = TetherState::Idle;
+    return;
+  }
   // Hookean spring: F = -k * x - c * v
   const glm::vec2 delta = targetPos_ - currentPos_;
   const glm::vec2 force = delta * kSpringK;

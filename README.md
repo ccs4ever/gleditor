@@ -120,9 +120,11 @@ notifications. `--strict-diagnostics` makes them fatal for automated checks.
 Programs extend the library through `TextSource`, `DocumentObserver`, `SpanDecorator`,
 `FrameContributor`, `PickObserver`, and the application/command interfaces in `include/gleditor/`.
 `Canvas` draws text and geometry in world or screen coordinates through the same glyph pipeline.
-`runWithState()` moves commands onto the render thread. Xuzz uses these hooks for versioned text,
-shared-span shading, and links, and contributes ZigZag cells and picking without putting its model
-in `libgleditor`.
+`CurveRibbons` draws tapered quadratic strokes with continuous normals, soft edges and optional
+stationary filament shading through a portable shader; a circular exclusion can preserve a pointer
+picking target beneath transient feedback. `runWithState()` moves commands onto the render thread.
+Xuzz uses these hooks for versioned text, shared-span shading, and links, and contributes ZigZag
+cells and picking without putting its model in `libgleditor`.
 
 For UI text overflow, `SPDLOG_LEVEL=ui.layout=debug` reports declared Canvas parent bounds;
 `ui.layout=trace` also reports render-thread shaping per frame. `--benchmark` includes p95 frame

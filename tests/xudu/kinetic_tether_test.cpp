@@ -151,3 +151,17 @@ TEST_F(KineticTetherTest,
   EXPECT_GT(engine.generation(), press);
   EXPECT_FALSE(engine.isDragging());
 }
+
+TEST_F(KineticTetherTest, ReducedMotionFollowsInputAndCompletesCancellation) {
+  KineticTetherEngine engine;
+  engine.setReducedMotion(true);
+  engine.startDrag({}, 10, 20);
+  engine.updateDrag(400, 300);
+  engine.stepPhysics();
+  EXPECT_EQ(engine.currentPos(), engine.targetPos());
+  EXPECT_TRUE(engine.isDetached());
+  engine.cancelDrag();
+  engine.stepPhysics();
+  EXPECT_FALSE(engine.busy());
+  EXPECT_EQ(engine.currentPos(), engine.originPos());
+}

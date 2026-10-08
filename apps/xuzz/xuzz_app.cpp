@@ -2961,6 +2961,7 @@ int XuzzApp::run(const int argc, char **argv) {
           storeObjectManager.setConfig(uiCfg.storePanel);
           satelloidOverlay.setConfig(uiCfg.satelloidCard);
           kineticTetherOverlay.setConfig(uiCfg.tetherCard);
+          kineticTetherOverlay.setTetherConfig(uiCfg.tether);
           wireframeHullOverlay.setConfig(uiCfg.hullCard);
           quotationOverlay.setConfig(uiCfg.quotationModal);
           swarmTelescope.setConfig(uiCfg.telescopeModal);
@@ -3003,6 +3004,7 @@ int XuzzApp::run(const int argc, char **argv) {
       storeObjectManager.setConfig(uiCfg.storePanel);
       satelloidOverlay.setConfig(uiCfg.satelloidCard);
       kineticTetherOverlay.setConfig(uiCfg.tetherCard);
+      kineticTetherOverlay.setTetherConfig(uiCfg.tether);
       wireframeHullOverlay.setConfig(uiCfg.hullCard);
       quotationOverlay.setConfig(uiCfg.quotationModal);
       swarmTelescope.setConfig(uiCfg.telescopeModal);

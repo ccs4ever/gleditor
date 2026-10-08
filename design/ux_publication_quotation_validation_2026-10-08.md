@@ -66,6 +66,8 @@ error: concurrent `vkDeviceWaitIdle` use of a queue. The functional assertions p
 notification overlaps the release instruction. Follow up the renderer/capture and glyph-cache idle
 paths (`src/render/vulkan/device_vk.cpp`, `device_vk_frame.cpp`, `src/glyphcache/cache.cpp`) and
 rerun this pouch case with strict diagnostics. This batch does not change generic device locking.
+The [subsequent tendril and ownership batch](ux_quotation_tendril_validation_2026-10-08.md) fixes
+the pouch event-thread buffer destruction and reruns this case with strict diagnostics.
 
 The device-free/native suites passed 61 Xuzz and 193 slice/overlay cases. The engine run excluding
 interface orchestrations passed 1,283 cases, skipped 17 (16 namespace-dependent network cases and a

@@ -904,3 +904,26 @@ TEST(SystemDocsTest,
   EXPECT_THROW(edit(xanadu::settings::kUiScale, std::string{"invalid"}),
                std::invalid_argument);
 }
+
+TEST(SystemDocsTest, QuotationTetherSettingsAreLiveAndBounded) {
+  xanadu::Store store(std::make_shared<xanadu::UserPermascroll>());
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::UI);
+  auto head = store.primaryCurrentVersion();
+  head =
+      xanadu::setSetting(store, head, xanadu::settings::kTetherRootWidth, 8.0);
+  head =
+      xanadu::setSetting(store, head, xanadu::settings::kTetherTipWidth, 20.0);
+  head =
+      xanadu::setSetting(store, head, xanadu::settings::kTetherSagShare, -1.0);
+  head = xanadu::setSetting(store, head,
+                            xanadu::settings::kTetherTextureStrength, 3.0);
+  head = xanadu::setSetting(store, head, xanadu::settings::kTetherReducedMotion,
+                            true);
+  store.setCurrentVersions({head});
+  const auto config = xanadu::UIConfig::fromStore(store).tether;
+  EXPECT_FLOAT_EQ(config.rootWidthPx, 8);
+  EXPECT_FLOAT_EQ(config.tipWidthPx, 8);
+  EXPECT_FLOAT_EQ(config.sagShare, 0);
+  EXPECT_FLOAT_EQ(config.textureStrength, .5F);
+  EXPECT_TRUE(config.reducedMotion);
+}

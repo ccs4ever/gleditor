@@ -535,3 +535,21 @@ TEST(PouchDrawerOverlayTest, drawnForgeAuthorsIntoTheActiveCommentary) {
 }
 
 } // namespace
+
+TEST(PouchDrawerOverlayTest, ToggleKeepsDeviceResourcesOnTheRenderThread) {
+  PouchFixture fixture;
+  fixture.drawer.deviceReady(fixture.device, {});
+  const UiMetrics metrics{.screenWidth = 800, .screenHeight = 600};
+  fixture.frame(metrics);
+  // A close/reopen is event-thread work. Buffer destruction here races Vulkan
+  // queue submission and readback; model replacement belongs to drawFrame.
+  EXPECT_CALL(fixture.device, destroyBuffer).Times(0);
+  EXPECT_CALL(fixture.device, updateBuffer).Times(0);
+  EXPECT_CALL(fixture.device, createBuffer).Times(0);
+  EXPECT_CALL(fixture.device, waitIdle).Times(0);
+  fixture.drawer.setOpen(false, false);
+  fixture.drawer.setOpen(true, false);
+  testing::Mock::VerifyAndClearExpectations(&fixture.device);
+  fixture.frame(metrics);
+  EXPECT_TRUE(fixture.drawer.isOpen());
+}

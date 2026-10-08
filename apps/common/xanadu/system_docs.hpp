@@ -272,8 +272,21 @@ inline constexpr std::string_view kSatelloidCardMaxHeightShare =
     "satelloidCard.maxHeightShare";
 inline constexpr std::string_view kSatelloidCardMaxLines =
     "satelloidCard.maxLines";
-inline constexpr std::string_view kTetherCardWidthPx  = "tetherCard.widthPx";
-inline constexpr std::string_view kTetherCardHeightPx = "tetherCard.heightPx";
+inline constexpr std::string_view kTetherRootWidth = "tether.rootWidthPx";
+inline constexpr std::string_view kTetherTipWidth  = "tether.tipWidthPx";
+inline constexpr std::string_view kTetherSag       = "tether.sagPx";
+inline constexpr std::string_view kTetherSagShare  = "tether.sagShare";
+inline constexpr std::string_view kTetherPointerRadius =
+    "tether.pointerRadiusPx";
+inline constexpr std::string_view kTetherPointerGap = "tether.pointerGapPx";
+inline constexpr std::string_view kTetherTexturePeriod =
+    "tether.texturePeriodPx";
+inline constexpr std::string_view kTetherTextureStrength =
+    "tether.textureStrength";
+inline constexpr std::string_view kTetherColour        = "tether.colour";
+inline constexpr std::string_view kTetherReducedMotion = "tether.reducedMotion";
+inline constexpr std::string_view kTetherCardWidthPx   = "tetherCard.widthPx";
+inline constexpr std::string_view kTetherCardHeightPx  = "tetherCard.heightPx";
 inline constexpr std::string_view kTetherCardMaxWidthShare =
     "tetherCard.maxWidthShare";
 inline constexpr std::string_view kTetherCardMaxHeightShare =
@@ -1170,6 +1183,17 @@ struct WorldCardConfig {
   bool operator==(const WorldCardConfig &) const = default;
 };
 
+/// Temporary quotation feedback: a fine tendril rather than a persistent prism.
+struct QuotationTetherConfig {
+  float rootWidthPx{4.5F}, tipWidthPx{1.0F};
+  float sagPx{40.0F}, sagShare{.18F};
+  float pointerRadiusPx{6.0F}, pointerGapPx{2.0F};
+  float texturePeriodPx{24.0F}, textureStrength{.25F};
+  std::uint32_t colour{0xDDB441DC};
+  bool reducedMotion{false};
+  bool operator==(const QuotationTetherConfig &) const = default;
+};
+
 struct UIConfig {
   float uiScale{1.0F}, uiFontScale{1.0F};
   float uiSafeMarginShare{gleditor::ui::kSafeMarginShare};
@@ -1186,6 +1210,7 @@ struct UIConfig {
   StorePanelConfig storePanel;
   WorldCardConfig satelloidCard;
   WorldCardConfig tetherCard{190.0F, 88.0F};
+  QuotationTetherConfig tether;
   WorldCardConfig hullCard{260.0F, 46.0F};
   ModalPresentationConfig quotationModal;
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
