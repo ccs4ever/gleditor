@@ -436,6 +436,12 @@ int XuzzApp::run(const int argc, char **argv) {
 
   if (opts.headless) {
     session->saveAll();
+    for (const auto &result : session->waitForContentRetention()) {
+      if (!result.outcome)
+        throw std::runtime_error(
+            "draft saved; offline quotations unavailable: " +
+            result.outcome.error());
+    }
     return 0;
   }
 
@@ -2938,13 +2944,22 @@ int XuzzApp::run(const int argc, char **argv) {
     session->rememberPlace(place);
   }
   session->saveAll();
+  bool retentionFailed = false;
+  for (const auto &result : session->waitForContentRetention()) {
+    if (!result.outcome) {
+      retentionFailed = true;
+      GLEDITOR_LOG_WARN("xudu.publication",
+                        "Draft saved; offline quotation retention failed: {}",
+                        result.outcome.error());
+    }
+  }
   if (opts.exportOsmic) {
     session->saveOsmicTextAll();
   }
   if (!opts.dumpPermascrollPath.empty()) {
     session->dumpPermascroll(opts.dumpPermascrollPath);
   }
-  return status;
+  return retentionFailed ? 1 : status;
 }
 
 } // namespace xuzz

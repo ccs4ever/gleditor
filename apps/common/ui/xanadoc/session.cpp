@@ -109,6 +109,8 @@ Session::Session(std::string aStorePath,
   stores.push_back(StoreEntry{.store       = std::move(primaryStore),
                               .path        = std::move(aStorePath),
                               .isTemporary = false});
+  if (!stores[0].path.empty())
+    retainForOffline(*stores[0].store, stores[0].path);
 }
 
 const UserPermascroll *Session::userPermascroll() const {
@@ -326,6 +328,8 @@ Session::~Session() {
     std::cerr << "xudu [warning]: failed to flush uncommitted edits on "
                  "session teardown (non-standard exception)\n";
   }
+  // Flushing can queue retention; drain before temporary sources disappear.
+  contentRetention_.reset();
   // An untitled store is kept once anything was written to it: typing is
   // saved as it happens, so deleting the directory here would throw away
   // work the reader never chose to discard. One opened and left alone is
@@ -411,6 +415,16 @@ InfoHash Session::addName(const std::string &uri) {
 InfoHash Session::addTorrentMemory(const std::string_view torrentData,
                                    const std::string &dataRoot) {
   const auto root = dataRoot.empty() ? "." : dataRoot;
+  const auto hash = Metainfo::parse(torrentData).hash();
+  const auto mounted =
+      std::ranges::find(mountedSeeds_, hash, &PublicationSeed::hash);
+  PublicationSeed seed{.hash     = hash,
+                       .metainfo = std::string(torrentData),
+                       .savePath = std::filesystem::absolute(root)};
+  if (mounted == mountedSeeds_.end())
+    mountedSeeds_.push_back(std::move(seed));
+  else
+    *mounted = std::move(seed);
   if (nullptr != swarmSource) {
     return swarmSource->addTorrent(torrentData, root, false);
   }
@@ -1152,18 +1166,19 @@ void Session::setStorePath(const std::size_t index, std::string newPath,
 
 void Session::loadRetainedScrolls(const Store &store,
                                   const std::string &storePath) {
+  std::set<InfoHash> seen;
   for (const auto &scroll : store.scrolls()) {
     for (const auto &segment : scroll.segments) {
+      if (!seen.insert(segment.torrent).second) continue;
       const auto root = std::filesystem::path(storePath) / "published" /
                         segment.torrent.hex();
-      const auto metainfo = root / "metainfo.torrent";
-      if (!std::filesystem::exists(metainfo)) continue;
-      std::ifstream in(metainfo, std::ios::binary);
+      if (!std::filesystem::exists(root / "metainfo.torrent")) continue;
+      std::ifstream in(root / "metainfo.torrent", std::ios::binary);
       if (!in) throw std::runtime_error("cannot read retained media metainfo");
-      const std::string encoded{std::istreambuf_iterator<char>(in),
-                                std::istreambuf_iterator<char>()};
-      if (Metainfo::parse(encoded).hash() != segment.torrent)
+      const std::string encoded{std::istreambuf_iterator<char>(in), {}};
+      if (in.bad() || Metainfo::parse(encoded).hash() != segment.torrent)
         throw std::runtime_error("retained media metainfo hash mismatch");
+      // Resolver verifies pieces on use; the worker reviews the full carrier.
       contentSource.add(encoded, root.string());
     }
   }
@@ -1185,6 +1200,8 @@ std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
                               .path          = std::move(aPath),
                               .isTemporary   = aIsTemporary,
                               .opsWhenOpened = opsNow});
+  if (!stores.back().path.empty())
+    retainForOffline(*stores.back().store, stores.back().path);
   return stores.size() - 1U;
 }
 
@@ -1277,8 +1294,39 @@ void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
-    stores[index].store->save(stores[index].path);
+    saveTo(index, stores[index].path);
   }
+}
+
+void Session::saveTo(const std::size_t index,
+                     const std::filesystem::path &destination) const {
+  const_cast<Session *>(this)->flushUncommitted();
+  const auto &source = store(index);
+  source.save(destination.string());
+  retainForOffline(source, destination);
+}
+void Session::retainForOffline(const Store &source,
+                               const std::filesystem::path &directory) const {
+  if (source.scrolls().empty()) return;
+  std::vector<std::filesystem::path> roots;
+  for (std::size_t i = 0; i < stores.size(); ++i) {
+    if (!stores[i].path.empty())
+      roots.push_back(std::filesystem::absolute(publishedDir(i)));
+  }
+  if (!contentRetention_)
+    contentRetention_ = std::make_unique<ContentRetention>();
+  contentRetention_->queue(source.scrolls(), std::move(roots),
+                           std::filesystem::absolute(directory / "published"),
+                           mountedSeeds_);
+}
+std::vector<ContentRetentionResult>
+Session::takeContentRetentionNotifications() {
+  return contentRetention_ ? contentRetention_->takeNotifications()
+                           : std::vector<ContentRetentionResult>{};
+}
+std::vector<ContentRetentionResult> Session::waitForContentRetention() {
+  return contentRetention_ ? contentRetention_->wait()
+                           : std::vector<ContentRetentionResult>{};
 }
 
 void Session::syncCurrentVersions(const std::size_t storeIndex) const {
@@ -1352,6 +1400,7 @@ void Session::rememberPlace(const xanadu::ReadingPlace &place) {
   const auto dir = xanadu::activityDirectory();
   std::filesystem::create_directories(dir);
   store->save(dir.string());
+  retainForOffline(*store, dir);
 }
 
 void Session::saveAll() const {
@@ -1564,6 +1613,7 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
         if (updated != before) {
           sysStore->repointCurrentVersion(updated);
           sysStore->save(dir.string());
+          retainForOffline(*sysStore, dir);
         }
       } else {
         GLEDITOR_LOG_WARN("xudu.settings",
@@ -1621,7 +1671,7 @@ void Session::repointSystemDoc(const SystemDocKind kind,
   const auto sIdx = systemStoreIndex(kind);
   auto &st        = store(sIdx);
   st.repointCurrentVersion(version);
-  st.save(stores[sIdx].path);
+  save(sIdx);
   // Also update any open view showing this system store
   for (std::size_t i = 0; i < open.size(); ++i) {
     if (open[i].storeIndex == sIdx) {
@@ -2304,7 +2354,7 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
   auto &st        = store(sIdx);
   if (st.isSystem()) {
     st.repointCurrentVersion(version);
-    st.save(stores[sIdx].path);
+    save(sIdx);
     if (systemDocChangedCallback_) {
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
         systemDocChangedCallback_(*kind, st);

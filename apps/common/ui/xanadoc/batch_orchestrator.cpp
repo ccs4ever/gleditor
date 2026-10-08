@@ -191,6 +191,17 @@ BatchOrchestrator::execute(Session &session,
                            const bool quiet) {
   const bool headless =
       parser["--headless"] == true || parser["--batch"] == true;
+  if (parser.present<std::vector<std::string>>("--torrent")) {
+    for (const auto &source :
+         parser.get<std::vector<std::string>>("--torrent")) {
+      if (MutableLink::looksLikeMutableLink(source))
+        session.addName(source);
+      else if (source.starts_with("magnet:"))
+        session.addMagnet(source);
+      else
+        session.addTorrent(source, parser.get<std::string>("--torrent-data"));
+    }
+  }
   MicroversionId opening;
   std::vector<std::pair<MicroversionId, std::size_t>> extraImports;
 
@@ -812,6 +823,12 @@ BatchOrchestrator::execute(Session &session,
       session.views().clear();
     }
     session.saveAll();
+    for (const auto &result : session.waitForContentRetention()) {
+      if (!result.outcome)
+        throw std::runtime_error(
+            "draft saved; offline quotations unavailable: " +
+            result.outcome.error());
+    }
     if (parser["--export-osmic"] == true) {
       session.saveOsmicTextAll();
     }

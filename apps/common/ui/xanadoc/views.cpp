@@ -68,7 +68,19 @@ void Views::deviceReady(render::RenderDevice &device,
 }
 
 void Views::drawFrame(gleditor::FrameContext &ctx) {
-  chromeTopPx_ = std::max(ctx.chrome.top, ctx.settledChrome.top);
+  chromeTopPx_          = std::max(ctx.chrome.top, ctx.settledChrome.top);
+  bool quotationsReady  = false;
+  bool quotationsFailed = false;
+  for (const auto &result : session.takeContentRetentionNotifications()) {
+    quotationsReady |= result.outcome.has_value();
+    quotationsFailed |= !result.outcome.has_value();
+  }
+  if (quotationsReady)
+    renderer->push(RenderItemNotification("Quoted content is ready offline."));
+  if (quotationsFailed)
+    renderer->push(RenderItemNotification(
+        "Draft saved. Offline quotations unavailable. Check local storage, "
+        "reopen the source and save again."));
   if (auto *subscriptions = session.activePublicationSubscriptions();
       subscriptions &&
       std::chrono::steady_clock::now() >= nextPublicationNotice_) {
@@ -1035,7 +1047,10 @@ void Views::saveCurrent() {
           });
     } else {
       session.save(storeIdx);
-      std::cout << "xudu: saved to " << session.path(storeIdx) << "\n";
+      std::cout << "xudu: saved draft to " << session.path(storeIdx) << "\n";
+      if (!session.store(storeIdx).scrolls().empty())
+        renderer->push(RenderItemNotification(
+            "Draft saved. Preparing offline quotations…"));
     }
   });
 }
@@ -1051,8 +1066,7 @@ void Views::preserveAnswers(const std::size_t storeIdx,
     try {
       namespace fs = std::filesystem;
       fs::create_directories(targetDir);
-      auto &st = session.store(storeIdx);
-      st.save(targetDir.string());
+      session.saveTo(storeIdx, targetDir);
       session.setStorePath(storeIdx, targetDir.string(), false);
       std::cout << "xudu: preserved temporary store to " << targetDir.string()
                 << "\n";

@@ -509,6 +509,10 @@ public:
 
   void save(std::size_t index = 0) const;
   void saveAll() const;
+  void saveTo(std::size_t index,
+              const std::filesystem::path &destination) const;
+  std::vector<ContentRetentionResult> takeContentRetentionNotifications();
+  std::vector<ContentRetentionResult> waitForContentRetention();
 
   /**
    * @brief Where the reader was when the last session ended, from the
@@ -850,6 +854,10 @@ private:
   /// Where the bytes of torrent-backed scrolls come from.
   void loadRetainedScrolls(const Store &store, const std::string &storePath);
   DirectoryContentSource contentSource;
+  std::vector<PublicationSeed> mountedSeeds_;
+  mutable std::unique_ptr<ContentRetention> contentRetention_;
+  void retainForOffline(const Store &store,
+                        const std::filesystem::path &directory) const;
   /// Null unless useSwarm() was called.
   std::unique_ptr<SwarmContentSource> swarmSource;
   std::unique_ptr<PublicationOutbox> publicationOutbox_;

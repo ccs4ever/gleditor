@@ -51,8 +51,9 @@ InfoHash DirectoryContentSource::add(const std::string_view torrentFile,
     // first file's name -- which sealing produces, since the scroll and the
     // content it carries are both called after the salt -- otherwise finds the
     // directory and tries to read the file out of it.
-    if (!std::filesystem::is_regular_file(root / first) &&
-        std::filesystem::is_regular_file(root / meta.name() / first)) {
+    // Prefer the torrent-named layout: the root may also hold a metainfo
+    // sidecar with the same name as the first payload file.
+    if (std::filesystem::is_regular_file(root / meta.name() / first)) {
       dataRoot = (root / meta.name()).string();
     }
   }

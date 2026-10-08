@@ -11,21 +11,10 @@
 #include <vector>
 
 #include "publication.hpp"
+#include "retained_content.hpp"
 
 namespace xanadu {
 struct LinkPackage;
-
-struct PublicationSeed {
-  InfoHash hash;
-  std::string metainfo;
-  std::filesystem::path savePath;
-  std::uint64_t bytes{};
-};
-
-/// Check one retained torrent, including paths, lengths and every piece.
-[[nodiscard]] PublicationSeed
-reviewPublicationSeed(const InfoHash &hash,
-                      const std::filesystem::path &directory);
 
 /// Verifies every piece before a seed-mode torrent can be offered to peers.
 /// Roots are immutable seed directories containing <hash>/metainfo.torrent.

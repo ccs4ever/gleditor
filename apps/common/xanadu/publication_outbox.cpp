@@ -23,73 +23,6 @@
 
 namespace xanadu {
 namespace {
-std::string readFile(const std::filesystem::path &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in)
-    throw std::runtime_error("cannot read publication seed: " + path.string());
-  std::string bytes{std::istreambuf_iterator<char>(in),
-                    std::istreambuf_iterator<char>()};
-  if (in.bad())
-    throw std::runtime_error("cannot read publication seed: " + path.string());
-  return bytes;
-}
-
-bool relativePath(const std::filesystem::path &path) {
-  if (path.empty() || path.has_root_path() ||
-      path.string().find('\0') != std::string::npos ||
-      path.string().find('\\') != std::string::npos)
-    return false;
-  for (const auto &component : path)
-    if (component == "." || component == "..") return false;
-  return true;
-}
-
-PublicationSeed checkedSeed(const InfoHash &hash,
-                            const std::filesystem::path &root) {
-  const auto encoded = readFile(root / "metainfo.torrent");
-  const auto meta    = Metainfo::parse(encoded);
-  if (meta.hash() != hash || !relativePath(meta.name()) ||
-      std::filesystem::path(meta.name()).has_parent_path())
-    throw std::runtime_error("publication seed metainfo mismatch: " +
-                             hash.hex());
-  const auto data          = root / meta.name();
-  const auto canonicalRoot = std::filesystem::weakly_canonical(data);
-  if (!relativePath(canonicalRoot.lexically_relative(
-          std::filesystem::weakly_canonical(root))))
-    throw std::runtime_error("publication seed data escapes its directory");
-  if (meta.pieceCount() != meta.totalLength() / meta.pieceLength() +
-                               (meta.totalLength() % meta.pieceLength() != 0))
-    throw std::runtime_error("publication seed has an incomplete piece table");
-  std::set<std::string> paths;
-  for (const auto &file : meta.files()) {
-    if (!paths.insert(file.path).second)
-      throw std::runtime_error("publication seed has duplicate file paths");
-    if (!relativePath(file.path) || file.path.find('\\') != std::string::npos)
-      throw std::runtime_error("unsafe publication seed path: " + hash.hex());
-    const auto full = std::filesystem::weakly_canonical(data / file.path);
-    if (!relativePath(full.lexically_relative(canonicalRoot)))
-      throw std::runtime_error("publication seed escapes its directory: " +
-                               hash.hex());
-    if (!std::filesystem::is_regular_file(full) ||
-        std::filesystem::file_size(full) != file.length)
-      throw std::runtime_error("publication seed file missing or truncated: " +
-                               hash.hex());
-  }
-  DirectoryContentSource source;
-  source.add(encoded, root.string());
-  for (std::size_t piece = 0; piece < meta.pieceCount(); ++piece) {
-    const auto bytes = source.readStream(hash, piece * meta.pieceLength(),
-                                         meta.lengthOfPiece(piece));
-    if (!meta.verifyPiece(piece, bytes))
-      throw std::runtime_error("publication seed piece " +
-                               std::to_string(piece) +
-                               " failed verification: " + hash.hex());
-  }
-  return {.hash     = hash,
-          .metainfo = encoded,
-          .savePath = root,
-          .bytes    = meta.totalLength()};
-}
 
 std::string jobId(const Publication &pub) {
   return pub.publisher.hex() + ":" + toHex(pub.salt) + ":" +
@@ -304,11 +237,6 @@ private:
 };
 } // namespace
 
-PublicationSeed reviewPublicationSeed(const InfoHash &hash,
-                                      const std::filesystem::path &directory) {
-  return checkedSeed(hash, directory);
-}
-
 std::vector<PublicationSeed>
 reviewPublicationDependencies(const Publication &pub,
                               const std::vector<std::filesystem::path> &roots) {
@@ -327,7 +255,7 @@ reviewPublicationDependencies(const Publication &pub,
     for (const auto &root : roots) {
       const auto dir = root / hash.hex();
       if (!std::filesystem::exists(dir / "metainfo.torrent")) continue;
-      seeds.push_back(checkedSeed(hash, dir));
+      seeds.push_back(reviewPublicationSeed(hash, dir));
       found = true;
       break;
     }
@@ -407,19 +335,7 @@ installPublication(const Publication &pub,
   try {
     const auto retained = staging / "published";
     for (const auto &seed : seeds) {
-      const auto meta   = Metainfo::parse(seed.metainfo);
-      const auto output = retained / seed.hash.hex();
-      fs::create_directories(output);
-      std::ofstream torrent(output / "metainfo.torrent", std::ios::binary);
-      torrent << seed.metainfo;
-      torrent.close();
-      if (!torrent)
-        throw std::runtime_error("cannot retain publication metainfo");
-      for (const auto &file : meta.files()) {
-        const auto target = output / meta.name() / file.path;
-        fs::create_directories(target.parent_path());
-        fs::copy_file(seed.savePath / meta.name() / file.path, target);
-      }
+      (void)retainPublicationSeed(seed, retained);
     }
     // Recheck the copies, including path escapes and piece hashes: source
     // files may have changed while the reader was retaining them.
@@ -603,7 +519,7 @@ struct PublicationOutbox::Impl {
     const auto root    = output / torrent.hash.hex();
     if (!std::filesystem::exists(root / "metainfo.torrent"))
       (void)writeTorrentSeed(output, torrent, files);
-    job.seeds.push_back(checkedSeed(torrent.hash, root));
+    job.seeds.push_back(reviewPublicationSeed(torrent.hash, root));
     job.status.manifestHash = torrent.hash;
   }
   void work(std::stop_token stop) {

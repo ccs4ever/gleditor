@@ -1594,6 +1594,11 @@ TEST(E2EBinaryOrchestrationTest,
     out << xudu_test::multiFileFirst;
   }
 
+  {
+    std::ofstream out(s2Dir / "sub" / "two.txt", std::ios::binary);
+    out << xudu_test::multiFileSecond;
+  }
+
   const auto s3TorrentPath = s3Dir / "source3.torrent";
   {
     std::ofstream out(s3TorrentPath, std::ios::binary);
@@ -2176,18 +2181,15 @@ TEST(E2EBinaryOrchestrationTest,
       " --click-label 'Notes ›' --click-label 'Notes ›'"
       " --click-label 'Insert: OMEGA' --click-label 'Forge Clasp'"
       " --dump-a11y --capture " +
-      (root / "quoted.ppm").string() + " --chord Escape --chord Ctrl+S";
+      (root / "quoted.ppm").string() +
+      " --chord Escape --chord Ctrl+S --chord Ctrl+Alt+1 --dump-a11y "
+      "--capture " +
+      (root / "saved.ppm").string();
   const auto result = executeProcess(command);
   ASSERT_EQ(result.exitCode, 0) << result.output;
   EXPECT_THAT(result.output, testing::HasSubstr("Bob: ALPHARESEARCHOMEGA"));
   std::optional<fs::path> commentary;
-  const auto reader = permascrollAt(readerPerma);
-  // This is a persisted-address check with verified carriers supplied. Offline
-  // reopening without the source publication is a separate journey requirement.
-  xanadu::DirectoryContentSource carriers;
-  for (const auto &seed :
-       xanadu::reviewPublicationDependencies(publication, {seeds}))
-    carriers.add(seed.metainfo, seed.savePath.string());
+  const auto reader  = permascrollAt(readerPerma);
   bool checkedSource = false;
   for (const auto &entry :
        fs::directory_iterator(root / "data/xudu/xanadocs")) {
@@ -2201,7 +2203,6 @@ TEST(E2EBinaryOrchestrationTest,
       continue;
     }
     if (!entry.path().filename().string().starts_with("untitled-")) continue;
-    loaded.setContentSource(&carriers);
     if (loaded.textOf(loaded.latest()) == "Bob: ALPHARESEARCHOMEGA") {
       commentary        = entry.path();
       const auto quoted = loaded.rebuild(loaded.latest()).spansFor(5, 18);
@@ -2220,6 +2221,34 @@ TEST(E2EBinaryOrchestrationTest,
   }
   ASSERT_TRUE(commentary) << result.output;
   EXPECT_TRUE(checkedSource);
+  // Hide both the original seed closure and Alice's installed publication.
+  // The commentary and the private pouch must each own what they need offline.
+  fs::remove_all(seeds);
+  for (const auto &entry :
+       fs::directory_iterator(root / "data/xudu/xanadocs")) {
+    if (entry.path().filename().string().starts_with("publication-"))
+      fs::remove_all(entry.path());
+  }
+  Store offline(reader);
+  offline.load(commentary->string());
+  EXPECT_EQ(offline.textOf(offline.latest()), "Bob: ALPHARESEARCHOMEGA");
+  fs::copy(root / "config", root / "offline-config",
+           fs::copy_options::recursive);
+  const auto reopened = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "offline-config").string() +
+      " XDG_DATA_HOME=" + (root / "offline-data").string() +
+      " XDG_CACHE_HOME=" + (root / "offline-cache").string() + " timeout 120 " +
+      binary.string() + permascrollFlag(readerPerma) + " --backend " +
+      activeBackend() + " --profile " + commentary->string() +
+      " --chord Ctrl+Alt+1 --dump-a11y --capture " +
+      (root / "offline-before.ppm").string() +
+      " --select 23,23 --chord F2 --click-label Zones --click-label Zones"
+      " --click-label 'Notes ›' --click-label 'Insert: ALPHA' --chord Escape"
+      " --dump-a11y --capture " +
+      (root / "offline-after.ppm").string());
+  ASSERT_EQ(reopened.exitCode, 0) << reopened.output;
+  EXPECT_THAT(reopened.output,
+              testing::HasSubstr("Bob: ALPHARESEARCHOMEGAALPHA"));
   EXPECT_EQ(alice.opCount(), authorOps);
   EXPECT_EQ(alice.userPermascroll().spool().size(), authorBytes);
   // Only Bob's typing plus private system-doc text belongs in his permascroll.
@@ -2229,6 +2258,29 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_EQ(readerText.find("ALPHA"), std::string::npos);
   EXPECT_EQ(readerText.find("RESEARCH"), std::string::npos);
   EXPECT_EQ(readerText.find("OMEGA"), std::string::npos);
+  Store savedDraft(reader);
+  savedDraft.load(commentary->string());
+  const auto savedOps      = savedDraft.opCount();
+  const auto savedEditions = savedDraft.currentVersions();
+  fs::rename(*commentary / "published", root / "unavailable-seeds");
+  const auto unavailable = executeProcess(
+      "XDG_CONFIG_HOME=" + (root / "unavailable-config").string() +
+      " XDG_DATA_HOME=" + (root / "unavailable-data").string() +
+      " XDG_CACHE_HOME=" + (root / "unavailable-cache").string() +
+      " timeout 120 " + binary.string() + permascrollFlag(readerPerma) +
+      " --backend " + activeBackend() + " --profile " + commentary->string() +
+      " --chord Ctrl+Alt+1 --chord Ctrl+S --wait-ms 500 --dump-a11y "
+      "--capture " +
+      (root / "unavailable.ppm").string());
+  EXPECT_EQ(unavailable.exitCode, 1) << unavailable.output;
+  EXPECT_THAT(unavailable.output,
+              testing::HasSubstr("offline quotation retention failed"));
+  Store preserved(reader);
+  preserved.load(commentary->string());
+  EXPECT_EQ(preserved.opCount(), savedOps);
+  EXPECT_EQ(preserved.currentVersions(), savedEditions);
+  EXPECT_EQ(preserved.rebuild(preserved.latest()).spansFor(5, 18).size(), 3U);
+  EXPECT_EQ(preserved.linkView().size(), 1U);
 }
 
 TEST(E2EBinaryOrchestrationTest,
