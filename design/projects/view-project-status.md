@@ -11,20 +11,21 @@ Last updated: 2026-10-08.
 | Milestone                 | State                  |
 | ------------------------- | ---------------------- |
 | M0, the tree in its shape | A1 and A2 done; closed |
-| M1, spikes                | not started            |
-| M2 onward                 | not started            |
+| M1, spikes                | done; closed           |
+| M2, the spine             | in progress            |
+| M3 onward                 | not started            |
 
 ## Done
 
-| Package or change              | Commit    | Notes                                                                                                                                                                                                                                                               |
-| ------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1 moves                       | `66afa4b` | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them. |
-| Build without ThorVG           | `a863fbe` | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                      |
-| `compare-backends.sh` isolated | `5142e20` | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                            |
-| No xvfb for GL and GLES        | `0d52fa3` | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                              |
-| A1 remainder                   | `3e48652` | See below.                                                                                                                                                                                                                                                          |
-
-| A2, `zigzag_test` to `ui_test` | this commit | See below. |
+| Package or change              | Commit      | Notes                                                                                                                                                                                                                                                               |
+| ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1 moves                       | `66afa4b`   | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them. |
+| Build without ThorVG           | `a863fbe`   | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                      |
+| `compare-backends.sh` isolated | `5142e20`   | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                            |
+| No xvfb for GL and GLES        | `0d52fa3`   | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                              |
+| A1 remainder                   | `3e48652`   | See below.                                                                                                                                                                                                                                                          |
+| A2, `zigzag_test` to `ui_test` | `0270fc7`   | See below.                                                                                                                                                                                                                                                          |
+| M1, the spikes                 | this commit | Results and what each changes: the plan's §3.1.                                                                                                                                                                                                                     |
 
 What the A1 remainder changed:
 
@@ -60,9 +61,13 @@ changed.
 
 ## Next
 
-1. **M1**: the spikes, through spike runners. S1, S4, S5, S2 and S3 are engine-only and can run now.
-   R1 to R5 can measure OpenGL and GLES headless; Vulkan needs `xvfb-run` or an SDL3 build here. V1
-   and V2 also need the frame inspector.
+1. **M2**, in parallel streams: E1, E2, E3 and E6 (engine), E0 and E4 with S4 (engine), U0 (the
+   seam) are with implementers; L1, L2 and L8 (library, ahead of M4) likewise. Then E5, E8, E9, U1
+   (with §3.1's three colour changes), U2, U5a, U6a, U7a; then the red team, the frame inspector
+   (re-check colours 0, 6 and 27), the UX validator and go or no-go.
+1. Kept from M1 for later packages: R3's shader change and harness (worktree branch
+   `worktree-agent-a52dc9e4e229f8f88`, `903c1ba`) for L9; R4's test (`7a776fb`) for L7, landed
+   disabled until L7.
 
 ## Fixed along the way
 
@@ -147,6 +152,12 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   audit enforces only the UI and program boundary for now, so it does not go red on this.
 
 ## Decisions taken
+
+- M1 (the plan's §3.1): P2 steps to a velocity threshold with a cap, parity against the `docSlots`
+  row; `PlaneSet` is one draw with a per-plane table; the glyph stage gets a "coverage is alpha"
+  flag; one translucent list sorted by camera depth, beams included, before L6 and L7; U1's colour
+  rule is the V1 re-run with three changes; E10 and P4 take the formula changes V2 and V3 named. The
+  decorative palettes (per author, lineage, badges) are not reserved hues.
 
 - System xanadocs live in the user's config directory, so their text lives in the user's own
   permascroll (`PermascrollRegistry::defaultUser()`), never the one a run's documents were opened
