@@ -8,12 +8,12 @@ Last updated: 2026-10-08.
 
 ## Where it stands
 
-| Milestone                 | State                  |
-| ------------------------- | ---------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed |
-| M1, spikes                | done; closed           |
-| M2, the spine             | in progress            |
-| M3 onward                 | not started            |
+| Milestone                 | State                              |
+| ------------------------- | ---------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed             |
+| M1, spikes                | done; closed                       |
+| M2, the spine             | in progress: E0 to E4, E6, U0 done |
+| M3 onward                 | not started                        |
 
 ## Done
 
@@ -28,6 +28,8 @@ Last updated: 2026-10-08.
 | M1, the spikes                 | `a1b8bf0`                                  | Results and what each changes: the plan's §3.1.                                                                                                                                                                                                                                                       |
 | L1, L2, L8                     | `90960b7`, `5b69a19`, `55699d7`            | Unprojection to a world ray; `insideFrustum`; `ui::PaneTree`. The pane tree's mutators return `std::expected`, and it gains `dividers()` and `resizeDivider()` (amended in the rendering plan).                                                                                                       |
 | E2, E1, E3, E6                 | `e5e6292`, `e2bfb3a`, `a8572c2`, `178ef87` | `ViewError` with its own `ViewMessage` keys (G8); records, `SubjectId` factories and `LayoutSink` (G13); `ViewRegistry`, refusing duplicate kinds and chords in one scope; the raster. `ViewEpoch` and `ViewAxisId` live in `view_ids.hpp`. The chord normaliser moved to `xanadu::canonicalChord()`. |
+| E0, E4                         | `5d9adad`, `bff4a36`                       | The `release()` guard and `shadowCount()`; `ViewManifold` over a binding and a derived arena, the layer rule (G1), toss, counts (G3) and `verifyViewSpace`, with S4 as the first test and random sequences against a model. I6 waits for E8's cursor.                                                 |
+| U0                             | `282b6e9`, `74c2e05`                       | `SlicePresentation` in `apps/common/ui/view/`; `xuzz_app` and `ViewCoordinator` hold the slice through it, except `vortexHost()` and the visualizer's own command set (X0's). The drawing roles left the engine's `presentation_surface.hpp`, which now includes no library header.                   |
 
 What the A1 remainder changed:
 
@@ -63,13 +65,20 @@ changed.
 
 ## Next
 
-1. **M2**, in parallel streams: E1, E2, E3 and E6 (engine), E0 and E4 with S4 (engine), U0 (the
-   seam) are with implementers; L1, L2 and L8 (library, ahead of M4) likewise. Then E5, E8, E9, U1
-   (with §3.1's three colour changes), U2, U5a, U6a, U7a; then the red team, the frame inspector
-   (re-check colours 0, 6 and 27), the UX validator and go or no-go.
-1. Kept from M1 for later packages: R3's shader change and harness (worktree branch
-   `worktree-agent-a52dc9e4e229f8f88`, `903c1ba`) for L9; R4's test (`7a776fb`) for L7, landed
-   disabled until L7.
+Four workers stopped mid-package on 2026-10-08 at the organisation's monthly spend limit. Their work
+is saved, ungated, as a `WIP` commit in each worktree under `.claude/worktrees/` (local only; lost
+if the container is reclaimed):
+
+| Package | Worktree branch                    | State                                                                                                                                                                  |
+| ------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E14     | `worktree-agent-a4fe70719502d1802` | `c9b6b88` complete and gated; `48e2cea` part of the rework the orchestrator asked for: a walk summary as cells and dimensions, not counts in text (owner's rule, VU5). |
+| P1, P2  | `worktree-agent-a7e182e3ccdb456ba` | `cc190dc`: `page_view.hpp`, `view/page/`, a side on the tension constraint, settings and tests in progress.                                                            |
+| E5, E8  | `worktree-agent-abf454dd6a47d2db9` | `48e5087`: `view_binding.hpp` begun.                                                                                                                                   |
+| U1      | none                               | Not begun. The rule is fixed by §3.1's V1 row.                                                                                                                         |
+
+Then, in order of dependency: E9 after E8; U2, U5a, U6a, U7a; the red team, the frame inspector
+(re-check colours 0, 6 and 27), the UX validator and go or no-go for M2. Kept from M1: R3's shader
+change (`worktree-agent-a52dc9e4e229f8f88`, `903c1ba`) for L9; R4's test (`7a776fb`) for L7.
 
 ## Fixed along the way
 
@@ -150,9 +159,9 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   `frame_contributor.hpp`, `pick_observer.hpp` and `a11y/tree.hpp`
   (`apps/common/xanadu/zigzag/presentation_surface.hpp`), `radial_menu.hpp` and `ui/theme.hpp`
   (`system_docs.hpp`) and `stepped_view.hpp` (`zigzag/cell_views.hpp`). All header-only uses; the
-  link line, which is what the Makefile enforces, still holds. `presentation_surface.hpp` is a
-  drawing interface in the engine and is where U0's seam will start, so it is reviewed there. The
-  audit enforces only the UI and program boundary for now, so it does not go red on this.
+  link line, which is what the Makefile enforces, still holds. U0 moved `presentation_surface.hpp`'s
+  drawing roles to the UI seam; the rest remain. The audit enforces only the UI and program boundary
+  for now, so it does not go red on this.
 
 ## Decisions taken
 
