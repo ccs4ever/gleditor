@@ -25,10 +25,16 @@ STATIC =
 # real display is looking at what was drawn, and `SDL_VIDEODRIVER=wayland make
 # test` still says so. See CLAUDE.md's "Tests" section, which is the rule this
 # implements.
+#
+# GALLIUM_DRIVER pins Mesa's software rasteriser to llvmpipe, so with the
+# offscreen video driver no X server is needed for a GL or GLES frame: xvfb is
+# only wanted for a Vulkan capture under SDL2, whose offscreen driver has no
+# Vulkan support.
 SDL_VIDEODRIVER       ?= offscreen
 SDL_AUDIODRIVER       ?= dummy
 LIBGL_ALWAYS_SOFTWARE ?= 1
-export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
+GALLIUM_DRIVER        ?= llvmpipe
+export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
 
 # And under the build tree, not the developer's home. A store holds no primedia
 # of its own: what was typed lives in the author's permascroll, which xudu

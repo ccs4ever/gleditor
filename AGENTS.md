@@ -84,23 +84,27 @@ has explicitly asked for visual confirmation.** A window stealing focus interrup
 keyboard, and a run that depends on a real display cannot be reproduced in CI or over SSH.
 
 `make` handles it: the Makefile exports `SDL_VIDEODRIVER=offscreen`, `SDL_AUDIODRIVER=dummy`,
-`LIBGL_ALWAYS_SOFTWARE=1`, plus `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` pointed into
-`build/xdg/`, so every target, script and child process inherits them. The XDG three matter: a store
-holds no primedia, so what tests type goes into the author's permascroll under `$XDG_DATA_HOME`, the
-system xanadocs live under `$XDG_CONFIG_HOME`, and the LMDB content cache lives under
-`$XDG_CACHE_HOME` — without the redirect a test run pollutes your real permascroll and cache and
-overwrites your real settings. All six are `?=`, so an explicit override survives
-(`SDL_VIDEODRIVER=wayland make test` still means it).
+`LIBGL_ALWAYS_SOFTWARE=1`, `GALLIUM_DRIVER=llvmpipe`, plus `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` pointed into `build/xdg/`, so every target, script and child process inherits them.
+The XDG three matter: a store holds no primedia, so what tests type goes into the author's
+permascroll under `$XDG_DATA_HOME`, the system xanadocs live under `$XDG_CONFIG_HOME`, and the LMDB
+content cache lives under `$XDG_CACHE_HOME` — without the redirect a test run pollutes your real
+permascroll and cache and overwrites your real settings. All seven are `?=`, so an explicit override
+survives (`SDL_VIDEODRIVER=wayland make test` still means it).
 
-Outside `make` it is yours to set, in order of preference:
+Outside `make` it is yours to set:
 
 ```sh
-SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
   XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config \
-  XDG_CACHE_HOME=$PWD/build/xdg/cache <command>                                        # 1. almost always enough
-xvfb-run -s "-screen 0 1024x768x24" <command>                                          # 2. when something insists on a display
-xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh                        # 3. both; what compare-backends wants
+  XDG_CACHE_HOME=$PWD/build/xdg/cache <command>
 ```
+
+No X server is needed: offscreen SDL over Mesa's llvmpipe renders GL and GLES frames by itself.
+`./tools/compare-backends.sh` sets the four rendering variables itself and its own XDG directories
+under `build/compare-backends/`, so it runs bare. The one thing that still needs a display is a
+Vulkan capture under SDL2, whose offscreen driver cannot make a Vulkan window; there use
+`xvfb-run -s "-screen 0 1024x768x24" <command>`, or build against SDL3.
 
 That covers `./build/xudu_test --gtest_filter=...`, the common case that bypasses make. `xuzz` (and
 the `xudu` / `zigzag` symlinks) also take `--headless`, which skips window creation entirely and is
@@ -468,9 +472,9 @@ Zero Cairo, zero Pango: FreeType 2, HarfBuzz, libunibreak (UAX #14), FriBidi, Fo
 - `GlyphCache` (`src/glyphcache/cache.cpp`) rasterises 8-bit coverage with FreeType into a 2D
   texture array atlas (512² growing to 16384² over 64 layers). Quads anchor to `line.top` at
   `lineHeight`; cluster textures put the baseline at $Y = \text{ascent}$.
-- After any shaping or layout change run `./tools/compare-backends.sh` under `xvfb-run` and inspect
-  the PNGs it writes (flat baselines, correct cluster height, sharp glyphs). Reading a captured
-  frame is inspection; opening a live window is not.
+- After any shaping or layout change run `./tools/compare-backends.sh` and inspect the PNGs it
+  writes (flat baselines, correct cluster height, sharp glyphs). Reading a captured frame is
+  inspection; opening a live window is not.
 
 ## ZigZag cell representation: text and mixed media
 

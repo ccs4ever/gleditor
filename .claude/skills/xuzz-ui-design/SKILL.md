@@ -241,7 +241,7 @@ program that draws nothing still exits 0.
 
 - Layout is checked by tests in `tests/xuzz/` with no graphics device. Library behaviour such as
   text fitting and focus is taken as given there and not tested again.
-- After a change to drawing, run `./tools/compare-backends.sh` under `xvfb-run` and inspect the
+- After a change to drawing, run `./tools/compare-backends.sh` (no display needed) and inspect the
   images it writes.
 - `tools/check-ui-text-policy.py` is the lint for the text rules.
 - The acceptance checks for the eye are in §5.5 of the implementation plan. Frames are inspected by

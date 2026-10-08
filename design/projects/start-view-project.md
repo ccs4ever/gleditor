@@ -99,11 +99,15 @@ session except what you push.
 - **Everything runs headless.** `make` exports the variables. Outside `make`:
 
   ```sh
-  SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
-    XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config <command>
+  SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+    XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config \
+    XDG_CACHE_HOME=$PWD/build/xdg/cache <command>
   ```
 
-  Never open a window. `tools/compare-backends.sh` runs under `xvfb-run -s "-screen 0 1024x768x24"`.
+  Never open a window. None of this needs an X server: offscreen SDL over llvmpipe renders GL and
+  GLES by itself, and `tools/compare-backends.sh` sets the variables itself and runs bare. Only a
+  Vulkan capture under SDL2 needs `xvfb-run -s "-screen 0 1024x768x24"`, because SDL2's offscreen
+  driver cannot make a Vulkan window.
 
 - **clang-format must be version 19.** Newer versions format differently and fail the gate:
 
@@ -175,14 +179,14 @@ test cannot see and for confirming that what the tests assert is what is on scre
 A package is done when its gate is green, its tests are in the right directory, its settings and
 chords are specified rather than hard-coded, and the status file says so.
 
-| Change                                                                        | Gate                                                                                                                                                                                              |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The relocation, the rename, and anything touching a device or the application | `make -j$(nproc)`; `make test` (read the PASSED lines); `PATH=/tmp/cf19/bin:$PATH make format-check lint` (no new findings); `xvfb-run … ./tools/compare-backends.sh` with its captures inspected |
-| Engine packages (plan tracks E and P)                                         | `make -j$(nproc) lib xuzz_test xudu_test`; both test binaries headless; format and lint                                                                                                           |
-| Header-only library packages                                                  | `make -j$(nproc) gleditor_test`; the binary headless; format and lint                                                                                                                             |
-| Device-level library packages                                                 | the full gate, with the new scene                                                                                                                                                                 |
-| Every package                                                                 | no file under `apps/xudu/` or `apps/zigzag/`; no sentinel in a new API; no library test repeated outside `tests/lib/`                                                                             |
-| Every milestone                                                               | the full gate; the red-team reviewer; the frame inspector; then your go or no-go, written in the status file with its reasons                                                                     |
+| Change                                                                        | Gate                                                                                                                                                                                   |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The relocation, the rename, and anything touching a device or the application | `make -j$(nproc)`; `make test` (read the PASSED lines); `PATH=/tmp/cf19/bin:$PATH make format-check lint` (no new findings); `./tools/compare-backends.sh` with its captures inspected |
+| Engine packages (plan tracks E and P)                                         | `make -j$(nproc) lib xuzz_test xudu_test`; both test binaries headless; format and lint                                                                                                |
+| Header-only library packages                                                  | `make -j$(nproc) gleditor_test`; the binary headless; format and lint                                                                                                                  |
+| Device-level library packages                                                 | the full gate, with the new scene                                                                                                                                                      |
+| Every package                                                                 | no file under `apps/xudu/` or `apps/zigzag/`; no sentinel in a new API; no library test repeated outside `tests/lib/`                                                                  |
+| Every milestone                                                               | the full gate; the red-team reviewer; the frame inspector; then your go or no-go, written in the status file with its reasons                                                          |
 
 A green fast gate proves the engine code is right by its own tests and nothing more. Do not report a
 feature as working until a presentation draws it and the inspector has seen it.

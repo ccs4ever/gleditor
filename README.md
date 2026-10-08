@@ -138,7 +138,7 @@ checked span access and a two-span `views::concat`. Vortex `map`/`filter`/`fold`
 native/fallback choices so clients use the same type layout. See the
 [C++26 compatibility note](design/cpp26-compatibility.md) for the exact boundary.
 
-For a rendering regression, build and run `./tools/compare-backends.sh` under `xvfb-run`. It
+For a rendering regression, build and run `./tools/compare-backends.sh`; it needs no display. It
 compares software-rendered PNGs, picking tags, and Vulkan's single- and multi-thread recordings. A
 process exiting zero while drawing nothing is not a rendering test.
 
@@ -359,8 +359,8 @@ make profile                         # library test coverage
 without a graphics device; `zigzag_test` covers the slice model and transclusion engine. The swarm
 step uses rootless network namespaces and needs the `veth` kernel module. If it ends with
 `Error: Unknown device type.`, inspect the four gtest summaries before diagnosing the failure. Run
-`xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` for the backend image and picking
-comparison.
+`./tools/compare-backends.sh` for the backend image and picking comparison; offscreen SDL over
+llvmpipe needs no X server, and only a Vulkan capture under SDL2 wants `xvfb-run`.
 
 Binary sample stores live under `tests/samples/xudu/` and `tests/samples/xuzz/`. When an operation
 layout or format changes, regenerate them in the same commit:

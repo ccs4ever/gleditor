@@ -477,7 +477,8 @@ space to the sibling; order is stable under resize.
 
 Steps 3 and 4 land on OpenGL, GLES and Vulkan in the same change, so the backends never disagree
 about what a region means. Every step passes `make test`, `make lint`, and
-`xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` before the next begins.
+`./tools/compare-backends.sh` before the next begins (no display needed for GL and GLES; a Vulkan
+capture under SDL2 still wants `xvfb-run`).
 
 ## 9. Risks
 

@@ -27,7 +27,13 @@ OUT=$(cd "$OUT" && pwd)
 export XDG_DATA_HOME="$OUT/xdg/data"
 export XDG_CONFIG_HOME="$OUT/xdg/config"
 export XDG_CACHE_HOME="$OUT/xdg/cache"
+# Offscreen SDL with Mesa's llvmpipe needs no display at all. Vulkan under SDL2
+# is the exception: SDL2's offscreen driver cannot make a Vulkan window, so that
+# backend is skipped unless the run has a display (xvfb-run) or SDL3.
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-dummy}"
+export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
 
 # Percentage of differing pixels tolerated against the OpenGL reference. OpenGL
 # ES runs the same pipeline through the same driver, so it is held to exact

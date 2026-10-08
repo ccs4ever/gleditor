@@ -441,13 +441,13 @@ records; **H** needs a person.
 
 ## 6. Gates
 
-| Change                                         | Gate                                                                                                                                               |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1, U2, U4, X3, and anything touching a device | `make -j$(nproc)`; `make test`; `make format-check lint` with clang-format 19; `xvfb-run … ./tools/compare-backends.sh` and the captures inspected |
-| Tracks E and P                                 | `make -j$(nproc) lib xuzz_test`; `./build/xuzz_test` and `./build/xudu_test` headless; `make format-check lint`                                    |
-| Track L, header-only (L1, L2, L8)              | `make -j$(nproc) gleditor_test`; `./build/gleditor_test` headless                                                                                  |
-| Track L, device (L3 to L7, L9)                 | the full gate, with the new scene                                                                                                                  |
-| Every package                                  | the eye's checks that apply (§5.5); no file under `apps/xudu/` or `apps/zigzag/`; `tools/check-ui-text-policy.py` over `apps/common/ui/view/`      |
+| Change                                         | Gate                                                                                                                                          |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1, U2, U4, X3, and anything touching a device | `make -j$(nproc)`; `make test`; `make format-check lint` with clang-format 19; `./tools/compare-backends.sh` and the captures inspected       |
+| Tracks E and P                                 | `make -j$(nproc) lib xuzz_test`; `./build/xuzz_test` and `./build/xudu_test` headless; `make format-check lint`                               |
+| Track L, header-only (L1, L2, L8)              | `make -j$(nproc) gleditor_test`; `./build/gleditor_test` headless                                                                             |
+| Track L, device (L3 to L7, L9)                 | the full gate, with the new scene                                                                                                             |
+| Every package                                  | the eye's checks that apply (§5.5); no file under `apps/xudu/` or `apps/zigzag/`; `tools/check-ui-text-policy.py` over `apps/common/ui/view/` |
 
 The publication-network tests take most of a full `make test`. Engine packages need not wait on
 them: they cannot be affected by code no program yet links. The full gate runs at every milestone.
@@ -548,3 +548,5 @@ Three challengers attacked the first draft. What each said that mattered, and wh
 - 2026-10-07 — The owner's decisions recorded (§8): relocation first, then spikes; `u` and `t`
   deferred; the orchestrator decides go or no-go and a subagent inspects frames; walk summaries in
   the activity store as they fit; the third test binary becomes `ui_test`.
+- 2026-10-08 — §6: `compare-backends.sh` needs no `xvfb-run`; offscreen SDL over llvmpipe renders GL
+  and GLES without a display. A Vulkan capture under SDL2 is the one case that still needs one.

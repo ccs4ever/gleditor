@@ -371,8 +371,8 @@ Xuzz and ZigZag integration tests for hidden tabs, nested focus, modal isolation
 routing, persistence, and accessibility order. Test window/DPI changes without changing the store
 version; a cached widget position keyed only by session generation is insufficient. Use the
 Makefile's offscreen XDG environment for every test, `make -j$(nproc) test`, and
-`xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh` for visual/backend checks. The
-swarm/network tests are not a layout gate unless a content-resolution path changes.
+`./tools/compare-backends.sh` for visual/backend checks. The swarm/network tests are not a layout
+gate unless a content-resolution path changes.
 
 ## 10. Explicit non-goals and unresolved prerequisites
 
