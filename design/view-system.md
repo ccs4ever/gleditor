@@ -1089,6 +1089,12 @@ public:
   [[nodiscard]] std::size_t derivedCellCount() const noexcept;
   ViewManifold *toss() noexcept; // §6.5
 
+  // -- what verifyViewSpace and the toss test read -------------------------
+  [[nodiscard]] bool isCurrent(ViewCellRef cell) const noexcept;
+  [[nodiscard]] std::size_t shadowCount(Layer layer) const noexcept;
+  [[nodiscard]] std::size_t trailSize(Layer layer) const noexcept;
+  [[nodiscard]] std::size_t spaceCount(Layer layer) const noexcept;
+
 private:
   const zigzag::Manifold &base_;
   zigzag::ArenaManifold bindings_;
@@ -1099,8 +1105,9 @@ private:
 };
 
 struct ViewSpaceViolation {
-  ViewCellRef cell;
-  std::string_view rule; // "I3", "two-sided", "rank-shape", ...
+  std::optional<ViewCellRef> cell; // none for an arena-wide one, as I4's
+  Layer layer;
+  std::string_view rule; // "I3", "I4", "two-sided", "rank-shape", ...
 };
 /// Calls @p report for each violation and answers how many there were.
 std::size_t verifyViewSpace(
@@ -3449,3 +3456,6 @@ ______________________________________________________________________
 - 2026-10-08 — §6.5, V-R9, V1: a toss leaves the derived arena's storage reusable, not reclaimed;
   `release()` keeps capacity, as spike S1 found. The `d.store-refs` guard and `shadowCount()` are
   landed (E0), with S1's numbers.
+- 2026-10-08 — §8.2: `ViewManifold` exposes each arena's shadow, trail and space counts and whether
+  a ref is current (plan G3); a violation of a whole arena, such as a trail on the derived one,
+  names its layer and no cell, rather than a placeholder cell.
