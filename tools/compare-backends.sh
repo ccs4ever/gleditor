@@ -15,7 +15,18 @@ set -eu
 
 SAMPLE="${1:-tests/samples/quick_brown_fox.txt}"
 BIN="${BIN:-build/gleditor}"
-OUT="${OUT:-$(mktemp -d)}"
+# Everything this run writes -- frames, logs, the E2E scenarios' stores and the
+# XDG directories -- lives under its own directory, apart from the build/xdg and
+# build/integration_workspace* that `make test` uses, so the two can run at once.
+if [ -z "${OUT:-}" ]; then
+  OUT=build/compare-backends
+  rm -rf "$OUT"
+fi
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+export XDG_DATA_HOME="$OUT/xdg/data"
+export XDG_CONFIG_HOME="$OUT/xdg/config"
+export XDG_CACHE_HOME="$OUT/xdg/cache"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
 
 # Percentage of differing pixels tolerated against the OpenGL reference. OpenGL
@@ -524,6 +535,7 @@ if [ -x "$XUDU_TEST_BIN" ]; then
   for backend in $backends; do
     mkdir -p "$OUT/xudu_$backend"
     XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
+      XUDU_WORKSPACE_DIR="$OUT/workspace_$backend" \
       "$XUDU_TEST_BIN" --gtest_filter='*E2EBinaryOrchestration*' \
       >"$OUT/xudu_$backend.log" 2>&1 ||
       {

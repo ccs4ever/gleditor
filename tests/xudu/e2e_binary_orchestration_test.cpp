@@ -349,12 +349,22 @@ std::string activeBackend() {
   return (env && *env) ? std::string(env) : "opengl";
 }
 
+// Where each scenario keeps its stores. compare-backends.sh points this at its
+// own directory so a run cannot collide with a concurrent `make test`.
+fs::path workspaceRoot() {
+  const char *env = std::getenv("XUDU_WORKSPACE_DIR");
+  if (env && *env) {
+    return fs::path(env);
+  }
+  return fs::current_path() / "build";
+}
+
 fs::path getScreenshotDir() {
   const char *env = std::getenv("XUDU_SCREENSHOT_DIR");
   if (env && *env) {
     return fs::path(env);
   }
-  return fs::current_path() / "build" / "integration_screenshots";
+  return workspaceRoot() / "integration_screenshots";
 }
 
 std::string makeMultiPageText(std::size_t pageCount, const std::string &topic) {
@@ -430,7 +440,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot = fs::current_path() / "build" / "integration_workspace";
+  const auto testRoot      = workspaceRoot() / "integration_workspace";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -763,9 +773,8 @@ TEST(E2EBinaryOrchestrationTest, textSurvivesAtWholePageDistance) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_default_fov";
-  const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
+  const auto testRoot = workspaceRoot() / "integration_workspace_default_fov";
+  const auto samples  = fs::current_path() / "tests" / "samples" / "xudu";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -804,8 +813,7 @@ TEST(E2EBinaryOrchestrationTest, defaultViewDrawsTextAtAReadableSize) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_readable";
+  const auto testRoot      = workspaceRoot() / "integration_workspace_readable";
   const auto samples       = fs::current_path() / "tests" / "samples" / "xudu";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
@@ -839,8 +847,7 @@ TEST(E2EBinaryOrchestrationTest, newDocumentTakesTypingInView) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_new_document";
+  const auto testRoot = workspaceRoot() / "integration_workspace_new_document";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -873,8 +880,7 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_untitled";
+  const auto testRoot = workspaceRoot() / "integration_workspace_untitled";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
@@ -915,8 +921,7 @@ TEST(E2EBinaryOrchestrationTest, aTabKeepsItsNameThroughEdits) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_tab_names";
+  const auto testRoot = workspaceRoot() / "integration_workspace_tab_names";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   const auto result = executeProcess(
@@ -940,8 +945,7 @@ TEST(E2EBinaryOrchestrationTest, theKeyboardMovesTheCaretAndEdits) {
   const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
   ASSERT_TRUE(fs::exists(dumpBin)) << "xudu-dump not found at " << dumpBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_caret_keys";
+  const auto testRoot = workspaceRoot() / "integration_workspace_caret_keys";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   const auto res = executeProcess(
@@ -1003,8 +1007,8 @@ TEST(E2EBinaryOrchestrationTest,
   };
   for (const auto &modal : cases) {
     SCOPED_TRACE(modal.command);
-    const auto root = fs::current_path() / "build" /
-                      ("integration_workspace_focus_" + modal.command);
+    const auto root =
+        workspaceRoot() / ("integration_workspace_focus_" + modal.command);
     fs::remove_all(root);
     fs::create_directories(root);
     const auto scroll = root / "permascroll";
@@ -1113,8 +1117,8 @@ TEST(E2EBinaryOrchestrationTest,
        " --click-label \"Graph\" --click-label \"Close hypertime\""}};
   for (const auto &[name, script] : scripts) {
     SCOPED_TRACE(name);
-    const auto root = fs::current_path() / "build" /
-                      ("integration_workspace_big_modal_" + name);
+    const auto root =
+        workspaceRoot() / ("integration_workspace_big_modal_" + name);
     fs::remove_all(root);
     fs::create_directories(root);
     const auto scroll = root / "permascroll";
@@ -1141,8 +1145,7 @@ TEST(E2EBinaryOrchestrationTest,
      storePanelCreatesObjectsThroughNamedDrawnControls) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));
-  const auto root =
-      fs::current_path() / "build" / "integration_workspace_panel_objects";
+  const auto root = workspaceRoot() / "integration_workspace_panel_objects";
   fs::remove_all(root);
   fs::create_directories(root);
   const auto scroll      = root / "permascroll";
@@ -1181,8 +1184,7 @@ TEST(E2EBinaryOrchestrationTest,
      pouchDividerResizesAndKeepsTheDocumentUntouched) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));
-  const auto root =
-      fs::current_path() / "build" / "integration_workspace_panel_resize";
+  const auto root = workspaceRoot() / "integration_workspace_panel_resize";
   fs::remove_all(root);
   fs::create_directories(root);
   const auto scroll      = root / "permascroll";
@@ -1232,8 +1234,7 @@ TEST(E2EBinaryOrchestrationTest,
      cellEditingBlocksBackgroundCommandsAndRestoresTheZigzagPane) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));
-  const auto root =
-      fs::current_path() / "build" / "integration_workspace_focus_cell_edit";
+  const auto root = workspaceRoot() / "integration_workspace_focus_cell_edit";
   fs::remove_all(root);
   fs::create_directories(root);
   const auto scroll = root / "permascroll";
@@ -1287,7 +1288,7 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
   const auto dumpBin = xuduBin.parent_path() / "xudu-dump";
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_selection_drag";
+      workspaceRoot() / "integration_workspace_selection_drag";
   std::string start;
   const auto capture = testRoot / "selection.ppm";
   const auto dragTo  = [&](const std::string &drop) {
@@ -1362,8 +1363,7 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_hypermesh";
+  const auto testRoot = workspaceRoot() / "integration_workspace_hypermesh";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1426,8 +1426,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_fans";
+  const auto testRoot      = workspaceRoot() / "integration_workspace_fans";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1493,8 +1492,7 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_types";
+  const auto testRoot      = workspaceRoot() / "integration_workspace_types";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1555,8 +1553,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_3doc";
+  const auto testRoot      = workspaceRoot() / "integration_workspace_3doc";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1727,7 +1724,7 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_symm_multipage";
+      workspaceRoot() / "integration_workspace_symm_multipage";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1810,7 +1807,7 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_asymm_multipage";
+      workspaceRoot() / "integration_workspace_asymm_multipage";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -1887,8 +1884,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_flyin";
+  const auto testRoot      = workspaceRoot() / "integration_workspace_flyin";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
@@ -2013,8 +2009,7 @@ TEST(E2EBinaryOrchestrationTest,
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_pagebreak";
+  const auto testRoot = workspaceRoot() / "integration_workspace_pagebreak";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
 
@@ -2064,7 +2059,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_type_decorated";
+      workspaceRoot() / "integration_workspace_type_decorated";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2125,7 +2120,7 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_scripted_clasp";
+      workspaceRoot() / "integration_workspace_scripted_clasp";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
 
@@ -2190,7 +2185,7 @@ TEST(E2EBinaryOrchestrationTest,
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_media_fragment";
+      workspaceRoot() / "integration_workspace_media_fragment";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2275,8 +2270,7 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_script_links";
+  const auto testRoot = workspaceRoot() / "integration_workspace_script_links";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   const auto script = testRoot / "links.xuzz";
@@ -2328,8 +2322,7 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_pdf_dedup";
+  const auto testRoot = workspaceRoot() / "integration_workspace_pdf_dedup";
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
 
@@ -2391,8 +2384,7 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_media_link";
+  const auto testRoot = workspaceRoot() / "integration_workspace_media_link";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2470,8 +2462,7 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_many_images";
+  const auto testRoot = workspaceRoot() / "integration_workspace_many_images";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2542,7 +2533,7 @@ TEST(E2EBinaryOrchestrationTest, savingADocumentDoesNotRedesignateItsEditions) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot = fs::current_path() / "build" / "editions_save_test";
+  const auto testRoot      = workspaceRoot() / "editions_save_test";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2593,7 +2584,7 @@ TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
-  const auto testRoot      = fs::current_path() / "build" / "cli_alias_test";
+  const auto testRoot      = workspaceRoot() / "cli_alias_test";
   const auto screenshotDir = getScreenshotDir();
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -2634,7 +2625,7 @@ TEST(E2EBinaryOrchestrationTest, cliAliasDesignatesEditionCell) {
 TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
   const auto binary = findXuduBinary();
   ASSERT_TRUE(fs::exists(binary));
-  const auto root = fs::current_path() / "build" / "publication_import_seed";
+  const auto root = workspaceRoot() / "publication_import_seed";
   fs::remove_all(root);
   fs::create_directories(root);
   const auto original = root / "image.png";
