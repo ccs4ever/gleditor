@@ -209,23 +209,28 @@ StoreObjectManager::prepare(const ui::UiMetrics &metrics,
   const auto requested = std::isfinite(config_.widthPx)
                              ? std::max(0.0F, metrics.px(config_.widthPx))
                              : metrics.px(StorePanelConfig{}.widthPx);
-  const auto padding   = font->metrics().lineHeight * theme.paddingEm;
-  const auto actionWidth =
+  // The layout puts every box edge on a whole pixel, so each nested box gives
+  // up round(padding) on a side, not the padding itself. Budgeting the rows
+  // below with the exact value left them a pixel wider than their flow
+  // whenever the padding was fractional, and the flow wrapped the last button
+  // onto a line with no height, where it could be neither seen nor clicked.
+  const auto pad = std::round(font->metrics().lineHeight * theme.paddingEm);
+  const auto gap = font->metrics().lineHeight * theme.gapEm;
+  const auto actionWidth = std::ceil(
       std::max(measurements_.fitted("New Slice", font, {}).widthPx,
                measurements_.fitted("New Xanadoc", font, {}).widthPx) +
-      padding * 2 + 2;
-  const auto closeWidth =
-      measurements_.fitted("Close Drawer", font, {}).widthPx + padding * 2 + 2;
+      pad * 2 + 2);
+  const auto closeWidth = std::ceil(
+      measurements_.fitted("Close Drawer", font, {}).widthPx + pad * 2 + 2);
   const auto headerWidth =
-      measurements_.fitted("Store Object Manager", font, {}).widthPx +
-      closeWidth + padding * 4;
-  const auto width = std::floor(std::min(
-      std::max({requested, actionWidth * 2 + padding * 4, headerWidth}),
-      safe.width * share(config_.maxWidthShare, .9F)));
+      std::ceil(measurements_.fitted("Store Object Manager", font, {}).widthPx +
+                closeWidth + gap + pad * 4);
+  const auto width = std::floor(
+      std::min(std::max({requested, std::ceil(actionWidth * 2 + gap + pad * 4),
+                         headerWidth}),
+               safe.width * share(config_.maxWidthShare, .9F)));
   const auto height =
       std::floor(safe.height * share(config_.maxHeightShare, 1));
-  const auto pad      = font->metrics().lineHeight * theme.paddingEm;
-  const auto gap      = font->metrics().lineHeight * theme.gapEm;
   const auto interior = std::max(0.0F, width - pad * 2);
   const auto buttonHeight =
       std::ceil(std::max(metrics.px(theme.type.minTouchPx), line + pad * 2));
@@ -242,8 +247,8 @@ StoreObjectManager::prepare(const ui::UiMetrics &metrics,
   header.children = {
       {.id        = 3,
        .model     = ui::Label{"Store Object Manager"},
-       .preferred = {metrics.logical(
-                         std::max(0.0F, interior - pad * 2 - gap - closeWidth)),
+       .preferred = {metrics.logical(std::floor(std::max(
+                         0.0F, interior - pad * 2 - gap - closeWidth))),
                      metrics.logical(buttonHeight)}},
       {.id        = closeId_,
        .model     = ui::Button{"Close Drawer", "close-drawer"},
