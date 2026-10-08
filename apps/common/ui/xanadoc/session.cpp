@@ -1485,11 +1485,44 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
   const auto dir = systemDocDirectory(kind);
   std::filesystem::create_directories(dir);
 
-  auto perma    = (stores.empty() || !stores[0].store)
-                      ? nullptr
-                      : stores[0].store->userPermascrollPtr();
+  // The user's own permascroll, never the one this session's documents were
+  // opened against. A store holds no text, so a system xanadoc's names and
+  // chords live in whichever permascroll it was written with; written with a
+  // document's --permascroll, the keymap read back as nothing on every later
+  // launch without that flag, and xuzz started with no key bindings at all.
+  auto perma    = PermascrollRegistry::instance().defaultUser();
   auto sysStore = std::make_unique<Store>(perma);
   sysStore->setSystem(true);
+
+  // A system xanadoc is scaffolding this program writes for itself, and the
+  // branch below already knows how to make one from nothing. So a system store
+  // this build cannot read means the same thing as one that is not there, and
+  // refusing to start over it would make every earlier config a reason the
+  // program will not open at all.
+  //
+  // A document the *user* named is the opposite case and is left to fail
+  // loudly, which is what R11 asks for: nobody can regenerate that one.
+  //
+  // Moved aside rather than written over. These hold whatever the user
+  // changed through the UI -- their keymap, their settings -- and this
+  // program did not write the bytes it is about to replace.
+  const auto moveAside = [&](const std::string &why) {
+    auto aside = dir;
+    aside += ".unreadable";
+    for (int n = 1; std::filesystem::exists(aside); n++) {
+      aside = dir;
+      aside += ".unreadable." + std::to_string(n);
+    }
+    std::error_code moved;
+    std::filesystem::rename(dir, aside, moved);
+    std::cerr << std::format(
+        "xudu [warning]: the system {} xanadoc could not be read ({}). It "
+        "has been moved to {} and a default one written in its place.\n",
+        systemDocName(kind), why, aside.string());
+    std::filesystem::create_directories(dir);
+    sysStore = std::make_unique<Store>(perma);
+    sysStore->setSystem(true);
+  };
 
   bool opened = false;
   if (std::filesystem::exists(dir / "ops.nodes") ||
@@ -1507,68 +1540,42 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
     } catch (const xanadu::StoreTablesUnreadable &e) {
       refusal = e.what();
     }
-    if (!refusal.empty()) {
-      // A system xanadoc is scaffolding this program writes for itself, and
-      // the branch below already knows how to make one from nothing. So a
-      // system store in a shape this build cannot read means the same thing
-      // as one that is not there, and refusing to start over it would make
-      // every earlier config a reason the program will not open at all.
-      //
-      // A document the *user* named is the opposite case and is left to fail
-      // loudly, which is what R11 asks for: nobody can regenerate that one.
-      //
-      // Moved aside rather than written over. These hold whatever the user
-      // changed through the UI -- their keymap, their settings -- and this
-      // program did not write the bytes it is about to replace.
-      auto aside = dir;
-      aside += ".unreadable";
-      for (int n = 1; std::filesystem::exists(aside); n++) {
-        aside = dir;
-        aside += ".unreadable." + std::to_string(n);
-      }
-      std::error_code moved;
-      std::filesystem::rename(dir, aside, moved);
-      std::cerr << std::format(
-          "xudu [warning]: the system {} xanadoc could not be read ({}). It "
-          "has been moved to {} and a default one written in its place.\n",
-          systemDocName(kind), refusal, aside.string());
-      std::filesystem::create_directories(dir);
-      sysStore = std::make_unique<Store>(perma);
-      sysStore->setSystem(true);
-    }
+    if (!refusal.empty()) moveAside(refusal);
   }
   if (opened) {
     if (sysStore->currentVersions().empty() && !sysStore->latest().isZero()) {
       sysStore->repointCurrentVersion(sysStore->latest());
     }
-    if (kind == SystemDocKind::UI) {
-      const auto before   = sysStore->primaryCurrentVersion();
-      const auto manifold = sysStore->rebuildManifold(before);
-      // An explicit document permascroll may differ from the one that wrote
-      // these settings. Never mint replacements for names we cannot resolve.
-      const auto groups = manifold.dimensionNamed(kDimGroups, *sysStore);
-      const bool readable =
-          groups &&
-          manifold.linked(sysStore->homeCell(), *groups) != zigzag::noCell &&
-          std::ranges::all_of(
-              std::array{kDimVars, kDimValues, kDimSubgroups, kDimClone,
-                         kDimNotes, kDimSchemas, kDimAlternates, kDimDefault},
-              [&](std::string_view name) {
-                return manifold.dimensionNamed(name, *sysStore).has_value();
-              });
-      if (readable) {
-        const auto updated = ensureAllSettings(*sysStore, before, kind);
-        if (updated != before) {
-          sysStore->repointCurrentVersion(updated);
-          sysStore->save(dir.string());
-        }
-      } else {
-        GLEDITOR_LOG_WARN("xudu.settings",
-                          "UI settings structure cannot be resolved with the "
-                          "active permascroll; leaving the store unchanged");
+    const auto before   = sysStore->primaryCurrentVersion();
+    const auto manifold = sysStore->rebuildManifold(before);
+    // The structure's names are text, so they resolve only against the
+    // permascroll the store was written with. One written by an older build
+    // against a document's permascroll loads, but reads as nothing: a keymap
+    // with no bindings, settings with no names. That is as unreadable as a
+    // refused file, and is handled the same way.
+    const auto groups = manifold.dimensionNamed(kDimGroups, *sysStore);
+    const bool readable =
+        groups &&
+        manifold.linked(sysStore->homeCell(), *groups) != zigzag::noCell &&
+        std::ranges::all_of(
+            std::array{kDimVars, kDimValues, kDimSubgroups, kDimClone,
+                       kDimNotes, kDimSchemas, kDimAlternates, kDimDefault},
+            [&](std::string_view name) {
+              return manifold.dimensionNamed(name, *sysStore).has_value();
+            });
+    if (!readable) {
+      moveAside("its names cannot be resolved against this user's "
+                "permascroll");
+      opened = false;
+    } else if (kind == SystemDocKind::UI) {
+      const auto updated = ensureAllSettings(*sysStore, before, kind);
+      if (updated != before) {
+        sysStore->repointCurrentVersion(updated);
+        sysStore->save(dir.string());
       }
     }
-  } else {
+  }
+  if (!opened) {
     // Fresh system store: initialize 3-page store with schema, notes, and
     // format links
     initializeSystemStore(*sysStore, kind);

@@ -60,22 +60,21 @@ changed.
 
 ## Next
 
-1. **The key-hint start-up race** that `compare-backends.sh`'s GL/GLES parity stage exposed (under
-   "Known reds").
-1. **The `config.h` race** (below), as its own commit.
 1. **M1**: the spikes, through spike runners. S1, S4, S5, S2 and S3 are engine-only and can run now.
    R1 to R5 can measure OpenGL and GLES headless; Vulkan needs `xvfb-run` or an SDL3 build here. V1
    and V2 also need the frame inspector.
 
 ## Fixed along the way
 
-| Commit      | What                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `61c5b95`   | The store panel budgeted its button rows with the exact padding, but the layout rounds box edges to whole pixels; at a fractional padding a row came out a pixel too wide and its last button was laid out zero pixels tall. Not a font problem: it failed for every family. Fixed `StoreObjectManagerOverlayTest.FittedRows…` and `E2EBinaryOrchestrationTest.storePanelCreates…`.                                                                       |
-| `975a560`   | Keymap actions only the slice presentation knows were registered unscoped, after the start-up pass that scopes built-in commands, so `std:zigzag/save_store` lost Ctrl+Shift+S to the global `std:xudu/publish` even in the ZigZag pane: the chord published. The "same key" warning was true. New test `E2EBinaryOrchestrationTest.aPaneChordIsNotTakenByTheGlobalOneOnItsKey`, failing before the fix.                                                  |
-| `33488c8`   | Font descriptions ("Monospace 16", "Sans Bold 12") went to Fontconfig whole, which reads them as one non-existent family and falls back to the default face: no role got its face, anywhere. Parsed as Pango does now; the glyph cache's bold and italic variants open at the right size and are keyed by style. Fixed `TextLayoutTest.InlineBoxAdvances…` and `E2EBinaryOrchestrationTest.textSurvives…`. Documents now render in a true monospace face. |
-| `f5d7218`   | `rebuild()` walked the whole ancestry to find the active xanadoc in a store with none, so a checkpointed Chronofilade rebuild cost O(K) again (5 us at 500 operations against the documented 0.29). Now a per-operation lookup: 0.23 us. Fixed `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`.                                                                                                                                                         |
-| this commit | `aDraggedSelectionLandsWhereItIsDropped` dropped "into empty space" at a fixed x = 770, which a monospace page now covers. The drop point is found in the calibration frame, beside the page's right edge.                                                                                                                                                                                                                                                |
+| Commit      | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `61c5b95`   | The store panel budgeted its button rows with the exact padding, but the layout rounds box edges to whole pixels; at a fractional padding a row came out a pixel too wide and its last button was laid out zero pixels tall. Not a font problem: it failed for every family. Fixed `StoreObjectManagerOverlayTest.FittedRows…` and `E2EBinaryOrchestrationTest.storePanelCreates…`.                                                                                 |
+| `975a560`   | Keymap actions only the slice presentation knows were registered unscoped, after the start-up pass that scopes built-in commands, so `std:zigzag/save_store` lost Ctrl+Shift+S to the global `std:xudu/publish` even in the ZigZag pane: the chord published. The "same key" warning was true. New test `E2EBinaryOrchestrationTest.aPaneChordIsNotTakenByTheGlobalOneOnItsKey`, failing before the fix.                                                            |
+| `33488c8`   | Font descriptions ("Monospace 16", "Sans Bold 12") went to Fontconfig whole, which reads them as one non-existent family and falls back to the default face: no role got its face, anywhere. Parsed as Pango does now; the glyph cache's bold and italic variants open at the right size and are keyed by style. Fixed `TextLayoutTest.InlineBoxAdvances…` and `E2EBinaryOrchestrationTest.textSurvives…`. Documents now render in a true monospace face.           |
+| `f5d7218`   | `rebuild()` walked the whole ancestry to find the active xanadoc in a store with none, so a checkpointed Chronofilade rebuild cost O(K) again (5 us at 500 operations against the documented 0.29). Now a per-operation lookup: 0.23 us. Fixed `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`.                                                                                                                                                                   |
+| `0331519`   | `aDraggedSelectionLandsWhereItIsDropped` dropped "into empty space" at a fixed x = 770, which a monospace page now covers. The drop point is found in the calibration frame, beside the page's right edge.                                                                                                                                                                                                                                                          |
+| `f5bd52d`   | The `config.h` race: only the two `main.o` files waited for the generated header; `xuzz_app.cpp` and `cli.cpp` include it too. The list of users is now read from the sources.                                                                                                                                                                                                                                                                                      |
+| this commit | The "key-hint race" was not a race. System xanadocs were written against the permascroll of the session's first document, so a launch with `--permascroll` wrote the keymap's text into that scroll and every later launch without it read a keymap with no bindings: no chords, and no hint bar. System xanadocs now always use the user's own permascroll, and one that loads but cannot be resolved is moved aside like an unreadable one and a default written. |
 
 ## Baseline
 
@@ -98,18 +97,9 @@ fails at its E2E stage on the three E2E reds below.
 
 ### Known reds, not this project's
 
-Every test that failed at the baseline is fixed (see "Fixed along the way"). A full `make -k test`
-after them exits 0: `gleditor_test` 743, `xudu_test` 1301, `xuzz_test` 61, `ui_test` 192, both swarm
-runs.
-
-`compare-backends.sh` passes every image check, and its E2E stage now passes on both backends (34 of
-34), which lets it reach, for the first time here, the per-scenario OpenGL-against-GLES parity
-stage. There one run failed five scenarios of the transclusion lifecycle by about 6 % against a 3 %
-limit. The frames are drawn alike except that the GLES capture has no key-hint bar at the foot and
-everything sits 18 px lower: it was captured before the hints, posted to the render thread with
-`runWithState` during start-up, had arrived. Run alone, six times on each backend, the bar was
-always there. So it is a start-up race between that post and the first capture, surfaced rather than
-caused by these fixes; the fix belongs in how start-up hands the hints over, not in the tolerance.
+None. After the fixes under "Fixed along the way", a full `make -k test` exits 0 (`gleditor_test`
+743, `xudu_test` 1301, `xuzz_test` 61, `ui_test` 193, both swarm runs) and `compare-backends.sh`
+exits 0, every image check and every E2E scenario agreeing between OpenGL and GLES.
 
 Two speedup benchmarks failed once each under a loaded `make -k test` and passed in every run alone:
 `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` and
@@ -157,6 +147,10 @@ What a fresh Ubuntu 24.04 container needs, beyond the submodules:
   audit enforces only the UI and program boundary for now, so it does not go red on this.
 
 ## Decisions taken
+
+- System xanadocs live in the user's config directory, so their text lives in the user's own
+  permascroll (`PermascrollRegistry::defaultUser()`), never the one a run's documents were opened
+  against with `--permascroll`. An existing one that cannot be resolved is moved aside, not edited.
 
 - A1's moves are taken as done by `66afa4b`; the package is closed by the remainder above rather
   than redone.

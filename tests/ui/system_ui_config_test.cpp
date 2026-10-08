@@ -39,7 +39,9 @@ private:
 TEST(SystemUiConfigTest,
      ExistingNativeStoreAddsTypographyWithoutChangingNotesOrValues) {
   TemporaryConfig config;
-  const auto scroll = std::make_shared<xanadu::UserPermascroll>();
+  // System xanadocs are written against the user's own permascroll, whatever
+  // permascroll the session's documents use.
+  const auto scroll = xanadu::PermascrollRegistry::instance().defaultUser();
   xanadu::Store existing(scroll);
   existing.setSystem(true);
   xanadu::initializeSystemStoreGenesis(existing, xanadu::SystemDocKind::UI);
@@ -86,7 +88,11 @@ TEST(SystemUiConfigTest,
     EXPECT_EQ(xanadu::UIConfig::fromStore(store).linkPanel.font, "Serif 17");
   }
 }
-TEST(SystemUiConfigTest, UnresolvedPermascrollLeavesExistingStoreUntouched) {
+// A store holds no text: a system xanadoc written against another
+// permascroll loads, but its names resolve to nothing. It is kept, moved aside
+// whole, and a default takes its place; nothing is minted into either
+// permascroll on its behalf.
+TEST(SystemUiConfigTest, AnUnresolvableSystemStoreIsMovedAsideWhole) {
   TemporaryConfig config;
   const auto original = std::make_shared<xanadu::UserPermascroll>();
   xanadu::Store existing(original);
@@ -94,20 +100,46 @@ TEST(SystemUiConfigTest, UnresolvedPermascrollLeavesExistingStoreUntouched) {
   const auto directory = xanadu::systemDocDirectory(xanadu::SystemDocKind::UI);
   std::filesystem::create_directories(directory);
   existing.save(directory.string());
-  const auto count = existing.opCount();
-  const auto head  = existing.primaryCurrentVersion();
-  const auto other = std::make_shared<xanadu::UserPermascroll>();
+  const auto count         = existing.opCount();
+  const auto head          = existing.primaryCurrentVersion();
+  const auto other         = std::make_shared<xanadu::UserPermascroll>();
+  const auto originalBytes = original->bytes().size();
   {
     xanadu::Session session{"", other};
-    auto &loaded = session.systemStore(xanadu::SystemDocKind::UI);
-    EXPECT_EQ(loaded.opCount(), count);
+    const auto model = xanadu::SystemStoreModel::fromStore(
+        session.systemStore(xanadu::SystemDocKind::UI));
+    EXPECT_TRUE(model.isValid()) << model.validationError();
+    EXPECT_TRUE(model.find(xanadu::settings::kUiScale).has_value());
     EXPECT_EQ(other->bytes().size(), 0U);
-    EXPECT_EQ(xanadu::UIConfig::fromStore(loaded).uiTheme,
-              xanadu::UIConfig{}.uiTheme);
+    EXPECT_EQ(original->bytes().size(), originalBytes);
   }
+  auto aside = directory;
+  aside += ".unreadable";
+  ASSERT_TRUE(std::filesystem::exists(aside));
   xanadu::Store preserved(original);
-  preserved.load(directory.string());
+  preserved.load(aside.string());
   EXPECT_EQ(preserved.opCount(), count);
   EXPECT_EQ(preserved.textOf(head), existing.textOf(head));
+}
+
+// The keymap lives in the user's config directory, so it must read the same
+// on every launch, whatever permascroll the documents of that launch use. It
+// was written with the first session's permascroll, and a later launch with
+// another one found a keymap with no bindings in it.
+TEST(SystemUiConfigTest, TheKeymapReadsTheSameWhicheverPermascrollIsInUse) {
+  TemporaryConfig config;
+  std::size_t first{};
+  {
+    xanadu::Session session{"", std::make_shared<xanadu::UserPermascroll>()};
+    first = xanadu::KeymapConfig::fromStore(
+                session.systemStore(xanadu::SystemDocKind::Keymap))
+                .bindings.size();
+  }
+  ASSERT_GT(first, 0U);
+  xanadu::Session later{"", std::make_shared<xanadu::UserPermascroll>()};
+  EXPECT_EQ(xanadu::KeymapConfig::fromStore(
+                later.systemStore(xanadu::SystemDocKind::Keymap))
+                .bindings.size(),
+            first);
 }
 } // namespace
