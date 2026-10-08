@@ -1629,7 +1629,14 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
   liveLinks_   = m.liveLinks;
   liveContent_ = m.liveContent;
 
-  const auto dimStoreRefs = dimensionNamed("d.store-refs");
+  // Only an arena with attached spaces has d.store-refs tails to repair. The
+  // lookup is skipped for the rest, and that is what keeps release() a fixed
+  // number of steps for a view arena: on a base with no d.store-refs
+  // dimension, dimensionNamed() falls back to reading the name of every
+  // dimension of the base, and allocates doing it, inside a noexcept function
+  // (design/view-system.md §6.5, spike S1).
+  const auto dimStoreRefs =
+      spaces_.empty() ? noCell : dimensionNamed("d.store-refs");
   if (dimStoreRefs != noCell) {
     for (std::size_t s = 0; s < spaces_.size(); ++s) {
       CellRef cur = spaces_[s].storeCell;

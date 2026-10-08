@@ -603,6 +603,14 @@ public:
   /// deterministic call that only binds variables it minted itself.
   [[nodiscard]] std::size_t trailSize() const noexcept { return trail_.size(); }
 
+  /// Base cells this arena has copied in to write to (copy-on-write shadows).
+  /// release() drops the ones taken under its mark. A view arena keeps this at
+  /// zero (design/view-system.md §6.2), which is half of why its release() is
+  /// constant-time.
+  [[nodiscard]] std::size_t shadowCount() const noexcept {
+    return shadowOrder_.size();
+  }
+
   /**
    * @brief Discard dead runs, leaving every cell's runs contiguous.
    *

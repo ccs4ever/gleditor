@@ -197,8 +197,8 @@ Each is one testable sentence. IDs are stable; §20 uses them.
   MUST answer at most one neighbour in each direction.
 - **V-R7.** A view-minted cell MUST be refused as the subject or target of any write to a store.
 - **V-R8.** No view MUST ever cause a real cell to be shadowed in a view arena.
-- **V-R9.** Rebinding MUST discard every derived view cell, and reclaim its storage, in a number of
-  steps that does not depend on how many were minted.
+- **V-R9.** Rebinding MUST discard every derived view cell, and leave its storage ready for reuse,
+  in a number of steps that does not depend on how many were minted.
 - **V-R10.** Every view-minted cell MUST resolve to a real cell in a bounded number of steps.
 - **V-R11.** The cursor MUST be recoverable after a toss from real cells and plain numbers alone.
 - **V-R12.** Movement, rebinding and view switching MUST append no operation to the visited store.
@@ -552,7 +552,11 @@ ViewManifold *ViewManifold::toss() noexcept {
 }
 ```
 
-This is constant-time, and it reclaims the storage in the same step. The argument is
+This is constant-time, and it makes the storage reusable in the same step. Reusable, not returned:
+`release()` truncates with `resize()`, which keeps every vector's capacity, so the next generation
+mints into memory the last one used and a placement's derived arena stays at its high-water mark
+until the placement goes. That is the right trade for a view, which re-derives a window of about the
+same size after every toss (§6.7), and spike S1 measured it. The argument is
 `ArenaManifold::release()` itself (`arena_manifold.cpp:1566`). Its loops run over, in order: quote
 spaces, proxy shadowed edges, quote occurrences and proxies added since the mark — federation state,
 which a view arena has none of; trail entries since the mark — none, because `trail()` skips any
@@ -560,12 +564,13 @@ cell minted under the innermost mark and every derived cell is; and shadows sinc
 by I3. What is left is four `resize()` calls on vectors of trivially destructible records and a
 fix-up of the `d.store-refs` tails of attached spaces. No step visits a minted cell.
 
-That last fix-up is the one thing to change. It begins by looking up the name `d.store-refs`, and on
+That last fix-up was the one thing to change. It began by looking up the name `d.store-refs`, and on
 a slice with no such dimension `Manifold::dimensionNamed` falls back to scanning every dimension of
 the base and reading its name (`manifold.cpp:785`). That does not depend on how much was minted, but
-it is neither constant nor allocation-free, and it serves only arenas with attached spaces. Guarding
-it with `if (!spaces_.empty())` makes `release()` on a view arena a fixed number of steps and
-changes nothing for any other caller.
+it is neither constant nor allocation-free, and it serves only arenas with attached spaces. Spike S1
+measured it at 132 ns to 8.6 µs warm per `release()`, allocating inside a `noexcept` function.
+Package E0 guards the lookup with `spaces_.empty()`, which makes `release()` on a view arena a fixed
+number of steps (34 to 43 ns warm on small arenas, in S1) and changes nothing for any other caller.
 
 Because `release()` truncates, a later mint reuses the same dense indices. A `CellRef` kept across a
 toss would silently name a different cell, so nothing keeps a bare one: a `ViewCellRef` pairs the
@@ -581,8 +586,8 @@ and 10⁶ cells, tosses, and asserts `cellCount()` is back to its empty value an
 `ViewCellRef` is refused. The preconditions are the proof; `tools/layout-latency-probe` additionally
 reports toss time at each size, which must be flat.
 
-`ArenaManifold` therefore gains two things and no new concept: the guard above, and `shadowCount()`,
-a `const` accessor for a count it already keeps for `Mark`.
+`ArenaManifold` therefore gained two things and no new concept: the guard above, and
+`shadowCount()`, a `const` accessor for a count it already keeps for `Mark` (E0).
 
 ### 6.6 The choke point and the verifier
 
@@ -3037,12 +3042,13 @@ ______________________________________________________________________
 **V1. A slice placement's view space is two sibling `ArenaManifold`s, and a toss is `release()` to
 the mark taken on the empty derived arena.** Why: `ArenaManifold` already has the link
 representation, the ephemeral bit and truncation; with no shadows and no trail, its `release()` is a
-fixed number of steps and frees the storage at once (§6.5). Price: a one-line guard and one accessor
-on `ArenaManifold`; a second arena per placement; refs are reused after a toss, so every held ref
-must carry its epoch. Refused: (a) a new storage type — a second copy of a tested invariant; (b) one
-arena with nested marks — a stack cannot empty the lower layer first without doing it on the rebind
-path; (c) an epoch counter that only hides old cells and reclaims them later — the earlier design;
-it was needed only because view links shadowed real cells, and V6 removes the cause.
+fixed number of steps and leaves the storage ready for reuse at once (§6.5). Price: a one-line guard
+and one accessor on `ArenaManifold`; a second arena per placement; refs are reused after a toss, so
+every held ref must carry its epoch. Refused: (a) a new storage type — a second copy of a tested
+invariant; (b) one arena with nested marks — a stack cannot empty the lower layer first without
+doing it on the rebind path; (c) an epoch counter that only hides old cells and reclaims them later
+— the earlier design; it was needed only because view links shadowed real cells, and V6 removes the
+cause.
 
 **V2. `d.pack` and `d.packing` are two dimensions.** Why: containment and the order of constituents
 are two relations; on one dimension a nested pack would need two posward neighbours (§9.3.3). Price:
@@ -3440,3 +3446,6 @@ ______________________________________________________________________
   same scope and same canonical chord, `chordHolder()` names the holder, settings are
   `xanadu::SettingSpec`, and `registerBuiltinViews()` is declared with the built-in views.
 - 2026-10-08 — §8.7's conventions as built (E6).
+- 2026-10-08 — §6.5, V-R9, V1: a toss leaves the derived arena's storage reusable, not reclaimed;
+  `release()` keeps capacity, as spike S1 found. The `d.store-refs` guard and `shadowCount()` are
+  landed (E0), with S1's numbers.

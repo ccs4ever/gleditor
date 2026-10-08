@@ -616,6 +616,83 @@ TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
   EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), doc.second);
 }
 
+TEST(ArenaManifoldTest, shadowCountCountsFirstWritesAndReleaseDropsThem) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+  EXPECT_EQ(arena.shadowCount(), 0U);
+
+  // A first write copies first in, and second with it: its end of the edge
+  // changes. Writing either again copies nothing more.
+  const auto early = arena.makeCell("early");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, early));
+  EXPECT_EQ(arena.shadowCount(), 2U);
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::NEG, early));
+  EXPECT_EQ(arena.shadowCount(), 2U);
+
+  // Only the shadows taken under a mark go with it.
+  const auto mark  = arena.mark();
+  const auto third = arena.makeCell("third");
+  ASSERT_TRUE(arena.link(doc.dim, doc.dim, DimVector::POS, third));
+  EXPECT_EQ(arena.shadowCount(), 3U);
+  arena.release(mark);
+  EXPECT_EQ(arena.shadowCount(), 2U);
+  EXPECT_TRUE(arena.holdsOwn(doc.first));
+  EXPECT_FALSE(arena.holdsOwn(doc.dim));
+}
+
+TEST(ArenaManifoldTest, releaseOnAnArenaWithNoSpacesIsTruncationAlone) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base, nullptr};
+  const auto dims = arena.dimensions().size();
+  const auto mark = arena.mark();
+
+  const auto step = arena.makeCell("d.view");
+  auto previous   = arena.makeCell();
+  for (int i = 0; i < 1'000; ++i) {
+    const auto next = arena.makeCell();
+    ASSERT_TRUE(arena.link(previous, step, DimVector::POS, next));
+    previous = next;
+  }
+
+  // What design/view-system.md §6.5 rests the constant-time toss on: nothing
+  // for release() to loop over but truncations. With no space attached there
+  // are no d.store-refs tails to repair, so it does not look the name up --
+  // on this base, a scan of every dimension, allocating -- at all.
+  EXPECT_EQ(arena.spaceCount(), 0U);
+  EXPECT_EQ(arena.shadowCount(), 0U);
+  EXPECT_EQ(arena.trailSize(), 0U);
+  arena.release(mark);
+
+  EXPECT_EQ(arena.cellCount(), 0U);
+  EXPECT_EQ(arena.deadLinks(), 0U);
+  EXPECT_EQ(arena.outstandingMarks(), 0U);
+  EXPECT_EQ(arena.dimensions().size(), dims);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  // The storage is kept for reuse: the next mint takes the first number again.
+  EXPECT_EQ(arena.makeCell(), ArenaManifold::refOf(0));
+}
+
+TEST(ArenaManifoldTest, releaseWithASpaceAttachedStillRepairsItsStoreRefsTail) {
+  ArenaManifold arena;
+  const auto space     = arena.attach(zigzag::Space{.label = "tail"});
+  const auto storeRefs = arena.ensureDimension("d.store-refs");
+  const auto storeCell = arena.spaceAt(space)->storeCell;
+
+  const auto mark = arena.mark();
+  const auto gone = arena.proxyFor(space, 50);
+  arena.release(mark);
+
+  // The proxy's number is free again and the next one takes it. Had the tail
+  // been left naming it, the new proxy would be linked after itself.
+  const auto next = arena.proxyFor(space, 60);
+  EXPECT_EQ(next, gone);
+  EXPECT_EQ(arena.linked(storeCell, storeRefs, DimVector::POS), next);
+  EXPECT_EQ(arena.linked(next, storeRefs, DimVector::NEG), storeCell);
+  EXPECT_EQ(arena.linked(next, storeRefs, DimVector::POS), noCell);
+}
+
 TEST(ArenaManifoldTest, aShadowedCellIsStillTrailedWhenItIsOlderThanTheMark) {
   Document doc;
   const auto base = doc.manifold();
