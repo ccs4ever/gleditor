@@ -39,6 +39,8 @@ using testing::Return;
 namespace gleditor {
 namespace {
 
+#ifdef GLEDITOR_HAVE_SVG_THORVG
+
 std::vector<std::uint8_t> readFile(const std::string &path) {
   std::ifstream file(path, std::ios::binary);
   if (!file.is_open()) {
@@ -47,8 +49,6 @@ std::vector<std::uint8_t> readFile(const std::string &path) {
   return {std::istreambuf_iterator<char>(file),
           std::istreambuf_iterator<char>()};
 }
-
-#ifdef GLEDITOR_HAVE_SVG_THORVG
 
 /// Reports Backend::Vulkan (so SvgCache always takes the CPU/SwCanvas path,
 /// never the GL one) and records every uploaded texture's bytes, keyed by
