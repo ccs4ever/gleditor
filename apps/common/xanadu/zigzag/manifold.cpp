@@ -14,6 +14,8 @@
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
+#include <atomic>
+
 namespace zigzag {
 
 Manifold::Manifold() = default;
@@ -781,9 +783,14 @@ std::span<const DimRef> Manifold::dimensions() const {
   return dimsCache;
 }
 
+// SPIKE S1 (throwaway): counts for the view-project release() measurement.
+std::atomic<std::uint64_t> spikeManifoldDimensionNamedCalls{0};
+std::atomic<std::uint64_t> spikeManifoldDimensionScans{0};
+
 std::optional<DimRef>
 Manifold::dimensionNamed(const std::string_view name,
                          const xanadu::SpanReader &reader) const {
+  spikeManifoldDimensionNamedCalls.fetch_add(1, std::memory_order_relaxed);
   const auto held = [this](const DimRef dim) {
     return contains(dim) ? std::optional{dim} : std::nullopt;
   };
@@ -793,6 +800,7 @@ Manifold::dimensionNamed(const std::string_view name,
       return fast;
     }
   }
+  spikeManifoldDimensionScans.fetch_add(1, std::memory_order_relaxed);
   std::optional<DimRef> dimAlias;
   if (name != "d.alias") {
     for (const auto dim : dimensions()) {

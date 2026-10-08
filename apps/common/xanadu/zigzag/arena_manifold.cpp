@@ -16,6 +16,8 @@
 #include "common/xanadu/zigzag/cell_views.hpp"
 #include <gleditor/logging.hpp>
 
+#include <atomic>
+
 namespace zigzag {
 
 ArenaManifold::ArenaManifold(const Manifold *base, const xanadu::Store *store)
@@ -53,8 +55,13 @@ ArenaManifold::dimensionNamed(const std::string_view name,
   return std::nullopt;
 }
 
+// SPIKE S1 (throwaway): toggles the §6.5 guard and counts lookups.
+bool spikeReleaseGuard = false;
+std::atomic<std::uint64_t> spikeArenaDimensionNamedCalls{0};
+
 DimRef ArenaManifold::dimensionNamed(const std::string_view name,
                                      const xanadu::SpanReader *reader) const {
+  spikeArenaDimensionNamedCalls.fetch_add(1, std::memory_order_relaxed);
   if (base_ != nullptr) {
     std::optional<DimRef> baseDim;
     if (reader != nullptr) {
@@ -1629,7 +1636,9 @@ ArenaManifold *ArenaManifold::release(const Mark &m) noexcept {
   liveLinks_   = m.liveLinks;
   liveContent_ = m.liveContent;
 
-  const auto dimStoreRefs = dimensionNamed("d.store-refs");
+  const auto dimStoreRefs = (spikeReleaseGuard && spaces_.empty())
+                                ? noCell
+                                : dimensionNamed("d.store-refs");
   if (dimStoreRefs != noCell) {
     for (std::size_t s = 0; s < spaces_.size(); ++s) {
       CellRef cur = spaces_[s].storeCell;
