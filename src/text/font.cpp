@@ -1,50 +1,137 @@
 #include <gleditor/text/font.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <fontconfig/fontconfig.h>
 #include <format>
 #include <hb-ft.h>
 #include <iostream>
+#include <optional>
+#include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace gleditor::text {
 
 namespace {
 
 struct ParsedFontSpec {
-  std::string family;
+  std::vector<std::string> families;
+  std::optional<int> weight;
+  std::optional<int> slant;
   double pointSize{16.0};
 };
 
-ParsedFontSpec parseFontSpec(const std::string &spec) {
-  if (spec.empty()) {
-    return {.family = "Monospace", .pointSize = 16.0};
-  }
+struct StyleWord {
+  std::string_view word;
+  std::optional<int> weight;
+  std::optional<int> slant;
+};
 
-  // Find last space which usually separates family from size
-  const auto lastSpace = spec.rfind(' ');
-  if (lastSpace != std::string::npos && lastSpace + 1 < spec.size()) {
-    try {
-      std::size_t idx = 0;
-      double sz       = std::stod(spec.substr(lastSpace + 1), &idx);
-      if (idx == spec.size() - (lastSpace + 1) && sz > 0.0) {
-        return {.family = spec.substr(0, lastSpace), .pointSize = sz};
-      }
-    } catch (...) { // NOLINT(bugprone-empty-catch)
-      // Not a number; treat entire string as family
+// The style words of a Pango-style description ("Sans Bold Italic 12"), the
+// spelling every caller in the tree uses, mapped to Fontconfig's values.
+// Fontconfig's own name syntax ("Sans-12:bold") reads a description like that
+// as one family called "Sans Bold Italic 12", matches nothing, and quietly
+// falls back to the default face, so the description must be taken apart
+// here rather than handed to FcNameParse.
+constexpr std::array kStyleWords{
+    StyleWord{"thin", FC_WEIGHT_THIN},
+    StyleWord{"ultra-light", FC_WEIGHT_EXTRALIGHT},
+    StyleWord{"extra-light", FC_WEIGHT_EXTRALIGHT},
+    StyleWord{"light", FC_WEIGHT_LIGHT},
+    StyleWord{"semi-light", FC_WEIGHT_DEMILIGHT},
+    StyleWord{"demi-light", FC_WEIGHT_DEMILIGHT},
+    StyleWord{"book", FC_WEIGHT_BOOK},
+    StyleWord{"regular", FC_WEIGHT_REGULAR},
+    StyleWord{"normal", FC_WEIGHT_REGULAR},
+    StyleWord{"medium", FC_WEIGHT_MEDIUM},
+    StyleWord{"semi-bold", FC_WEIGHT_DEMIBOLD},
+    StyleWord{"demi-bold", FC_WEIGHT_DEMIBOLD},
+    StyleWord{"bold", FC_WEIGHT_BOLD},
+    StyleWord{"ultra-bold", FC_WEIGHT_EXTRABOLD},
+    StyleWord{"extra-bold", FC_WEIGHT_EXTRABOLD},
+    StyleWord{"heavy", FC_WEIGHT_HEAVY},
+    StyleWord{"black", FC_WEIGHT_BLACK},
+    StyleWord{"ultra-heavy", FC_WEIGHT_EXTRABLACK},
+    StyleWord{"roman", std::nullopt, FC_SLANT_ROMAN},
+    StyleWord{"italic", std::nullopt, FC_SLANT_ITALIC},
+    StyleWord{"oblique", std::nullopt, FC_SLANT_OBLIQUE},
+};
+
+std::optional<StyleWord> styleWord(std::string_view word) {
+  std::string folded(word);
+  std::ranges::transform(folded, folded.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  const auto found = std::ranges::find(kStyleWords, folded, &StyleWord::word);
+  if (found == kStyleWords.end()) return std::nullopt;
+  return *found;
+}
+
+std::optional<double> pointSizeOf(const std::string &word) {
+  try {
+    std::size_t used  = 0;
+    const double size = std::stod(word, &used);
+    if (used == word.size() && size > 0.0) return size;
+  } catch (...) { // NOLINT(bugprone-empty-catch)
+    // Not a number, so not a size.
+  }
+  return std::nullopt;
+}
+
+/// "[FAMILY,LIST] [STYLE-WORDS] [SIZE]", as Pango reads it: the size is the
+/// last word if it is a number, the style words are those before it, and
+/// what is left is a comma-separated family list.
+ParsedFontSpec parseFontSpec(const std::string &spec) {
+  std::vector<std::string> words;
+  std::istringstream in(spec);
+  for (std::string word; in >> word;) words.push_back(std::move(word));
+
+  ParsedFontSpec parsed;
+  if (!words.empty()) {
+    if (const auto size = pointSizeOf(words.back())) {
+      parsed.pointSize = *size;
+      words.pop_back();
     }
   }
+  while (!words.empty()) {
+    const auto style = styleWord(words.back());
+    if (!style) break;
+    if (!parsed.weight) parsed.weight = style->weight;
+    if (!parsed.slant) parsed.slant = style->slant;
+    words.pop_back();
+  }
 
-  return {.family = spec, .pointSize = 16.0};
+  std::string family;
+  for (const auto &word : words) family += (family.empty() ? "" : " ") + word;
+  std::istringstream list(family);
+  for (std::string name; std::getline(list, name, ',');) {
+    const auto first = name.find_first_not_of(' ');
+    const auto last  = name.find_last_not_of(' ');
+    if (first != std::string::npos)
+      parsed.families.push_back(name.substr(first, last - first + 1));
+  }
+  if (parsed.families.empty()) parsed.families.emplace_back("Monospace");
+  return parsed;
 }
 
 std::expected<std::string, FontError> resolveFontPath(const std::string &spec) {
   FcInit();
-  FcPattern *pat = FcNameParse(reinterpret_cast<const FcChar8 *>(spec.c_str()));
+  const auto parsed = parseFontSpec(spec);
+  FcPattern *pat    = FcPatternCreate();
   if (!pat) {
     return std::unexpected{FontError::BadSpec};
   }
+  for (const auto &family : parsed.families)
+    FcPatternAddString(pat, FC_FAMILY,
+                       reinterpret_cast<const FcChar8 *>(family.c_str()));
+  if (parsed.weight) FcPatternAddInteger(pat, FC_WEIGHT, *parsed.weight);
+  if (parsed.slant) FcPatternAddInteger(pat, FC_SLANT, *parsed.slant);
+  FcPatternAddDouble(pat, FC_SIZE, parsed.pointSize);
 
   FcConfigSubstitute(nullptr, pat, FcMatchPattern);
   FcDefaultSubstitute(pat);
@@ -98,7 +185,10 @@ FontFace::FontFace(FT_Library ftLib, const std::string &fontPath,
   }
 
   family_ = face_->family_name ? face_->family_name : fontPath;
-  key_    = std::format("{} {:.1f}", family_, pointSize);
+  // The style is part of the key: a family's bold and regular faces at one
+  // size are different faces, and the glyph cache keys its glyphs by this.
+  key_ = std::format("{} {} {:.1f}", family_,
+                     face_->style_name ? face_->style_name : "", pointSize);
 
   hbFont_ = hb_ft_font_create_referenced(face_);
   if (!hbFont_) {

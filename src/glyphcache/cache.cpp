@@ -191,13 +191,12 @@ resolveRealVariant(const FontPtr &font,
     return {.font = font, .stillSynthetic = decorations};
   }
 
-  auto spec = std::format("{} {:.1f}", font->family(), font->pointSize());
-  if (wantBold) {
-    spec += ":bold";
-  }
-  if (wantItalic) {
-    spec += ":italic";
-  }
+  // The description's own grammar, so the variant opens at this face's size:
+  // a ":bold" suffix made the size unreadable and the variant opened at the
+  // default size instead.
+  const auto spec =
+      std::format("{}{}{} {:.1f}", font->family(), wantBold ? " Bold" : "",
+                  wantItalic ? " Italic" : "", font->pointSize());
 
   const auto found = text::FontManager::instance().findFont(spec);
   if (!found) {
