@@ -229,98 +229,52 @@ void TensionLayoutEngine::step(const float dt) {
     return;
   }
 
-  const std::size_t n = bodies_.size();
+  const std::size_t n           = bodies_.size();
+  auto &[forces, dv, dx, state] = scratch_;
 
-  // RK4 Stage 1
-  std::vector<glm::vec3> f1;
-  computeForces(bodies_, f1);
-
-  std::vector<glm::vec3> k1_v(n);
-  std::vector<glm::vec3> k1_x(n);
-  std::vector<TensionBody> s1 = bodies_;
-
-  for (std::size_t i = 0; i < n; ++i) {
-    if (bodies_[i].pinned) {
-      k1_v[i] = glm::vec3(0.0F);
-      k1_x[i] = glm::vec3(0.0F);
-      continue;
+  // Stage k evaluates the forces on @p at, and, when @p next is given, steps
+  // a copy of the bodies by @p h along its slopes for the stage after.
+  const auto stage = [&](const std::size_t k,
+                         const std::vector<TensionBody> &at,
+                         std::vector<TensionBody> *next, const float h) {
+    computeForces(at, forces[k]);
+    dv[k].resize(n);
+    dx[k].resize(n);
+    if (next != nullptr) {
+      next->assign(bodies_.begin(), bodies_.end());
     }
-    const float invM =
-        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
-    k1_v[i] = f1[i] * invM;
-    k1_x[i] = bodies_[i].velocity;
-
-    s1[i].position += 0.5F * dt * k1_x[i];
-    s1[i].velocity += 0.5F * dt * k1_v[i];
-  }
-
-  // RK4 Stage 2
-  std::vector<glm::vec3> f2;
-  computeForces(s1, f2);
-
-  std::vector<glm::vec3> k2_v(n);
-  std::vector<glm::vec3> k2_x(n);
-  std::vector<TensionBody> s2 = bodies_;
-
-  for (std::size_t i = 0; i < n; ++i) {
-    if (bodies_[i].pinned) {
-      k2_v[i] = glm::vec3(0.0F);
-      k2_x[i] = glm::vec3(0.0F);
-      continue;
+    for (std::size_t i = 0; i < n; ++i) {
+      if (bodies_[i].pinned) {
+        dv[k][i] = glm::vec3(0.0F);
+        dx[k][i] = glm::vec3(0.0F);
+        continue;
+      }
+      const float invM =
+          (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
+      dv[k][i] = forces[k][i] * invM;
+      dx[k][i] = at[i].velocity;
+      if (next != nullptr) {
+        (*next)[i].position += h * dx[k][i];
+        (*next)[i].velocity += h * dv[k][i];
+      }
     }
-    const float invM =
-        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
-    k2_v[i] = f2[i] * invM;
-    k2_x[i] = s1[i].velocity;
+  };
 
-    s2[i].position += 0.5F * dt * k2_x[i];
-    s2[i].velocity += 0.5F * dt * k2_v[i];
-  }
-
-  // RK4 Stage 3
-  std::vector<glm::vec3> f3;
-  computeForces(s2, f3);
-
-  std::vector<glm::vec3> k3_v(n);
-  std::vector<glm::vec3> k3_x(n);
-  std::vector<TensionBody> s3 = bodies_;
-
-  for (std::size_t i = 0; i < n; ++i) {
-    if (bodies_[i].pinned) {
-      k3_v[i] = glm::vec3(0.0F);
-      k3_x[i] = glm::vec3(0.0F);
-      continue;
-    }
-    const float invM =
-        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
-    k3_v[i] = f3[i] * invM;
-    k3_x[i] = s2[i].velocity;
-
-    s3[i].position += dt * k3_x[i];
-    s3[i].velocity += dt * k3_v[i];
-  }
-
-  // RK4 Stage 4
-  std::vector<glm::vec3> f4;
-  computeForces(s3, f4);
-
-  std::vector<glm::vec3> k4_v(n);
-  std::vector<glm::vec3> k4_x(n);
+  const float half = 0.5F * dt;
+  stage(0, bodies_, &state[0], half);
+  stage(1, state[0], &state[1], half);
+  stage(2, state[1], &state[2], dt);
+  stage(3, state[2], nullptr, dt);
 
   for (std::size_t i = 0; i < n; ++i) {
     if (bodies_[i].pinned) {
       continue;
     }
-    const float invM =
-        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
-    k4_v[i] = f4[i] * invM;
-    k4_x[i] = s3[i].velocity;
-
     // RK4 final weighted blend
     bodies_[i].position +=
-        (dt / 6.0F) * (k1_x[i] + 2.0F * k2_x[i] + 2.0F * k3_x[i] + k4_x[i]);
+        (dt / 6.0F) * (dx[0][i] + 2.0F * dx[1][i] + 2.0F * dx[2][i] + dx[3][i]);
     bodies_[i].velocity +=
-        (dt / 6.0F) * (k1_v[i] + 2.0F * k2_v[i] + 2.0F * k3_v[i] + k4_v[i]);
+        (dt / 6.0F) * (dv[0][i] + 2.0F * dv[1][i] + 2.0F * dv[2][i] + dv[3][i]);
 
     if (params_.maxVelocity > 0.0F) {
       const float speed = glm::length(bodies_[i].velocity);
@@ -330,7 +284,7 @@ void TensionLayoutEngine::step(const float dt) {
       }
     }
 
-    bodies_[i].force = f4[i];
+    bodies_[i].force = forces[3][i];
   }
 }
 

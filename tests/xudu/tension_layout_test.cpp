@@ -200,6 +200,65 @@ TEST(TensionLayoutTest, AlignmentToTheLeftSide) {
   EXPECT_THAT(std::abs(resFar->position.x + 58.0F), Lt(3.5F));
 }
 
+/// A row of documents, the first pinned, each tied to the one before it on
+/// alternating sides, offset in depth so every force term is exercised.
+void loadRow(TensionLayoutEngine &engine, const std::size_t count) {
+  engine.clear();
+  for (std::size_t d = 0; d < count; ++d) {
+    TensionBody body;
+    body.docIndex        = d;
+    body.position        = glm::vec3(30.0F * static_cast<float>(d),
+                                     -7.0F * static_cast<float>(d % 3U),
+                              (d % 2U) == 0U ? 0.0F : 12.0F);
+    body.restingPosition = body.position;
+    body.width           = 40.0F + static_cast<float>(d);
+    body.isForeground    = d != 2U;
+    body.pinned          = d == 0U;
+    engine.setBody(body);
+    if (d > 0U) {
+      TensionConstraint tie;
+      tie.fromDoc     = d - 1U;
+      tie.toDoc       = d;
+      tie.nearAnchorY = 4.0F;
+      tie.farAnchorY  = static_cast<float>(d);
+      tie.active      = true;
+      tie.side        = (d % 2U) == 0U ? AlignSide::Left : AlignSide::Right;
+      engine.addConstraint(tie);
+    }
+  }
+}
+
+// step() keeps its stage buffers between calls and through clear(), so a
+// solve of hundreds of steps allocates on its first step only. A buffer left
+// longer, or holding another scene's values, must not change a single bit of
+// what the next scene does.
+TEST(TensionLayoutTest, AWarmEngineStepsExactlyAsAFreshOne) {
+  constexpr float dt           = 0.016F;
+  constexpr int kSteps         = 120;
+  constexpr std::size_t kScene = 5;
+
+  TensionLayoutEngine warm;
+  loadRow(warm, kScene + 3U);
+  for (int i = 0; i < kSteps; ++i) {
+    warm.step(dt);
+  }
+  loadRow(warm, kScene);
+
+  TensionLayoutEngine fresh;
+  loadRow(fresh, kScene);
+
+  for (int i = 0; i < kSteps; ++i) {
+    warm.step(dt);
+    fresh.step(dt);
+  }
+  ASSERT_EQ(warm.bodies().size(), fresh.bodies().size());
+  for (std::size_t d = 0; d < kScene; ++d) {
+    EXPECT_EQ(warm.bodies()[d].position, fresh.bodies()[d].position) << d;
+    EXPECT_EQ(warm.bodies()[d].velocity, fresh.bodies()[d].velocity) << d;
+    EXPECT_EQ(warm.bodies()[d].force, fresh.bodies()[d].force) << d;
+  }
+}
+
 TEST(TensionLayoutTest, AnalyticalEquilibriumSolver) {
   TensionLayoutEngine engine;
 
