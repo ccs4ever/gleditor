@@ -185,6 +185,22 @@ public:
   [[nodiscard]] ViewDim packingDim(); ///< d.packing: constituents in order
   [[nodiscard]] ViewDim axisStepDim(ViewAxisId axis); ///< packs along an axis
 
+  /// The same dimensions as read by a caller that must not mint, such as
+  /// cellAt(): nothing until a prepare() of this epoch has minted them.
+  [[nodiscard]] std::optional<ViewDim> findPackDim() const noexcept;
+  [[nodiscard]] std::optional<ViewDim> findPackingDim() const noexcept;
+  [[nodiscard]] std::optional<ViewDim>
+  findAxisStepDim(ViewAxisId axis) const noexcept;
+  /**
+   * @brief An occurrence of @p target in @p dim's layer that is on @p dim.
+   *
+   * The way back from a real cell into derived structure, as the origin of a
+   * rank of packs is found from the cursor's real origin (§9.3.3). A scan of
+   * the arena, which derivation keeps to what is on screen (§6.7).
+   */
+  [[nodiscard]] std::optional<ViewCellRef>
+  findOccurrence(ViewDim dim, zigzag::CellRef target) const noexcept;
+
   [[nodiscard]] std::size_t derivedCellCount() const noexcept {
     return derived_.cellCount();
   }

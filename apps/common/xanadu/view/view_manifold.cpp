@@ -293,6 +293,49 @@ ViewDim ViewManifold::axisStepDim(const ViewAxisId axis) {
   return derivedDim(axisStepDims_[axis], "d.axis-step");
 }
 
+std::optional<ViewDim> ViewManifold::findPackDim() const noexcept {
+  return packDim_.has_value() ? std::optional{wrap(Layer::Derived, *packDim_)}
+                              : std::nullopt;
+}
+
+std::optional<ViewDim> ViewManifold::findPackingDim() const noexcept {
+  return packingDim_.has_value()
+             ? std::optional{wrap(Layer::Derived, *packingDim_)}
+             : std::nullopt;
+}
+
+std::optional<ViewDim>
+ViewManifold::findAxisStepDim(const ViewAxisId axis) const noexcept {
+  if (axisStepDims_.size() <= axis || !axisStepDims_[axis].has_value()) {
+    return std::nullopt;
+  }
+  return wrap(Layer::Derived, *axisStepDims_[axis]);
+}
+
+std::optional<ViewCellRef>
+ViewManifold::findOccurrence(const ViewDim dim,
+                             const zigzag::CellRef target) const noexcept {
+  if (!check(dim.layer, dim)) {
+    return std::nullopt;
+  }
+  const auto own = realCell(target);
+  if (!own.has_value()) {
+    return std::nullopt;
+  }
+  const auto &space = arena(dim.layer);
+  for (const auto &slot : space.cells()) {
+    const auto ref = slot.birthOp;
+    if (!zigzag::isEphemeral(ref) || space.handleTarget(ref) != own) {
+      continue;
+    }
+    if (space.linked(ref, dim.ref, zigzag::DimVector::POS).has_value() ||
+        space.linked(ref, dim.ref, zigzag::DimVector::NEG).has_value()) {
+      return wrap(dim.layer, ref);
+    }
+  }
+  return std::nullopt;
+}
+
 ViewManifold *ViewManifold::toss() noexcept {
   derived_.release(empty_);
   empty_ = derived_.mark();

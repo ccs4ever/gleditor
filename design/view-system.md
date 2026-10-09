@@ -1545,6 +1545,7 @@ struct MoveOutcome {
   SliceCursor cursor;
   bool moved{};
   bool originChanged{}; // the host tosses and re-prepares
+  std::optional<SliceStep> step; // the step through the slice, if one (G6)
 };
 
 class SliceView : public View {
@@ -1574,6 +1575,18 @@ public:
                                          MoveRequest request) const noexcept;
 };
 ```
+
+As built (E8): `cellAt()` finds the pack under the cursor from the occurrence of the origin on the
+axis's `d.axis-step` rank, then `d.pack` and `d.packing` per lane, as §9.3.3 lays them out; it
+answers nothing when that rank is not derived in the current epoch (just after a toss) or a lane is
+an empty place, and the origin itself at step 0 whatever was tossed. It reads through
+`ViewManifold::findAxisStepDim`, `findPackDim`, `findPackingDim` and `findOccurrence`, which mint
+nothing. The default `move()` handles `AlongAxis` (an axis showing a group steps along the group's
+first leaf, as a group resolves, until the pack view overrides it), `AlongSpoke` and `Retrieve`; the
+other kinds are a view's own. A step leaves any pack it began in, as §9.3.5 says, so the neighbour
+becomes the origin; `MoveOutcome::step` carries E14's `SliceStep` for a step between real cells
+along a real dimension, which is exactly what plan G6 feeds the walk recorder, and nothing for a
+retrieve.
 
 Editing is write-through and belongs to the host: it resolves `cellAt(cursor)`, which is always a
 real cell, and hands it to the existing edit path. Keeping a pack is explicit and separate:
@@ -3653,3 +3666,7 @@ ______________________________________________________________________
   link steps with ring moves as places; `saveBindings()` and `replayBindings()` with leaves-first
   groups and one notice per lost name. `ViewManifold` gains `setText()` and `text()`, `ViewError`
   gains `UnknownPlace`, and §12.2 gains four messages. §6.6 states the binding-model shape checks.
+- 2026-10-09 — §8.5 as built (E8): `cellAt()` over the structure of §9.3.3 through read-only finders
+  on `ViewManifold`, the default `move()` for axes, spokes and retrieve, and `MoveOutcome::step` so
+  the walk recorder is fed only real steps (G6). I6 is tested by tossing at every place of both
+  worked examples of §9.3.4 and re-deriving the same real cell.
