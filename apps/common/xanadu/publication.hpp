@@ -496,6 +496,22 @@ localise(Store &store, const GlobalSpan &span,
                             const PrimediaSpan &span);
 
 /**
+ * @brief @p span, addressed in @p from, as @p into already names it.
+ *
+ * What a reader of @p into can compare @p span against without changing
+ * either store, which is what a display path may do: a local span only when
+ * both read the same permascroll, an external one only when @p into already
+ * knows its scroll. Two stores' local offsets are into different
+ * permascrolls unless they share one, so comparing them bare matches
+ * unrelated text.
+ *
+ * @return Nothing when @p into cannot name @p span yet; carrySpan() is the
+ *         one that teaches it.
+ */
+[[nodiscard]] std::optional<PrimediaSpan>
+spanIn(const Store &from, const Store &into, const PrimediaSpan &span);
+
+/**
  * @brief @p span, addressed in @p from, in @p into's own coordinates: the same
  *        bytes, so a cell made from it transcludes rather than copies.
  *

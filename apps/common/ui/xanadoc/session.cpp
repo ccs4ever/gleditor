@@ -2837,13 +2837,20 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   auto &found      = view.decorations;
   const auto &mine = view.pieces;
 
+  const Store &mineStore = store(view.storeIndex);
+
   // Passages this document shares with another open one.
   for (std::size_t other = 0; other < open.size(); other++) {
     if (other == which) {
       continue;
     }
+    const Store &otherStore = store(open[other].storeIndex);
     for (const auto &piece : open[other].pieces.pieces()) {
-      for (const auto &extent : mine.occurrencesOf(piece)) {
+      const auto here = spanIn(otherStore, mineStore, piece);
+      if (!here) {
+        continue;
+      }
+      for (const auto &extent : mine.occurrencesOf(*here)) {
         found.push_back(
             gleditor::SpanStyle{.start  = extent.start,
                                 .end    = extent.end,
@@ -2865,7 +2872,13 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
           xanadu::linkColourWithInstanceShift(id, link.type, link.tier);
       for (const auto *const ends : {&link.left, &link.right}) {
         for (const auto &span : *ends) {
-          for (const auto &extent : mine.occurrencesOf(span)) {
+          // Offsets are into each store's own permascroll: a system
+          // xanadoc's are into the user's, a document's may not be.
+          const auto here = spanIn(*entry.store, mineStore, span);
+          if (!here) {
+            continue;
+          }
+          for (const auto &extent : mine.occurrencesOf(*here)) {
             found.push_back(gleditor::SpanStyle{
                 .start = extent.start, .end = extent.end, .colour = colour});
           }

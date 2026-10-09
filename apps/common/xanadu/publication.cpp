@@ -884,6 +884,32 @@ bool canCarry(const Store &from, const Store &into, const PrimediaSpan &span) {
   return span.scroll <= from.scrolls().size();
 }
 
+std::optional<PrimediaSpan> spanIn(const Store &from, const Store &into,
+                                   const PrimediaSpan &span) {
+  if (&from == &into) {
+    return span;
+  }
+  if (span.isLocal()) {
+    if (&from.userPermascroll() != &into.userPermascroll()) {
+      return std::nullopt;
+    }
+    return span;
+  }
+  if (span.scroll > from.scrolls().size()) {
+    return std::nullopt;
+  }
+  const auto key   = scrollKey(from.scrolls()[span.scroll - 1]);
+  const auto &here = into.scrolls();
+  for (std::size_t i = 0; i < here.size(); i++) {
+    if (scrollKey(here[i]) == key) {
+      return PrimediaSpan{.scroll = static_cast<ScrollId>(i + 1),
+                          .start  = span.start,
+                          .length = span.length};
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<PrimediaSpan> carrySpan(const Store &from, Store &into,
                                       const PrimediaSpan &span) {
   if (!canCarry(from, into, span)) {
