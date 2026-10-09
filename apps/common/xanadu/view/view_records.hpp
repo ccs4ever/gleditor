@@ -192,6 +192,9 @@ struct PlacedFrame {
   std::optional<std::uint32_t> parent;
   std::uint32_t count{}; // what it stands for, when collapsed to a badge
   bool collapsed{};
+  /// A frame is faded with its contents: an outline that popped in or out
+  /// while its parts faded would be the one thing in the scene that jumped.
+  float opacity{1.0F};
 };
 
 /// Where a dragged edge may be dropped: an axis, as a segment with a radius.

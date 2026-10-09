@@ -514,6 +514,65 @@ TEST(SystemDocsTest, PageViewSettingsFromStore) {
   EXPECT_FLOAT_EQ(layout.pages.backgroundOpacity, 0.5F);
 }
 
+// How views move is the reader's to set in system://ui (plan §5.3, G16);
+// a value that would make no sense keeps its default rather than freezing
+// or inverting a motion.
+TEST(SystemDocsTest, ViewMotionSettingsFromStore) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::UI);
+  EXPECT_EQ(UIConfig::fromStore(store).motion, xanadu::MotionConfig{});
+  const auto model = xanadu::SystemStoreModel::fromStore(store);
+  for (const auto key : {xanadu::settings::kViewMotionReduced,
+                         xanadu::settings::kViewMotionStepMs,
+                         xanadu::settings::kViewMotionHintEase}) {
+    const auto entry = model.find(key);
+    ASSERT_TRUE(entry.has_value()) << key;
+    EXPECT_FALSE(entry->notes.empty());
+  }
+
+  namespace s     = xanadu::settings;
+  const auto edit = [&](std::string_view key, auto value) {
+    store.repointCurrentVersion(
+        xanadu::setSetting(store, store.primaryCurrentVersion(), key, value));
+  };
+  edit(s::kViewMotionReduced, true);
+  edit(s::kViewMotionStepMs, 200.0);
+  edit(s::kViewMotionStepEase, std::string{"linear"});
+  edit(s::kViewMotionTossOutMs, 0.0);
+  edit(s::kViewMotionTossInScale, 0.5);
+  edit(s::kViewMotionViewSwitchEase, std::string{"out-quad"});
+  edit(s::kViewMotionSubViewMs, 75.0);
+  edit(s::kViewMotionHintEase, std::string{"in-out-cubic"});
+  auto motion = xanadu::MotionConfig::fromStore(store);
+  EXPECT_TRUE(motion.reduced);
+  EXPECT_EQ(motion.step,
+            (xanadu::MotionSpec{.durationMs = 200.0F,
+                                .ease       = xanadu::MotionEase::Linear}));
+  EXPECT_FLOAT_EQ(motion.tossOut.durationMs, 0.0F);
+  EXPECT_FLOAT_EQ(motion.tossInScale, 0.5F);
+  EXPECT_EQ(motion.viewSwitch.ease, xanadu::MotionEase::OutQuad);
+  EXPECT_FLOAT_EQ(motion.subViewSwitch.durationMs, 75.0F);
+  EXPECT_EQ(motion.hint, xanadu::MotionEase::InOutCubic);
+  EXPECT_EQ(UIConfig::fromStore(store).motion, motion);
+
+  edit(s::kViewMotionStepMs, -1.0);
+  edit(s::kViewMotionStepEase, std::string{"bouncy"});
+  edit(s::kViewMotionTossInScale, 1.5);
+  motion = xanadu::MotionConfig::fromStore(store);
+  const xanadu::MotionConfig defaults;
+  EXPECT_EQ(motion.step, defaults.step);
+  EXPECT_FLOAT_EQ(motion.tossInScale, defaults.tossInScale);
+
+  for (const auto ease :
+       {xanadu::MotionEase::Linear, xanadu::MotionEase::InQuad,
+        xanadu::MotionEase::OutQuad, xanadu::MotionEase::InOutQuad,
+        xanadu::MotionEase::InCubic, xanadu::MotionEase::OutCubic,
+        xanadu::MotionEase::InOutCubic}) {
+    EXPECT_EQ(xanadu::motionEaseNamed(xanadu::motionEaseName(ease)), ease);
+  }
+}
+
 TEST(SystemDocsTest, GetSetVaryingCellValues) {
   Store store;
   store.setSystem(true);

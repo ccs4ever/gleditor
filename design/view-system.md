@@ -1435,6 +1435,7 @@ struct PlacedFrame {
   std::optional<std::uint32_t> parent;
   std::uint32_t count{}; // what it stands for, when collapsed to a badge
   bool collapsed{};
+  float opacity{1.0F}; // faded with its contents, so an outline never pops
 };
 
 /// Where a dragged edge may be dropped: an axis, as a segment with a radius.
@@ -1748,6 +1749,30 @@ The animation layer keeps, for each `SubjectId` it is showing, a copy of the las
 missing from a new layout fades out from that copy; nothing is looked up. A derived view cell's id
 includes its epoch, so after a toss its old id matches nothing and it fades, while the real cells
 and pages around it tween.
+
+As built (U6a, `apps/common/ui/view/view_animation.hpp`): `ViewAnimation::retarget()` takes a
+placement's new sink with the epoch it was laid out in and a `MotionCause` — a move, a rebinding, a
+view switch or a sub-view switch — and `advance(dt, out)` writes what to draw into a second sink. A
+toss is told by the epoch changing, not by the cause; a rebinding has its own cause only because it
+is a command and never a key's repeat. What comes out is flat: every record has its frames composed
+by `placedPose` and names none, and each edge's label is renumbered to the items written, because a
+subject whose frame changed or went away has no frame to be placed relative to and must still follow
+one path. A record that cannot be placed is not shown. A subject in both layouts travels from where
+it is drawn now; a `MotionHint` naming it sets its delay and duration, with `view.motion.hintEase`
+as its curve; a new one fades in where it stands; a gone one fades out from the copy last drawn, in
+place. A view switch matches nothing, so the old scene fades out as the new one fades in. A ghost's
+position is cut and only its opacity moves (plan §5.3). The curves are Choreograph's easing
+functions; its timeline is not used, because it allocates for every motion it starts and a held key
+starts one per subject per repeat, so the tracks are vectors that keep their storage and a placement
+whose subjects have stopped changing in number allocates nothing to retarget or advance. A frame
+fades with its contents, which is why `PlacedFrame` carries an opacity.
+
+The rule for a held key (plan §5.3) is kept without knowing about keys: a step that arrives before
+the last one's motion would have ended (`view.motion.stepMs`) is a repeat, and the time since the
+last step is the repeat interval. Every step retargets from where things are drawn, so nothing
+queues, and a derived subject that appears on a repeat waits one interval before it fades in, so one
+gone by the next repeat is never drawn. The input layer carries no repeat flag today, which is why
+the interval is measured rather than told.
 
 ### 8.10 Extension points
 
@@ -2968,6 +2993,12 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `activity.settleMs`, `activity.bounceMs`               | 1200, 300    | pause that ends a run of movement; a step undone this soon is a slip      |
 | `subspace.rimBand`                                     | 48           | band at the pane's edge showing the next space along `u`                  |
 | `view.motion.reduced`                                  | false        | every tween and transition becomes a cut                                  |
+| `view.motion.stepMs`, `stepEase`                       | 120          | a step, or a move a view does not time; curve out-cubic                   |
+| `view.motion.tossOutMs`, `tossOutEase`                 | 90           | discarded view cells fade in place; in-cubic                              |
+| `view.motion.tossInMs`, `tossInEase`, `tossInScale`    | 160, 0.92    | new view cells fade in, growing from that share; out-cubic                |
+| `view.motion.viewSwitchMs`, `viewSwitchEase`           | 220          | cross-fade on a change of view; in-out-cubic                              |
+| `view.motion.subViewMs`, `subViewEase`                 | 150          | a change of sub-view; in-out-cubic                                        |
+| `view.motion.hintEase`                                 | in-out-quad  | curve of a move a view times itself, as today's sworph                    |
 | `view.viewOnlyOpacity`                                 | 0.7          | chrome of view-only items                                                 |
 | `stretch.gap`                                          | 4            | space between neighbouring boxes                                          |
 | `stretch.minContact`                                   | 12           | least overlap with the cell a box was reached from                        |
@@ -3720,3 +3751,8 @@ ______________________________________________________________________
   fits, where windows stack, ghost identities, and how `transition()` tells the subject from the
   row. `page.backgroundDepth`, `page.backgroundOpacity` and the rest of §12.3's `page.base.*` are in
   `system://layout`.
+- 2026-10-09 — §8.4, §8.9 and §12.3 as built (U6a, plan G16): `ViewAnimation` in
+  `apps/common/ui/view/`, retargeting by `SubjectId` with a toss told by the epoch, writing a flat
+  sink; `PlacedFrame` gains `opacity` so a frame fades with its contents; the held-key rule measured
+  from the steps' own timing. `view.motion.*` — `reduced` and the step, toss, view-switch,
+  sub-view-switch and hint timings and curves — are in `system://ui`.
