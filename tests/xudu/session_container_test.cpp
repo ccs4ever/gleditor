@@ -479,5 +479,204 @@ TEST(SessionContainerTest, FileExportAndImportRoundTrip) {
   std::filesystem::remove(tempPath);
 }
 
+TEST(SessionContainerTest, EncryptedPackageExportAndImportRoundTrip) {
+  const auto masterKeys   = generateKeyPair();
+  const auto deviceKeys   = generateKeyPair();
+  const auto masterFp     = computeSha256Hex(masterKeys.pub);
+  const auto deviceKeyHex = toHexStr(deviceKeys.pub);
+
+  auto certRes = createX509DelegationCertificate(deviceKeys.pub,
+                                                 masterKeys.priv, "laptop");
+  ASSERT_TRUE(certRes.has_value());
+
+  const std::string text = "Confidential hypermedia content";
+  SessionPackage pkg;
+  pkg.setManifestVersion(1)
+      ->setMasterFingerprint(masterFp)
+      ->setDeviceId("laptop")
+      ->setDeviceKey(deviceKeyHex)
+      ->setBaseVersion("1")
+      ->setHeadVersion("1a1")
+      ->setPrimediaOffset(0)
+      ->setPrimediaLength(text.size())
+      ->setTimestamp(1791480000)
+      ->setPrimediaSlice(std::string_view(text))
+      ->setDeviceCert(*certRes)
+      ->setEncrypted(true)
+      ->setPassphrase("super-secret-passphrase-2026");
+
+  auto signRes = pkg.signWithDeviceKey(deviceKeys.priv);
+  ASSERT_TRUE(signRes.has_value());
+
+  auto exportRes = exportPackage(pkg);
+  ASSERT_TRUE(exportRes.has_value());
+  const auto &archive = *exportRes;
+
+  // Import with correct passphrase
+  auto importRes =
+      importPackage(archive, masterFp, true,
+                    std::span<const std::uint8_t, 32>(masterKeys.pub),
+                    "super-secret-passphrase-2026");
+  ASSERT_TRUE(importRes.has_value());
+  EXPECT_EQ(importRes->primediaSliceString(), text);
+  EXPECT_TRUE(importRes->isEncrypted());
+}
+
+TEST(SessionContainerTest, EncryptedPackageRejectsWrongOrMissingPassphrase) {
+  const auto masterKeys   = generateKeyPair();
+  const auto deviceKeys   = generateKeyPair();
+  const auto masterFp     = computeSha256Hex(masterKeys.pub);
+  const auto deviceKeyHex = toHexStr(deviceKeys.pub);
+
+  auto certRes = createX509DelegationCertificate(deviceKeys.pub,
+                                                 masterKeys.priv, "laptop");
+  ASSERT_TRUE(certRes.has_value());
+
+  const std::string text = "Encrypted test data";
+  SessionPackage pkg;
+  pkg.setManifestVersion(1)
+      ->setMasterFingerprint(masterFp)
+      ->setDeviceId("laptop")
+      ->setDeviceKey(deviceKeyHex)
+      ->setBaseVersion("1")
+      ->setHeadVersion("1a1")
+      ->setPrimediaOffset(0)
+      ->setPrimediaLength(text.size())
+      ->setTimestamp(1791480000)
+      ->setPrimediaSlice(std::string_view(text))
+      ->setDeviceCert(*certRes)
+      ->setEncrypted(true)
+      ->setPassphrase("correct-passphrase");
+
+  ASSERT_TRUE(pkg.signWithDeviceKey(deviceKeys.priv).has_value());
+
+  auto exportRes = exportPackage(pkg);
+  ASSERT_TRUE(exportRes.has_value());
+  const auto &archive = *exportRes;
+
+  // Wrong passphrase
+  auto wrongRes = importPackage(
+      archive, masterFp, true,
+      std::span<const std::uint8_t, 32>(masterKeys.pub), "wrong-passphrase");
+  ASSERT_FALSE(wrongRes.has_value());
+  EXPECT_EQ(wrongRes.error(), SessionValidationError::DecryptionFailed);
+
+  // Missing passphrase
+  auto missingRes =
+      importPackage(archive, masterFp, true,
+                    std::span<const std::uint8_t, 32>(masterKeys.pub), "");
+  ASSERT_FALSE(missingRes.has_value());
+  EXPECT_EQ(missingRes.error(), SessionValidationError::MissingDecryptionKey);
+}
+
+TEST(SessionContainerTest, EncryptedPackageRejectsTamperedCiphertext) {
+  const auto masterKeys   = generateKeyPair();
+  const auto deviceKeys   = generateKeyPair();
+  const auto masterFp     = computeSha256Hex(masterKeys.pub);
+  const auto deviceKeyHex = toHexStr(deviceKeys.pub);
+
+  auto certRes = createX509DelegationCertificate(deviceKeys.pub,
+                                                 masterKeys.priv, "laptop");
+  ASSERT_TRUE(certRes.has_value());
+
+  const std::string text = "Tamper test";
+  SessionPackage pkg;
+  pkg.setManifestVersion(1)
+      ->setMasterFingerprint(masterFp)
+      ->setDeviceId("laptop")
+      ->setDeviceKey(deviceKeyHex)
+      ->setBaseVersion("1")
+      ->setHeadVersion("1a1")
+      ->setPrimediaOffset(0)
+      ->setPrimediaLength(text.size())
+      ->setTimestamp(1791480000)
+      ->setPrimediaSlice(std::string_view(text))
+      ->setDeviceCert(*certRes)
+      ->setEncrypted(true)
+      ->setPassphrase("passphrase");
+
+  ASSERT_TRUE(pkg.signWithDeviceKey(deviceKeys.priv).has_value());
+
+  auto exportRes = exportPackage(pkg);
+  ASSERT_TRUE(exportRes.has_value());
+  auto archive = *exportRes;
+
+  // Find "payload.enc" in tar archive and tamper with one byte of the content
+  // past header
+  const std::string tarName = "payload.enc";
+  auto pos                  = archive.size();
+  for (std::size_t i = 0; i + tarName.size() < archive.size(); ++i) {
+    if (std::memcmp(archive.data() + i, tarName.data(), tarName.size()) == 0) {
+      pos = i + 512; // skip header to payload data
+      break;
+    }
+  }
+  ASSERT_LT(pos, archive.size());
+  archive[pos] ^= 0x55;
+
+  auto tamperRes = importPackage(
+      archive, masterFp, true,
+      std::span<const std::uint8_t, 32>(masterKeys.pub), "passphrase");
+  ASSERT_FALSE(tamperRes.has_value());
+  // Either payload hash mismatch or decryption failed
+  EXPECT_TRUE(tamperRes.error() ==
+                  SessionValidationError::PayloadHashMismatch ||
+              tamperRes.error() == SessionValidationError::DecryptionFailed);
+}
+
+TEST(SessionContainerTest, ContainerExportRejectsProtectedMainOrEmptyDeviceId) {
+  const auto masterKeys = generateKeyPair();
+  const auto deviceKeys = generateKeyPair();
+  const auto masterFp   = computeSha256Hex(masterKeys.pub);
+
+  auto certRes = createX509DelegationCertificate(deviceKeys.pub,
+                                                 masterKeys.priv, "laptop");
+  ASSERT_TRUE(certRes.has_value());
+
+  SessionPackage pkg;
+  pkg.setManifestVersion(1)
+      ->setMasterFingerprint(masterFp)
+      ->setDeviceId("main") // Protected!
+      ->setDeviceKey(toHexStr(deviceKeys.pub))
+      ->setBaseVersion("1")
+      ->setHeadVersion("1a1")
+      ->setPrimediaOffset(0)
+      ->setPrimediaLength(4)
+      ->setTimestamp(1791480000)
+      ->setPrimediaSlice(std::string_view("test"))
+      ->setDeviceCert(*certRes);
+
+  auto exportMainRes = exportPackage(pkg);
+  ASSERT_FALSE(exportMainRes.has_value());
+  EXPECT_EQ(exportMainRes.error(), SessionValidationError::InvalidFieldFormat);
+
+  pkg.setDeviceId("");
+  auto exportEmptyRes = exportPackage(pkg);
+  ASSERT_FALSE(exportEmptyRes.has_value());
+  EXPECT_EQ(exportEmptyRes.error(), SessionValidationError::InvalidFieldFormat);
+}
+
+TEST(SessionContainerTest, ContainerImportRejectsPathTraversal) {
+  // Construct a minimal corrupt tar archive containing a traversal filename
+  // "../evil.txt"
+  std::vector<std::uint8_t> corruptTar(1024, 0);
+  std::memcpy(corruptTar.data(), "../evil.txt", 11);
+  // Set size octal string "0000010"
+  std::memcpy(corruptTar.data() + 124, "0000010\0", 8);
+  // Compute checksum
+  std::memset(corruptTar.data() + 148, ' ', 8);
+  unsigned int sum = 0;
+  for (std::size_t i = 0; i < 512; ++i) {
+    sum += corruptTar[i];
+  }
+  char chk[8];
+  std::snprintf(chk, sizeof(chk), "%06o", sum);
+  std::memcpy(corruptTar.data() + 148, chk, 7);
+
+  auto res = importPackage(corruptTar, "master_fp");
+  ASSERT_FALSE(res.has_value());
+  EXPECT_EQ(res.error(), SessionValidationError::CorruptArchive);
+}
+
 } // namespace
 } // namespace xanadu

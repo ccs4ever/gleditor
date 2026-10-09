@@ -153,10 +153,10 @@ void Form::describe(a11y::Builder &into) {
     if (focusLayout_) {
       const auto rect = focusLayout_->bounds;
       panel.bounds    = a11y::Rect{
-             .left  = rect.left,
-             .top   = static_cast<double>(builtHeight) - rect.bottom - rect.height,
-             .right = rect.left + rect.width,
-             .bottom = static_cast<double>(builtHeight) - rect.bottom};
+          .left  = rect.left,
+          .top   = static_cast<double>(builtHeight) - rect.bottom - rect.height,
+          .right = rect.left + rect.width,
+          .bottom = static_cast<double>(builtHeight) - rect.bottom};
     }
     panel.children.push_back(into.id(titleId));
     if (!note.empty() || !trouble.empty()) {
@@ -218,10 +218,10 @@ void Form::describe(a11y::Builder &into) {
               focusLayout_->find(static_cast<std::uint32_t>(fieldId(which)))) {
         const auto rect = box->rect;
         node.bounds     = a11y::Rect{
-                .left = rect.left,
-                .top = static_cast<double>(builtHeight) - rect.bottom - rect.height,
-                .right  = rect.left + rect.width,
-                .bottom = static_cast<double>(builtHeight) - rect.bottom};
+            .left = rect.left,
+            .top = static_cast<double>(builtHeight) - rect.bottom - rect.height,
+            .right  = rect.left + rect.width,
+            .bottom = static_cast<double>(builtHeight) - rect.bottom};
       }
     }
 
@@ -1030,10 +1030,10 @@ void Form::drawFrame(FrameContext &ctx) {
       box.focusable        = true;
       box.textInput        = takesText;
       *std::ranges::find(layout->boxes, id, &ui::LayoutBox::id) = box;
-      const auto fill                                           = i == where
-                                                                      ? ui::rgba(glm::mix(ctx.theme.colours.surface,
-                                                                                          ctx.theme.colours.accent, .2F))
-                                                                      : surface;
+      const auto fill = i == where
+                            ? ui::rgba(glm::mix(ctx.theme.colours.surface,
+                                                ctx.theme.colours.accent, .2F))
+                            : surface;
       canvas->addRect(box.rect.left, box.rect.bottom, box.rect.width,
                       box.rect.height, fill);
       canvas->pushClip(box.contentRect);
@@ -1058,8 +1058,8 @@ void Form::drawFrame(FrameContext &ctx) {
     }
     if (listDown && where < shown.size() && !shown[where].options.empty()) {
       const auto &options = shown[where].options;
-      const auto used     = placed.boxes.empty() ? viewport.height
-                                                 : placed.boxes.front().rect.height;
+      const auto used = placed.boxes.empty() ? viewport.height
+                                             : placed.boxes.front().rect.height;
       const ui::Rect listBox{viewport.left, viewport.bottom, viewport.width,
                              std::max(0.0F, viewport.height - used - gap)};
       const auto visible = std::max(

@@ -348,6 +348,8 @@ struct IdentityEntry {
     out += fieldStr("name", identityName);
     out += fieldStr("key", publicKeyArmored);
     out += fieldU64("ts", timestamp);
+    out += fieldU64("seq", sequence);
+    out += fieldStr("revoked", revoked ? "true" : "false");
     return out;
   }
 
@@ -443,6 +445,7 @@ struct OracleAttestation {
 
   [[nodiscard]] bool isValid() const noexcept {
     return oracleFingerprint.isValid() && targetFingerprint.isValid() &&
+           !(oracleFingerprint == targetFingerprint) &&
            !verifiedEmail.empty() && verifiedEmail.size() <= kMaxEmailLength &&
            expiresTimestamp > issuedTimestamp;
   }

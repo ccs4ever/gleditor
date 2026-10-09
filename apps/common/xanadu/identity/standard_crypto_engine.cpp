@@ -12,7 +12,10 @@
 #include <openssl/asn1.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
+#include <openssl/sha.h>
 #include <openssl/x509_vfy.h>
+
+#include "identity_layout.hpp"
 
 namespace xanadu::identity {
 
@@ -40,14 +43,59 @@ std::string base64Encode(std::span<const std::uint8_t> bytes) {
     return "";
   }
   const std::size_t outLen = 4UZ * ((bytes.size() + 2UZ) / 3UZ);
-  std::string out(outLen, '\0');
+  std::string out(outLen + 1UZ, '\0');
   const int written =
       EVP_EncodeBlock(reinterpret_cast<unsigned char *>(out.data()),
                       bytes.data(), static_cast<int>(bytes.size()));
   if (written < 0) {
     return "";
   }
+  out.resize(static_cast<std::size_t>(written));
   return out;
+}
+
+bool isSmallOrderPoint(std::span<const std::uint8_t, 32> pt) noexcept {
+  static constexpr std::array<std::array<std::uint8_t, 32>, 8>
+      kSmallOrderPoints = {
+          {// 1. Order 1: (0, 1)
+           {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+           // 2. Order 2: (0, -1)
+           {0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
+           // 3. Order 4: (I, 0)
+           {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+           // 4. Order 4: (-I, 0)
+           {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80},
+           // 5. Order 8: y = d^{-1/4}, sign bit 0
+           {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+            0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+            0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x05},
+           // 6. Order 8: y = d^{-1/4}, sign bit 1
+           {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+            0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+            0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x85},
+           // 7. Order 8: y = -d^{-1/4}, sign bit 0
+           {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+            0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+            0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0x7a},
+           // 8. Order 8: y = -d^{-1/4}, sign bit 1
+           {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+            0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+            0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0xfa}}};
+
+  for (const auto &bad : kSmallOrderPoints) {
+    if (CRYPTO_memcmp(pt.data(), bad.data(), 32) == 0) {
+      return true;
+    }
+  }
+  return false;
 }
 
 std::expected<std::vector<std::uint8_t>, ValidationError>
@@ -56,6 +104,10 @@ base64Decode(std::string_view b64) {
   clean.reserve(b64.size());
   for (const char c : b64) {
     if (!std::isspace(static_cast<unsigned char>(c))) {
+      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=')) {
+        return std::unexpected(ValidationError::SerializationError);
+      }
       clean.push_back(c);
     }
   }
@@ -84,6 +136,37 @@ base64Decode(std::string_view b64) {
 }
 
 StandardCryptoEngine::StandardCryptoEngine() = default;
+
+StandardCryptoEngine::~StandardCryptoEngine() {
+  OPENSSL_cleanse(privKeyBytes_.data(), privKeyBytes_.size());
+  hasPrivKeyBytes_ = false;
+}
+
+StandardCryptoEngine::StandardCryptoEngine(
+    StandardCryptoEngine &&other) noexcept
+    : evpKey_(std::move(other.evpKey_)), pubKey_(other.pubKey_),
+      privKeyBytes_(other.privKeyBytes_),
+      hasPrivKeyBytes_(other.hasPrivKeyBytes_),
+      defaultDomain_(std::move(other.defaultDomain_)) {
+  OPENSSL_cleanse(other.privKeyBytes_.data(), other.privKeyBytes_.size());
+  other.hasPrivKeyBytes_ = false;
+}
+
+StandardCryptoEngine &
+StandardCryptoEngine::operator=(StandardCryptoEngine &&other) noexcept {
+  if (this != &other) {
+    OPENSSL_cleanse(privKeyBytes_.data(), privKeyBytes_.size());
+    evpKey_          = std::move(other.evpKey_);
+    pubKey_          = other.pubKey_;
+    privKeyBytes_    = other.privKeyBytes_;
+    hasPrivKeyBytes_ = other.hasPrivKeyBytes_;
+    defaultDomain_   = std::move(other.defaultDomain_);
+
+    OPENSSL_cleanse(other.privKeyBytes_.data(), other.privKeyBytes_.size());
+    other.hasPrivKeyBytes_ = false;
+  }
+  return *this;
+}
 
 std::expected<StandardCryptoEngine, ValidationError>
 StandardCryptoEngine::generate() noexcept {
@@ -133,6 +216,7 @@ StandardCryptoEngine *StandardCryptoEngine::setPrivateKeyRaw(
   if (!rawPkey) {
     return this;
   }
+  OPENSSL_cleanse(privKeyBytes_.data(), privKeyBytes_.size());
   evpKey_.reset(rawPkey);
   std::copy(raw32.begin(), raw32.end(), privKeyBytes_.begin());
   hasPrivKeyBytes_   = true;
@@ -141,6 +225,7 @@ StandardCryptoEngine *StandardCryptoEngine::setPrivateKeyRaw(
                                   &pubLen) <= 0 ||
       pubLen != 32) {
     evpKey_.reset();
+    OPENSSL_cleanse(privKeyBytes_.data(), privKeyBytes_.size());
     hasPrivKeyBytes_ = false;
   }
   return this;
@@ -410,9 +495,12 @@ StandardCryptoEngine::loadPrivateKeyPkcs8Der(
   if (!bio) {
     return std::unexpected(ValidationError::CorruptKey);
   }
+  std::string passStr(passphrase);
   EVP_PKEY *rawPkey = d2i_PKCS8PrivateKey_bio(
-      bio.get(), nullptr, nullptr,
-      passphrase.empty() ? nullptr : const_cast<char *>(passphrase.data()));
+      bio.get(), nullptr, nullptr, passStr.empty() ? nullptr : passStr.data());
+  if (!passStr.empty()) {
+    OPENSSL_cleanse(passStr.data(), passStr.size());
+  }
   if (!rawPkey) {
     return std::unexpected(ValidationError::CorruptKey);
   }
@@ -447,9 +535,12 @@ StandardCryptoEngine::loadPrivateKeyPkcs8Pem(
   if (!bio) {
     return std::unexpected(ValidationError::CorruptKey);
   }
+  std::string passStr(passphrase);
   EVP_PKEY *rawPkey = PEM_read_bio_PrivateKey(
-      bio.get(), nullptr, nullptr,
-      passphrase.empty() ? nullptr : const_cast<char *>(passphrase.data()));
+      bio.get(), nullptr, nullptr, passStr.empty() ? nullptr : passStr.data());
+  if (!passStr.empty()) {
+    OPENSSL_cleanse(passStr.data(), passStr.size());
+  }
   if (!rawPkey) {
     return std::unexpected(ValidationError::CorruptKey);
   }
@@ -576,8 +667,12 @@ std::expected<X509Certificate, ValidationError>
 StandardCryptoEngine::createDelegationCertificate(
     const ISigner &masterSigner, const PubKey32 &devicePublicKey,
     const CertificateConstraints &constraints) const noexcept {
-  if (devicePublicKey.isZero()) {
+  if (devicePublicKey.isZero() || isSmallOrderPoint(devicePublicKey.bytes)) {
     return std::unexpected(ValidationError::CorruptKey);
+  }
+  if (constraints.notAfter <= constraints.notBefore ||
+      constraints.serialNumber == 0) {
+    return std::unexpected(ValidationError::CorruptCertificate);
   }
   ERR_clear_error();
   EvpPkeyPtr pkeyPub(EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, nullptr,
@@ -736,6 +831,9 @@ StandardCryptoEngine::authorizeCsr(
   if (!reqPubkey) {
     return std::unexpected(ValidationError::CorruptKey);
   }
+  if (EVP_PKEY_get_base_id(reqPubkey.get()) != EVP_PKEY_ED25519) {
+    return std::unexpected(ValidationError::UnsupportedAlgorithm);
+  }
   if (X509_REQ_verify(req.get(), reqPubkey.get()) <= 0) {
     return std::unexpected(ValidationError::CsrSignatureInvalid);
   }
@@ -774,17 +872,24 @@ StandardCryptoEngine::authorizeCsr(
 
 std::optional<PubKey32>
 StandardCryptoEngine::publicKeyFromAnyFormat(std::string_view keyStr) noexcept {
+  auto validateAndReturn = [](PubKey32 pk) -> std::optional<PubKey32> {
+    if (pk.isZero() || isSmallOrderPoint(pk.bytes)) {
+      return std::nullopt;
+    }
+    return pk;
+  };
+
   if (keyStr.size() == 32) {
     PubKey32 pk;
     std::memcpy(pk.bytes.data(), keyStr.data(), 32);
-    return pk;
+    return validateAndReturn(pk);
   }
   if (keyStr.size() == 64) {
     auto hOpt = Hash32::fromHex(keyStr);
     if (hOpt) {
       PubKey32 pk;
       std::memcpy(pk.bytes.data(), hOpt->bytes.data(), 32);
-      return pk;
+      return validateAndReturn(pk);
     }
   }
   if (!keyStr.empty()) {
@@ -792,7 +897,7 @@ StandardCryptoEngine::publicKeyFromAnyFormat(std::string_view keyStr) noexcept {
     if (b64Res.has_value() && b64Res->size() == 32) {
       PubKey32 pk;
       std::memcpy(pk.bytes.data(), b64Res->data(), 32);
-      return pk;
+      return validateAndReturn(pk);
     }
     ERR_clear_error();
     BIO *bio = BIO_new_mem_buf(keyStr.data(), static_cast<int>(keyStr.size()));
@@ -805,12 +910,40 @@ StandardCryptoEngine::publicKeyFromAnyFormat(std::string_view keyStr) noexcept {
         int ok = EVP_PKEY_get_raw_public_key(pkey, pk.bytes.data(), &len);
         EVP_PKEY_free(pkey);
         if (ok == 1 && len == 32) {
-          return pk;
+          return validateAndReturn(pk);
         }
       }
     }
   }
   return std::nullopt;
+}
+
+std::string
+StandardCryptoEngine::computeFingerprint(const PubKey32 &pubKey) noexcept {
+  unsigned char digest[SHA_DIGEST_LENGTH];
+  SHA1(pubKey.bytes.data(), pubKey.bytes.size(), digest);
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  std::string out;
+  out.reserve(40);
+  for (int i = 0; i < SHA_DIGEST_LENGTH; ++i) {
+    out.push_back(kHex[(digest[i] >> 4) & 0x0f]);
+    out.push_back(kHex[digest[i] & 0x0f]);
+  }
+  return out;
+}
+
+std::string StandardCryptoEngine::computeFingerprintSha256(
+    const PubKey32 &pubKey) noexcept {
+  unsigned char digest[SHA256_DIGEST_LENGTH];
+  SHA256(pubKey.bytes.data(), pubKey.bytes.size(), digest);
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(64);
+  for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i) {
+    out.push_back(kHex[(digest[i] >> 4) & 0x0f]);
+    out.push_back(kHex[digest[i] & 0x0f]);
+  }
+  return out;
 }
 
 std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
@@ -836,10 +969,21 @@ std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
     const ASN1_TIME *nb = X509_get0_notBefore(x509Cert.get());
     const ASN1_TIME *na = X509_get0_notAfter(x509Cert.get());
     auto curT           = static_cast<time_t>(currentTime);
-    if (nb && X509_cmp_time(nb, &curT) > 0) {
+    if (!nb || !na) {
+      return std::unexpected(ValidationError::CorruptCertificate);
+    }
+    const int cmpNb = X509_cmp_time(nb, &curT);
+    if (cmpNb == 0) {
+      return std::unexpected(ValidationError::CorruptCertificate);
+    }
+    if (cmpNb > 0) {
       return std::unexpected(ValidationError::CertificateNotYetValid);
     }
-    if (na && X509_cmp_time(na, &curT) < 0) {
+    const int cmpNa = X509_cmp_time(na, &curT);
+    if (cmpNa == 0) {
+      return std::unexpected(ValidationError::CorruptCertificate);
+    }
+    if (cmpNa < 0) {
       return std::unexpected(ValidationError::CertificateExpired);
     }
   }
@@ -899,10 +1043,19 @@ std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
   X509_NAME *issName = X509_get_issuer_name(x509Cert.get());
   X509_set_subject_name(rootCert.get(), issName);
   X509_set_issuer_name(rootCert.get(), issName);
-  ASN1_TIME_set(X509_getm_notBefore(rootCert.get()), 0);
-  ASN1_TIME_set(X509_getm_notAfter(rootCert.get()),
-                static_cast<time_t>(currentTime > 0 ? currentTime + 86400 * 3650
-                                                    : 2147483647));
+  if (!ASN1_TIME_set(X509_getm_notBefore(rootCert.get()), 0)) {
+    return std::unexpected(ValidationError::PathValidationFailed);
+  }
+  const std::uint64_t maxTime =
+      static_cast<std::uint64_t>(std::numeric_limits<time_t>::max());
+  const std::uint64_t rootNotAfter =
+      (currentTime > 0)
+          ? std::min<std::uint64_t>(currentTime + 86400ULL * 3650ULL, maxTime)
+          : std::min<std::uint64_t>(2147483647ULL, maxTime);
+  if (!ASN1_TIME_set(X509_getm_notAfter(rootCert.get()),
+                     static_cast<time_t>(rootNotAfter))) {
+    return std::unexpected(ValidationError::PathValidationFailed);
+  }
   X509_set_pubkey(rootCert.get(), rootPkey.get());
 
   X509V3_CTX rootCtx;
@@ -934,14 +1087,14 @@ std::expected<void, ValidationError> StandardCryptoEngine::verifyDelegation(
     return std::unexpected(ValidationError::PathValidationFailed);
   }
 
+  const std::uint64_t checkTime =
+      (currentTime > 0) ? currentTime
+                        : static_cast<std::uint64_t>(std::time(nullptr));
+
   X509_VERIFY_PARAM *param = X509_STORE_CTX_get0_param(ctx.get());
   if (param) {
     X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_PARTIAL_CHAIN);
-    if (currentTime > 0) {
-      X509_VERIFY_PARAM_set_time(param, static_cast<time_t>(currentTime));
-    } else {
-      X509_VERIFY_PARAM_set_flags(param, X509_V_FLAG_NO_CHECK_TIME);
-    }
+    X509_VERIFY_PARAM_set_time(param, static_cast<time_t>(checkTime));
   }
 
   const int verifyRes = X509_verify_cert(ctx.get());

@@ -105,13 +105,20 @@ class UserPermascroll : public SpanReader {
 public:
   struct Config {
     std::filesystem::path
-        storageDir; ///< e.g. ~/.local/share/xudu/permascroll/<fp>/
-    identity::Fingerprint masterIdentity; ///< 40-hex OpenPGP fingerprint
-    MutableKeys deviceKeys;               ///< Active BEP 46 keypair
-    std::string deviceId{"main"}; ///< Device identifier for subscroll salting
+        storageDir; ///< e.g. ~/.local/share/xuzz/permascroll/<fp>/
+    identity::Fingerprint
+        masterIdentity;     ///< 64-hex SHA-256 (or 40-hex) author fingerprint
+    MutableKeys deviceKeys; ///< Active BEP 46 keypair
+    std::string
+        deviceId{}; ///< Device identifier for subscroll salting (empty for
+                    ///< primary author station; 'main' is protected)
     std::size_t segmentAlignmentBytes{
         64UZ * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
   };
+
+  /// Generates a cryptographically unique RFC 4122 UUIDv4 for a secondary
+  /// device session.
+  [[nodiscard]] static std::string generateUniqueDeviceId();
 
   UserPermascroll();
   explicit UserPermascroll(Config config);

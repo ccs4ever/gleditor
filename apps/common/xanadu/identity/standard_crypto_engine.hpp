@@ -41,6 +41,10 @@ using BioPtr = std::unique_ptr<BIO, decltype(&BIO_free_all)>;
 [[nodiscard]] bool
 isCanonicalEd25519Scalar(std::span<const std::uint8_t, 32> sBytes) noexcept;
 
+/// Curve25519 small-order point rejection (order 1, 2, 4, 8).
+[[nodiscard]] bool
+isSmallOrderPoint(std::span<const std::uint8_t, 32> pt) noexcept;
+
 /// Base64 encoding and decoding utilities (single-line Base64 DER support).
 [[nodiscard]] std::string base64Encode(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::expected<std::vector<std::uint8_t>, ValidationError>
@@ -56,10 +60,10 @@ class StandardCryptoEngine : public ISigner,
                              public ICertificateEngine {
 public:
   StandardCryptoEngine();
-  ~StandardCryptoEngine() override = default;
+  ~StandardCryptoEngine() override;
 
-  StandardCryptoEngine(StandardCryptoEngine &&) noexcept            = default;
-  StandardCryptoEngine &operator=(StandardCryptoEngine &&) noexcept = default;
+  StandardCryptoEngine(StandardCryptoEngine &&other) noexcept;
+  StandardCryptoEngine &operator=(StandardCryptoEngine &&other) noexcept;
 
   StandardCryptoEngine(const StandardCryptoEngine &)            = delete;
   StandardCryptoEngine &operator=(const StandardCryptoEngine &) = delete;
@@ -107,6 +111,12 @@ public:
 
   [[nodiscard]] static std::optional<PubKey32>
   publicKeyFromAnyFormat(std::string_view keyStr) noexcept;
+
+  [[nodiscard]] static std::string
+  computeFingerprint(const PubKey32 &pubKey) noexcept;
+
+  [[nodiscard]] static std::string
+  computeFingerprintSha256(const PubKey32 &pubKey) noexcept;
 
   [[nodiscard]] std::expected<void, ValidationError>
   verifyDelegation(const X509Certificate &cert,

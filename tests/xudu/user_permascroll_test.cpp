@@ -25,7 +25,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
-#include "pgp_fixture.hpp"
+#include "identity_fixture.hpp"
 
 namespace {
 
@@ -366,9 +366,27 @@ TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
   renamed.deviceName = "someone-elses-laptop";
   EXPECT_FALSE(renamed.verify(xanadu::testing::kAuthorPublicKey));
 
-  auto reissued            = good;
-  reissued.issuedTimestamp = 1700000001;
-  EXPECT_FALSE(reissued.verify(xanadu::testing::kAuthorPublicKey));
+  // Temporal validity RFC 5280 check:
+  // Before notBefore (1700000000)
+  auto beforeNotBefore            = good;
+  beforeNotBefore.issuedTimestamp = 1699999999;
+  EXPECT_FALSE(beforeNotBefore.verify(xanadu::testing::kAuthorPublicKey));
+
+  // After notAfter (1700000000 + 365 * 86400)
+  auto afterNotAfter            = good;
+  afterNotAfter.issuedTimestamp = 1700000000 + 365 * 86400 + 1;
+  EXPECT_FALSE(afterNotAfter.verify(xanadu::testing::kAuthorPublicKey));
+
+  // Valid timestamp within [notBefore, notAfter]
+  auto withinWindow            = good;
+  withinWindow.issuedTimestamp = 1700000000 + 1000;
+  EXPECT_TRUE(withinWindow.verify(xanadu::testing::kAuthorPublicKey));
+
+  // Master fingerprint mismatch must be rejected
+  auto badMasterFp              = good;
+  badMasterFp.masterFingerprint = *xanadu::identity::Fingerprint::fromString(
+      xanadu::testing::kImpostorFingerprint);
+  EXPECT_FALSE(badMasterFp.verify(xanadu::testing::kAuthorPublicKey));
 
   auto swappedDevice = good;
   swappedDevice.devicePublicKey.bytes.fill(0x22);
@@ -380,6 +398,37 @@ TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
   EXPECT_FALSE(unsignedCert.verify(xanadu::testing::kAuthorPublicKey));
 
   EXPECT_FALSE(good.verify("")) << "no master key means no verification";
+}
+
+TEST(UserPermascrollTest, MainDeviceIdIsProtectedAndBlockedInConfig) {
+  UserPermascroll::Config cfg;
+  cfg.deviceId = "main";
+  EXPECT_THROW(UserPermascroll scroll(cfg), std::invalid_argument);
+}
+
+TEST(UserPermascrollTest, SubscrollRejectsPrimaryOrEmptyDeviceId) {
+  UserPermascroll scroll;
+  EXPECT_THROW(scroll.registerSubscroll("main", "/tmp/nonexistent"),
+               std::invalid_argument);
+  EXPECT_THROW(scroll.registerSubscroll("", "/tmp/nonexistent"),
+               std::invalid_argument);
+  EXPECT_THROW(scroll.ingestSubscroll("main", {}), std::invalid_argument);
+  EXPECT_THROW(scroll.ingestSubscroll("", {}), std::invalid_argument);
+}
+
+TEST(UserPermascrollTest, UniqueUuidDeviceIdGeneration) {
+  const auto id1 = UserPermascroll::generateUniqueDeviceId();
+  const auto id2 = UserPermascroll::generateUniqueDeviceId();
+  EXPECT_NE(id1, id2);
+  EXPECT_EQ(id1.size(), 36U);
+  EXPECT_EQ(id2.size(), 36U);
+  EXPECT_EQ(id1[8], '-');
+  EXPECT_EQ(id1[13], '-');
+  EXPECT_EQ(id1[14], '4'); // RFC 4122 version 4
+  EXPECT_EQ(id1[18], '-');
+  EXPECT_TRUE(id1[19] == '8' || id1[19] == '9' || id1[19] == 'a' ||
+              id1[19] == 'b'); // RFC 4122 variant 1
+  EXPECT_EQ(id1[23], '-');
 }
 
 TEST(UserPermascrollTest, PermascrollRegistrySingleton) {

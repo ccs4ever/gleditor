@@ -211,7 +211,7 @@ void SatelloidOverlay::synchronizeSelection() {
         }
         found->selected = side == selected->active && cursor.member == member &&
                           cursor.occurrence == occurrence;
-        found->active      = true;
+        found->active   = true;
         found->targetAlpha = 1.0F;
         if (anchorResolver_) {
           if (const auto anchor = anchorResolver_(cell->cell)) {
@@ -270,8 +270,8 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
       if (s.active && s.neighborhoodRevision != revision) {
         s.neighborhood         = neighborhoodResolver_(s.cellRef);
         s.neighborhoodRevision = revision;
-        s.text                 = s.neighborhood.empty() ? std::string{}
-                                                        : s.neighborhood.front().text;
+        s.text = s.neighborhood.empty() ? std::string{}
+                                        : s.neighborhood.front().text;
         if (axisNameResolver_) s.dimName = axisNameResolver_();
       }
     }
@@ -314,9 +314,9 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
     if (satelloids_[occurrences[i]].selected) chosen = i;
   }
   const auto anchor  = stacked ? gleditor::spatial::projectToScreen(
-                                    ctx.viewProjection,
-                                    satelloids_[occurrences[chosen]].currentPos,
-                                    screenW, screenH)
+                                     ctx.viewProjection,
+                                     satelloids_[occurrences[chosen]].currentPos,
+                                     screenW, screenH)
                                : glm::vec2(screenW * 0.5F, screenH * 0.5F);
   const float stackX = std::clamp(
       anchor.x, safe.left, std::max(safe.left, safe.left + safe.width - cardW));
@@ -567,9 +567,9 @@ bool SatelloidOverlay::picked(const render::PickingResult &pick,
                                                    : xanadu::LinkSide::Right;
       std::ignore     = linkContext_->execute(
           xanadu::nav::EnterAt{.key        = selected->key,
-                                   .side       = side,
-                                   .member     = card.occurrence->member,
-                                   .occurrence = card.occurrence->occurrence});
+                               .side       = side,
+                               .member     = card.occurrence->member,
+                               .occurrence = card.occurrence->occurrence});
       return true;
     }
     return true;

@@ -73,12 +73,14 @@ public:
   static constexpr gleditor::ui::WidgetId kIdBannerReviewBtn  = 21003U;
   static constexpr gleditor::ui::WidgetId kIdBannerDismissBtn = 21004U;
 
-  static constexpr gleditor::ui::WidgetId kIdPalettePanel     = 21101U;
-  static constexpr gleditor::ui::WidgetId kIdPaletteTitle     = 21102U;
-  static constexpr gleditor::ui::WidgetId kIdPaletteAdoptBtn  = 21103U;
-  static constexpr gleditor::ui::WidgetId kIdPaletteRetainBtn = 21104U;
-  static constexpr gleditor::ui::WidgetId kIdPaletteSynthBtn  = 21105U;
-  static constexpr gleditor::ui::WidgetId kIdPaletteDismiss   = 21106U;
+  static constexpr gleditor::ui::WidgetId kIdPalettePanel            = 21101U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteTitle            = 21102U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteAdoptBtn         = 21103U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteRetainBtn        = 21104U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteSynthBtn         = 21105U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteDismiss          = 21106U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteEncryptCheckbox  = 21107U;
+  static constexpr gleditor::ui::WidgetId kIdPaletteExportPackageBtn = 21108U;
 
   BranchConvergenceOverlay();
   explicit BranchConvergenceOverlay(Store *store, std::string fontName = {});
@@ -100,6 +102,16 @@ public:
   BranchConvergenceOverlay *setBannerVisible(bool visible) noexcept;
   BranchConvergenceOverlay *setPaletteVisible(bool visible) noexcept;
   BranchConvergenceOverlay *setConvergenceActive(bool active) noexcept;
+
+  BranchConvergenceOverlay *setEncryptPackage(bool enabled) noexcept;
+  [[nodiscard]] bool isEncryptPackage() const noexcept {
+    return encryptPackage_;
+  }
+  BranchConvergenceOverlay *
+  setPackagePassphrase(std::string passphrase) noexcept;
+  [[nodiscard]] const std::string &packagePassphrase() const noexcept {
+    return packagePassphrase_;
+  }
 
   // -- Detection & Notification Banner ---------------------------------------
   BranchConvergenceOverlay *
@@ -221,6 +233,8 @@ private:
   bool bannerVisible_{false};
   bool paletteVisible_{false};
   bool convergenceActive_{false};
+  bool encryptPackage_{false};
+  std::string packagePassphrase_{};
 
   std::optional<MultiVersionDiffResult> diffResult_;
 

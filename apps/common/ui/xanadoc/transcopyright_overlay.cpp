@@ -396,10 +396,10 @@ void TranscopyrightOverlay::describe(gleditor::a11y::Builder &into) {
   const auto snapshot = accessible_.load();
   if (!snapshot) return;
   for (const auto &badge : *snapshot) {
-    auto &node  = into.add(badge.id, badge.locked ? gleditor::a11y::Role::Button
-                                                  : gleditor::a11y::Role::Label);
-    node.label  = badge.label;
-    node.bounds = badge.bounds;
+    auto &node = into.add(badge.id, badge.locked ? gleditor::a11y::Role::Button
+                                                 : gleditor::a11y::Role::Label);
+    node.label = badge.label;
+    node.bounds    = badge.bounds;
     node.focusable = badge.locked;
     node.actions =
         badge.locked ? gleditor::a11y::bit(gleditor::a11y::Action::Click) : 0;

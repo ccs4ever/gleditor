@@ -526,8 +526,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      gleditor::Beams::Surface surface) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
-  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
-  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
+  const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan   = std::abs(farSide.top.y - farSide.bottom.y);
 
   // How many strands comes from the taller of the two ends, so that end is
   // drawn at its full reach rather than reduced to whatever the other end
@@ -728,8 +728,8 @@ void LinkBeams::updatePriorityOffsets(RenderState &state,
     if constexpr (requires { strand.link; }) {
       const bool pending = sworph && !strand.aligned &&
                            strand.from.isDocument() && strand.to.isDocument();
-      fromEndNeeds = pending && !strand.fromEndAnchor;
-      toEndNeeds   = pending && !strand.toEndAnchor;
+      fromEndNeeds       = pending && !strand.fromEndAnchor;
+      toEndNeeds         = pending && !strand.toEndAnchor;
     }
     if (!fromNeeds && !toNeeds && !fromEndNeeds && !toEndNeeds) {
       // Every end it needs is resolved (or none is a document end) --
@@ -1131,7 +1131,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     auto &view             = renderer->appState()->view;
     const float aspect     = (view.screenHeight > 0 && view.screenWidth > 0)
                                  ? static_cast<float>(view.screenWidth) /
-                                   static_cast<float>(view.screenHeight)
+                                       static_cast<float>(view.screenHeight)
                                  : fallbackAspect;
     const float fovRad     = glm::radians(view.fov);
     const float tanHalfFov = std::tan(fovRad * 0.5F);
@@ -1253,11 +1253,11 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   docBody.position        = docPos;
   docBody.restingPosition = docPos;
   docBody.width           = docHalfW * 2.0F;
-  docBody.height          = doc->page(0)
-                                ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
-                                : fallbackDocHeight;
-  docBody.isForeground    = true;
-  docBody.pinned          = true;
+  docBody.height = doc->page(0)
+                       ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
+                       : fallbackDocHeight;
+  docBody.isForeground = true;
+  docBody.pinned       = true;
   tensionEngine_.setBody(docBody);
 
   // 2. Add collinear alignment constraint
@@ -1504,12 +1504,12 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
   const auto selected = linkContext_ != nullptr ? linkContext_->selection()
                                                 : gleditor::cpp26::nullopt;
-  activeLink          = selected
-                            ? std::optional<std::uint64_t>(
+  activeLink = selected
+                   ? std::optional<std::uint64_t>(
                          selected->key.authority == session.store().documentId()
                              ? static_cast<std::uint64_t>(selected->key.id)
                              : session.packageRenderId(selected->key))
-                            : std::nullopt;
+                   : std::nullopt;
 
   // Advance pulse phase every frame for live photonic traveling wave packets
   pulsePhase = std::fmod(pulsePhase + 0.02F, 1.0F);
@@ -1558,7 +1558,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       };
       const bool rightwards = position(st.to, st.toCellAnchor).x >=
                               position(st.from, st.fromCellAnchor).x;
-      const auto edge = [&](bool left) -> std::optional<Edge> {
+      const auto edge       = [&](bool left) -> std::optional<Edge> {
         const auto &end  = left ? st.from : st.to;
         const auto &cell = left ? st.fromCellAnchor : st.toCellAnchor;
         if (end.isCell())
@@ -1771,7 +1771,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
                                  other.to.doc == strand.to.doc) ||
                                 (other.from.doc == strand.to.doc &&
                                  other.to.doc == strand.from.doc);
-          const auto waiting = [&](const auto &anchor, const LinkEnd &end) {
+          const auto waiting  = [&](const auto &anchor, const LinkEnd &end) {
             return !anchor && endpointStillLoading(end);
           };
           return samePair && (waiting(other.fromAnchor, other.from) ||
@@ -2268,7 +2268,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                 .label = "occurrence " + std::to_string(i + 1) + " of " +
                          std::to_string(member.occurrences.size()) + ", " +
                          linkContext_->describe(occurrence.site),
-                .value       = chosen && cursor.occurrence == i ? "chosen" : "",
+                .value = chosen && cursor.occurrence == i ? "chosen" : "",
                 .description = xanadu::Coverage::Partial == occurrence.coverage
                                    ? "part of the member"
                                    : "",

@@ -125,10 +125,10 @@ void DocumentSwitcher::rebuild(FrameContext &ctx,
   layoutResult           = ui::split(
       bar, {.id = tabsId}, {.id = actionsId},
       {.firstShare = available > 0
-                                   ? std::max(0.0F, available - actionWidth) / available
-                                   : 0.0F,
-                 .gap        = gap,
-                 .parentId   = barId});
+                         ? std::max(0.0F, available - actionWidth) / available
+                         : 0.0F,
+       .gap        = gap,
+       .parentId   = barId});
   layoutResult.boxes.push_back({barId, 0, bar, bar});
   const auto tabsBounds    = layoutResult.find(tabsId)->rect;
   const auto actionsBounds = layoutResult.find(actionsId)->rect;

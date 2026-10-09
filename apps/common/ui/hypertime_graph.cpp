@@ -441,7 +441,7 @@ void HypertimeGraph::layout(const float screenW, const float screenH) {
                                             font->metrics().lineHeight + 4));
   const float dx       = std::max(
       diameter * 2.2F, maxDepth ? graphAreaW / static_cast<float>(maxDepth + 1)
-                                      : diameter * 2.2F);
+                                : diameter * 2.2F);
   const float dy =
       std::max(diameter * 1.4F, graphAreaH / static_cast<float>(maxLanes + 1));
   const float originX = graphBounds_.left + diameter;
@@ -632,11 +632,11 @@ HypertimeGraph::prepare(const ui::UiMetrics &metrics, const ui::Theme &source) {
       std::floor((panelW_ - 4) / static_cast<float>(headerCount));
   std::size_t column = 0;
   auto header        = [&](std::string label, std::string kind,
-                    std::optional<MicroversionId> version = {}) {
+                           std::optional<MicroversionId> version = {}) {
     actionButton(std::move(label), std::move(kind),
-                        {panelX_ + 2 + static_cast<float>(column++) * buttonWidth,
+                 {panelX_ + 2 + static_cast<float>(column++) * buttonWidth,
                   headerY, buttonWidth, touch},
-                        version);
+                 version);
   };
   header("Close hypertime", "close");
   header("Graph", "graph");
@@ -741,17 +741,17 @@ HypertimeGraph::prepare(const ui::UiMetrics &metrics, const ui::Theme &source) {
         actions_.emplace(alias->second, Action{"node", node.id, {}, epoch_});
         add({.id       = alias->second,
              .model    = ui::Button{node.alias, "node", true,
-                                 "Alias " + node.alias + " for version " +
-                                     node.id.str()},
+                                    "Alias " + node.alias + " for version " +
+                                        node.id.str()},
              .maxLines = 1},
             {node.aliasX, node.aliasY, node.aliasW, node.aliasH});
       }
     }
   }
-  const auto current       = std::ranges::find(chronologicalOrder_, current_);
-  const auto index         = current == chronologicalOrder_.end()
-                                 ? 0
-                                 : std::distance(chronologicalOrder_.begin(), current);
+  const auto current = std::ranges::find(chronologicalOrder_, current_);
+  const auto index = current == chronologicalOrder_.end()
+                         ? 0
+                         : std::distance(chronologicalOrder_.begin(), current);
   auto [time, createdTime] = controlIds_.try_emplace("time", nextId_);
   if (createdTime) ++nextId_;
   const auto timeId = time->second;

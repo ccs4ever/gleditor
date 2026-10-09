@@ -12,6 +12,7 @@
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
+#include <unordered_set>
 
 #include "common/xanadu/merkle_domain.hpp"
 #include "standard_crypto_engine.hpp"
@@ -23,8 +24,9 @@ namespace {
 // The domain tags are shared (see merkle_domain.hpp); this tree remains a
 // separate implementation over its own record type -- only the fixed RFC
 // 6962 protocol byte is common to both.
-constexpr char kLeafDomain     = kMerkleLeafDomain;
-constexpr char kInteriorDomain = kMerkleInteriorDomain;
+constexpr char kLeafDomain                             = kMerkleLeafDomain;
+constexpr char kInteriorDomain                         = kMerkleInteriorDomain;
+constexpr std::uint64_t kMaxAttestationDurationSeconds = 365ULL * 86400ULL;
 
 void sha256_lt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                merkle::HashT<32> &out) {
@@ -60,43 +62,7 @@ Hash32 computeBlockHash(const BlockHeader &header) {
 }
 
 std::optional<PubKey32> extractPubKey(const IdentityEntry &entry) {
-  if (entry.publicKeyArmored.size() == 32) {
-    PubKey32 pk;
-    std::memcpy(pk.bytes.data(), entry.publicKeyArmored.data(), 32);
-    return pk;
-  }
-  if (entry.publicKeyArmored.size() == 64) {
-    auto hOpt = Hash32::fromHex(entry.publicKeyArmored);
-    if (hOpt) {
-      PubKey32 pk;
-      std::memcpy(pk.bytes.data(), hOpt->bytes.data(), 32);
-      return pk;
-    }
-  }
-  if (!entry.publicKeyArmored.empty()) {
-    auto b64Res = base64Decode(entry.publicKeyArmored);
-    if (b64Res.has_value() && b64Res->size() == 32) {
-      PubKey32 pk;
-      std::memcpy(pk.bytes.data(), b64Res->data(), 32);
-      return pk;
-    }
-    BIO *bio = BIO_new_mem_buf(entry.publicKeyArmored.data(),
-                               static_cast<int>(entry.publicKeyArmored.size()));
-    if (bio) {
-      EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
-      BIO_free(bio);
-      if (pkey) {
-        PubKey32 pk;
-        std::size_t len = 32;
-        int ok = EVP_PKEY_get_raw_public_key(pkey, pk.bytes.data(), &len);
-        EVP_PKEY_free(pkey);
-        if (ok == 1 && len == 32) {
-          return pk;
-        }
-      }
-    }
-  }
-  return std::nullopt;
+  return StandardCryptoEngine::publicKeyFromAnyFormat(entry.publicKeyArmored);
 }
 
 } // namespace
@@ -267,9 +233,21 @@ std::expected<void, ValidationError> EnginePipeline::stageBlock(
   std::vector<VoteEntry> stagedVotes;
   stagedVotes.reserve(votes.size());
 
+  std::unordered_set<Fingerprint, FingerprintHash> votersInBlock;
   for (const auto &vote : votes) {
     if (!vote.isValid()) {
       return std::unexpected(ValidationError::InvalidSignature);
+    }
+
+    // Disallow duplicate votes from the same voter in a single block
+    if (!votersInBlock.insert(vote.voterFingerprint).second) {
+      return std::unexpected(ValidationError::DuplicateEntry);
+    }
+
+    // Verify vote timestamp relative to block header
+    if (header.timestamp > 0 &&
+        vote.timestamp > header.timestamp + kMaxClockSkewSeconds) {
+      return std::unexpected(ValidationError::TimestampInFuture);
     }
 
     // Check voter registration in committed state or staged identities
@@ -286,6 +264,22 @@ std::expected<void, ValidationError> EnginePipeline::stageBlock(
 
     if (!voterEntry || voterEntry->revoked) {
       return std::unexpected(ValidationError::VoterNotFound);
+    }
+
+    // Check candidate registration in committed state or staged identities
+    const IdentityEntry *candidateEntry =
+        findIdentityByFingerprint(vote.candidateOracle);
+    if (!candidateEntry) {
+      for (const auto &stagedId : stagedIdentities) {
+        if (stagedId.fingerprint == vote.candidateOracle) {
+          candidateEntry = &stagedId;
+          break;
+        }
+      }
+    }
+
+    if (!candidateEntry || candidateEntry->revoked) {
+      return std::unexpected(ValidationError::OracleNotAuthorized);
     }
 
     // Enforce 30-day minimum registration age
@@ -376,6 +370,9 @@ bool EnginePipeline::hasStagedBlock() const noexcept {
 
 std::pair<std::uint64_t, Hash32>
 EnginePipeline::appendIdentity(IdentityEntry entry) {
+  if (!entry.fingerprint.isValid()) {
+    throw std::invalid_argument("EnginePipeline: invalid identity entry");
+  }
   entry.sequence      = impl_->identities.size();
   const auto leafHash = computeLeafHash(entry);
   merkle::HashT<32> leaf;
@@ -391,6 +388,14 @@ EnginePipeline::appendIdentity(IdentityEntry entry) {
 }
 
 std::pair<std::uint64_t, Hash32> EnginePipeline::appendVote(VoteEntry vote) {
+  if (!vote.voterFingerprint.isValid() || !vote.candidateOracle.isValid()) {
+    throw std::invalid_argument("EnginePipeline: invalid vote entry");
+  }
+  const auto *voter = findIdentityByFingerprint(vote.voterFingerprint);
+  if (!voter || voter->revoked) {
+    throw std::invalid_argument(
+        "EnginePipeline: voter does not exist or is revoked");
+  }
   vote.sequence       = impl_->votes.size();
   const auto leafHash = computeLeafHash(vote);
   merkle::HashT<32> leaf;
@@ -524,6 +529,24 @@ EnginePipeline::getActiveOracleQuorum(std::size_t quorumSize,
         (currentTimestamp > 0) ? currentTimestamp : vote.timestamp;
     const std::uint64_t weight = calculateVotingPower(voter, checkTs);
     if (weight > 0) {
+      // Validate candidate exists in committed or staged state and is not
+      // revoked
+      const IdentityEntry *candidateEntry =
+          findIdentityByFingerprint(vote.candidateOracle);
+      if (!candidateEntry && impl_->staged) {
+        for (const auto &stagedId : impl_->staged->identities) {
+          if (stagedId.fingerprint == vote.candidateOracle) {
+            candidateEntry = &stagedId;
+            break;
+          }
+        }
+      }
+      if (!candidateEntry || candidateEntry->revoked) {
+        continue;
+      }
+      if (checkTs > 0 && candidateEntry->timestamp > checkTs) {
+        continue;
+      }
       tallies[vote.candidateOracle] += weight;
     }
   }
@@ -559,9 +582,38 @@ std::expected<void, ValidationError> EnginePipeline::verifyOracleAttestation(
   if (!att.isValid()) {
     return std::unexpected(ValidationError::InvalidSignature);
   }
-  if (currentTimestamp > 0 && currentTimestamp > att.expiresTimestamp) {
+  if (att.oracleFingerprint == att.targetFingerprint) {
+    return std::unexpected(ValidationError::OracleNotAuthorized);
+  }
+
+  // Enforce maximum attestation duration (365 days)
+  if (att.expiresTimestamp - att.issuedTimestamp >
+      kMaxAttestationDurationSeconds) {
     return std::unexpected(ValidationError::AttestationExpired);
   }
+
+  // Temporal validation
+  if (currentTimestamp > 0) {
+    if (att.issuedTimestamp > currentTimestamp + kMaxClockSkewSeconds) {
+      return std::unexpected(ValidationError::TimestampInFuture);
+    }
+    if (currentTimestamp > att.expiresTimestamp) {
+      return std::unexpected(ValidationError::AttestationExpired);
+    }
+  }
+
+  // Cryptographically bind oracleKey to oracleFingerprint
+  const auto oracleFp = Fingerprint::fromString(
+      StandardCryptoEngine::computeFingerprint(oracleKey));
+  if (!oracleFp || *oracleFp != att.oracleFingerprint) {
+    return std::unexpected(ValidationError::IdentityMismatch);
+  }
+
+  const auto *oracleEntry = findIdentityByFingerprint(att.oracleFingerprint);
+  if (oracleEntry && oracleEntry->revoked) {
+    return std::unexpected(ValidationError::KeyRevoked);
+  }
+
   if (!isOracleAuthorized(att.oracleFingerprint, att.issuedTimestamp,
                           quorumSize)) {
     return std::unexpected(ValidationError::OracleNotAuthorized);
@@ -591,15 +643,22 @@ EnginePipeline::verifyOracleAttestation(const OracleAttestation &att,
   if (!att.isValid()) {
     return std::unexpected(ValidationError::InvalidSignature);
   }
-  if (currentTimestamp > 0 && currentTimestamp > att.expiresTimestamp) {
-    return std::unexpected(ValidationError::AttestationExpired);
-  }
-  if (!isOracleAuthorized(att.oracleFingerprint, att.issuedTimestamp,
-                          quorumSize)) {
+  if (att.oracleFingerprint == att.targetFingerprint) {
     return std::unexpected(ValidationError::OracleNotAuthorized);
   }
-  if (att.oracleSignature.isZero()) {
-    return std::unexpected(ValidationError::InvalidSignature);
+
+  if (att.expiresTimestamp - att.issuedTimestamp >
+      kMaxAttestationDurationSeconds) {
+    return std::unexpected(ValidationError::AttestationExpired);
+  }
+
+  if (currentTimestamp > 0) {
+    if (att.issuedTimestamp > currentTimestamp + kMaxClockSkewSeconds) {
+      return std::unexpected(ValidationError::TimestampInFuture);
+    }
+    if (currentTimestamp > att.expiresTimestamp) {
+      return std::unexpected(ValidationError::AttestationExpired);
+    }
   }
 
   const IdentityEntry *oracleEntry =
@@ -612,8 +671,11 @@ EnginePipeline::verifyOracleAttestation(const OracleAttestation &att,
       }
     }
   }
-  if (!oracleEntry || oracleEntry->revoked) {
+  if (!oracleEntry) {
     return std::unexpected(ValidationError::OracleNotAuthorized);
+  }
+  if (oracleEntry->revoked) {
+    return std::unexpected(ValidationError::KeyRevoked);
   }
 
   const auto pubKeyOpt = extractPubKey(*oracleEntry);

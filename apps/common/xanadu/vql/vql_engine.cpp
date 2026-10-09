@@ -766,9 +766,9 @@ VQLEngine::evaluateValueExpr(const ValueExpr &expr, zigzag::CellRef context) {
 
   if (std::holds_alternative<std::shared_ptr<PathExpression>>(expr.kind)) {
     const auto &path = *std::get<std::shared_ptr<PathExpression>>(expr.kind);
-    auto cells       = evaluatePath(path, context != zigzag::noCell
-                                              ? std::vector<zigzag::CellRef>{context}
-                                              : std::vector<zigzag::CellRef>{});
+    auto cells = evaluatePath(path, context != zigzag::noCell
+                                        ? std::vector<zigzag::CellRef>{context}
+                                        : std::vector<zigzag::CellRef>{});
     if (!cells.empty()) {
       return core_->render(cells[0]);
     }

@@ -120,8 +120,10 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
   };
   const auto dumpOf = [&](const fs::path &store) {
     fs::path permascroll;
-    for (const auto &entry :
-         fs::directory_iterator(root / "data" / "xudu" / "permascroll")) {
+    const auto permaDir = fs::exists(root / "data" / "xuzz" / "permascroll")
+                              ? root / "data" / "xuzz" / "permascroll"
+                              : root / "data" / "xudu" / "permascroll";
+    for (const auto &entry : fs::directory_iterator(permaDir)) {
       permascroll = entry.path();
     }
     return run(built("xudu-dump").string() + " --section=ops --permascroll=" +
@@ -167,10 +169,10 @@ TEST(PublicationUiTest, aSliceCanBeAddedToTheCurrentTextStoreAndReopened) {
   const auto permascroll = root / "permascroll";
   const auto launch      = [&](const std::string &script) {
     return run("XDG_CONFIG_HOME=" + (root / "config").string() +
-                    " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
-                    built("xuzz").string() + " " + store.string() +
-                    " --permascroll " + permascroll.string() + " --profile " +
-                    script);
+               " XDG_DATA_HOME=" + (root / "data").string() + " timeout 120 " +
+               built("xuzz").string() + " " + store.string() +
+               " --permascroll " + permascroll.string() + " --profile " +
+               script);
   };
   const auto first = launch("--type 'Story Ideas' --chord Ctrl+Alt+Shift+N"
                             " --chord N --chord E --type alpha --chord Return"

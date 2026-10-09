@@ -291,8 +291,8 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
               const auto &aliasNode = file.nodes[node.to - file.firstOpIndex];
               const auto aSpan      = aliasNode.span();
               if (xanadu::localScroll == aliasNode.scrollId &&
-                  0 != aSpan.length &&
-                  aSpan.start + aSpan.length <= primedia.size()) {
+                  0 != aSpan.length && aSpan.start <= primedia.size() &&
+                  aSpan.length <= primedia.size() - aSpan.start) {
                 line << " name="
                      << excerpt(std::string_view{primedia}.substr(
                             static_cast<std::size_t>(aSpan.start),
@@ -318,7 +318,8 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
     // operation rather than hexdumping it: a change that shifted a field puts
     // garbage here, and a diff of two dumps says so on the line it happened.
     if (xanadu::localScroll == node.scrollId && 0 != span.length &&
-        span.start + span.length <= primedia.size()) {
+        span.start <= primedia.size() &&
+        span.length <= primedia.size() - span.start) {
       line << " text="
            << excerpt(std::string_view{primedia}.substr(
                   static_cast<std::size_t>(span.start),
@@ -587,7 +588,8 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (wants("authorship")) {
+  if (wants("authorship") &&
+      (exists("AUTHORSHIP.tsv") || section == "authorship")) {
     dumpAuthorship(target);
   }
 

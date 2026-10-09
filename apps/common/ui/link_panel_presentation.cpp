@@ -89,8 +89,8 @@ LinkPanelPresentation linkPanelPresentation(
   const float wantedPadding = std::max(0.F, metrics.px(config.paddingPx));
   auto columns              = static_cast<unsigned>(
       std::clamp(std::floor(std::max(0.F, maxWidth - wantedPadding * 2) /
-                                         std::max(1.F, longestButton + wantedPadding * 2)),
-                              1.F, 3.F));
+                            std::max(1.F, longestButton + wantedPadding * 2)),
+                 1.F, 3.F));
   if ((lines.size() + (buttons.size() + columns - 1) / columns) *
           (std::ceil(line) + 2) >
       maxHeight)
@@ -115,9 +115,9 @@ LinkPanelPresentation linkPanelPresentation(
   result.theme.gapEm     = line > 0 ? gap / line : 0;
   const auto colour      = [](std::uint32_t rgba) {
     return glm::vec4(static_cast<float>((rgba >> 24U) & 255U) / 255,
-                          static_cast<float>((rgba >> 16U) & 255U) / 255,
-                          static_cast<float>((rgba >> 8U) & 255U) / 255,
-                          static_cast<float>(rgba & 255U) / 255);
+                     static_cast<float>((rgba >> 16U) & 255U) / 255,
+                     static_cast<float>((rgba >> 8U) & 255U) / 255,
+                     static_cast<float>(rgba & 255U) / 255);
   };
   result.theme.colours.surface       = colour(config.backgroundColour);
   result.theme.colours.text          = colour(config.textColour);

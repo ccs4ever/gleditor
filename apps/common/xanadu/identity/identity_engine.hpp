@@ -25,7 +25,7 @@ inline constexpr std::string_view kDomainManifest =
 inline constexpr std::string_view kDomainDeviceCsr = "xanadu-device-csr-v2\n";
 inline constexpr std::string_view kDomainDeviceRevocation =
     "xanadu-device-revocation-v2\n";
-inline constexpr std::string_view kDomainPeerAuth = "xanadu-peer-auth-v2\n";
+inline constexpr std::string_view kDomainPeerAuth = "xanadu-peer-auth-v2:";
 inline constexpr std::string_view kDomainOracleAttestation =
     "xanadu-oracle-attestation-v1\n";
 

@@ -383,7 +383,7 @@ TEST(QuotationBuilderOverlayTest,
   const auto go      = [&](std::string page) {
     const auto scene = overlay.prepare(metrics, ui::defaultTheme());
     const auto tab   = std::ranges::find(scene->visuals, page,
-                                              &ui::WidgetVisual::accessibleLabel);
+                                         &ui::WidgetVisual::accessibleLabel);
     EXPECT_NE(tab, scene->visuals.end());
     if (tab != scene->visuals.end()) {
       EXPECT_TRUE(overlay.activateNode(tab->id));

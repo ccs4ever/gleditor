@@ -85,8 +85,8 @@ TEST_F(
   const auto slot = a.addScroll(scroll);
   auto other      = Scroll::ofTorrentFile(
       makeTorrent(std::vector<TorrentContent>{{.path = "text",
-                                                    .data = "unrelated bytes"}},
-                       "other")
+                                               .data = "unrelated bytes"}},
+                  "other")
           .hash,
       0, "text", 0, 15);
   b.addScroll(other);

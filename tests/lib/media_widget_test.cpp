@@ -427,8 +427,8 @@ TEST_F(MediaWidgetTest, CapturedCardMeaningSurvivesPresentationChanges) {
   ASSERT_EQ(captured.widgetOverlays.size(), 1U);
   render::PickingResult pick{
       .requestId = 1,
-      .tag       = render::unpackPickingTag(captured.widgetOverlays[0].identity,
-                                            MediaWidget::tagSeekBase + 750U, 0)};
+      .tag = render::unpackPickingTag(captured.widgetOverlays[0].identity,
+                                      MediaWidget::tagSeekBase + 750U, 0)};
   pick.overlayWidgetId = render::resolveOverlayWidget(captured, pick.tag);
   widget->setTitle("Changed after the click was requested");
   context.metrics.fontScale = 2.0F;

@@ -1,12 +1,12 @@
 /**
- * @file pgp_fixture.hpp
+ * @file identity_fixture.hpp
  * @brief Modernized Ed25519 and X.509 v3 cryptographic identity test fixtures.
  *
  * Provides deterministic author and impostor key pairs, canonical delegation
  * certificates, and device keys for headless unit testing.
  */
-#ifndef XUDU_TESTS_PGP_FIXTURE_HPP
-#define XUDU_TESTS_PGP_FIXTURE_HPP
+#ifndef XUDU_TESTS_IDENTITY_FIXTURE_HPP
+#define XUDU_TESTS_IDENTITY_FIXTURE_HPP
 
 #include <array>
 #include <cstdint>
@@ -21,7 +21,7 @@
 namespace xanadu::testing {
 
 inline constexpr std::string_view kAuthorFingerprint =
-    "2151B04ADF99D0AB9886CCD5AB83CC2E0A1D80F0";
+    "9F80BE4F7F2A4FE7C1D0B9AAD24309D7444DCFEC";
 
 inline constexpr std::string_view kImpostorFingerprint =
     "9D7EAE7DA54B600656115C0591F07DD3C211514A";
@@ -96,4 +96,4 @@ fixtureDelegation(PublicKey devicePublicKey     = PublicKey{},
 
 } // namespace xanadu::testing
 
-#endif // XUDU_TESTS_PGP_FIXTURE_HPP
+#endif // XUDU_TESTS_IDENTITY_FIXTURE_HPP

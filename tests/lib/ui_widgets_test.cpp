@@ -115,9 +115,9 @@ TEST(UiWidgetTest, virtualListsNeverShapeThousandsOfOffscreenRows) {
   List list;
   list.rowHeightPx = 40;
   for (unsigned index = 0; index < 10000; ++index) {
-    list.rows.push_back({.id   = index + 10,
-                         .text = "Publication " + std::to_string(index) +
-                                 " with a long descriptive title",
+    list.rows.push_back({.id     = index + 10,
+                         .text   = "Publication " + std::to_string(index) +
+                                   " with a long descriptive title",
                          .action = "open"});
   }
   Widget widget{.id = 1, .model = list, .preferred = {300, 200}};
@@ -330,8 +330,8 @@ TEST(UiWidgetTest,
       "A long description contains several words and Unicode 名称, preserving "
       "the complete accessible text while wrapping.";
   List list{
-      .rows        = {{2, identifier, "inspect", true, TextPurpose::Identifier},
-                      {3, description, "inspect", true, TextPurpose::Description}},
+      .rows = {{2, identifier, "inspect", true, TextPurpose::Identifier},
+               {3, description, "inspect", true, TextPurpose::Description}},
       .rowHeightPx = 110};
   ScreenOverlay overlay({.id = 1, .model = std::move(list), .maxLines = 3});
   overlay.setBounds(Rect{40, 40, 180, 220});

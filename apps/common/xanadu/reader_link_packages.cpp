@@ -272,11 +272,11 @@ LinkOccurrences PackageOccurrenceIndex::resolve(const LinkKey &key,
                                                 const LinkPackage &pkg) const {
   const auto &global = pkg.links.at(key.id);
   Link link;
-  link.id    = key.id;
-  link.type  = global.type;
-  link.tier  = ProminenceTier::Curated;
-  link.owner = pkg.title + " — curator " + pkg.curator.hex().substr(0, 12) +
-               " / " + global.owner;
+  link.id      = key.id;
+  link.type    = global.type;
+  link.tier    = ProminenceTier::Curated;
+  link.owner   = pkg.title + " — curator " + pkg.curator.hex().substr(0, 12) +
+                 " / " + global.owner;
   link.curator = pkg.curator.hex();
   LinkOccurrences result{.key = key, .link = link};
   for (const auto side : {LinkSide::Left, LinkSide::Right}) {

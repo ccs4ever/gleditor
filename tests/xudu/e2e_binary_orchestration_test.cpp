@@ -330,7 +330,7 @@ void exportToPng(const fs::path &ppmPath, const fs::path &pngPath) {
   std::string py = "python3 -c \"from PIL import Image; Image.open('" +
                    ppmPath.string() + "').save('" + pngPath.string() +
                    "')\" >/dev/null 2>&1";
-  std::ignore = std::system(py.c_str());
+  std::ignore    = std::system(py.c_str());
 }
 
 fs::path findXuduBinary() {
@@ -574,10 +574,10 @@ TEST(E2EBinaryOrchestrationTest,
       storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
   const auto sealB = xanadu::sealLocalSpool(storeB, authorB, "permascroll",
                                             testRoot.string(), provenance);
-  auto pubB        = publish(storeB, vB1, authorB, "xanadoc_b",
-                             "Bob Observations on Multi-Source Data", 1, 1700000050,
-                             &sealB.scroll, {*sealB.opsSegment});
-  pubB.signature   = signMutableItem(publicationSigningBuffer(pubB), authorB);
+  auto pubB = publish(storeB, vB1, authorB, "xanadoc_b",
+                      "Bob Observations on Multi-Source Data", 1, 1700000050,
+                      &sealB.scroll, {*sealB.opsSegment});
+  pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
 
   const auto pubBPath = testRoot / "xanadoc_b.manifest";
   {
@@ -680,10 +680,10 @@ TEST(E2EBinaryOrchestrationTest,
       storeC.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
   const auto sealC = xanadu::sealLocalSpool(storeC, authorC, "permascroll",
                                             testRoot.string(), provenance);
-  auto pubC        = publish(storeC, vC1, authorC, "xanadoc_c",
-                             "Epilogue on Universal Xanadu Wisdom", 1, 1700000250,
-                             &sealC.scroll, {*sealC.opsSegment});
-  pubC.signature   = signMutableItem(publicationSigningBuffer(pubC), authorC);
+  auto pubC      = publish(storeC, vC1, authorC, "xanadoc_c",
+                           "Epilogue on Universal Xanadu Wisdom", 1, 1700000250,
+                           &sealC.scroll, {*sealC.opsSegment});
+  pubC.signature = signMutableItem(publicationSigningBuffer(pubC), authorC);
 
   const auto pubCPath = testRoot / "xanadoc_c.manifest";
   {
@@ -884,9 +884,9 @@ TEST(E2EBinaryOrchestrationTest, untitledXanadocIsKeptOnlyWhenWrittenTo) {
   const auto xanadocs = testRoot / "data" / "xudu" / "xanadocs";
   const auto run      = [&](const std::string &script) {
     return executeProcess("XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-                               " XDG_DATA_HOME=" + (testRoot / "data").string() +
-                               " timeout 120 " + xuduBin.string() + " --backend " +
-                               activeBackend() + " --profile " + script);
+                          " XDG_DATA_HOME=" + (testRoot / "data").string() +
+                          " timeout 120 " + xuduBin.string() + " --backend " +
+                          activeBackend() + " --profile " + script);
   };
   const auto untitled = [&] {
     std::vector<fs::path> found;
@@ -1082,10 +1082,10 @@ TEST(E2EBinaryOrchestrationTest, quotationCommitsThroughNamedDrawnControls) {
       (root / "data").string() + " timeout 120 " + binary.string() +
       permascrollFlag(scroll) + " --backend " + activeBackend() +
       " --profile --do quotation-toggle --click-label \"Selector\""
-          " --click-label \"Preview\""
-          " --dump-a11y --click-label \"Commit\""
-          " --click-label \"Quotation label\" --key home --type \"Adopted \""
-          " --click-label \"Commit quotation\" --dump-a11y --do save-document " +
+      " --click-label \"Preview\""
+      " --dump-a11y --click-label \"Commit\""
+      " --click-label \"Quotation label\" --key home --type \"Adopted \""
+      " --click-label \"Commit quotation\" --dump-a11y --do save-document " +
       path.string());
   ASSERT_EQ(result.exitCode, 0) << result.output;
   EXPECT_THAT(result.output,
@@ -1303,9 +1303,9 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
-         " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
+        " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
         (drop.empty() ? " --capture " + capture.string()
-                       : " --drag " + start + ":" + drop));
+                      : " --drag " + start + ":" + drop));
   };
   const auto untitledOps = [&] {
     for (const auto &entry :
@@ -1789,8 +1789,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pages) +
                                  "x" + std::to_string(pages) + "_pages";
-    const auto ppmPath = screenshotDir / (filename + ".ppm");
-    const auto pngPath = screenshotDir / (filename + ".png");
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -1865,8 +1865,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
                                  "x" + std::to_string(pagesB) + "_asymmetric";
-    const auto ppmPath = screenshotDir / (filename + ".ppm");
-    const auto pngPath = screenshotDir / (filename + ".png");
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
 
     std::string cmd =
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
@@ -2493,10 +2493,10 @@ TEST(E2EBinaryOrchestrationTest, structureScriptMakesLinksAndQuotedCells) {
            "link comment 0:5,11:5 | 24:3,28:3,32:5\n";
   }
   const auto storePath = testRoot / "store";
-  const auto res       = executeProcess(xuduBin.string() +
-                                        permascrollFlag(testRoot / "permascroll") +
-                                        " --headless --structure-script " +
-                                        script.string() + " " + storePath.string());
+  const auto res = executeProcess(xuduBin.string() +
+                                  permascrollFlag(testRoot / "permascroll") +
+                                  " --headless --structure-script " +
+                                  script.string() + " " + storePath.string());
   ASSERT_EQ(res.exitCode, 0) << res.output;
 
   Store store(permascrollAt(testRoot / "permascroll"));
@@ -2708,8 +2708,8 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
 
   auto textVer     = store.insert(MicroversionId{}, 0, before);
   std::uint32_t at = static_cast<std::uint32_t>(before.size());
-  textVer          = store.transclude(textVer, at, pngVersion, 0,
-                                      static_cast<std::uint32_t>(pngBytes.size()));
+  textVer = store.transclude(textVer, at, pngVersion, 0,
+                             static_cast<std::uint32_t>(pngBytes.size()));
   at += static_cast<std::uint32_t>(pngBytes.size());
   textVer = store.insert(textVer, at, between);
   at += static_cast<std::uint32_t>(between.size());
@@ -2941,8 +2941,8 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
   const auto bounds = selectionBounds(root / "selection.ppm");
   ASSERT_TRUE(bounds);
   const auto &[left, top, right, bottom] = *bounds;
-  const auto start = std::to_string((left + right) / 2) + "," +
-                     std::to_string((top + bottom) / 2);
+  const auto start   = std::to_string((left + right) / 2) + "," +
+                       std::to_string((top + bottom) / 2);
   const auto spawned = run("spawn", "--mouse-down " + start +
                                         " --mouse-move 770,300 --capture " +
                                         (root / "detached.ppm").string() +
@@ -2982,7 +2982,10 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
                        (root / "pouch-dropped.ppm").string());
   ASSERT_EQ(collected.exitCode, 0) << collected.output;
   Store pouch(permascrollAt(root / "pouch/permascroll"));
-  pouch.load((root / "pouch/config/xudu/system/pouches").string());
+  const auto pouchConfig = fs::exists(root / "pouch/config/xuzz/system/pouches")
+                               ? root / "pouch/config/xuzz/system/pouches"
+                               : root / "pouch/config/xudu/system/pouches";
+  pouch.load(pouchConfig.string());
   xanadu::PouchManager manager(pouch);
   manager.loadManifest();
   const auto &items = manager.zoneById("notes")->items();
@@ -3054,7 +3057,7 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
       {}, 0, "ALPHA left member\nUnlinked gap\nOMEGA left member\n");
   const auto b  = right.insert({}, 0,
                                "ONE right member\nUnlinked gap\nTWO right "
-                                "member\nUnlinked gap\nTHREE right member\n");
+                               "member\nUnlinked gap\nTHREE right member\n");
   const auto av = left.rebuild(a), bv = right.rebuild(b);
   Link link;
   link.type         = LinkType::Comment;

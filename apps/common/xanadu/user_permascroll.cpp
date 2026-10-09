@@ -13,6 +13,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include <openssl/rand.h>
+
 #include "bencode.hpp"
 #include "common/tsv.hpp"
 #include "identity/standard_crypto_engine.hpp"
@@ -106,15 +108,17 @@ std::optional<Scroll> permascrollState(UserPermascroll::Config &config,
                              keys.publicKey))
         throw PermascrollStateUnreadable(
             "permascroll state format 1: invalid key pair");
-      if (master->asString() != config.masterIdentity.toString() ||
-          device->asString() != config.deviceId ||
+      const std::string storedDev = device->asString();
+      const bool devMatch = (storedDev == config.deviceId) ||
+                            (config.deviceId.empty() && storedDev == "main");
+      if (master->asString() != config.masterIdentity.toString() || !devMatch ||
           (!config.deviceKeys.publicKey.isZero() &&
            (config.deviceKeys.publicKey != keys.publicKey ||
             config.deviceKeys.secretKey.bytes != keys.secretKey.bytes)))
         throw PermascrollStateUnreadable(
             "permascroll state format 1: identity mismatch");
       const auto state = decodeSealState(seal->asString());
-      const auto salt  = config.deviceId == "main"
+      const auto salt  = config.deviceId.empty()
                              ? "permascroll"
                              : "permascroll/" + config.deviceId;
       if (!state || state->opsAlreadySealed != 0 ||
@@ -194,29 +198,55 @@ bool DeviceDelegation::verify(const identity::PubKey32 &masterPubKey,
     return false;
   }
   // Check subject public key matches devicePublicKey
-  if (std::memcmp(certificate.subjectPublicKey.bytes.data(),
-                  devicePublicKey.bytes.data(), 32) != 0) {
+  if (CRYPTO_memcmp(certificate.subjectPublicKey.bytes.data(),
+                    devicePublicKey.bytes.data(), 32) != 0) {
     return false;
   }
   // Check issuer public key matches masterPubKey if set in cert
   if (!certificate.issuerPublicKey.isZero() &&
-      std::memcmp(certificate.issuerPublicKey.bytes.data(),
-                  masterPubKey.bytes.data(), 32) != 0) {
+      CRYPTO_memcmp(certificate.issuerPublicKey.bytes.data(),
+                    masterPubKey.bytes.data(), 32) != 0) {
+    return false;
+  }
+  // Verify masterPubKey matches masterFingerprint
+  const std::string expectedFp =
+      identity::StandardCryptoEngine::computeFingerprint(masterPubKey);
+  const auto fpOpt = identity::Fingerprint::fromString(expectedFp);
+  if (!fpOpt.has_value() ||
+      !identity::constantTimeEquals(masterFingerprint.hex, fpOpt->hex)) {
     return false;
   }
   // Check deviceName matches certificate if present
   if (!certificate.subjectDn.empty() && !deviceName.empty()) {
-    if (certificate.subjectDn.find(deviceName) == std::string::npos) {
+    const std::string cn = "CN=" + deviceName;
+    const auto pos       = certificate.subjectDn.find(cn);
+    if (pos == std::string::npos) {
+      return false;
+    }
+    if (pos != 0 && certificate.subjectDn[pos - 1] != '/' &&
+        certificate.subjectDn[pos - 1] != ',') {
+      return false;
+    }
+    const std::size_t endPos = pos + cn.size();
+    if (endPos < certificate.subjectDn.size() &&
+        certificate.subjectDn[endPos] != '/' &&
+        certificate.subjectDn[endPos] != ',') {
       return false;
     }
   }
-  // Check issuedTimestamp against notBefore
-  if (issuedTimestamp > 0 && certificate.notBefore > 0 &&
-      issuedTimestamp != certificate.notBefore) {
-    return false;
+  // RFC 5280 validity window containment: [notBefore, notAfter]
+  if (issuedTimestamp > 0) {
+    if (certificate.notBefore > 0 && issuedTimestamp < certificate.notBefore) {
+      return false;
+    }
+    if (certificate.notAfter > 0 && issuedTimestamp > certificate.notAfter) {
+      return false;
+    }
   }
   identity::StandardCryptoEngine engine;
-  auto res = engine.verifyDelegation(certificate, masterPubKey, currentTime);
+  auto res =
+      engine.verifyDelegation(certificate, masterPubKey,
+                              currentTime > 0 ? currentTime : issuedTimestamp);
   return res.has_value();
 }
 
@@ -229,7 +259,7 @@ bool DeviceDelegation::verify(
   auto pkOpt = identity::StandardCryptoEngine::publicKeyFromAnyFormat(
       masterPublicKeyArmored);
   if (pkOpt) {
-    return verify(*pkOpt, 0);
+    return verify(*pkOpt, issuedTimestamp);
   }
   return false;
 }
@@ -285,12 +315,18 @@ DeviceDelegation::fromTsv(const std::string_view tsv) {
     } else if (entry.key == kCertificateB64) {
       auto certRes =
           identity::StandardCryptoEngine::certificateFromBase64Der(entry.value);
-      if (certRes) {
-        cert.certificate = std::move(*certRes);
+      if (!certRes) {
+        return std::nullopt;
       }
+      cert.certificate = std::move(*certRes);
     } else if (entry.key == kGpgSignature) {
       cert.gpgSignatureArmored = entry.value;
     }
+  }
+
+  if (!cert.masterFingerprint.isValid() || cert.devicePublicKey.isZero() ||
+      cert.certificate.empty()) {
+    return std::nullopt;
   }
 
   return cert;
@@ -298,21 +334,55 @@ DeviceDelegation::fromTsv(const std::string_view tsv) {
 
 // -- UserPermascroll ---------------------------------------------------------
 
+std::string UserPermascroll::generateUniqueDeviceId() {
+  std::array<std::uint8_t, 16> b{};
+  if (RAND_bytes(b.data(), static_cast<int>(b.size())) != 1) {
+    throw std::runtime_error("CSPRNG failure generating device UUID");
+  }
+  b[6] = static_cast<std::uint8_t>((b[6] & 0x0f) | 0x40);
+  b[8] = static_cast<std::uint8_t>((b[8] & 0x3f) | 0x80);
+  char buf[37];
+  std::snprintf(
+      buf, sizeof(buf),
+      "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+      b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11],
+      b[12], b[13], b[14], b[15]);
+  return std::string(buf, 36);
+}
+
+[[nodiscard]] static bool isValidDeviceId(std::string_view id) noexcept {
+  if (id.empty() || id == "main" || id.size() > 64) {
+    return false;
+  }
+  return std::ranges::all_of(id, [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-';
+  });
+}
+
 UserPermascroll::UserPermascroll() {
   config_.deviceKeys       = createMutableKeys();
-  config_.deviceId         = "main";
+  config_.deviceId         = "";
   currentScroll_.publisher = config_.deviceKeys.publicKey;
   currentScroll_.salt      = "permascroll";
 }
 
 UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
-  if (config_.deviceId.empty()) config_.deviceId = "main";
+  if (config_.deviceId == "main") {
+    throw std::invalid_argument(
+        "UserPermascroll: 'main' is a protected device identifier; primary "
+        "author station uses an empty deviceId");
+  }
+  if (!config_.deviceId.empty() && !isValidDeviceId(config_.deviceId)) {
+    throw std::invalid_argument("UserPermascroll: invalid deviceId in config "
+                                "(must be 1-64 alphanumeric, "
+                                "dash, or underscore characters, not 'main')");
+  }
   const auto restored = permascrollState(config_);
   if (config_.deviceKeys.publicKey.isZero())
     config_.deviceKeys = createMutableKeys();
 
   currentScroll_.publisher = config_.deviceKeys.publicKey;
-  currentScroll_.salt      = (config_.deviceId == "main")
+  currentScroll_.salt      = config_.deviceId.empty()
                                  ? "permascroll"
                                  : "permascroll/" + config_.deviceId;
 
@@ -320,23 +390,15 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
     std::error_code ec;
     std::filesystem::create_directories(config_.storageDir / "segments", ec);
 
-    // Multi-device hierarchy: if deviceId is not "main", store in
-    // devices/<deviceId>/active.primedia, while supporting root active.primedia
-    // symlink/fallback
-    const auto deviceDir = config_.storageDir / "devices" / config_.deviceId;
-    std::filesystem::create_directories(deviceDir, ec);
-    std::filesystem::create_directories(deviceDir / "segments", ec);
-
-    const auto devActive  = deviceDir / "active.primedia";
     const auto rootActive = config_.storageDir / "active.primedia";
-
     std::filesystem::path activePathToOpen = rootActive;
-    if (config_.deviceId != "main" || std::filesystem::exists(devActive)) {
-      activePathToOpen = devActive;
-      // Ensure root active.primedia symlinks to or mirrors this if possible
-      if (!std::filesystem::exists(rootActive)) {
-        std::filesystem::create_symlink(devActive, rootActive, ec);
-      }
+
+    if (!config_.deviceId.empty()) {
+      const auto deviceDir = config_.storageDir / "devices" / config_.deviceId;
+      std::filesystem::create_directories(deviceDir, ec);
+      std::filesystem::create_directories(deviceDir / "segments", ec);
+      const auto devActive = deviceDir / "active.primedia";
+      activePathToOpen     = devActive;
     }
 
     spool_.openActiveSegment(activePathToOpen);
@@ -498,12 +560,10 @@ UserPermascroll::deviceActivePrimediaPath(std::string_view deviceId) const {
     return {};
   }
   if (deviceId.empty() || deviceId == "main") {
-    const auto devPath =
-        config_.storageDir / "devices" / "main" / "active.primedia";
-    if (std::filesystem::exists(devPath)) {
-      return devPath;
-    }
     return config_.storageDir / "active.primedia";
+  }
+  if (!isValidDeviceId(deviceId)) {
+    return {};
   }
   return config_.storageDir / "devices" / deviceId / "active.primedia";
 }
@@ -511,12 +571,16 @@ UserPermascroll::deviceActivePrimediaPath(std::string_view deviceId) const {
 Scroll
 UserPermascroll::registerSubscroll(std::string_view deviceId,
                                    const std::filesystem::path &primediaPath) {
+  if (!isValidDeviceId(deviceId)) {
+    throw std::invalid_argument(
+        "UserPermascroll: cannot register subscroll for invalid deviceId (must "
+        "be 1-64 alphanumeric, dash, or underscore characters, not 'main' or "
+        "empty)");
+  }
   std::scoped_lock lock(appendMutex_);
   Scroll subscroll;
   subscroll.publisher = config_.deviceKeys.publicKey;
-  subscroll.salt      = (deviceId.empty() || deviceId == "main")
-                            ? "permascroll"
-                            : "permascroll/" + std::string(deviceId);
+  subscroll.salt      = "permascroll/" + std::string(deviceId);
 
   if (!config_.storageDir.empty() && std::filesystem::exists(primediaPath)) {
     const auto targetPath = deviceActivePrimediaPath(deviceId);
@@ -534,12 +598,16 @@ UserPermascroll::registerSubscroll(std::string_view deviceId,
 
 Scroll UserPermascroll::ingestSubscroll(std::string_view deviceId,
                                         std::span<const std::uint8_t> data) {
+  if (!isValidDeviceId(deviceId)) {
+    throw std::invalid_argument(
+        "UserPermascroll: cannot ingest subscroll for invalid deviceId (must "
+        "be 1-64 alphanumeric, dash, or underscore characters, not 'main' or "
+        "empty)");
+  }
   std::scoped_lock lock(appendMutex_);
   Scroll subscroll;
   subscroll.publisher = config_.deviceKeys.publicKey;
-  subscroll.salt      = (deviceId.empty() || deviceId == "main")
-                            ? "permascroll"
-                            : "permascroll/" + std::string(deviceId);
+  subscroll.salt      = "permascroll/" + std::string(deviceId);
 
   if (!config_.storageDir.empty()) {
     const auto targetPath = deviceActivePrimediaPath(deviceId);

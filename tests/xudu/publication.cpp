@@ -273,8 +273,8 @@ TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
   // The middle of it, written by somebody who only has the address.
   const auto quotingVersion = quoting(quotingStore, scroll, 150, 50);
 
-  const auto first  = xanadu::publish(originalStore, originalVersion, author,
-                                      "original", "The Original", 1, 1700000000);
+  const auto first = xanadu::publish(originalStore, originalVersion, author,
+                                     "original", "The Original", 1, 1700000000);
   const auto second = xanadu::publish(quotingStore, quotingVersion, quoter,
                                       "quoting", "A Quotation", 1, 1700000100);
 
@@ -948,7 +948,7 @@ TEST(PublicationSequenceTest, reservationsSurviveReopenAndArePerNameAndKey) {
   const auto keys  = xanadu::createMutableKeys();
   const auto other = xanadu::createMutableKeys();
   const auto dir   = std::filesystem::temp_directory_path() /
-                   ("xudu-sequences-" + keys.publicKey.hex());
+                     ("xudu-sequences-" + keys.publicKey.hex());
   std::filesystem::remove_all(dir);
   EXPECT_EQ(
       xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
@@ -977,7 +977,7 @@ TEST(PublicationSequenceTest, reservationsSurviveReopenAndArePerNameAndKey) {
 TEST(PublicationSequenceTest, simultaneousReservationsNeverReuseASequence) {
   const auto keys = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                   ("xudu-sequences-" + keys.publicKey.hex());
+                    ("xudu-sequences-" + keys.publicKey.hex());
   std::vector<std::future<std::int64_t>> writers;
   for (int i = 0; i < 12; ++i) {
     writers.push_back(std::async(std::launch::async, [&] {
@@ -1018,7 +1018,7 @@ TEST(PublicationTest,
 TEST(PublicationSequenceTest, anUnknownCounterVersionCannotResetTheSequence) {
   const auto keys = xanadu::createMutableKeys();
   const auto dir  = std::filesystem::temp_directory_path() /
-                   ("xudu-sequences-" + keys.publicKey.hex());
+                    ("xudu-sequences-" + keys.publicKey.hex());
   EXPECT_EQ(
       xanadu::reservePublicationSequence(dir, keys.publicKey, "doc:ideas"), 1);
   {

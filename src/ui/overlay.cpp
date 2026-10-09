@@ -328,10 +328,10 @@ bool ScreenOverlay::pointerEvent(const PointerEvent &event) {
     }
     if (activateId) {
       const auto *box = scene_->layout.find(activateId);
-      fraction        = box && box->contentRect.width > 0
-                            ? (static_cast<double>(event.x) - box->contentRect.left) /
+      fraction = box && box->contentRect.width > 0
+                     ? (static_cast<double>(event.x) - box->contentRect.left) /
                            box->contentRect.width
-                            : 0;
+                     : 0;
     }
   }
   if (scrollId) return scrollList(scrollId, scroll);

@@ -1266,7 +1266,7 @@ int XuzzApp::run(const int argc, char **argv) {
                                  ? *freshCell
                                  : changedCells.front();
     const bool focusSlice  = zigzagPresentation->presentationVisible() &&
-                            changedCell != zigzag::noCell;
+                             changedCell != zigzag::noCell;
 
     renderer->runWithState([&views, &renderer, viewIndex, changeAt, &bindZigzag,
                             zigzagPresentation, &state, &keyboardPane, &links,
@@ -1428,7 +1428,7 @@ int XuzzApp::run(const int argc, char **argv) {
     const auto &openView = session->views()[docIdx];
     const auto &st       = session->store(openView.storeIndex);
     const auto spans     = st.rebuild(openView.version, openView.focusedBirth)
-                           .spansFor(selStart, selEnd - selStart);
+                               .spansFor(selStart, selEnd - selStart);
     if (spans.empty()) {
       return false;
     }
@@ -2133,7 +2133,7 @@ int XuzzApp::run(const int argc, char **argv) {
              {},
              CaretMotion::DocumentEnd,
              "to the end of the document"},
-        };
+    };
     for (const auto &[move, select, motion, where] : motions) {
       app.commands().registerAction(
           std::string(move), std::string("move the caret ") + where,

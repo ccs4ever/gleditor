@@ -46,7 +46,10 @@ enum class SessionValidationError : std::uint8_t {
   CorruptOpsNodes,
   PrimediaLengthMismatch,
   IoError,
-  SerializationError
+  SerializationError,
+  MissingDecryptionKey,
+  DecryptionFailed,
+  PayloadHashMismatch
 };
 
 using ValidationError = SessionValidationError;
@@ -97,6 +100,13 @@ validationErrorToString(SessionValidationError err) noexcept {
     return "I/O error reading or writing package";
   case SessionValidationError::SerializationError:
     return "Serialization or parsing error";
+  case SessionValidationError::MissingDecryptionKey:
+    return "Encrypted package requires decryption passphrase";
+  case SessionValidationError::DecryptionFailed:
+    return "Decryption failed: incorrect passphrase or corrupted AEAD "
+           "ciphertext";
+  case SessionValidationError::PayloadHashMismatch:
+    return "Payload cryptographic hash does not match manifest commitment";
   }
   return "Unknown error";
 }
@@ -112,6 +122,19 @@ struct SessionManifest {
   std::uint64_t primediaOffset{0};
   std::uint64_t primediaLength{0};
   std::uint64_t timestamp{0};
+
+  // Encryption metadata
+  bool encrypted{false};
+  std::string encryptionCipher; // "chacha20-poly1305"
+  std::string encryptionSalt;   // 32-hex (16 bytes)
+  std::string encryptionNonce;  // 24-hex (12 bytes)
+  std::string payloadSha256;    // 64-hex SHA-256 of payload.enc
+
+  // Content verification hashes
+  std::string primediaSha256;   // 64-hex
+  std::string opsSha256;        // 64-hex
+  std::string deviceCertSha256; // 64-hex
+
   std::vector<std::pair<std::string, std::string>> extraFields;
 
   [[nodiscard]] std::string serialize() const;
@@ -121,6 +144,13 @@ struct SessionManifest {
 
 /// Structure representing a complete .xuzzpkg session exchange container.
 struct SessionPackage {
+  SessionPackage();
+  ~SessionPackage();
+  SessionPackage(SessionPackage &&) noexcept;
+  SessionPackage &operator=(SessionPackage &&) noexcept;
+  SessionPackage(const SessionPackage &);
+  SessionPackage &operator=(const SessionPackage &);
+
   // Manifest fields
   std::uint32_t manifestVersion{1};
   std::string masterFingerprint; // 64-hex SHA-256
@@ -131,6 +161,20 @@ struct SessionPackage {
   std::uint64_t primediaOffset{0};
   std::uint64_t primediaLength{0};
   std::uint64_t timestamp{0};
+
+  // Encryption metadata
+  bool encrypted{false};
+  std::string encryptionCipher;
+  std::string encryptionSalt;
+  std::string encryptionNonce;
+  std::string payloadSha256;
+  std::string passphrase;
+
+  // Content verification hashes
+  std::string primediaSha256;
+  std::string opsSha256;
+  std::string deviceCertSha256;
+
   std::vector<std::pair<std::string, std::string>> extraFields;
 
   // Content files
@@ -185,6 +229,54 @@ struct SessionPackage {
 
   SessionPackage *setTimestamp(std::uint64_t ts) noexcept {
     timestamp = ts;
+    return this;
+  }
+
+  SessionPackage *setEncrypted(bool enc) noexcept {
+    encrypted = enc;
+    return this;
+  }
+
+  [[nodiscard]] bool isEncrypted() const noexcept { return encrypted; }
+
+  SessionPackage *setEncryptionCipher(std::string cipher) noexcept {
+    encryptionCipher = std::move(cipher);
+    return this;
+  }
+
+  SessionPackage *setEncryptionSalt(std::string salt) noexcept {
+    encryptionSalt = std::move(salt);
+    return this;
+  }
+
+  SessionPackage *setEncryptionNonce(std::string nonce) noexcept {
+    encryptionNonce = std::move(nonce);
+    return this;
+  }
+
+  SessionPackage *setPayloadSha256(std::string hash) noexcept {
+    payloadSha256 = std::move(hash);
+    return this;
+  }
+
+  SessionPackage *setPassphrase(std::string pass) noexcept;
+
+  [[nodiscard]] const std::string &getPassphrase() const noexcept {
+    return passphrase;
+  }
+
+  SessionPackage *setPrimediaSha256(std::string hash) noexcept {
+    primediaSha256 = std::move(hash);
+    return this;
+  }
+
+  SessionPackage *setOpsSha256(std::string hash) noexcept {
+    opsSha256 = std::move(hash);
+    return this;
+  }
+
+  SessionPackage *setDeviceCertSha256(std::string hash) noexcept {
+    deviceCertSha256 = std::move(hash);
     return this;
   }
 
@@ -291,13 +383,19 @@ exportPackage(const SessionPackage &pkg, const std::filesystem::path &filePath);
 importPackage(
     std::span<const std::uint8_t> archiveBytes,
     std::optional<std::string_view> expectedMasterFingerprint = std::nullopt,
-    bool verifySignature                                      = true);
+    bool verifySignature                                      = true,
+    std::optional<std::span<const std::uint8_t, 32>> masterPubKey =
+        std::nullopt,
+    std::string_view passphrase = {});
 
 [[nodiscard]] std::expected<SessionPackage, SessionValidationError>
 importPackage(
     const std::filesystem::path &filePath,
     std::optional<std::string_view> expectedMasterFingerprint = std::nullopt,
-    bool verifySignature                                      = true);
+    bool verifySignature                                      = true,
+    std::optional<std::span<const std::uint8_t, 32>> masterPubKey =
+        std::nullopt,
+    std::string_view passphrase = {});
 
 // Utility helpers for keys and X.509 delegation certs
 [[nodiscard]] std::expected<std::string, SessionValidationError>
