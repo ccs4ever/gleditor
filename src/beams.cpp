@@ -80,7 +80,8 @@ Beams::Beams(render::RenderDevice *const aDevice,
 Beams::~Beams() = default;
 
 void Beams::createPipeline(const std::string &assetDir,
-                           const std::string &spirvDir, const bool depthTest) {
+                           const std::string &spirvDir, const bool depthTest,
+                           const bool depthWrite) {
   render::PipelineDesc desc;
   desc.name = "beam";
   // Which SPIR-V the Vulkan backend loads follows from this, so it has to be
@@ -91,6 +92,7 @@ void Beams::createPipeline(const std::string &assetDir,
   desc.spirvDir       = spirvDir;
   desc.layout         = layout();
   desc.depthTest      = depthTest;
+  desc.depthWrite     = depthWrite;
   pipeline            = device->createPipeline(desc);
 }
 

@@ -533,3 +533,8 @@ capture under SDL2 still wants `xvfb-run`).
   must. `dividers()` and `resizeDivider()` are added because `resize(pane, …)` cannot reach a
   divider between two subtrees. `PaneTree` is in `src/ui/pane_tree.cpp`, not header-only, as
   `ui::split()` (`src/ui/layout.cpp`) is not either.
+- 2026-10-09 — Step 5 built (L5): `PipelineDesc::depthWrite`, `glDepthMask` in the GL loader and
+  `bindPipeline`, and `depthWriteEnable` on Vulkan no longer copied from `depthTest`;
+  `Beams::createPipeline` takes it too. The GL backend sets the mask back on before its frame clear,
+  since `glClear` obeys it and a frame that ended on a translucent draw would otherwise keep its
+  depth. §4's cases are `tests/lib/depth_write_test.cpp`, on each backend the machine can open.

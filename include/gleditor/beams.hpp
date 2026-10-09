@@ -102,9 +102,13 @@ public:
    * @param depthTest Whether beams are occluded by what they run between.
    *        Usually yes: a beam that passed in front of the page it points at
    *        would be a beam nothing could be behind.
+   * @param depthWrite Whether a beam hides what is drawn after it and behind
+   *        it. Off when beams are drawn among translucent things back to
+   *        front, where a beam that wrote its depth would cut itself out of a
+   *        faded page drawn in front of it.
    */
   void createPipeline(const std::string &assetDir, const std::string &spirvDir,
-                      bool depthTest = true);
+                      bool depthTest = true, bool depthWrite = true);
 
   /// Whether there is a pipeline to draw with. False when the shaders could
   /// not be read, which is not fatal: the rest of the frame still draws.
