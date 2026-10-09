@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <tuple>
@@ -31,6 +32,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 #include <gleditor/text/font.hpp>
+#include <gleditor/translucent_list.hpp>
 
 namespace zigzag {
 namespace ui = gleditor::ui;
@@ -49,6 +51,26 @@ namespace {
  */
 bool shown(const RenderStateCell &cell) noexcept {
   return cell.target_alpha > 0.0F && cell.current_alpha >= 0.02F;
+}
+
+/**
+ * How far along a run from @p from to @p to it leaves @p box, as a fraction
+ * of the run: zero when it starts outside the box, one or more when it never
+ * leaves it.
+ */
+float leaving(const glm::vec2 from, const glm::vec2 to, const ui::Rect &box) {
+  const auto inside = from.x >= box.left && from.x <= box.left + box.width &&
+                      from.y >= box.bottom && from.y <= box.bottom + box.height;
+  if (!inside) return 0.0F;
+  const auto run  = to - from;
+  const auto exit = [](const float at, const float step, const float low,
+                       const float high) {
+    if (step > 0.0F) return (high - at) / step;
+    if (step < 0.0F) return (low - at) / step;
+    return std::numeric_limits<float>::infinity();
+  };
+  return std::min(exit(from.x, run.x, box.left, box.left + box.width),
+                  exit(from.y, run.y, box.bottom, box.bottom + box.height));
 }
 
 } // namespace
@@ -125,8 +147,9 @@ void ZigzagVisualizer::deviceReady(
   card_line_px_ = valueFont_->metrics().lineHeight;
 
   beams_ = std::make_unique<gleditor::Beams>(&device);
+  // Tested, not written: drawn among the faded pages, back to front.
   beams_->createPipeline(gleditor::assetPath("shaders"),
-                         gleditor::assetPath("shaders/vulkan"), true);
+                         gleditor::assetPath("shaders/vulkan"), true, false);
 
   imageCache_ = std::make_unique<gleditor::ImageCache>(&device);
 }
@@ -1701,7 +1724,8 @@ void ZigzagVisualizer::describeCellBounds(gleditor::a11y::Node &node,
       box.left + box.width, projectedViewport_.height - box.bottom};
 }
 
-void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+void ZigzagVisualizer::drawScene(gleditor::FrameContext &ctx) {
+  sceneDrawn_ = false;
   if (!presentation_visible_) {
     last_frame_time_ = std::chrono::steady_clock::now();
     return;
@@ -1857,6 +1881,47 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     beams_->clear();
     drawnEdges_.clear();
 
+    // A beam runs from card centre to card centre. Where both cards lie in
+    // the plane the cards are drawn in, the ends of the beam lie in it too,
+    // and which of the two shows there is a depth tie. When the beams were
+    // drawn first, the cards won it; drawn after them among the translucent
+    // draws, the beams would. So the beam stops at each card's edge, border
+    // included, and keeps the share of the run it had, so that it is shaded
+    // as it was. Cards are drawn opaque even while they fade (see shown()),
+    // so nothing that showed is lost.
+    const float borderHalf = scene_.border_thickness / 2.0F;
+    const float inPlane    = presentation_config_.connectionBeamWidthPx / 2.0F;
+    const auto cardOf =
+        [&](const CellID which,
+            const RenderStateCell &card) -> std::optional<ui::Rect> {
+      if (!shown(card) || std::abs(card.current_pos.z) > inPlane)
+        return std::nullopt;
+      const auto &layout =
+          cellLayout(which, card, which == accursed_cell_focus_);
+      return ui::Rect{card.current_pos.x - (layout.width / 2.0F) - borderHalf,
+                      card.current_pos.y - (layout.height / 2.0F) - borderHalf,
+                      layout.width + scene_.border_thickness,
+                      layout.height + scene_.border_thickness};
+    };
+    const auto connect = [&](const CellID fromId, const RenderStateCell &from,
+                             const CellID toId, const RenderStateCell &to,
+                             const std::uint32_t colour) {
+      const auto fromCard = cardOf(fromId, from);
+      const auto toCard   = cardOf(toId, to);
+      const glm::vec2 a{from.current_pos};
+      const glm::vec2 b{to.current_pos};
+      const float start = fromCard && toCard ? leaving(a, b, *fromCard) : 0.0F;
+      const float end =
+          fromCard && toCard ? 1.0F - leaving(b, a, *toCard) : 1.0F;
+      if (end <= start) return;
+      const auto along = [&](const float t) {
+        return from.current_pos + ((to.current_pos - from.current_pos) * t);
+      };
+      beams_->add(along(start), along(end),
+                  presentation_config_.connectionBeamWidthPx, colour,
+                  static_cast<std::uint32_t>(fromId), start, end);
+    };
+
     if (engine_) {
       const auto &manifold = engine_->manifold();
       const auto &store    = engine_->store();
@@ -1910,9 +1975,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
             const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
                                                visual.color.b, edgeAlpha);
 
-            beams_->add(cell.current_pos, neighborCell.current_pos,
-                        presentation_config_.connectionBeamWidthPx, col,
-                        static_cast<std::uint32_t>(id));
+            connect(id, cell, static_cast<CellID>(neighborId), neighborCell,
+                    col);
           }
         }
 
@@ -1945,9 +2009,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
               const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
                                                  visual.color.b, edgeAlpha);
 
-              beams_->add(cell.current_pos, neighborCell.current_pos,
-                          presentation_config_.connectionBeamWidthPx, col,
-                          static_cast<std::uint32_t>(id));
+              connect(id, cell, static_cast<CellID>(neighborId), neighborCell,
+                      col);
             }
           }
         }
@@ -2064,9 +2127,23 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     drawnModelRevision_ = revision_;
     worldMoving_        = moving;
   }
-  if (beams_->pending() > 0) beams_->draw(ctx.state, vpPresentation, 1.F, 0);
+  // Without a translucent list the beams go first, as they always did, and
+  // the cards over them; with one, the cards are drawn now with the opaque
+  // scene and the beams later, in depth order with the faded pages.
+  if (nullptr == ctx.translucent && beams_->pending() > 0)
+    beams_->draw(ctx.state, vpPresentation, 1.F, 0);
   worldCanvas_->draw(ctx.state, vpPresentation, 1.F);
   ancillaryCanvas_->draw(ctx.state, vpPresentation, 1.F);
+  if (nullptr != ctx.translucent && beams_->pending() > 0)
+    ctx.translucent->addBeams(*beams_, vpPresentation, 1.F, 0);
+  sceneDrawn_ = true;
+}
+
+void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  if (!sceneDrawn_) return;
+  // The scene was drawn before anything claimed chrome this frame; the HUD
+  // sits under whatever has been claimed by now.
+  uiMetrics_.chrome = ctx.chrome;
 
   const auto width        = static_cast<float>(ctx.screenWidth);
   const auto height       = static_cast<float>(ctx.screenHeight);

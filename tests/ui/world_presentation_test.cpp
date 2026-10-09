@@ -153,6 +153,7 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
       for (unsigned i = 0; i < 300; ++i) {
         state.beginPickScene();
         ctx.chrome = {};
+        viz.drawScene(ctx);
         viz.drawFrame(ctx);
       }
       ASSERT_TRUE(viz.projectedCell(viz.focusCellId()));
@@ -162,6 +163,7 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
       for (unsigned i = 0; i < 5; ++i) {
         state.beginPickScene();
         ctx.chrome = {};
+        viz.drawScene(ctx);
         viz.drawFrame(ctx);
       }
       EXPECT_EQ(warm.stats().harfbuzzCalls, 0U);
@@ -175,6 +177,7 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
   ctx.metrics.fontScale       = 1.5F;
   ctx.chrome                  = {};
   state.beginPickScene();
+  viz.drawScene(ctx);
   viz.drawFrame(ctx);
   EXPECT_GT(viz.accessibilityRevision(), beforeTypography);
   zigzag::RenderStateCell rich{.id = 42, .text = full + "\n" + full};
@@ -198,6 +201,7 @@ TEST(WorldPresentationTest, ZigzagLabelsHaveLodWithoutChangingCellContent) {
   for (unsigned i = 0; i < 300; ++i) {
     ctx.chrome = {};
     state.beginPickScene();
+    viz.drawScene(ctx);
     viz.drawFrame(ctx);
   }
   EXPECT_FALSE(viz.projectedCell(previousFocus));
@@ -234,6 +238,7 @@ TEST(WorldPresentationTest,
     ++navigations;
   });
   state.beginPickScene();
+  sat.drawScene(ctx);
   sat.drawFrame(ctx);
   ASSERT_EQ(sat.snapshots().size(), 1U);
   fitted(*sat.snapshots().front());
@@ -258,6 +263,7 @@ TEST(WorldPresentationTest,
   EXPECT_TRUE(sat.performAction(builder.id(*widget),
                                 gleditor::a11y::Action::Click, {}));
   state.beginPickScene();
+  sat.drawScene(ctx);
   sat.drawFrame(ctx);
   EXPECT_EQ(navigations, 2U);
   sat.clear();

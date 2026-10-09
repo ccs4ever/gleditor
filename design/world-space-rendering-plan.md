@@ -559,3 +559,15 @@ capture under SDL2 still wants `xvfb-run`).
   up to 1/cos of the ray's angle off the axis: in a four-beam head-on scene, 2,252 of its 3,235 beam
   pixels changed by more than 2 in a channel (11 by more than 40) and total intensity rose 4.6%,
   which is not visible side by side.
+- 2026-10-09 — The UI adopts R5's list. `LinkBeams`, the slice visualizer's connection beams and
+  the tenuous tether build their beams in `drawScene()` and hand them to
+  `FrameContext::translucent`, with beam pipelines that do not write depth; satelloid cards, which
+  stand in the world, go to it as sheets through `WorldPanel::addTo` and `Canvas::batch` (glyph
+  quads only; an image has its own pipeline and atlas), drawn with the renderer's
+  `translucentGlyphPipeline`. Opaque world content — the visualizer's cards and `ImageOverlay`'s
+  images — is drawn in `drawScene()` itself, before the faded pages. Each falls back to drawing as
+  before when the list is null. Screen-space chrome stays in `drawFrame()`. The visualizer's beams
+  now stop at the edge of each card they join when both lie in the cards' plane: drawn after the
+  cards, a beam's end would otherwise win the depth tie with the card it runs into, which the card
+  won when the beams were drawn first. `tests/ui/link_beam_occlusion_test.cpp` draws a link's beam
+  behind a faded page from both sides on each backend the machine can open.

@@ -1,11 +1,14 @@
 #include "mocks/world_device.hpp"
+#include <cstring>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/diagnostics.hpp>
+#include <gleditor/translucent_list.hpp>
 #include <gleditor/ui/world_panel.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <gtest/gtest.h>
 #include <limits>
+#include <vector>
 
 namespace {
 using namespace gleditor::ui;
@@ -101,5 +104,51 @@ TEST(WorldPanelTest, LowLodRetainsPicksFullNamesAndProjectedAccessibility) {
   (void)panel.prepare(metrics, theme);
   panel.draw(state, camera(1), {640, 480}, tag);
   EXPECT_EQ(device.pipelines, pipelines);
+}
+// Handed to a translucent list, a panel draws exactly what draw() draws, in
+// the same order: the list sorts the panel's sheets as one, since they share
+// a plane, and keeps the order they were added in.
+TEST(WorldPanelTest, AddToDrawsThroughAListWhatDrawDraws) {
+  WorldRecordingDevice device;
+  RenderState state(&device);
+  WorldPanel panel(
+      {.id       = 1,
+       .model    = Panel{},
+       .children = {
+           {.id = 2, .model = Label{"Sheet", TextPurpose::Description}}}});
+  panel.setBounds({-100, -50, 200, 100});
+  const UiMetrics metrics{.screenWidth = 640, .screenHeight = 480};
+  ASSERT_TRUE(panel.prepare(metrics, Theme{}));
+  panel.deviceReady(device, {});
+  const render::PickingTag tag{.kind = render::tagKindOverlay, .docIndex = 5};
+  panel.draw(state, camera(1), {640, 480}, tag, .6F);
+  const auto drawn      = device.drawn;
+  const auto identities = device.identities;
+  ASSERT_FALSE(drawn.empty());
+
+  device.drawn.clear();
+  device.identities.clear();
+  gleditor::TranslucentList list(&device);
+  panel.addTo(list, render::PipelineHandle{99}, state, camera(1), {640, 480},
+              tag, .6F);
+  EXPECT_FALSE(list.empty());
+  list.draw(state);
+  ASSERT_EQ(device.drawn.size(), drawn.size());
+  EXPECT_EQ(0, std::memcmp(device.drawn.data(), drawn.data(),
+                           drawn.size() * sizeof(Doc::VBORow)));
+  EXPECT_EQ(device.identities, identities);
+  EXPECT_EQ(list.lastDraw().beams, 0U);
+}
+TEST(WorldPanelTest, AnEmptyCanvasHasNoBatch) {
+  WorldRecordingDevice device;
+  gleditor::Canvas canvas(&device, "Sans 10");
+  canvas.createPipeline({}, true);
+  EXPECT_FALSE(canvas.batch(camera(1)));
+  canvas.addRect(0, 0, 10, 10, 0xFFFFFFFFU);
+  canvas.commit();
+  const auto batch = canvas.batch(camera(1), .5F);
+  ASSERT_TRUE(batch);
+  EXPECT_EQ(batch->instanceCount, 1U);
+  EXPECT_FLOAT_EQ(batch->uniforms.opacity, .5F);
 }
 } // namespace

@@ -8,6 +8,10 @@
 #include <memory>
 #include <optional>
 
+namespace gleditor {
+class TranslucentList;
+} // namespace gleditor
+
 namespace gleditor::ui {
 /// Canvas-local rectangle projected into bottom-up viewport pixels. The screen
 /// box is clipped to the viewport; scales describe the uncut plane footprint.
@@ -50,6 +54,14 @@ public:
   /// viewport is in physical pixels. opacity is applied by the draw uniform.
   void draw(RenderState &, const glm::mat4 &canvasToClip, Size viewport,
             render::PickingTag tag = {}, float opacity = 1);
+  /// As draw(), but handed to @p list as sheets drawn with @p pipeline, so a
+  /// panel standing in the world is blended in depth order with the frame's
+  /// other translucent draws. The pipeline is normally one that tests depth
+  /// and does not write it. The panel must not be drawn or changed again
+  /// until the list has been drawn.
+  void addTo(TranslucentList &list, render::PipelineHandle pipeline,
+             RenderState &, const glm::mat4 &canvasToClip, Size viewport,
+             render::PickingTag tag = {}, float opacity = 1);
   [[nodiscard]] std::optional<ProjectedPlane>
   projected(WidgetId, const glm::mat4 &canvasToClip, Size viewport) const;
   /// Optional metadata description of the SAME projected visual boxes. Full
@@ -75,6 +87,10 @@ private:
   bool depthTest_{true};
   FontRole primaryRole_{FontRole::Body};
   void rebuild(RenderState &, render::PickingTag);
+  /// Bring the canvases up to date for a draw; false when there is nothing to
+  /// draw with.
+  bool ready(RenderState &, const glm::mat4 &canvasToClip, Size viewport,
+             render::PickingTag tag, float opacity);
 };
 } // namespace gleditor::ui
 #endif

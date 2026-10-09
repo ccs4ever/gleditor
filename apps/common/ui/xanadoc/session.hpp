@@ -956,7 +956,10 @@ public:
 
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
-  void drawFrame(gleditor::FrameContext &ctx) override;
+  /// The images stand on their pages, so they are drawn with the scene, where
+  /// a faded page in front of one blends over it.
+  void drawScene(gleditor::FrameContext &ctx) override;
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {}
 
   /// Forget every placed image. Called before syncMediaWidgets rebuilds its
   /// list from scratch, the same way mediaWidgets itself is rebuilt.
@@ -981,10 +984,10 @@ public:
    *        feed it through exactly the code that already turns a text
    *        anchor into a beam endpoint.
    *
-   * Refactored out of drawFrame()'s own position math rather than
+   * Refactored out of drawScene()'s own position math rather than
    * duplicated: an image's rectangle is anchorFor(docOffset) offset by the
    * same (height + 20px caption gap) and centred over the same width/height
-   * drawFrame() draws, so keeping one formula is what keeps them from
+   * drawScene() draws, so keeping one formula is what keeps them from
    * drifting apart the way MediaWidget's two position branches once did
    * (see Phase 3's own writeup).
    *
@@ -1004,7 +1007,7 @@ private:
   };
 
   /// A placement's bottom-left corner in its own page's pixel space, and
-  /// which page -- the one formula drawFrame() (to build a world transform)
+  /// which page -- the one formula drawScene() (to build a world transform)
   /// and rectFor() (to build a beam anchor) both derive from, so the two
   /// cannot drift into disagreeing about where an image actually is.
   struct Corner {

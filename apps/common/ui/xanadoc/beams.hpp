@@ -158,7 +158,11 @@ public:
 
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
-  void drawFrame(gleditor::FrameContext &ctx) override;
+  /// Every beam is in the world, so all of it is done here and the beams go
+  /// to the frame's translucent list, which blends them in depth order with
+  /// the faded pages they pass in front of and behind.
+  void drawScene(gleditor::FrameContext &ctx) override;
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {}
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
 
@@ -167,7 +171,7 @@ public:
    *
    * The render loop calls a frame settled when nothing is pending, and a
    * settled frame is what a screenshot captures and what --profile quits on.
-   * Bringing a document alongside is decided inside drawFrame(), on the first
+   * Bringing a document alongside is decided inside drawScene(), on the first
    * frame where every document has finished building -- which is exactly the
    * frame the loop would otherwise have called settled. Without this, a run
    * whose links move anything quits in the instant before it moves, and

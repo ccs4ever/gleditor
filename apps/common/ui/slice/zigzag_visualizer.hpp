@@ -146,6 +146,10 @@ public:
   // -- gleditor::FrameContributor -------------------------------------------
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
+  /// The cards and the beams between them: the cards drawn with the opaque
+  /// scene, the beams handed to the frame's translucent list.
+  void drawScene(gleditor::FrameContext &ctx) override;
+  /// The HUD, over the scene; only on a frame whose scene was drawn.
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool busy() const override;
 
@@ -673,6 +677,9 @@ private:
   std::string accessibilityDocument_;
   xanadu::MicroversionId accessibilityVersion_;
   bool worldMoving_{};
+  /// Whether this frame's drawScene() got as far as drawing; drawFrame()
+  /// draws the HUD only then, as one pass used to return before both.
+  bool sceneDrawn_{};
   std::uint32_t worldPickScope_{};
   std::uint64_t nextAccessibilityId_{10};
   std::optional<gleditor::InputArea> hudInputArea_;

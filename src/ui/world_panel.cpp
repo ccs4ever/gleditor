@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <gleditor/render_state.hpp>
+#include <gleditor/translucent_list.hpp>
 #include <glm/ext/vector_float4.hpp>
 #include <limits>
 #include <stdexcept>
@@ -245,9 +246,9 @@ void WorldPanel::rebuild(RenderState &state, render::PickingTag tag) {
   drawingDirty_ = false;
   tag_          = tag;
 }
-void WorldPanel::draw(RenderState &state, const glm::mat4 &canvasToClip,
-                      Size viewport, render::PickingTag tag, float opacity) {
-  if (!scene_ || !device_ || !pipeline_) return;
+bool WorldPanel::ready(RenderState &state, const glm::mat4 &canvasToClip,
+                       Size viewport, render::PickingTag tag, float opacity) {
+  if (!scene_ || !device_ || !pipeline_) return false;
   if (!std::isfinite(opacity))
     throw std::invalid_argument("Invalid world panel opacity");
   for (std::size_t i = 0; i < scene_->visuals.size(); ++i) {
@@ -266,9 +267,27 @@ void WorldPanel::draw(RenderState &state, const glm::mat4 &canvasToClip,
     }
   }
   if (drawingDirty_ || !tag_ || !sameTag(*tag_, tag)) rebuild(state, tag);
+  return true;
+}
+void WorldPanel::draw(RenderState &state, const glm::mat4 &canvasToClip,
+                      Size viewport, render::PickingTag tag, float opacity) {
+  if (!ready(state, canvasToClip, viewport, tag, opacity)) return;
   background_->draw(state, canvasToClip, opacity);
   for (auto &canvas : text_)
     if (canvas) canvas->draw(state, canvasToClip, opacity);
+}
+void WorldPanel::addTo(TranslucentList &list, render::PipelineHandle pipeline,
+                       RenderState &state, const glm::mat4 &canvasToClip,
+                       Size viewport, render::PickingTag tag, float opacity) {
+  if (!ready(state, canvasToClip, viewport, tag, opacity)) return;
+  // All in the panel's one plane, so they sort together, and the list keeps
+  // the order they are added in: the background under the text.
+  if (const auto sheet = background_->batch(canvasToClip, opacity))
+    list.addSheet(pipeline, *sheet);
+  for (auto &canvas : text_)
+    if (canvas)
+      if (const auto sheet = canvas->batch(canvasToClip, opacity))
+        list.addSheet(pipeline, *sheet);
 }
 std::optional<ProjectedPlane>
 WorldPanel::projected(WidgetId id, const glm::mat4 &canvasToClip,
