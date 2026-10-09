@@ -182,6 +182,21 @@ inline constexpr std::string_view kPageBaseLevelTolerance =
     "page.base.levelTolerance";
 inline constexpr std::string_view kPageBasePhysicsUnitPx =
     "page.base.physicsUnitPx";
+// The base page view's arrangement (design/view-system.md §10.2, §10.3)
+inline constexpr std::string_view kPageBackgroundDepth = "page.backgroundDepth";
+inline constexpr std::string_view kPageBackgroundOpacity =
+    "page.backgroundOpacity";
+inline constexpr std::string_view kPageBaseDocumentGap =
+    "page.base.documentGap";
+inline constexpr std::string_view kPageBasePageGap   = "page.base.pageGap";
+inline constexpr std::string_view kPageBaseLiftDepth = "page.base.liftDepth";
+inline constexpr std::string_view kPageBaseBandContext =
+    "page.base.bandContext";
+inline constexpr std::string_view kPageBaseContextOpacity =
+    "page.base.contextOpacity";
+inline constexpr std::string_view kPageBaseSubjectMs  = "page.base.subjectMs";
+inline constexpr std::string_view kPageBaseRowMs      = "page.base.rowMs";
+inline constexpr std::string_view kPageBaseRowDelayMs = "page.base.rowDelayMs";
 inline constexpr std::string_view kBeamsBandStrandLimit =
     "beams.bandStrandLimit";
 inline constexpr std::string_view kBeamsBandStrandPitch =
@@ -1065,13 +1080,49 @@ struct PhysicsConfig {
 };
 
 /**
- * @brief How the base page view brings the pages of an active link together
- *        (design/view-system.md §10.3.2). Lengths are Canvas pixels.
+ * @brief What every page view shares (design/view-system.md §10.2). Lengths
+ *        are Canvas pixels.
+ *
+ * The defaults here are the ones defaultSettingSpecs() seeds system://layout
+ * with, so the two cannot drift.
+ */
+struct PageViewsConfig {
+  /// How far behind the row a document opened for context stands: today's
+  /// physics.backgroundDepthZ of 40 world units, at 18 pixels a unit.
+  float backgroundDepth{720.0F};
+  /// How dim a document opened for context is drawn.
+  float backgroundOpacity{0.42F};
+
+  bool operator==(const PageViewsConfig &) const = default;
+};
+
+/**
+ * @brief How the base page view arranges documents and brings the pages of
+ *        an active link together (design/view-system.md §10.3). Lengths are
+ *        Canvas pixels, times milliseconds.
  *
  * The defaults here are the ones defaultSettingSpecs() seeds system://layout
  * with, so the two cannot drift.
  */
 struct PageBaseConfig {
+  /// Between neighbouring documents of the row: today's
+  /// render::kDefaultDocumentGap of 24 world units.
+  float documentGap{432.0F};
+  /// Between the pages of one document: today's Doc::pageGapPx.
+  float pageGap{32.0F};
+  /// How far towards the reader the pages of an active link come, so they
+  /// pass in front of the columns they leave.
+  float liftDepth{90.0F};
+  /// Lines shown either side of a passage on a page shown as a window.
+  std::uint32_t bandContext{2};
+  /// Pages not taking part while a link is active.
+  float contextOpacity{0.42F};
+  /// The page brought to the reader starts first and takes longest; pages
+  /// making room start rowDelayMs later and take rowMs. Today's
+  /// gleditor::anim::sworphSubject, sworphRow and sworphRowDelay.
+  float subjectMs{620.0F};
+  float rowMs{450.0F};
+  float rowDelayMs{90.0F};
   /// Least room left between two pages brought together.
   float coalesceGap{432.0F};
   /// Most solver steps; the solver stops sooner once every page has settled
@@ -1158,6 +1209,7 @@ struct LayoutConfig {
   bool transclusionLoom{true};
   bool xanalinkRibbons{true};
   PhysicsConfig physics{};
+  PageViewsConfig pages{};
   PageBaseConfig pageBase{};
   BeamConfig beams{};
   ZigzagPresentationConfig zigzag{};

@@ -2419,6 +2419,13 @@ those are the document frames. Within its frame a document's pages flow downward
 present arrangement (`documentSlot`, `kDefaultDocumentGap`, `Doc::pageGapPx`), now produced by a
 view.
 
+A document's frame is its column's box: centred on the column, its top the top of the first page.
+The presenter gives `Doc` the frame's top edge as its origin, which is where `Doc` has its own, so a
+page's place in the frame is the flow matrix `Doc` gives it. A frame is a box like every other
+record, so a raster or a hit test needs no special case for documents; the price is that the frame's
+centre moves down as pagination adds pages, while no page moves. Context documents stand in a row of
+their own, `page.backgroundDepth` behind, by the same formula.
+
 ```text
    doc A        doc B        doc C
   +------+     +------+     +------+
@@ -2519,12 +2526,50 @@ Today the unit that moves is the whole document. The base view's unit is the pag
 of a document takes part, or it has one page, the document moves as before; otherwise only the pages
 that hold ends fly, and the rest of the document stays readable where it was.
 
+As built (P3, `view/page/base_view.{hpp,cpp}`):
+
+- **Two sub-views** (V-R49) say what moves. `pages`, the default, is the rule above. `documents` is
+  every document of the row a body and the anchor's pinned, as `LinkBeams` loads its engine; a
+  context document holding an end joins the row in its list place and those after it make room, as
+  `LinkBeams` gives it a slot; nothing is lifted and nothing is windowed. It is today's row: the
+  parity test runs against it. The two differ exactly where the pages sub-view means to: with
+  documents between the anchor and an end, the end's page comes beside the anchor, in front of them,
+  while in `documents` it stays in its slot.
+- **Ties.** Each body is tied by its end whose passage stands nearest the anchor's in height at
+  home, so the tie that moves it least; equal distances go to the earlier end. *Tie order* is
+  nearness of a body's home to the anchor's: across the row first, then down the column, then end
+  order.
+- **What fits.** The camera may draw back until the smallest line among the participants projects at
+  `PaneFrame::minReadableLinePx`, so the pane can show `widthPx` by `heightPx` scaled by that line
+  height over that limit. Bodies stay whole in tie order while the box round them and the anchor
+  fits; those that do not are dropped and the rest solved again, until a solve fits. A pane with no
+  limit shows every page whole.
+- **Windows.** The band is the passage and `page.base.bandContext` lines either side, clipped to the
+  page. Windows stack on the side of the group their page's home is on, `page.base.coalesceGap`
+  beyond its edge, the first with its passage level with the anchor's and each next one
+  `page.base.pageGap` below the last, lifted like the whole pages. A document that would have moved
+  whole is windowed page by page, each page round its own nearest end. Nothing of a window stack can
+  then cover a passage. Not built: the count and the scrolling of a stack that outruns the pane,
+  which need a scroll offset in the input and a measure for the count.
+- **Ghosts and tethers.** A ghost is a `Marker` item, `itemGhost | itemViewOnly`,
+  `ContentMode::None`, at `page.base.contextOpacity`, unframed at the home place; its slot is 0 for
+  a page and 1 for a document (the documents sub-view's unit), so the two are different subjects.
+  The tether runs from the ghost to the page, `relation` the link's cell. "Moved" is "not where the
+  row at rest puts it", so a lifted page that did not move sideways still leaves one.
+- **Scratch.** The view keeps its working vectors between layouts, so its own arithmetic allocates
+  nothing at size (V-R2); each solve still builds a fresh `TensionLayoutEngine`, a few allocations a
+  solve rather than one set a step.
+
 #### 10.3.3 Motion
 
 The page being brought to the reader is the subject of the move: it starts first and takes longest
 (`page.base.subjectMs`); pages that make room start `page.base.rowDelayMs` later and take
 `page.base.rowMs`. These are today's `anim::sworphSubject`, `sworphRow` and `sworphRowDelay`,
 expressed as `MotionHint`s.
+
+`transition()` lays out both inputs and compares where each subject is placed: what the link brought
+in either layout is a subject; anything else that moved makes room; a subject in only one of the two
+gets no hint, and the animation layer fades it.
 
 #### 10.3.4 Acceptance
 
@@ -3670,3 +3715,8 @@ ______________________________________________________________________
   on `ViewManifold`, the default `move()` for axes, spokes and retrieve, and `MoveOutcome::step` so
   the walk recorder is fed only real steps (G6). I6 is tested by tossing at every place of both
   worked examples of §9.3.4 and re-deriving the same real cell.
+- 2026-10-09 — §10.3 as built (P3): the base view's two sub-views (`pages` by default, `documents`
+  at parity with today's row), the frame as the column's box, how ties are chosen and ordered, what
+  fits, where windows stack, ghost identities, and how `transition()` tells the subject from the
+  row. `page.backgroundDepth`, `page.backgroundOpacity` and the rest of §12.3's `page.base.*` are in
+  `system://layout`.

@@ -12,6 +12,7 @@
 #include "common/xanadu/link_occurrences.hpp"
 #include "common/xanadu/view/page_view.hpp"
 #include "common/xanadu/view/view_records.hpp"
+#include "hand_catalog.hpp"
 
 namespace {
 
@@ -35,58 +36,8 @@ using xanadu::view::PaneFrame;
 using xanadu::view::PlacedItem;
 using xanadu::view::SubjectId;
 using xanadu::view::subjectOf;
-
-/// One document as pagination has it so far: each page's facts, and the
-/// byte at which each page's text starts.
-struct HandDocument {
-  DocumentFacts facts;
-  std::vector<PageFacts> pages;
-  std::vector<std::uint32_t> pageStarts;
-};
-
-/// A catalog written by hand, as §8.6 says a test writes one.
-class HandCatalog final : public PageCatalog {
-public:
-  explicit HandCatalog(std::vector<HandDocument> documents)
-      : documents_(std::move(documents)) {}
-
-  [[nodiscard]] std::uint32_t documents() const noexcept override {
-    return static_cast<std::uint32_t>(documents_.size());
-  }
-  [[nodiscard]] DocumentFacts
-  document(const std::uint32_t index) const noexcept override {
-    return documents_.at(index).facts;
-  }
-  [[nodiscard]] PageFacts page(const PageRef ref) const noexcept override {
-    return documents_.at(ref.document).pages.at(ref.page);
-  }
-  [[nodiscard]] std::optional<PageRef>
-  pageOf(const DocumentSite &site) const noexcept override {
-    for (std::uint32_t d = 0; d < documents_.size(); ++d) {
-      const auto &doc = documents_[d];
-      if (!(doc.facts.id == site.store)) {
-        continue;
-      }
-      const auto after =
-          std::ranges::upper_bound(doc.pageStarts, site.range.start);
-      if (after == doc.pageStarts.begin()) {
-        return std::nullopt;
-      }
-      const auto page =
-          static_cast<std::uint32_t>(after - doc.pageStarts.begin() - 1);
-      // Past the last page known so far, while pagination is still running,
-      // is not yet on any page.
-      if (doc.facts.paginating && after == doc.pageStarts.end()) {
-        return std::nullopt;
-      }
-      return PageRef{.document = d, .page = page};
-    }
-    return std::nullopt;
-  }
-
-private:
-  std::vector<HandDocument> documents_;
-};
+using xuzz_test::HandCatalog;
+using xuzz_test::HandDocument;
 
 constexpr float kWidth  = 800.0F;
 constexpr float kHeight = 1000.0F;

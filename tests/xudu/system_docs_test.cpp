@@ -478,6 +478,42 @@ TEST(SystemDocsTest, PageBaseCoalesceSettingsFromStore) {
   EXPECT_FLOAT_EQ(page.physicsUnitPx, 9.0F);
 }
 
+// The base page view's arrangement and motion, and what every page view
+// shares, are read from system://layout beside the coalescing settings.
+TEST(SystemDocsTest, PageViewSettingsFromStore) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
+  EXPECT_EQ(LayoutConfig::fromStore(store).pages, xanadu::PageViewsConfig{});
+
+  namespace s = xanadu::settings;
+  auto head   = store.primaryCurrentVersion();
+  head        = xanadu::setSetting(store, head, s::kPageBaseDocumentGap, 100.0);
+  head        = xanadu::setSetting(store, head, s::kPageBasePageGap, 10.0);
+  head        = xanadu::setSetting(store, head, s::kPageBaseLiftDepth, 30.0);
+  head        = xanadu::setSetting(store, head, s::kPageBaseBandContext,
+                                   static_cast<std::int64_t>(5));
+  head = xanadu::setSetting(store, head, s::kPageBaseContextOpacity, 0.25);
+  head = xanadu::setSetting(store, head, s::kPageBaseSubjectMs, 700.0);
+  head = xanadu::setSetting(store, head, s::kPageBaseRowMs, 300.0);
+  head = xanadu::setSetting(store, head, s::kPageBaseRowDelayMs, 40.0);
+  head = xanadu::setSetting(store, head, s::kPageBackgroundDepth, 500.0);
+  head = xanadu::setSetting(store, head, s::kPageBackgroundOpacity, 0.5);
+  store.repointCurrentVersion(head);
+
+  const auto layout = LayoutConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(layout.pageBase.documentGap, 100.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.pageGap, 10.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.liftDepth, 30.0F);
+  EXPECT_EQ(layout.pageBase.bandContext, 5U);
+  EXPECT_FLOAT_EQ(layout.pageBase.contextOpacity, 0.25F);
+  EXPECT_FLOAT_EQ(layout.pageBase.subjectMs, 700.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.rowMs, 300.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.rowDelayMs, 40.0F);
+  EXPECT_FLOAT_EQ(layout.pages.backgroundDepth, 500.0F);
+  EXPECT_FLOAT_EQ(layout.pages.backgroundOpacity, 0.5F);
+}
+
 TEST(SystemDocsTest, GetSetVaryingCellValues) {
   Store store;
   store.setSystem(true);
