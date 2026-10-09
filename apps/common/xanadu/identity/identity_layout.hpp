@@ -194,6 +194,28 @@ struct PubKey32 {
   operator<=>(const PubKey32 &other) const noexcept = default;
 };
 
+/// Fast hash functor for PubKey32 in hash tables
+struct PubKeyHash {
+  std::size_t operator()(const PubKey32 &k) const noexcept {
+    std::size_t h = 14695981039346656037ULL;
+    for (const auto b : k.bytes) {
+      h = (h ^ b) * 1099511628211ULL;
+    }
+    return h;
+  }
+};
+
+/// Fast hash functor for Fingerprint in hash tables
+struct FingerprintHash {
+  std::size_t operator()(const Fingerprint &fp) const noexcept {
+    std::size_t h = 14695981039346656037ULL;
+    for (const auto c : fp.hex) {
+      h = (h ^ static_cast<std::uint8_t>(c)) * 1099511628211ULL;
+    }
+    return h;
+  }
+};
+
 /// 64-byte Ed25519 or cryptographic signature buffer.
 struct Signature64 {
   std::array<std::uint8_t, 64> bytes{};
@@ -223,11 +245,12 @@ struct Signature64 {
 enum class MessageType : std::uint8_t {
   // 0x01 - 0x0F: Identity Lookup & Peer Challenge (Extension
   // "xudu_identity_lookup")
-  IdentityQuery     = 0x01,
-  IdentityResponse  = 0x02,
-  PeerAuthChallenge = 0x03,
-  PeerAuthResponse  = 0x04,
-  ConnectionDenial  = 0x05,
+  IdentityQuery             = 0x01,
+  IdentityResponse          = 0x02,
+  PeerAuthChallenge         = 0x03,
+  PeerAuthResponse          = 0x04,
+  ConnectionDenial          = 0x05,
+  DeviceRevocationBroadcast = 0x06,
 
   // 0x10 - 0x1F: Oracle Consensus & Voting (Extension "xudu_oracle_vote")
   OracleVoteBroadcast     = 0x10,
@@ -264,7 +287,21 @@ inline constexpr std::uint8_t kDefaultHashcashDifficulty = 20;
 
 /// Ledger and Engine Validation Errors
 enum class ValidationError : std::uint8_t {
+  Ok   = 0,
   None = 0,
+  KeyRevoked,
+  CertificateExpired,
+  CertificateNotYetValid,
+  DelegationSignatureInvalid,
+  CsrSignatureInvalid,
+  DuplicateKey,
+  PathValidationFailed,
+  CorruptKey,
+  CorruptCertificate,
+  CorruptSignature,
+  UnsupportedAlgorithm,
+  IdentityMismatch,
+  SerializationError,
   InvalidMerkleRoot,
   ProofVerificationFailed,
   NonSequentialBlock,
@@ -294,6 +331,26 @@ struct IdentityEntry {
   bool revoked{false};
   Signature64 signature;
 
+  [[nodiscard]] std::string signingBuffer() const {
+    const auto fieldU64 = [](std::string_view label, std::uint64_t val) {
+      const auto s = std::to_string(val);
+      return std::string(label) + ":" + std::to_string(s.size()) + ":" + s +
+             "\n";
+    };
+    const auto fieldStr = [](std::string_view label, std::string_view val) {
+      return std::string(label) + ":" + std::to_string(val.size()) + ":" +
+             std::string(val) + "\n";
+    };
+
+    std::string out = "xanadu-identity-entry-v1\n";
+    out += fieldStr("fingerprint", fingerprint.view());
+    out += fieldStr("email", email);
+    out += fieldStr("name", identityName);
+    out += fieldStr("key", publicKeyArmored);
+    out += fieldU64("ts", timestamp);
+    return out;
+  }
+
   [[nodiscard]] bool isValid() const noexcept {
     return fingerprint.isValid() && !email.empty() &&
            email.size() <= kMaxEmailLength &&
@@ -311,6 +368,24 @@ struct VoteEntry {
   std::uint64_t timestamp{};
   std::uint64_t sequence{};
   Signature64 signature;
+
+  [[nodiscard]] std::string signingBuffer() const {
+    const auto fieldU64 = [](std::string_view label, std::uint64_t val) {
+      const auto s = std::to_string(val);
+      return std::string(label) + ":" + std::to_string(s.size()) + ":" + s +
+             "\n";
+    };
+    const auto fieldStr = [](std::string_view label, std::string_view val) {
+      return std::string(label) + ":" + std::to_string(val.size()) + ":" +
+             std::string(val) + "\n";
+    };
+
+    std::string out = "xanadu-oracle-vote-v1\n";
+    out += fieldStr("voter", voterFingerprint.view());
+    out += fieldStr("candidate", candidateOracle.view());
+    out += fieldU64("ts", timestamp);
+    return out;
+  }
 
   [[nodiscard]] bool isValid() const noexcept {
     return voterFingerprint.isValid() && candidateOracle.isValid() &&
@@ -345,6 +420,26 @@ struct OracleAttestation {
   std::uint64_t issuedTimestamp{};
   std::uint64_t expiresTimestamp{};
   Signature64 oracleSignature;
+
+  [[nodiscard]] std::string signingBuffer() const {
+    const auto fieldU64 = [](std::string_view label, std::uint64_t val) {
+      const auto s = std::to_string(val);
+      return std::string(label) + ":" + std::to_string(s.size()) + ":" + s +
+             "\n";
+    };
+    const auto fieldStr = [](std::string_view label, std::string_view val) {
+      return std::string(label) + ":" + std::to_string(val.size()) + ":" +
+             std::string(val) + "\n";
+    };
+
+    std::string out = "xanadu-oracle-attestation-v1\n";
+    out += fieldStr("oracle", oracleFingerprint.view());
+    out += fieldStr("target", targetFingerprint.view());
+    out += fieldStr("email", verifiedEmail);
+    out += fieldU64("issued", issuedTimestamp);
+    out += fieldU64("expires", expiresTimestamp);
+    return out;
+  }
 
   [[nodiscard]] bool isValid() const noexcept {
     return oracleFingerprint.isValid() && targetFingerprint.isValid() &&
@@ -512,5 +607,18 @@ struct TcKeyDeliveryMsg {
 };
 
 } // namespace xanadu::identity
+
+template <> struct std::hash<xanadu::identity::PubKey32> {
+  std::size_t operator()(const xanadu::identity::PubKey32 &k) const noexcept {
+    return xanadu::identity::PubKeyHash{}(k);
+  }
+};
+
+template <> struct std::hash<xanadu::identity::Fingerprint> {
+  std::size_t
+  operator()(const xanadu::identity::Fingerprint &fp) const noexcept {
+    return xanadu::identity::FingerprintHash{}(fp);
+  }
+};
 
 #endif // XUDU_IDENTITY_LAYOUT_HPP

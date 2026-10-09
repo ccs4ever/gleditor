@@ -282,16 +282,12 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
-endif
-ifneq ($(shell pkg-config --exists librnp && echo 1),1)
-$(error librnp was not found by pkg-config. It is required: install \
-librnp-dev (Debian, Ubuntu), rnp-devel (Fedora), or rnp (Arch, Homebrew).)
 endif
 endif
 
@@ -534,7 +530,7 @@ GLEDITOR_LIBS :=
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3 spdlog
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic sqlite3 spdlog libzstd
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS))
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -732,7 +728,7 @@ endif
 GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
 SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
-all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag store-dump xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -999,9 +995,10 @@ $(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/
 # and twenty-three the whole core would cost, and the property that matters is
 # unchanged: a tool for looking at a broken store does not need the whole stack
 # to be healthy before it will build.
-.PHONY: xudu-dump
+.PHONY: store-dump xudu-dump
+store-dump: $(OBJDIR)/store-dump
 xudu-dump: $(OBJDIR)/xudu-dump
-XUDU_DUMP_OBJS := $(call obj,tools/xudu-dump.cpp) \
+STORE_DUMP_OBJS := $(call obj,tools/store-dump.cpp) \
 	$(OBJDIR)/apps/common/xanadu/microversion.o \
 	$(OBJDIR)/apps/common/xanadu/ops.o \
 	$(OBJDIR)/apps/common/xanadu/store_tables.o \
@@ -1010,9 +1007,12 @@ XUDU_DUMP_OBJS := $(call obj,tools/xudu-dump.cpp) \
 	$(OBJDIR)/apps/common/xanadu/bencode.o \
 	$(OBJDIR)/apps/common/xanadu/torrent.o \
 	$(OBJDIR)/apps/common/xanadu/mutable_link.o \
+	$(OBJDIR)/apps/common/xanadu/identity/standard_crypto_engine.o \
 	$(OBJDIR)/src/mimetype.o
-$(OBJDIR)/xudu-dump: $(XUDU_DUMP_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ -lcrypto -lmagic
+$(OBJDIR)/store-dump: $(STORE_DUMP_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ -lcrypto -lssl -lmagic
+$(OBJDIR)/xudu-dump: $(OBJDIR)/store-dump
+	ln -sf store-dump $@
 
 # What the loader pays to lay a page out, against the two ways of asking Pango
 # for it. Not part of `all`, because it measures rather than builds anything the

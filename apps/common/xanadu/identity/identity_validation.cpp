@@ -9,8 +9,12 @@
 #include <cstring>
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
 
 #include "common/xanadu/merkle_domain.hpp"
+#include "standard_crypto_engine.hpp"
 
 namespace xanadu::identity {
 
@@ -53,6 +57,46 @@ Hash32 computeBlockHash(const BlockHeader &header) {
   Hash32 out;
   std::memcpy(out.bytes.data(), digest.data(), 32);
   return out;
+}
+
+std::optional<PubKey32> extractPubKey(const IdentityEntry &entry) {
+  if (entry.publicKeyArmored.size() == 32) {
+    PubKey32 pk;
+    std::memcpy(pk.bytes.data(), entry.publicKeyArmored.data(), 32);
+    return pk;
+  }
+  if (entry.publicKeyArmored.size() == 64) {
+    auto hOpt = Hash32::fromHex(entry.publicKeyArmored);
+    if (hOpt) {
+      PubKey32 pk;
+      std::memcpy(pk.bytes.data(), hOpt->bytes.data(), 32);
+      return pk;
+    }
+  }
+  if (!entry.publicKeyArmored.empty()) {
+    auto b64Res = base64Decode(entry.publicKeyArmored);
+    if (b64Res.has_value() && b64Res->size() == 32) {
+      PubKey32 pk;
+      std::memcpy(pk.bytes.data(), b64Res->data(), 32);
+      return pk;
+    }
+    BIO *bio = BIO_new_mem_buf(entry.publicKeyArmored.data(),
+                               static_cast<int>(entry.publicKeyArmored.size()));
+    if (bio) {
+      EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
+      BIO_free(bio);
+      if (pkey) {
+        PubKey32 pk;
+        std::size_t len = 32;
+        int ok = EVP_PKEY_get_raw_public_key(pkey, pk.bytes.data(), &len);
+        EVP_PKEY_free(pkey);
+        if (ok == 1 && len == 32) {
+          return pk;
+        }
+      }
+    }
+  }
+  return std::nullopt;
 }
 
 } // namespace
@@ -191,11 +235,28 @@ std::expected<void, ValidationError> EnginePipeline::stageBlock(
   IdentityTree candidateTree = impl_->tree;
   std::vector<IdentityEntry> stagedIdentities;
   stagedIdentities.reserve(identities.size());
+  StandardCryptoEngine cryptoEngine;
 
   for (const auto &id : identities) {
     if (!id.isValid()) {
       return std::unexpected(ValidationError::InvalidSignature);
     }
+    if (!id.signature.isZero()) {
+      const auto pubKeyOpt = extractPubKey(id);
+      if (!pubKeyOpt) {
+        return std::unexpected(ValidationError::CorruptKey);
+      }
+      const std::string sbuf = id.signingBuffer();
+      const auto vRes        = cryptoEngine.verify(
+          *pubKeyOpt,
+          std::span<const std::uint8_t>(
+              reinterpret_cast<const std::uint8_t *>(sbuf.data()), sbuf.size()),
+          id.signature);
+      if (!vRes.has_value()) {
+        return std::unexpected(ValidationError::InvalidSignature);
+      }
+    }
+
     const auto leafHash = computeLeafHash(id);
     merkle::HashT<32> leaf;
     std::memcpy(leaf.bytes, leafHash.bytes.data(), 32);
@@ -231,6 +292,22 @@ std::expected<void, ValidationError> EnginePipeline::stageBlock(
     if (vote.timestamp < voterEntry->timestamp ||
         (vote.timestamp - voterEntry->timestamp) < kMinVoterAgeSeconds) {
       return std::unexpected(ValidationError::VoterTooYoung);
+    }
+
+    if (!vote.signature.isZero()) {
+      const auto pubKeyOpt = extractPubKey(*voterEntry);
+      if (!pubKeyOpt) {
+        return std::unexpected(ValidationError::CorruptKey);
+      }
+      const std::string sbuf = vote.signingBuffer();
+      const auto vRes        = cryptoEngine.verify(
+          *pubKeyOpt,
+          std::span<const std::uint8_t>(
+              reinterpret_cast<const std::uint8_t *>(sbuf.data()), sbuf.size()),
+          vote.signature);
+      if (!vRes.has_value()) {
+        return std::unexpected(ValidationError::InvalidSignature);
+      }
     }
 
     const auto leafHash = computeLeafHash(vote);
@@ -476,6 +553,37 @@ bool EnginePipeline::isOracleAuthorized(const Fingerprint &oracle,
   return std::ranges::find(quorum, oracle) != quorum.end();
 }
 
+std::expected<void, ValidationError> EnginePipeline::verifyOracleAttestation(
+    const OracleAttestation &att, const PubKey32 &oracleKey,
+    std::uint64_t currentTimestamp, std::size_t quorumSize) const {
+  if (!att.isValid()) {
+    return std::unexpected(ValidationError::InvalidSignature);
+  }
+  if (currentTimestamp > 0 && currentTimestamp > att.expiresTimestamp) {
+    return std::unexpected(ValidationError::AttestationExpired);
+  }
+  if (!isOracleAuthorized(att.oracleFingerprint, att.issuedTimestamp,
+                          quorumSize)) {
+    return std::unexpected(ValidationError::OracleNotAuthorized);
+  }
+  if (att.oracleSignature.isZero()) {
+    return std::unexpected(ValidationError::InvalidSignature);
+  }
+
+  StandardCryptoEngine cryptoEngine;
+  const std::string sbuf = att.signingBuffer();
+  const auto vRes        = cryptoEngine.verify(
+      oracleKey,
+      std::span<const std::uint8_t>(
+          reinterpret_cast<const std::uint8_t *>(sbuf.data()), sbuf.size()),
+      att.oracleSignature);
+  if (!vRes.has_value()) {
+    return std::unexpected(ValidationError::InvalidSignature);
+  }
+
+  return {};
+}
+
 std::expected<void, ValidationError>
 EnginePipeline::verifyOracleAttestation(const OracleAttestation &att,
                                         std::uint64_t currentTimestamp,
@@ -490,7 +598,30 @@ EnginePipeline::verifyOracleAttestation(const OracleAttestation &att,
                           quorumSize)) {
     return std::unexpected(ValidationError::OracleNotAuthorized);
   }
-  return {};
+  if (att.oracleSignature.isZero()) {
+    return std::unexpected(ValidationError::InvalidSignature);
+  }
+
+  const IdentityEntry *oracleEntry =
+      findIdentityByFingerprint(att.oracleFingerprint);
+  if (!oracleEntry && impl_->staged) {
+    for (const auto &stagedId : impl_->staged->identities) {
+      if (stagedId.fingerprint == att.oracleFingerprint) {
+        oracleEntry = &stagedId;
+        break;
+      }
+    }
+  }
+  if (!oracleEntry || oracleEntry->revoked) {
+    return std::unexpected(ValidationError::OracleNotAuthorized);
+  }
+
+  const auto pubKeyOpt = extractPubKey(*oracleEntry);
+  if (!pubKeyOpt) {
+    return std::unexpected(ValidationError::CorruptKey);
+  }
+
+  return verifyOracleAttestation(att, *pubKeyOpt, currentTimestamp, quorumSize);
 }
 
 // ============================================================================

@@ -15,7 +15,7 @@
 
 #include "bencode.hpp"
 #include "common/tsv.hpp"
-#include "identity/pgp_verify.hpp"
+#include "identity/standard_crypto_engine.hpp"
 #include "publication.hpp"
 
 namespace xanadu {
@@ -27,19 +27,20 @@ inline constexpr std::string_view kDevicePublicKey   = "device_public_key";
 inline constexpr std::string_view kDeviceName        = "device_name";
 inline constexpr std::string_view kIssuedTimestamp   = "issued_timestamp";
 inline constexpr std::string_view kGpgSignature      = "gpg_signature";
+inline constexpr std::string_view kCertificateB64    = "certificate_b64";
 
 std::filesystem::path resolveDefaultStorageDir(std::string_view subDir) {
   const char *xdgData = std::getenv("XDG_DATA_HOME");
   std::filesystem::path base;
   if (xdgData && *xdgData) {
-    base = std::filesystem::path(xdgData) / "xudu" / "permascroll";
+    base = std::filesystem::path(xdgData) / "xuzz" / "permascroll";
   } else {
     const char *home = std::getenv("HOME");
     if (home && *home) {
-      base = std::filesystem::path(home) / ".local" / "share" / "xudu" /
+      base = std::filesystem::path(home) / ".local" / "share" / "xuzz" /
              "permascroll";
     } else {
-      base = std::filesystem::temp_directory_path() / "xudu" / "permascroll";
+      base = std::filesystem::temp_directory_path() / "xuzz" / "permascroll";
     }
   }
   return base / subDir;
@@ -178,7 +179,7 @@ std::string DeviceDelegation::signingBuffer() const {
            std::string(value) + "\n";
   };
 
-  std::string out = "xudu-device-delegation-v1\n";
+  std::string out = "xanadu-device-delegation-v2\n";
   out += field("master", masterFingerprint.toString());
   out += field("device", devicePublicKey.hex());
   out += field("name", deviceName);
@@ -186,21 +187,51 @@ std::string DeviceDelegation::signingBuffer() const {
   return out;
 }
 
+bool DeviceDelegation::verify(const identity::PubKey32 &masterPubKey,
+                              std::uint64_t currentTime) const {
+  if (!masterFingerprint.isValid() || devicePublicKey.isZero() ||
+      certificate.empty() || masterPubKey.isZero()) {
+    return false;
+  }
+  // Check subject public key matches devicePublicKey
+  if (std::memcmp(certificate.subjectPublicKey.bytes.data(),
+                  devicePublicKey.bytes.data(), 32) != 0) {
+    return false;
+  }
+  // Check issuer public key matches masterPubKey if set in cert
+  if (!certificate.issuerPublicKey.isZero() &&
+      std::memcmp(certificate.issuerPublicKey.bytes.data(),
+                  masterPubKey.bytes.data(), 32) != 0) {
+    return false;
+  }
+  // Check deviceName matches certificate if present
+  if (!certificate.subjectDn.empty() && !deviceName.empty()) {
+    if (certificate.subjectDn.find(deviceName) == std::string::npos) {
+      return false;
+    }
+  }
+  // Check issuedTimestamp against notBefore
+  if (issuedTimestamp > 0 && certificate.notBefore > 0 &&
+      issuedTimestamp != certificate.notBefore) {
+    return false;
+  }
+  identity::StandardCryptoEngine engine;
+  auto res = engine.verifyDelegation(certificate, masterPubKey, currentTime);
+  return res.has_value();
+}
+
 bool DeviceDelegation::verify(
     const std::string_view masterPublicKeyArmored) const {
   if (!masterFingerprint.isValid() || devicePublicKey.isZero() ||
-      gpgSignatureArmored.empty()) {
+      certificate.empty()) {
     return false;
   }
-  // The key has to be the one this delegation names before its signature
-  // means anything. Otherwise any valid key with any valid signature over
-  // these bytes would do, which is the hole this whole layer exists to close.
-  if (!identity::pgp::keyMatchesFingerprint(masterPublicKeyArmored,
-                                            masterFingerprint)) {
-    return false;
+  auto pkOpt = identity::StandardCryptoEngine::publicKeyFromAnyFormat(
+      masterPublicKeyArmored);
+  if (pkOpt) {
+    return verify(*pkOpt, 0);
   }
-  return identity::pgp::verifyDetached(masterPublicKeyArmored, signingBuffer(),
-                                       gpgSignatureArmored);
+  return false;
 }
 
 std::string DeviceDelegation::toTsv() const {
@@ -209,7 +240,14 @@ std::string DeviceDelegation::toTsv() const {
   common::tsv::write(out, kDevicePublicKey, devicePublicKey.hex());
   common::tsv::write(out, kDeviceName, deviceName);
   common::tsv::write(out, kIssuedTimestamp, std::to_string(issuedTimestamp));
-  common::tsv::write(out, kGpgSignature, gpgSignatureArmored);
+  if (!certificate.empty()) {
+    common::tsv::write(
+        out, kCertificateB64,
+        identity::StandardCryptoEngine::certificateToBase64Der(certificate));
+  }
+  if (!gpgSignatureArmored.empty()) {
+    common::tsv::write(out, kGpgSignature, gpgSignatureArmored);
+  }
   return out;
 }
 
@@ -244,6 +282,12 @@ DeviceDelegation::fromTsv(const std::string_view tsv) {
       } catch (...) {
         return std::nullopt;
       }
+    } else if (entry.key == kCertificateB64) {
+      auto certRes =
+          identity::StandardCryptoEngine::certificateFromBase64Der(entry.value);
+      if (certRes) {
+        cert.certificate = std::move(*certRes);
+      }
     } else if (entry.key == kGpgSignature) {
       cert.gpgSignatureArmored = entry.value;
     }
@@ -276,13 +320,26 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
     std::error_code ec;
     std::filesystem::create_directories(config_.storageDir / "segments", ec);
 
-    // Unconditionally, not only when the file is already there. This is what
-    // binds the spool to its backing file in *both* directions -- it restores
-    // what the file holds and it is what a later flush() writes through -- so
-    // skipping it for a permascroll that does not exist yet left the first
-    // session with nowhere to write, and the author's first document reopened
-    // empty. openActiveSegment() creates the file.
-    spool_.openActiveSegment(config_.storageDir / "active.primedia");
+    // Multi-device hierarchy: if deviceId is not "main", store in
+    // devices/<deviceId>/active.primedia, while supporting root active.primedia
+    // symlink/fallback
+    const auto deviceDir = config_.storageDir / "devices" / config_.deviceId;
+    std::filesystem::create_directories(deviceDir, ec);
+    std::filesystem::create_directories(deviceDir / "segments", ec);
+
+    const auto devActive  = deviceDir / "active.primedia";
+    const auto rootActive = config_.storageDir / "active.primedia";
+
+    std::filesystem::path activePathToOpen = rootActive;
+    if (config_.deviceId != "main" || std::filesystem::exists(devActive)) {
+      activePathToOpen = devActive;
+      // Ensure root active.primedia symlinks to or mirrors this if possible
+      if (!std::filesystem::exists(rootActive)) {
+        std::filesystem::create_symlink(devActive, rootActive, ec);
+      }
+    }
+
+    spool_.openActiveSegment(activePathToOpen);
     if (restored) {
       if (restored->length() > spool_.size())
         throw PermascrollStateUnreadable(
@@ -433,6 +490,69 @@ bool UserPermascroll::flush() {
 bool UserPermascroll::refresh() {
   std::scoped_lock lock(appendMutex_);
   return spool_.refreshActiveSegment();
+}
+
+std::filesystem::path
+UserPermascroll::deviceActivePrimediaPath(std::string_view deviceId) const {
+  if (config_.storageDir.empty()) {
+    return {};
+  }
+  if (deviceId.empty() || deviceId == "main") {
+    const auto devPath =
+        config_.storageDir / "devices" / "main" / "active.primedia";
+    if (std::filesystem::exists(devPath)) {
+      return devPath;
+    }
+    return config_.storageDir / "active.primedia";
+  }
+  return config_.storageDir / "devices" / deviceId / "active.primedia";
+}
+
+Scroll
+UserPermascroll::registerSubscroll(std::string_view deviceId,
+                                   const std::filesystem::path &primediaPath) {
+  std::scoped_lock lock(appendMutex_);
+  Scroll subscroll;
+  subscroll.publisher = config_.deviceKeys.publicKey;
+  subscroll.salt      = (deviceId.empty() || deviceId == "main")
+                            ? "permascroll"
+                            : "permascroll/" + std::string(deviceId);
+
+  if (!config_.storageDir.empty() && std::filesystem::exists(primediaPath)) {
+    const auto targetPath = deviceActivePrimediaPath(deviceId);
+    std::error_code ec;
+    std::filesystem::create_directories(targetPath.parent_path(), ec);
+    if (!std::filesystem::equivalent(primediaPath, targetPath, ec)) {
+      std::filesystem::copy_file(
+          primediaPath, targetPath,
+          std::filesystem::copy_options::overwrite_existing, ec);
+    }
+  }
+
+  return subscroll;
+}
+
+Scroll UserPermascroll::ingestSubscroll(std::string_view deviceId,
+                                        std::span<const std::uint8_t> data) {
+  std::scoped_lock lock(appendMutex_);
+  Scroll subscroll;
+  subscroll.publisher = config_.deviceKeys.publicKey;
+  subscroll.salt      = (deviceId.empty() || deviceId == "main")
+                            ? "permascroll"
+                            : "permascroll/" + std::string(deviceId);
+
+  if (!config_.storageDir.empty()) {
+    const auto targetPath = deviceActivePrimediaPath(deviceId);
+    std::error_code ec;
+    std::filesystem::create_directories(targetPath.parent_path(), ec);
+    std::ofstream out(targetPath, std::ios::binary | std::ios::trunc);
+    if (out && !data.empty()) {
+      out.write(reinterpret_cast<const char *>(data.data()),
+                static_cast<std::streamsize>(data.size()));
+    }
+  }
+
+  return subscroll;
 }
 
 // -- PermascrollRegistry -----------------------------------------------------

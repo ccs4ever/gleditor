@@ -160,13 +160,21 @@ public:
                                         std::size_t quorumSize = 5) const;
 
   /**
-   * @brief Verifies an Oracle attestation token against the active quorum and
-   * expiration.
+   * @brief Verifies an Oracle attestation token against the active quorum,
+   * expiration, and cryptographic signature.
    */
   [[nodiscard]] std::expected<void, ValidationError>
   verifyOracleAttestation(const OracleAttestation &att,
                           std::uint64_t currentTimestamp,
                           std::size_t quorumSize = 5) const;
+
+  /**
+   * @brief Verifies an Oracle attestation token against a specific oracle
+   * public key, active quorum, and expiration.
+   */
+  [[nodiscard]] std::expected<void, ValidationError> verifyOracleAttestation(
+      const OracleAttestation &att, const PubKey32 &oracleKey,
+      std::uint64_t currentTimestamp, std::size_t quorumSize = 5) const;
 
 private:
   struct Impl;

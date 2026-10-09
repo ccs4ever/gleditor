@@ -31,6 +31,7 @@ using xanadu::Config;
 class Environment {
 public:
   Environment() {
+    remember("XUZZ_CONFIG");
     remember("XUDU_CONFIG");
     remember("XDG_CONFIG_HOME");
     remember("HOME");
@@ -118,22 +119,42 @@ TEST(ConfigTest, somethingThatIsNotAConfigurationIsRefused) {
   EXPECT_FALSE(Config::fromTsv("this is not a configuration").has_value());
 }
 
+TEST(ConfigTest, fluentSettersChain) {
+  Config config;
+  config.setAuthorName("Ada Lovelace")
+      ->setEmail("ada@example.org")
+      ->setGpgKey("0xDEADBEEF")
+      ->setGpgHome("/home/ada/.gnupg-publishing");
+
+  EXPECT_EQ(config.author.name, "Ada Lovelace");
+  EXPECT_EQ(config.author.email, "ada@example.org");
+  EXPECT_EQ(config.author.gpgKey, "0xDEADBEEF");
+  EXPECT_EQ(config.gpgHome, "/home/ada/.gnupg-publishing");
+  EXPECT_TRUE(config.complete());
+}
+
 TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
   const Environment environment;
+  Environment::clear("XUZZ_CONFIG");
   Environment::clear("XUDU_CONFIG");
 
   Environment::set("XDG_CONFIG_HOME", "/somewhere/config");
-  EXPECT_EQ(xanadu::configPath(), "/somewhere/config/xudu/config.tsv");
+  EXPECT_EQ(xanadu::configPath(), "/somewhere/config/xuzz/config.tsv");
 
   // Without it, the fallback the specification names.
   Environment::clear("XDG_CONFIG_HOME");
   Environment::set("HOME", "/home/ada");
-  EXPECT_EQ(xanadu::configPath(), "/home/ada/.config/xudu/config.tsv");
+  EXPECT_EQ(xanadu::configPath(), "/home/ada/.config/xuzz/config.tsv");
 
   // And a file named outright wins over both, which is what lets somebody with
   // two identities keep two.
-  Environment::set("XUDU_CONFIG", "/tmp/other.tsv");
+  Environment::set("XUZZ_CONFIG", "/tmp/other.tsv");
   EXPECT_EQ(xanadu::configPath(), "/tmp/other.tsv");
+
+  // XUDU_CONFIG fallback works when XUZZ_CONFIG is unset
+  Environment::clear("XUZZ_CONFIG");
+  Environment::set("XUDU_CONFIG", "/tmp/xudu_fallback.tsv");
+  EXPECT_EQ(xanadu::configPath(), "/tmp/xudu_fallback.tsv");
 }
 
 TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {

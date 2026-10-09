@@ -18,7 +18,9 @@
 #include <string_view>
 #include <vector>
 
+#include "identity/identity_engine.hpp"
 #include "identity/identity_layout.hpp"
+#include "identity/standard_crypto_engine.hpp"
 #include "provenance.hpp"
 #include "scroll.hpp"
 #include "segmented_primedia_spool.hpp"
@@ -30,38 +32,57 @@ namespace xanadu {
 
 /**
  * @struct DeviceDelegation
- * @brief Attestation binding a device-specific Ed25519 key to a master OpenPGP
- * identity.
+ * @brief Attestation binding a device-specific Ed25519 key to a master identity
+ * via an X.509 v3 delegation certificate.
  */
 struct DeviceDelegation {
   identity::Fingerprint masterFingerprint;
   PublicKey devicePublicKey;
   std::string deviceName;
   std::uint64_t issuedTimestamp{0};
-  std::string gpgSignatureArmored;
+  identity::X509Certificate certificate;
+  std::string gpgSignatureArmored{};
+
+  /// Fluent setters chaining `this`
+  DeviceDelegation *setMasterFingerprint(identity::Fingerprint fp) noexcept {
+    masterFingerprint = fp;
+    return this;
+  }
+
+  DeviceDelegation *setDevicePublicKey(PublicKey pk) noexcept {
+    devicePublicKey = pk;
+    return this;
+  }
+
+  DeviceDelegation *setDeviceName(std::string name) {
+    deviceName = std::move(name);
+    return this;
+  }
+
+  DeviceDelegation *setIssuedTimestamp(std::uint64_t ts) noexcept {
+    issuedTimestamp = ts;
+    return this;
+  }
+
+  DeviceDelegation *setCertificate(identity::X509Certificate cert) noexcept {
+    certificate = std::move(cert);
+    return this;
+  }
 
   /**
-   * @brief The bytes the master key signs: everything but the signature.
-   *
-   * Canonical and unambiguous -- each field is length-prefixed, so no
-   * combination of a device name and a fingerprint can be rearranged into a
-   * different delegation that produces the same bytes.
+   * @brief Canonical signing buffer for the delegation fields.
    */
   [[nodiscard]] std::string signingBuffer() const;
 
   /**
-   * @brief Whether this delegation really is signed by the master key.
+   * @brief Whether this delegation is verified by the master key.
    *
-   * @param masterPublicKeyArmored The master's OpenPGP public key. Required
-   *        rather than carried in the struct: a delegation that supplied its
-   *        own verification key would only ever attest to itself. The key is
-   *        checked against masterFingerprint before the signature is checked
-   *        against the key, so supplying the wrong key fails rather than
-   *        silently verifying a different identity's delegation.
-   *
-   * Was previously a check that three fields were non-empty, which is to say
-   * it was not a verification at all -- so it has no callers to migrate.
+   * Verifies the X.509 delegation certificate against the master public key
+   * using StandardCryptoEngine path validation.
    */
+  [[nodiscard]] bool verify(const identity::PubKey32 &masterPubKey,
+                            std::uint64_t currentTime = 0) const;
+
   [[nodiscard]] bool verify(std::string_view masterPublicKeyArmored) const;
 
   [[nodiscard]] std::string toTsv() const;
@@ -197,6 +218,30 @@ public:
 
   /// Refresh unread bytes written by another process from active segment.
   bool refresh();
+
+  /**
+   * @brief Register or ingest a device subscroll ("permascroll/<device_id>")
+   * with zero-shift ingestion into the multi-device storage hierarchy.
+   *
+   * @param deviceId Identifier of the peer or source device (e.g. "laptop").
+   * @param primediaPath File path to the device's primedia payload.
+   * @return The canonical Scroll descriptor for the subscroll.
+   */
+  Scroll registerSubscroll(std::string_view deviceId,
+                           const std::filesystem::path &primediaPath);
+
+  /**
+   * @brief Ingest a slice of primedia bytes directly into a device subscroll.
+   *
+   * Writes the data to `devices/<deviceId>/active.primedia` and returns the
+   * canonical Scroll descriptor.
+   */
+  Scroll ingestSubscroll(std::string_view deviceId,
+                         std::span<const std::uint8_t> data);
+
+  /// Resolves the storage path for a given device's active primedia file.
+  [[nodiscard]] std::filesystem::path
+  deviceActivePrimediaPath(std::string_view deviceId) const;
 
   [[nodiscard]] const Config &config() const noexcept { return config_; }
 

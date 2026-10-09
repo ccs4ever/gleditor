@@ -358,12 +358,14 @@ TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
   const auto *m = h.find_key("m");
   ASSERT_THAT(m, NotNull());
   EXPECT_THAT(m->type(), Eq(libtorrent::entry::dictionary_t));
-  EXPECT_THAT(m->find_key("xudu_identity_lookup")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_identity_lookup")->integer(),
               Eq(kExtIdentityLookupMsgId));
-  EXPECT_THAT(m->find_key("xudu_oracle_vote")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_oracle_vote")->integer(),
               Eq(kExtOracleVoteMsgId));
-  EXPECT_THAT(m->find_key("xudu_oracle_verify")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_oracle_verify")->integer(),
               Eq(kExtOracleVerifyMsgId));
+  EXPECT_THAT(m->find_key("xanadu_transcopyright")->integer(),
+              Eq(kExtTranscopyrightMsgId));
 }
 
 namespace {
@@ -402,20 +404,14 @@ xanadu::MutableKeys testDeviceKeys() {
 /// key -- the state a peer must reach before any of its signatures count.
 [[nodiscard]] bool
 trustFixtureDelegation(IdentityNetworkController &controller) {
-  xanadu::DeviceDelegation cert;
-  cert.masterFingerprint =
-      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
-  cert.devicePublicKey = testDeviceKeys().publicKey;
-  cert.deviceName      = "peer-under-test";
-  cert.issuedTimestamp = 1700000000;
-  cert.gpgSignatureArmored =
-      std::string(xanadu::testing::kDelegationForTestDeviceKey);
+  const auto cert = xanadu::testing::fixtureDelegation(
+      testDeviceKeys().publicKey, "peer-under-test", 1700000000);
   return controller.trustDelegation(cert, xanadu::testing::kAuthorPublicKey);
 }
 
 /// Signs a challenge nonce the way a well-behaved peer does.
 Signature64 signNonce(const Hash32 &nonce, const xanadu::MutableKeys &keys) {
-  std::string buffer = "xudu-peer-auth-v1:";
+  std::string buffer = "xanadu-peer-auth-v2:";
   buffer.append(reinterpret_cast<const char *>(nonce.bytes.data()),
                 nonce.bytes.size());
   const auto sig = xanadu::signMutableItem(buffer, keys);
@@ -610,6 +606,47 @@ TEST(IdentityBEP10Test, RejectsAVoteCastUnderAnotherIdentity) {
 
   EXPECT_THAT(controller.pipeline().size(), Eq(0U))
       << "an authenticated peer voted as somebody else";
+}
+
+TEST(IdentityBEP10Test, QuarantinesRevokedDeviceViaBroadcastAndRejectsAuth) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  // Verify before quarantine, device is not quarantined
+  EXPECT_FALSE(controller.isDeviceQuarantined(
+      PubKey32{testDeviceKeys().publicKey.bytes}));
+
+  // Deliver DeviceRevocationBroadcast to quarantine the device
+  auto plugin1 = challengedPlugin(controller);
+  DeviceRevocationRecord rev;
+  rev.serialNumber    = 42;
+  rev.devicePublicKey = PubKey32{testDeviceKeys().publicKey.bytes};
+  rev.masterFingerprint =
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
+  rev.revocationDate = 1700001000;
+  rev.reason         = RevocationReason::KeyCompromise;
+
+  deliver(*plugin1, MessageType::DeviceRevocationBroadcast, serialize(rev));
+
+  // TQC should now report device is quarantined and serial is quarantined
+  EXPECT_TRUE(controller.isDeviceQuarantined(
+      PubKey32{testDeviceKeys().publicKey.bytes}));
+  EXPECT_TRUE(controller.isSerialQuarantined(42));
+
+  // Now, a new peer attempting to authenticate with this device key must be
+  // rejected
+  auto plugin2 = challengedPlugin(controller);
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin2->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, testDeviceKeys());
+
+  deliver(*plugin2, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin2->isAuthenticated());
+  EXPECT_TRUE(plugin2->isIsolated());
 }
 
 // ============================================================================

@@ -61,10 +61,13 @@ std::optional<Config> Config::fromTsv(const std::string_view text) {
 }
 
 std::string configPath() {
+  if (const auto named = environment("XUZZ_CONFIG"); !named.empty()) {
+    return named;
+  }
   if (const auto named = environment("XUDU_CONFIG"); !named.empty()) {
     return named;
   }
-  return gleditor::paths::configPath("xudu", "config.tsv");
+  return gleditor::paths::configPath("xuzz", "config.tsv");
 }
 
 Config loadConfig(const std::string &path) {

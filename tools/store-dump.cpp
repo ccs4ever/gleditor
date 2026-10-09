@@ -40,7 +40,9 @@
 #include <string_view>
 #include <vector>
 
+#include "common/tsv.hpp"
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/identity/standard_crypto_engine.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/segmented_ops_spool.hpp"
@@ -385,16 +387,73 @@ void dumpVersions(const xanadu::StoreTables &) {
   // §5.4).
 }
 
+void dumpAuthorship(const std::filesystem::path &targetDir) {
+  const auto tsvPath = targetDir / "AUTHORSHIP.tsv";
+  const auto sigPath = targetDir / "AUTHORSHIP.sig";
+  if (!std::filesystem::exists(tsvPath)) {
+    trouble(targetDir.string() + ": no AUTHORSHIP.tsv found");
+    return;
+  }
+  const std::string tsvContent = readWhole(tsvPath);
+  std::cout << "=== AUTHORSHIP.tsv ===\n";
+  const auto entries = common::tsv::read(tsvContent);
+  if (!entries) {
+    trouble(tsvPath.string() + ": invalid TSV formatting");
+    return;
+  }
+  std::string deviceKeyHex;
+  std::string certB64;
+
+  for (const auto &e : *entries) {
+    std::cout << "  " << e.key << ": " << e.value << '\n';
+    if (e.key == "device_public_key") {
+      deviceKeyHex = e.value;
+    } else if (e.key == "certificate_b64" ||
+               e.key == "delegation_certificate") {
+      certB64 = e.value;
+    }
+  }
+
+  if (std::filesystem::exists(sigPath)) {
+    const std::string sigContent = readWhole(sigPath);
+    std::cout << "  [AUTHORSHIP.sig file present: " << sigContent.size()
+              << " bytes]\n";
+  }
+
+  if (!deviceKeyHex.empty()) {
+    auto devPk = xanadu::identity::StandardCryptoEngine::publicKeyFromAnyFormat(
+        deviceKeyHex);
+    if (devPk) {
+      std::cout << "  device_key_status: valid Ed25519 public key\n";
+    } else {
+      std::cout << "  device_key_status: invalid format\n";
+    }
+  }
+  if (!certB64.empty()) {
+    auto certRes =
+        xanadu::identity::StandardCryptoEngine::certificateFromBase64Der(
+            certB64);
+    if (certRes) {
+      std::cout << "  delegation_certificate: valid X.509 v3 DER\n";
+      std::cout << "    serial: " << certRes->serialNumber << '\n';
+      std::cout << "    subject_dn: " << certRes->subjectDn << '\n';
+      std::cout << "    issuer_dn: " << certRes->issuerDn << '\n';
+    } else {
+      std::cout << "  delegation_certificate: unparseable DER\n";
+    }
+  }
+}
+
 void usage() {
   std::cerr
-      << "usage: xudu-dump [--section=SECTION] [--permascroll=PATH]\n"
+      << "usage: store-dump [--section=SECTION] [--permascroll=PATH]\n"
          "                 <store-directory|ops-file>\n"
          "\n"
-         "  Renders a xudu store as text without going through the loader,\n"
+         "  Renders a xanadu store as text without going through the loader,\n"
          "  so that a store the loader refuses can still be looked at.\n"
          "\n"
          "  SECTION is one of: all (default), header, ops, scrolls, links,\n"
-         "  versions.\n"
+         "  versions, authorship.\n"
          "\n"
          "  --section=ops is the one to diff across a format change: it\n"
          "  renders what each operation means, so a change that preserves\n"
@@ -442,8 +501,8 @@ int main(int argc, char **argv) {
     return "all" == section || section == name;
   };
   if (!wants("header") && !wants("ops") && !wants("scrolls") &&
-      !wants("links") && !wants("versions")) {
-    std::cerr << "xudu-dump: no such section \"" << section << "\"\n";
+      !wants("links") && !wants("versions") && !wants("authorship")) {
+    std::cerr << "store-dump: no such section \"" << section << "\"\n";
     usage();
     return 2;
   }
@@ -526,6 +585,10 @@ int main(int argc, char **argv) {
               "store.tables. Open and save the store with xudu to bring it "
               "forward.");
     }
+  }
+
+  if (wants("authorship")) {
+    dumpAuthorship(target);
   }
 
   return sawTrouble ? 1 : 0;
