@@ -293,6 +293,29 @@ inline constexpr std::string_view kNotificationDurationMs =
 inline constexpr std::string_view kRadialMenuRadius = "radialMenu.radius";
 inline constexpr std::string_view kRadialMenuInnerRadius =
     "radialMenu.innerRadius";
+// How views move (view-system-implementation-plan.md §5.3, G16). Times are
+// milliseconds; a curve is named as motionEaseNamed() reads it.
+inline constexpr std::string_view kViewMotionReduced  = "view.motion.reduced";
+inline constexpr std::string_view kViewMotionStepMs   = "view.motion.stepMs";
+inline constexpr std::string_view kViewMotionStepEase = "view.motion.stepEase";
+inline constexpr std::string_view kViewMotionTossOutMs =
+    "view.motion.tossOutMs";
+inline constexpr std::string_view kViewMotionTossOutEase =
+    "view.motion.tossOutEase";
+inline constexpr std::string_view kViewMotionTossInMs = "view.motion.tossInMs";
+inline constexpr std::string_view kViewMotionTossInEase =
+    "view.motion.tossInEase";
+inline constexpr std::string_view kViewMotionTossInScale =
+    "view.motion.tossInScale";
+inline constexpr std::string_view kViewMotionViewSwitchMs =
+    "view.motion.viewSwitchMs";
+inline constexpr std::string_view kViewMotionViewSwitchEase =
+    "view.motion.viewSwitchEase";
+inline constexpr std::string_view kViewMotionSubViewMs =
+    "view.motion.subViewMs";
+inline constexpr std::string_view kViewMotionSubViewEase =
+    "view.motion.subViewEase";
+inline constexpr std::string_view kViewMotionHintEase = "view.motion.hintEase";
 // The overview panel. Colours are RGBA8, most significant byte red.
 inline constexpr std::string_view kOverviewVisible  = "overview.visible";
 inline constexpr std::string_view kOverviewWidthPx  = "overview.widthPx";
@@ -1312,6 +1335,72 @@ struct WorldCardConfig {
   bool operator==(const WorldCardConfig &) const = default;
 };
 
+/// The curve a motion follows. Each is one of Choreograph's, which the
+/// animation layer maps it to; the settings name them as motionEaseName()
+/// spells them.
+enum class MotionEase : std::uint8_t {
+  Linear,
+  InQuad,
+  OutQuad,
+  InOutQuad,
+  InCubic,
+  OutCubic,
+  InOutCubic,
+};
+[[nodiscard]] std::string_view motionEaseName(MotionEase ease) noexcept;
+/// Nothing for a name that is not one of motionEaseName()'s.
+[[nodiscard]] std::optional<MotionEase>
+motionEaseNamed(std::string_view name) noexcept;
+
+/// How long one kind of motion takes and the curve it follows. Zero is a
+/// cut for that kind alone.
+struct MotionSpec {
+  float durationMs{};
+  MotionEase ease{MotionEase::OutCubic};
+  bool operator==(const MotionSpec &) const = default;
+};
+
+/**
+ * @brief How views move (view-system-implementation-plan.md §5.3, gap G16):
+ *        the chrome-speed family of the motion table, which the animation
+ *        layer applies by SubjectId.
+ *
+ * In system://ui because motion is the reader's presentation preference, as
+ * ui.minFontPx is, and reduced motion an accessibility one; the base view's
+ * own timings stay page.base.* in system://layout, where that view reads
+ * them, and reach the animation layer as MotionHints. A row of the table that
+ * belongs to a later component (the selector, the wheel, packs, panes, the
+ * camera) is added here by the package that builds it. The defaults here are
+ * the ones defaultSettingSpecs() seeds system://ui with, so the two cannot
+ * drift.
+ */
+struct MotionConfig {
+  /// Every tween and transition becomes a cut (spec §15).
+  bool reduced{false};
+  /// A step along a dimension, and whatever else a layout moves without a
+  /// hint: the most frequent motion, so chrome-speed.
+  MotionSpec step{.durationMs = 120.0F, .ease = MotionEase::OutCubic};
+  /// The derived cells a toss discards fade where they were drawn.
+  MotionSpec tossOut{.durationMs = 90.0F, .ease = MotionEase::InCubic};
+  /// The derived cells a toss brings fade in, growing from tossInScale.
+  MotionSpec tossIn{.durationMs = 160.0F, .ease = MotionEase::OutCubic};
+  float tossInScale{0.92F};
+  /// A placement's view replaced: the old scene fades out as the new fades
+  /// in, nothing travelling between them.
+  MotionSpec viewSwitch{.durationMs = 220.0F, .ease = MotionEase::InOutCubic};
+  MotionSpec subViewSwitch{.durationMs = 150.0F,
+                           .ease       = MotionEase::InOutCubic};
+  /// The curve of a move a view times itself (MotionHint): today's sworph,
+  /// which Doc::animateMoveTo eases in and out.
+  MotionEase hint{MotionEase::InOutQuad};
+
+  bool operator==(const MotionConfig &) const = default;
+
+  /// A time that is negative or not finite, a scale outside (0, 1] and a
+  /// curve with no name keep their defaults.
+  [[nodiscard]] static MotionConfig fromStore(const Store &store);
+};
+
 struct UIConfig {
   float uiScale{1.0F}, uiFontScale{1.0F};
   float uiSafeMarginShare{gleditor::ui::kSafeMarginShare};
@@ -1332,6 +1421,7 @@ struct UIConfig {
   ModalPresentationConfig quotationModal;
   ModalPresentationConfig telescopeModal{860.0F, 560.0F};
   ModalPresentationConfig hypertimeModal{640.0F, 460.0F};
+  MotionConfig motion;
 
   UIConfig();
   [[nodiscard]] static UIConfig fromStore(const Store &store);

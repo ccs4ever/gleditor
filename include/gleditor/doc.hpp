@@ -40,6 +40,9 @@ struct RenderState;
 // Test-only friend: constructs a gap in Doc::pages directly, since nothing
 // production does yet -- see design/priority-page-building.md's Stage 2.
 class DocGapTest;
+// Test-only friend: poses a page and runs an edit's reflow without a render
+// loop -- design/view-system-implementation-plan.md's F2, until L7.
+class DocPagePoseTest;
 
 namespace render {
 class RenderDevice;
@@ -1252,6 +1255,7 @@ public:
 
   friend class Page;
   friend class DocGapTest;
+  friend class DocPagePoseTest;
 };
 
 #endif // GLEDITOR_DOC_H

@@ -5,6 +5,7 @@
 #include "common/xanadu/system_docs.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
@@ -345,7 +346,28 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "type, transclusion, focus or the accent, in a vivid, a deep and a "
            "pale tier in turn, each with its own dash and glyph. Change "
            "either to override the palette; resetting restores its "
-           "assignment.\n";
+           "assignment.\n"
+           "view.motion.reduced: When true every movement in a view is a cut "
+           "and nothing fades. Default is false.\n"
+           "view.motion.stepMs, view.motion.tossOutMs, view.motion.tossInMs, "
+           "view.motion.viewSwitchMs and view.motion.subViewMs: Milliseconds "
+           "a step along a dimension takes, the view cells a rebinding "
+           "discards take to fade where they stood, the ones it brings take "
+           "to fade in, a change of view takes to cross-fade and a change of "
+           "sub-view takes. Zero or more; zero is a cut. Defaults are 120, "
+           "90, 160, 220 and 150. A held key never waits for one: each "
+           "repeat starts the motion again from where things are.\n"
+           "view.motion.tossInScale: The size, as a share of their own, that "
+           "new view cells grow from as they fade in. Above 0, at most 1. "
+           "Default is 0.92.\n"
+           "view.motion.stepEase, view.motion.tossOutEase, "
+           "view.motion.tossInEase, view.motion.viewSwitchEase, "
+           "view.motion.subViewEase and view.motion.hintEase: The curve each "
+           "follows, one of linear, in-quad, out-quad, in-out-quad, "
+           "in-cubic, out-cubic or in-out-cubic; hintEase is for moves a "
+           "view times itself, such as pages a link brings together. "
+           "Defaults are out-cubic, in-cubic, out-cubic, in-out-cubic, "
+           "in-out-cubic and in-out-quad.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -1183,6 +1205,54 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
                       .defaultValues = {std::int64_t{
                           panel.memberHighlightColour}}}}},
     };
+    const MotionConfig motion;
+    const auto easeSpec = [](std::string_view name, const char *notes,
+                             const MotionEase ease) {
+      return SettingSpec{
+          .name    = std::string(name),
+          .notes   = notes,
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {std::string{motionEaseName(ease)}}}}};
+    };
+    specs.push_back({.name    = std::string(settings::kViewMotionReduced),
+                     .notes   = "Every view tween and transition becomes a cut",
+                     .schemas = {{.expectedTypes = {"bool"},
+                                  .defaultValues = {motion.reduced}}}});
+    specs.insert(
+        specs.end(),
+        {
+            lengthSpec(settings::kViewMotionStepMs,
+                       "Milliseconds a step along a dimension takes",
+                       motion.step.durationMs),
+            easeSpec(settings::kViewMotionStepEase,
+                     "Curve of a step along a dimension", motion.step.ease),
+            lengthSpec(settings::kViewMotionTossOutMs,
+                       "Milliseconds discarded view cells take to fade",
+                       motion.tossOut.durationMs),
+            easeSpec(settings::kViewMotionTossOutEase,
+                     "Curve of discarded view cells fading",
+                     motion.tossOut.ease),
+            lengthSpec(settings::kViewMotionTossInMs,
+                       "Milliseconds new view cells take to fade in",
+                       motion.tossIn.durationMs),
+            easeSpec(settings::kViewMotionTossInEase,
+                     "Curve of new view cells fading in", motion.tossIn.ease),
+            lengthSpec(settings::kViewMotionTossInScale,
+                       "Size new view cells grow from, range 0 to 1",
+                       motion.tossInScale),
+            lengthSpec(settings::kViewMotionViewSwitchMs,
+                       "Milliseconds a view switch takes to cross-fade",
+                       motion.viewSwitch.durationMs),
+            easeSpec(settings::kViewMotionViewSwitchEase,
+                     "Curve of a view switch", motion.viewSwitch.ease),
+            lengthSpec(settings::kViewMotionSubViewMs,
+                       "Milliseconds a sub-view switch takes",
+                       motion.subViewSwitch.durationMs),
+            easeSpec(settings::kViewMotionSubViewEase,
+                     "Curve of a sub-view switch", motion.subViewSwitch.ease),
+            easeSpec(settings::kViewMotionHintEase,
+                     "Curve of a move a view times itself", motion.hint),
+        });
     for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
       const auto role  = static_cast<gleditor::ui::FontRole>(i);
       const auto &font = modals.uiTheme.font(role);
@@ -3414,6 +3484,78 @@ gleditor::RadialConfig createDefaultRadialConfig() {
 }
 } // namespace
 
+namespace {
+struct MotionEaseNameEntry {
+  MotionEase ease;
+  std::string_view name;
+};
+constexpr std::array kMotionEaseNames{
+    MotionEaseNameEntry{MotionEase::Linear, "linear"},
+    MotionEaseNameEntry{MotionEase::InQuad, "in-quad"},
+    MotionEaseNameEntry{MotionEase::OutQuad, "out-quad"},
+    MotionEaseNameEntry{MotionEase::InOutQuad, "in-out-quad"},
+    MotionEaseNameEntry{MotionEase::InCubic, "in-cubic"},
+    MotionEaseNameEntry{MotionEase::OutCubic, "out-cubic"},
+    MotionEaseNameEntry{MotionEase::InOutCubic, "in-out-cubic"},
+};
+} // namespace
+
+std::string_view motionEaseName(const MotionEase ease) noexcept {
+  for (const auto &entry : kMotionEaseNames) {
+    if (entry.ease == ease) {
+      return entry.name;
+    }
+  }
+  return {};
+}
+
+std::optional<MotionEase>
+motionEaseNamed(const std::string_view name) noexcept {
+  for (const auto &entry : kMotionEaseNames) {
+    if (entry.name == name) {
+      return entry.ease;
+    }
+  }
+  return std::nullopt;
+}
+
+MotionConfig MotionConfig::fromStore(const Store &store) {
+  MotionConfig cfg;
+  if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
+    return cfg;
+  }
+  const auto model = SystemStoreModel::fromStore(store);
+  const auto read  = [&model](const std::string_view msKey,
+                             const std::string_view easeKey, MotionSpec &into) {
+    const auto ms = model.getDouble(msKey, double{into.durationMs});
+    if (std::isfinite(ms) && ms >= 0.0 &&
+        ms <= double{std::numeric_limits<float>::max()}) {
+      into.durationMs = static_cast<float>(ms);
+    }
+    into.ease = motionEaseNamed(model.getString(easeKey, std::string{}))
+                    .value_or(into.ease);
+  };
+  cfg.reduced = model.getBool(settings::kViewMotionReduced, cfg.reduced);
+  read(settings::kViewMotionStepMs, settings::kViewMotionStepEase, cfg.step);
+  read(settings::kViewMotionTossOutMs, settings::kViewMotionTossOutEase,
+       cfg.tossOut);
+  read(settings::kViewMotionTossInMs, settings::kViewMotionTossInEase,
+       cfg.tossIn);
+  read(settings::kViewMotionViewSwitchMs, settings::kViewMotionViewSwitchEase,
+       cfg.viewSwitch);
+  read(settings::kViewMotionSubViewMs, settings::kViewMotionSubViewEase,
+       cfg.subViewSwitch);
+  cfg.hint = motionEaseNamed(
+                 model.getString(settings::kViewMotionHintEase, std::string{}))
+                 .value_or(cfg.hint);
+  const auto scale = model.getDouble(settings::kViewMotionTossInScale,
+                                     double{cfg.tossInScale});
+  if (std::isfinite(scale) && scale > 0.0 && scale <= 1.0) {
+    cfg.tossInScale = static_cast<float>(scale);
+  }
+  return cfg;
+}
+
 UIConfig::UIConfig() : radialMenu(createDefaultRadialConfig()) {}
 
 UIConfig UIConfig::fromStore(const Store &store) {
@@ -3421,6 +3563,7 @@ UIConfig UIConfig::fromStore(const Store &store) {
   if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
     return cfg;
   }
+  cfg.motion          = MotionConfig::fromStore(store);
   const auto model    = SystemStoreModel::fromStore(store);
   const auto positive = [&model](std::string_view key, float fallback) {
     const auto value =

@@ -405,6 +405,17 @@ within one repeat interval are not faded in at all.
 
 Every number in the table that is not already a setting becomes one (`motion.*`, G16).
 
+As built (U6a): the settings are `view.motion.*`, beside the spec's `view.motion.reduced` (§12.3),
+and live in `system://ui` with the reader's other presentation preferences; each row is a time and a
+named Choreograph curve (`MotionConfig`). U6a adds the rows the animation layer itself applies —
+step, toss out, toss in with its scale, view switch, sub-view switch — and the curve of hinted
+moves. The page fly-in is already `page.base.*` and arrives as `MotionHint`s; riffle and split are
+`stack.*` in the spec. The rows of components not yet built (pack spread, wheel depth, selector,
+pane split, subspace zoom, camera reframe) become `view.motion.*` settings in the package that
+builds each, as §4.4 says settings are added, so no setting exists that nothing reads. The held-key
+rule is measured: a step arriving before the last one's motion would have ended is a repeat, since
+no repeat flag reaches the view commands today.
+
 ### 5.4 Component notes
 
 The full guidance for each component is the visual review's report
@@ -590,3 +601,5 @@ Three challengers attacked the first draft. What each said that mattered, and wh
 - 2026-10-09 — §5.2: U1 as built. The ΔE₀₀ floor cuts each tier's open arcs, the reserved colours
   are one table that a `ui_test` checks against their definitions, and "first seen" is the order of
   the dimension settings in `system://ui`.
+- 2026-10-09 — §5.3: U6a as built. `view.motion.*` in `system://ui`, the rows the animation layer
+  applies now and the rest with their components; the held-key rule measured from the steps' timing.
