@@ -402,6 +402,7 @@ apps/common/xanadu/view/                 engine; linked by xuzz_test and the lan
   selector.{hpp,cpp}     the dimension selector: tiers, cursor, pure layout (§7.7)
   dimension_ranking.{hpp,cpp}  most used and most likely, from activity (§7.8)
   raster.{hpp,cpp}       layout records -> text grid, for REPLs, --raster and golden tests
+  view_marks.{hpp,cpp}   ghosts, view-only marks, the focus mark, faded text's steps (plan §5.6)
   slice/
     stretch_vanishing_view.{hpp,cpp}
     all_dim_walk_view.{hpp,cpp}
@@ -1123,7 +1124,9 @@ public:
 };
 
 // builtin_views.hpp, with the first built-in view (E15)
-void registerBuiltinViews(ViewRegistry &registry);
+/// The first refusal stops the call; the views before it stay added.
+std::expected<ViewRegistry *, ViewError>
+registerBuiltinViews(ViewRegistry &registry);
 ```
 
 A chord collides with another when their scopes are equal and their chords are equal in
@@ -1824,8 +1827,13 @@ first reached; the second route is drawn as an edge only.
 
 #### 9.1.3 Placement
 
-Let `e(x, u)` be half the extent of cell `x`'s content box along direction `u`, and `g` the gap
-(`stretch.gap`). Binding point `x` runs along +x and `y` along +y.
+Let `e(x, u)` be half the extent of cell `x`'s box along direction `u` — its measured content and
+the existing `zigzag.cellHorizontalPaddingPx` and `cellVerticalPaddingPx` — and `g` the gap
+(`stretch.gap`). The first spatial binding point in binding-point order runs along +x, the second
+along +y and the third in depth (§9.1.4); a fourth or later spatial point is on the compass and
+moves the cursor but has no direction here, and `axisDirection` answers nothing for it (plan G5). A
+point showing nothing keeps its place, so binding only the second still places it along +y. An axis
+showing a group walks its first leaf, and the tick names the group.
 
 1. **The focus.** `c` is placed at the origin at its measured size.
 
@@ -1837,7 +1845,11 @@ Let `e(x, u)` be half the extent of cell `x`'s content box along direction `u`, 
    ```
 
    so its centre is on `c`'s axis line and its edge is one gap from `c`'s. This is the only place
-   alignment is promised (V-R17).
+   alignment is promised (V-R17). Two radius-1 neighbours on different axes can meet in the corner
+   between them — a tall one along +x and a wide one along +y — and "no two boxes overlap" (§9.1.8)
+   holds too, so a neighbour whose box there would overlap one placed before it moves outward along
+   `u`, past what is in the way, and never off the axis line. Alignment is kept; only the gap grows,
+   and only in that case.
 
 1. **Further out, anchored slide.** Take placed cells in the order they were placed. For each `p`,
    each placed in-plane axis in order with direction `u` and perpendicular `v`, and each sign: let
@@ -1868,8 +1880,11 @@ pane.
 
 Binding point `z` runs away from the viewer. A cell reached along it from `p` is placed in the next
 plane behind or in front, `stretch.layerDepth` apart, starting at `p`'s own x and y and sliding by
-the same rule within that plane, which has its own grid. Planes in front of the focus are drawn only
-where they do not cover it.
+the same rule within that plane, which has its own grid. For depth the slide is along y and the
+outward move along +x. Planes in front of the focus are drawn only where they do not cover it: the
+focus's box stands in each of their grids as an obstacle, so a cell in front is slid clear of it
+rather than drawn over it and clipped. The focus's own neighbour behind starts, and stays, at its x
+and y.
 
 #### 9.1.5 Fade and clip
 
@@ -1885,13 +1900,24 @@ where `f` is `stretch.fadeFloor` and `b` is `stretch.fadeBand`. Opacity is const
 of the pane and falls smoothly through the outer band to the floor (V-R19).
 
 A cell whose box is not entirely inside the view is never drawn with its content (V-R18): the test
-is the library's `insideFrustum`, the mirror of `outsideFrustum`. A cut cell is emitted as a
-**ghost** instead: a `Marker` with `itemGhost` and no content, an empty outline of its box at
-`stretch.ghostOpacity`, drawn only where it lies inside the pane. A ghost says that a cell is there
-without showing half of one. The presenter applies the same test to each cell's *animated* box, so a
-cell in flight appears only once it is wholly inside, and it uses a margin of `stretch.clipMargin`
-pixels before showing a cell again, so a cell resting on the edge does not flicker as the camera
-moves.
+is the library's `insideFrustum`, the mirror of `outsideFrustum`. A cut cell — one neither wholly
+inside nor wholly outside — is emitted as a **ghost** instead: a `Marker` with `itemGhost` and
+`itemViewOnly`, no content, an empty outline of its box, drawn only where it lies inside the pane. A
+cell wholly outside is not emitted at all. A ghost says that a cell is there without showing half of
+one. Its opacity is `stretch.ghostShare` of `stretch.fadeFloor` (plan D1): a fixed opacity of its
+own (0.25 against a floor of 0.15) outshone the dimmest real cell, which a placeholder never does.
+The ghost, the focus mark and view-only chrome are made by one helper, `view_marks`, which every
+view uses (plan §5.6). The presenter applies the same test to each cell's *animated* box, so a cell
+in flight appears only once it is wholly inside, and it uses a margin of `stretch.clipMargin` pixels
+before showing a cell again, so a cell resting on the edge does not flicker as the camera moves.
+
+Fading a box and keeping its text readable are separate (plan D2). The floor gives about 1.7:1
+against the theme, far under what text needs, so a cell's content steps down as its opacity falls:
+`Full` above `stretch.abbreviateBelow`, `Abbreviated` above `stretch.coarseBelow`, `Coarse` bars
+below; and `Coarse` wherever a line would project under `PaneFrame::minReadableLinePx`. At 0.5, the
+default for `coarseBelow`, the theme's text over its surface is about 4.6:1, and a test reads the
+theme to say so (§15). The layout is pure, so the hysteresis §5.1 asks of a detail step is the
+presenter's, as the clip margin's is.
 
 **Edge heat.** Ghosts show the cells that just missed. Beyond them the walk has stopped, but it
 knows roughly how much it left: for each direction, the cells it placed outside the pane plus the
@@ -1899,7 +1925,9 @@ neighbours it did not go on to visit. Those counts are summed into `stretch.heat
 round the pane, and each sector is a `Marker` with `itemGlow` along the pane's edge whose opacity
 rises with its count, reaching full at `stretch.heatFull`. The glow is where there is more to see
 and how much. It is a lower bound, since unvisited cells have unvisited neighbours, and the chrome
-says "at least". Ghosts are on by default; the heat is the view's second sub-view and a setting.
+says "at least". Ghosts are on by default; the heat is the view's second sub-view and a setting. As
+built (E9) the heat is not there yet: it is deferred beyond the spine (plan §4.1), and the view
+lists one sub-view until it lands.
 
 The accursed cell is never faded and never hidden. A cell larger than the pane cannot be shown
 whole, so it is shown only when it is the accursed cell, scrolling within the pane; as a neighbour
@@ -1912,6 +1940,15 @@ emphasis; each of its immediate neighbours carries a tick naming the dimension a
 reached it; and a breadcrumb strip in the chrome lists the last `stretch.breadcrumbs` cells walked,
 read from the activity log. Where the walk stopped at the viewport with more cells along a rank, the
 last cell placed on that rank carries the count not shown.
+
+As built (E9), a tick is a `Label` item — Caption role, never faded — naming what the axis shows,
+the group itself when it shows a group, and it is the `label` of the edge from the focus to that
+neighbour, whose direction says which way. It stands beside the neighbour on the far side of the
+perpendicular, flush with the edge nearest the focus, and is placed before anything beyond radius 1
+as an obstacle in the grid, so no later cell covers it; where something is already there it moves
+outward along the axis. A tick the pane would cut is not drawn. The breadcrumb strip is chrome and
+lands with the presenter; the count not shown waits too, since counting the rest of a rank is work
+in the length of the rank, not of the pane, and wants a bound of its own.
 
 ```text
  pane
@@ -1948,7 +1985,9 @@ on the axis perpendicular to its own. No two emitted boxes overlap. No item with
 `insideFrustum`; every cut cell has exactly one ghost. A sector's glow is zero when nothing lies
 that way and rises with the count. Opacity at the centre is 1, at the band's inner edge is 1, and at
 the pane's edge is the floor. A slice of 10⁶ cells and one of 10³ place the same number of cells for
-the same pane.
+the same pane. The test compares 10⁴ with 10³: minting 10⁶ cells through `Store::makeCell` costs
+hours, because `Store::putOp` walks the parent chain back to each operation's containing context, so
+N mints in one slice cost O(N²).
 
 ### 9.2 All-dim walk
 
@@ -2975,7 +3014,8 @@ given to the measurer), `rankClearancePx`, `minReadableTextPx` and `connectionBe
 | `stretch.layerDepth`                                   | 120          | distance between depth planes                                             |
 | `stretch.fadeBand`, `fadeFloor`                        | 0.35, 0.15   | outer fraction that fades; the opacity it fades to                        |
 | `stretch.clipMargin`                                   | 6            | margin before a hidden cell is shown again                                |
-| `stretch.ghostOpacity`                                 | 0.25         | outline of a cell the pane would cut                                      |
+| `stretch.ghostShare`                                   | 0.6          | a ghost's opacity as a share of `fadeFloor` (plan D1)                     |
+| `stretch.abbreviateBelow`, `coarseBelow`               | 0.75, 0.5    | opacities below which content shortens, then becomes bars (plan D2)       |
 | `stretch.heatSectors`, `stretch.heatFull`              | 16, 24       | directions the edge heat is summed in; count at full glow                 |
 | `stretch.breadcrumbs`                                  | 6            | cells in the breadcrumb strip                                             |
 | `ring.radius`, `ring.radiusStep`                       | 220, 90      | ring 0's least radius; growth per ring                                    |
@@ -3720,3 +3760,11 @@ ______________________________________________________________________
   fits, where windows stack, ghost identities, and how `transition()` tells the subject from the
   row. `page.backgroundDepth`, `page.backgroundOpacity` and the rest of §12.3's `page.base.*` are in
   `system://layout`.
+- 2026-10-09 — §9.1 as built (E9), with plan G5, D1 and D2: the first two spatial points lie in the
+  plane and the third in depth; radius-1 neighbours that would meet in a corner move out along their
+  axis line; the focus is an obstacle in planes in front; a ghost is `stretch.ghostShare` of the
+  fade floor, replacing `stretch.ghostOpacity`; content steps down by `stretch.abbreviateBelow` and
+  `coarseBelow`; ticks are labels on the focus's edges, placed as obstacles; a cell wholly outside
+  emits nothing. The shared marks are `view_marks` (§5.2), and `registerBuiltinViews()` returns
+  `std::expected` (§8.1). Edge heat, the breadcrumb and the count not shown are not built yet; the
+  size test is 10⁴ against 10³, for the reason §9.1.8 gives.
