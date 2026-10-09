@@ -25,8 +25,8 @@ against the code. Until the packages it names amend the sections below, these ho
 
 - A page's matrix is rewritten, and read back, by reflow (`src/doc.cpp`). §6 must first split a
   page's flow matrix from its pose and close `Page::setModel`.
-- A beam along world Z has no width (`assets/shaders/beam.vert.glsl`). The beam shader needs a fix,
-  so "no shader change" is not quite true.
+- A beam along world Z had no width (`assets/shaders/beam.vert.glsl`). The beam shader needed a fix,
+  so "no shader change" was not quite true; L9 made it (see the change history).
 - A soft band is a quad textured from a gradient baked into the glyph atlas, since the solid-fill
   path has one alpha per quad.
 - `PlaneSet::draw` also takes the camera's view matrix; `faceCamera` cannot be had from the combined
@@ -533,3 +533,29 @@ capture under SDL2 still wants `xvfb-run`).
   must. `dividers()` and `resizeDivider()` are added because `resize(pane, …)` cannot reach a
   divider between two subtrees. `PaneTree` is in `src/ui/pane_tree.cpp`, not header-only, as
   `ui::split()` (`src/ui/layout.cpp`) is not either.
+- 2026-10-09 — Step 5 built (L5): `PipelineDesc::depthWrite`, `glDepthMask` in the GL loader and
+  `bindPipeline`, and `depthWriteEnable` on Vulkan no longer copied from `depthTest`;
+  `Beams::createPipeline` takes it too. The GL backend sets the mask back on before its frame clear,
+  since `glClear` obeys it and a frame that ended on a translucent draw would otherwise keep its
+  depth. §4's cases are `tests/lib/depth_write_test.cpp`, on each backend the machine can open.
+- 2026-10-09 — R5's decision built, before steps 6 and 7: `gleditor::TranslucentList`
+  (`include/gleditor/translucent_list.hpp`) is the frame's one translucent list. Sheets (any flat
+  glyph batch) and `Beams` batches go in; it sorts them by clip-space w of a reference point (the
+  sheet's origin, a piece's midpoint), cuts each beam where it crosses a sheet's plane, uploads the
+  pieces in draw order and draws runs of them as one call. The renderer no longer sorts documents by
+  world z (`src/renderer.cpp`); a page batch with opacity under one goes to the list and is drawn
+  with a second glyph pipeline that does not write depth, after the opaque pages. A
+  `FrameContributor` gains `drawScene()`, called before the list is drawn, with the list in
+  `FrameContext::translucent`; `drawFrame()` now comes after it. So §4's "after the opaque ones,
+  back to front" and §6.2's sort of page batches are this list, and §5.2's `PlaneSet::draw` should
+  hand its translucent planes to it rather than sort them itself. The R5 scene is
+  `TranslucentSceneTest` in `tests/lib/translucent_list_test.cpp`.
+- 2026-10-09 — L9 built (F3, from spike R3): `beam.vert.glsl` takes a beam's sideways vector across
+  the run and the camera ray through its midpoint, found from `uMVP` alone, with a fixed axis as
+  fallback when the two are parallel. `tests/lib/beams.cpp` tests that rule with a matrix argument
+  in place of the old run × z copy, and draws a beam along each world axis from four cameras on each
+  backend. Exactly end on a ribbon is still a line. Head on, a beam centred in the view is where it
+  was; one off the axis faces the ray to it rather than lying in z = 0, so on screen it is wider by
+  up to 1/cos of the ray's angle off the axis: in a four-beam head-on scene, 2,252 of its 3,235 beam
+  pixels changed by more than 2 in a channel (11 by more than 40) and total intensity rose 4.6%,
+  which is not visible side by side.

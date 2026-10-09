@@ -79,7 +79,11 @@ void Renderer::createPipeline(RenderState &state) const {
   desc.spirvDir       = shaders + "/vulkan";
   desc.layout         = Doc::vertexLayout();
 
-  state.glyphPipeline = device->createPipeline(desc);
+  state.glyphPipeline                  = device->createPipeline(desc);
+  render::PipelineDesc translucentDesc = desc;
+  translucentDesc.name                 = "glyph-translucent";
+  translucentDesc.depthWrite           = false;
+  state.translucentGlyphPipeline = device->createPipeline(translucentDesc);
   // The overlay draws the same glyph instances with the same shaders; only the
   // depth state and the transform it is handed differ.
   toasts->createPipeline(desc);
@@ -397,14 +401,13 @@ bool Renderer::update(RenderState &state, const bool settled) {
   budget.coarseBelow = this->state->coarseBelow;
   budget.cull        = this->state->cullPages;
   lastDraw           = DrawStats{};
-  // Sort documents back-to-front (lowest Z first) so that alpha blending
-  // correctly composites semi-transparent layers in 3D onion-skinning mode.
-  auto sortedDocs = state.docs;
-  std::ranges::stable_sort(sortedDocs, [](const auto &a, const auto &b) {
-    return a->currentPosition().z < b->currentPosition().z;
-  });
+  // In any order: the opaque pages are ordered by the depth buffer, and the
+  // faded ones are sorted below, page by page and by their depth from the
+  // camera. Sorting documents by their world z instead -- what was done here
+  // -- is back to front only for a camera looking down -z, and blended a
+  // document seen from behind over the ones in front of it.
   if (state.documentsVisible) {
-    for (const std::shared_ptr<Doc> &doc : sortedDocs) {
+    for (const std::shared_ptr<Doc> &doc : state.docs) {
       doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
     }
   }
@@ -419,38 +422,61 @@ bool Renderer::update(RenderState &state, const bool settled) {
   std::erase_if(fadingDocs, [](const std::shared_ptr<Doc> &doc) {
     return doc->hasFadedOut();
   });
+  // Faded pages go to the translucent list, drawn after everything opaque
+  // without writing depth; the rest are drawn now. Partitioned in place, so
+  // the list of batches still counts every page drawn.
+  translucent->clear();
+  const auto faded = std::ranges::partition(
+      state.pageBatches, [](const render::GlyphBatch &batch) {
+        return batch.uniforms.opacity >= 1.0F;
+      });
+  for (const auto &batch : faded) {
+    translucent->addSheet(state.translucentGlyphPipeline, batch);
+  }
   // Timed apart from the collection above: only the recording can be split
   // across threads, so an improvement there would be invisible in a figure
   // that also counted a matrix multiply per page.
   const auto recordStart = std::chrono::steady_clock::now();
-  device->drawGlyphBatches(state.pageBatches);
+  device->drawGlyphBatches(std::span<const render::GlyphBatch>(
+      state.pageBatches.begin(), faded.begin()));
   const auto recordEnd = std::chrono::steady_clock::now();
 
+  // Whatever the program draws for itself: its scene among the documents, and
+  // what sits over them after the translucent list, before the notifications,
+  // which must be over everything.
+  const auto theme = this->state->uiTheme.load();
+  gleditor::FrameContext ctx{
+      .state          = state,
+      .viewProjection = viewProjection,
+      .screenWidth    = screenWidth,
+      .screenHeight   = screenHeight,
+      .timeline       = timeline,
+      .settledChrome  = lastChrome,
+      .metrics        = {.contentScale = this->state->contentScale.load(),
+                         .userScale    = this->state->uiScale.load(),
+                         .fontScale    = this->state->fontScale.load(),
+                         .screenWidth  = screenWidth,
+                         .screenHeight = screenHeight,
+                         .marginShare  = this->state->uiSafeMarginShare.load()},
+      .theme          = theme ? *theme : gleditor::ui::defaultTheme(),
+      .translucent    = translucent.get()};
+  if (!frameContributors.empty()) {
+    state.beginPickScene();
+    for (auto *const contributor : frameContributors) {
+      contributor->drawScene(ctx);
+    }
+  }
+  translucent->draw(state);
+
+  // After the translucent list: the caret does not test depth, and a faded
+  // page drawn over it would fade it too.
   if (state.documentsVisible) {
     for (const std::shared_ptr<Doc> &doc : state.docs) {
       doc->drawCaret(state, viewProjection, *caret);
     }
   }
 
-  // Whatever the program draws for itself: after the documents, so it can sit
-  // over them, and before the notifications, which must be over everything.
-  const auto theme = this->state->uiTheme.load();
   if (!frameContributors.empty()) {
-    state.beginPickScene();
-    gleditor::FrameContext ctx{
-        .state          = state,
-        .viewProjection = viewProjection,
-        .screenWidth    = screenWidth,
-        .screenHeight   = screenHeight,
-        .timeline       = timeline,
-        .settledChrome  = lastChrome,
-        .metrics        = {.contentScale = this->state->contentScale.load(),
-                           .userScale    = this->state->uiScale.load(),
-                           .fontScale    = this->state->fontScale.load(),
-                           .screenWidth  = screenWidth,
-                           .screenHeight = screenHeight,
-                           .marginShare  = this->state->uiSafeMarginShare.load()},
-        .theme          = theme ? *theme : gleditor::ui::defaultTheme()};
     for (auto *const contributor : frameContributors) {
       ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);
@@ -1284,6 +1310,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   RenderState state(device.get());
   toasts      = std::make_unique<ToastOverlay>(device.get(), std::string{});
   caret       = std::make_unique<Caret>(device.get());
+  translucent = std::make_unique<gleditor::TranslucentList>(device.get());
   state.caret = caret.get();
 
   // What the library itself has to say about what is on screen. Registered
@@ -1451,6 +1478,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   timeline.clear();
   fadingDocs.clear();
   state.docs.clear();
+  translucent.reset();
   caret.reset();
   toasts.reset();
   device->shutdown();

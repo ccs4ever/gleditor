@@ -10,9 +10,10 @@
  * So this is a second pipeline with a record of its own: one instance per
  * beam, holding its two ends. The corners come from the vertex index as
  * before, but from the *ends* rather than from a centre, and the width is
- * taken perpendicular to the run within the plane the pages lie in -- so a
- * beam foreshortens with what it connects rather than facing the camera like
- * a label.
+ * taken perpendicular both to the run and to the camera ray through the
+ * beam's middle: the ribbon turns about its own length to face the camera.
+ * Taken within the plane the pages lie in instead, as it once was, a beam
+ * running in depth had no width at all, and any beam vanished edge on.
  *
  * Nothing here knows what a beam means. A beam has two ends, a colour and a
  * tag; whether it stands for a link, a reference, a dependency or a wire is
@@ -102,9 +103,13 @@ public:
    * @param depthTest Whether beams are occluded by what they run between.
    *        Usually yes: a beam that passed in front of the page it points at
    *        would be a beam nothing could be behind.
+   * @param depthWrite Whether a beam hides what is drawn after it and behind
+   *        it. Off when beams are drawn among translucent things back to
+   *        front, where a beam that wrote its depth would cut itself out of a
+   *        faded page drawn in front of it.
    */
   void createPipeline(const std::string &assetDir, const std::string &spirvDir,
-                      bool depthTest = true);
+                      bool depthTest = true, bool depthWrite = true);
 
   /// Whether there is a pipeline to draw with. False when the shaders could
   /// not be read, which is not fatal: the rest of the frame still draws.
@@ -143,6 +148,22 @@ public:
   [[nodiscard]] std::uint32_t committed() const { return committedRows; }
 
   /**
+   * @brief The beams the last commit() handed the device.
+   *
+   * For a caller that draws them in pieces rather than in one call -- a
+   * TranslucentList cutting them where they cross a translucent sheet. A copy
+   * rather than the pending rows, which add() may have changed since.
+   */
+  [[nodiscard]] std::span<const Row> committedBeams() const {
+    return committedCopy;
+  }
+
+  /// The pipeline draw() binds, for the same caller.
+  [[nodiscard]] render::PipelineHandle pipelineHandle() const {
+    return pipeline;
+  }
+
+  /**
    * @brief Draw the committed beams.
    * @param transform projection * view, with any model transform already on
    *        it: beam ends are given in the space this maps from.
@@ -159,6 +180,7 @@ private:
   BufferPool::Allocation backing{};
   std::uint32_t committedRows{};
   std::vector<Row> rows;
+  std::vector<Row> committedCopy;
 };
 
 } // namespace gleditor

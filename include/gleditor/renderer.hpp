@@ -35,6 +35,7 @@
 #include <gleditor/text/diagnostics.hpp>
 #include <gleditor/text_source.hpp>
 #include <gleditor/toast.hpp>
+#include <gleditor/translucent_list.hpp>
 
 class Doc;
 struct AutoSDLWindow;
@@ -364,6 +365,9 @@ private:
   std::unique_ptr<ToastOverlay> toasts;
   /// The editing caret, likewise built and destroyed around the device.
   std::unique_ptr<Caret> caret;
+  /// The frame's translucent draws, sorted together; likewise built and
+  /// destroyed around the device, since it owns storage for cut beams.
+  std::unique_ptr<gleditor::TranslucentList> translucent;
   /// What the open documents look like to an assistive technology. Built from
   /// the same state as the frame, once a frame, and only when it has changed.
   gleditor::a11y::DocumentsSource documents;

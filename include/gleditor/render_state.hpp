@@ -40,6 +40,9 @@ struct RenderState {
   render::RenderDevice *device;           ///< Active graphics device.
   gleditor::GlyphCache glyphCache;        ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
+  /// The same, depth tested and not written: what a page that is fading draws
+  /// with, after everything opaque (see TranslucentList).
+  render::PipelineHandle translucentGlyphPipeline{};
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
   /// A host presentation may keep documents open while showing another view.
   bool documentsVisible{true};

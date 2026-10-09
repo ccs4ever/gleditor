@@ -31,6 +31,8 @@ class RenderDevice;
 
 namespace gleditor {
 
+class TranslucentList;
+
 /// What a contributor is given when the frame asks it to draw.
 struct FrameContext {
   RenderState &state;
@@ -69,11 +71,21 @@ struct FrameContext {
   ScreenInsets settledChrome{};
   ui::UiMetrics metrics;
   const ui::Theme &theme{ui::defaultTheme()};
+  /**
+   * @brief The frame's translucent draws, sorted by camera depth and drawn
+   *        between drawScene() and drawFrame().
+   *
+   * A contributor hands its translucent world content -- beams above all --
+   * to this from drawScene() rather than drawing it, so that it is blended in
+   * depth order with the faded pages instead of on top of them. Null where no
+   * renderer is drawing, as in a test that calls a contributor directly.
+   */
+  TranslucentList *translucent{};
 };
 
 /**
  * @brief Draws into the frame after the documents and before the
- *        notifications.
+ *        notifications, in two passes: the scene, then what is over it.
  *
  * Called on the render thread, every frame, in the order registered.
  * Contributors are held as bare pointers and are not owned; one must outlive
@@ -103,6 +115,22 @@ public:
   deviceReady([[maybe_unused]] render::RenderDevice &device,
               [[maybe_unused]] const render::PipelineDesc &documentPipeline) {}
 
+  /**
+   * @brief Draw what belongs to the scene, before anything translucent.
+   *
+   * Called for every contributor, in the order registered, after the opaque
+   * pages and before the frame's translucent list is drawn. Opaque world
+   * content drawn here is behind, and seen through, a faded page in front of
+   * it; translucent world content is added to FrameContext::translucent so
+   * that it is sorted with the pages. Nothing here claims chrome.
+   *
+   * Content drawn in drawFrame() instead comes after the translucent list:
+   * right for what sits over the scene, wrong for what is in it, since a faded
+   * page does not hide what is drawn after it.
+   */
+  virtual void drawScene([[maybe_unused]] FrameContext &ctx) {}
+
+  /// Draw what sits over the scene, after the translucent list.
   virtual void drawFrame(FrameContext &ctx) = 0;
 
   /**

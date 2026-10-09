@@ -10,7 +10,9 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -19,12 +21,20 @@
 
 #include <gmock/gmock.h>
 
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_float4x4.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/ext/vector_float2.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <gleditor/beams.hpp>
+#include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/render_state.hpp>
 
+#include "headless_device.hpp"
 #include "mocks/device.hpp"
 
 using gleditor::Beams;
@@ -72,18 +82,87 @@ public:
   }
 };
 
-/// What the vertex stage builds from a beam and a vertex index, written out as
-/// assets/shaders/beam.vert.glsl does it.
-glm::vec3 cornerOf(const Beams::Row &row, const int corner) {
+/// The camera ray through @p point, from the combined matrix alone, written
+/// out as viewRayThrough() in assets/shaders/beam.vert.glsl does it.
+glm::vec3 viewRayThrough(const glm::mat4 &mvp, const glm::vec3 &point) {
+  const glm::vec4 clip = mvp * glm::vec4(point, 1.0F);
+  const glm::vec3 rowX{mvp[0][0], mvp[1][0], mvp[2][0]};
+  const glm::vec3 rowY{mvp[0][1], mvp[1][1], mvp[2][1]};
+  const glm::vec3 rowW{mvp[0][3], mvp[1][3], mvp[2][3]};
+  return glm::cross((clip.w * rowX) - (clip.x * rowW),
+                    (clip.w * rowY) - (clip.y * rowW));
+}
+
+/// What the vertex stage builds from a beam, a vertex index and the matrix it
+/// is drawn with, written out as assets/shaders/beam.vert.glsl does it.
+glm::vec3 cornerOf(const Beams::Row &row, const int corner,
+                   const glm::mat4 &mvp) {
   const glm::vec3 from{row.from[0], row.from[1], row.from[2]};
   const glm::vec3 to{row.to[0], row.to[1], row.to[2]};
   const float along  = (0 != (corner & 2)) ? 1.0F : 0.0F;
   const float across = (0 != (corner & 1)) ? 1.0F : -1.0F;
 
-  const auto run      = to - from;
-  const auto sideways = glm::cross(run, glm::vec3(0.0F, 0.0F, 1.0F));
-  const auto offset   = glm::normalize(sideways) * (row.width * 0.5F) * across;
+  const auto run = glm::normalize(to - from);
+  auto sideways  = glm::cross(
+      run, glm::normalize(viewRayThrough(mvp, glm::mix(from, to, 0.5F))));
+  if (glm::dot(sideways, sideways) < 1e-6F) {
+    const glm::vec3 other = std::abs(run.z) < 0.9F
+                                ? glm::vec3(0.0F, 0.0F, 1.0F)
+                                : glm::vec3(1.0F, 0.0F, 0.0F);
+    sideways              = glm::cross(run, other);
+  }
+  const auto offset = glm::normalize(sideways) * (row.width * 0.5F) * across;
   return glm::mix(from, to, along) + offset;
+}
+
+/// A camera at @p eye looking at the origin, as the renderer builds one.
+glm::mat4 lookingAtOrigin(const glm::vec3 &eye) {
+  return glm::perspective(glm::radians(45.0F), 4.0F / 3.0F, 0.1F, 1000.0F) *
+         glm::lookAt(eye, glm::vec3(0.0F), glm::vec3(0.0F, 1.0F, 0.0F));
+}
+
+/// Head on: on the +z axis, looking down -z at the plane the pages lie in.
+const glm::mat4 headOn = lookingAtOrigin({0.0F, 0.0F, 50.0F});
+
+/**
+ * @brief Four cameras round the origin, none of them end on to a world axis:
+ *        in front and to the side, behind and below, above, and low to the
+ *        right. Azimuth from +z towards +x, then elevation, in degrees.
+ */
+constexpr std::array<std::array<float, 2>, 4> oblique{
+    {{30.0F, 20.0F}, {150.0F, -25.0F}, {250.0F, 60.0F}, {300.0F, 5.0F}}};
+
+glm::vec3 orbit(const std::array<float, 2> &angles, const float radius) {
+  const float azimuth   = glm::radians(angles[0]);
+  const float elevation = glm::radians(angles[1]);
+  return {radius * std::cos(elevation) * std::sin(azimuth),
+          radius * std::sin(elevation),
+          radius * std::cos(elevation) * std::cos(azimuth)};
+}
+
+/// Where @p point lands, in pixels of a 640 by 480 target.
+glm::vec2 onScreen(const glm::mat4 &mvp, const glm::vec3 &point) {
+  const glm::vec4 clip = mvp * glm::vec4(point, 1.0F);
+  return {((clip.x / clip.w) * 0.5F + 0.5F) * 640.0F,
+          ((clip.y / clip.w) * 0.5F + 0.5F) * 480.0F};
+}
+
+/// Area of the drawn ribbon on screen, in square pixels.
+float screenArea(const Beams::Row &row, const glm::mat4 &mvp) {
+  std::array<glm::vec2, 4> c{};
+  for (int corner = 0; corner < 4; ++corner) {
+    c[static_cast<std::size_t>(corner)] =
+        onScreen(mvp, cornerOf(row, corner, mvp));
+  }
+  // The strip's quad is 0, 1, 3, 2 going round.
+  const std::array<glm::vec2, 4> ring{c[0], c[1], c[3], c[2]};
+  float twice = 0.0F;
+  for (std::size_t i = 0; i < ring.size(); ++i) {
+    const auto &a = ring[i];
+    const auto &b = ring[(i + 1) % ring.size()];
+    twice += (a.x * b.y) - (b.x * a.y);
+  }
+  return std::abs(twice) * 0.5F;
 }
 
 class BeamsTest : public testing::Test {
@@ -246,18 +325,18 @@ TEST_F(BeamsTest, moreBeamsThanTheStorageHoldsGrowIt) {
 // centred on the segment, in the order a triangle strip wants: 0 and 1 at one
 // end, 2 and 3 at the other. Swapping the two bits would draw a bow tie.
 TEST_F(BeamsTest, theFourCornersAreARectangleAlongTheRun) {
-  const Beams::Row row{{0.0F, 0.0F, 0.0F}, 2.0F, {10.0F, 0.0F, 0.0F}, 0, 0};
+  const Beams::Row row{{-5.0F, 0.0F, 0.0F}, 2.0F, {5.0F, 0.0F, 0.0F}, 0, 0};
 
-  const auto nearLeft  = cornerOf(row, 0);
-  const auto nearRight = cornerOf(row, 1);
-  const auto farLeft   = cornerOf(row, 2);
-  const auto farRight  = cornerOf(row, 3);
+  const auto nearLeft  = cornerOf(row, 0, headOn);
+  const auto nearRight = cornerOf(row, 1, headOn);
+  const auto farLeft   = cornerOf(row, 2, headOn);
+  const auto farRight  = cornerOf(row, 3, headOn);
 
   // The first two sit at the near end and the last two at the far end.
-  EXPECT_FLOAT_EQ(nearLeft.x, 0.0F);
-  EXPECT_FLOAT_EQ(nearRight.x, 0.0F);
-  EXPECT_FLOAT_EQ(farLeft.x, 10.0F);
-  EXPECT_FLOAT_EQ(farRight.x, 10.0F);
+  EXPECT_FLOAT_EQ(nearLeft.x, -5.0F);
+  EXPECT_FLOAT_EQ(nearRight.x, -5.0F);
+  EXPECT_FLOAT_EQ(farLeft.x, 5.0F);
+  EXPECT_FLOAT_EQ(farRight.x, 5.0F);
 
   // Half the width to each side of the run, and the two ends offset the same
   // way, so the quad has parallel sides.
@@ -265,27 +344,100 @@ TEST_F(BeamsTest, theFourCornersAreARectangleAlongTheRun) {
   EXPECT_FLOAT_EQ(glm::distance(farLeft, farRight), row.width);
   EXPECT_FLOAT_EQ(nearLeft.y, farLeft.y);
   EXPECT_FLOAT_EQ(nearRight.y, farRight.y);
+}
 
-  // And it stays in the plane the pages lie in rather than turning to face the
-  // camera: every corner keeps the Z of the end it came from.
-  for (const auto &corner : {nearLeft, nearRight, farLeft, farRight}) {
-    EXPECT_FLOAT_EQ(corner.z, 0.0F);
+// Head on, a beam centred in the view lies in the plane of the pages, as every
+// beam did under the old rule (run x z): turning to face the camera changes
+// nothing for a reader looking straight at the pages.
+TEST_F(BeamsTest, headOnABeamLiesInThePlaneOfThePages) {
+  for (const auto &to :
+       {glm::vec3{5.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 5.0F, 0.0F},
+        glm::vec3{3.0F, 4.0F, 0.0F}}) {
+    const Beams::Row row{{-to.x, -to.y, 0.0F}, 1.5F, {to.x, to.y, 0.0F}, 0, 0};
+    for (int corner = 0; corner < 4; ++corner) {
+      EXPECT_NEAR(cornerOf(row, corner, headOn).z, 0.0F, 1e-5F);
+    }
   }
 }
 
-// The width is measured across the beam whichever way it runs, which is what
-// says the offset is perpendicular rather than along an axis.
+// The width is measured across the beam whichever way it runs and from
+// wherever it is seen, which is what says the offset is perpendicular to the
+// run rather than along an axis.
 TEST_F(BeamsTest, theWidthIsAcrossTheBeamAtAnyAngle) {
-  for (const auto &to :
-       {glm::vec3{5.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 5.0F, 0.0F},
-        glm::vec3{3.0F, 4.0F, 0.0F}, glm::vec3{-2.0F, 7.0F, 0.0F}}) {
-    const Beams::Row row{{0.0F, 0.0F, 0.0F}, 1.5F, {to.x, to.y, to.z}, 0, 0};
-    const auto left  = cornerOf(row, 0);
-    const auto right = cornerOf(row, 1);
-    EXPECT_FLOAT_EQ(glm::distance(left, right), row.width);
-    // Perpendicular: the offset between the corners has no component along the
-    // run.
-    EXPECT_NEAR(glm::dot(right - left, glm::normalize(to)), 0.0F, 1e-5F);
+  for (const auto &angles : oblique) {
+    const auto mvp = lookingAtOrigin(orbit(angles, 60.0F));
+    for (const auto &to :
+         {glm::vec3{5.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 5.0F, 0.0F},
+          glm::vec3{0.0F, 0.0F, 5.0F}, glm::vec3{-2.0F, 7.0F, 3.0F}}) {
+      const Beams::Row row{{0.0F, 0.0F, 0.0F}, 1.5F, {to.x, to.y, to.z}, 0, 0};
+      const auto left  = cornerOf(row, 0, mvp);
+      const auto right = cornerOf(row, 1, mvp);
+      EXPECT_NEAR(glm::distance(left, right), row.width, 1e-4F);
+      EXPECT_NEAR(glm::dot(right - left, glm::normalize(to)), 0.0F, 1e-4F);
+    }
+  }
+}
+
+// The ribbon turns about its run to face the camera: across it is
+// perpendicular to the camera ray, so its full width is seen.
+TEST_F(BeamsTest, theRibbonFacesTheCamera) {
+  for (const auto &angles : oblique) {
+    const auto eye = orbit(angles, 60.0F);
+    const auto mvp = lookingAtOrigin(eye);
+    const Beams::Row row{{0.0F, 0.0F, -5.0F}, 1.0F, {0.0F, 0.0F, 5.0F}, 0, 0};
+    const auto across = cornerOf(row, 1, mvp) - cornerOf(row, 0, mvp);
+    // The midpoint is the origin, so the ray to it runs from the eye.
+    EXPECT_NEAR(glm::dot(glm::normalize(across), glm::normalize(eye)), 0.0F,
+                1e-4F);
+  }
+}
+
+// F3: under the old rule a beam along z had no width at any angle, and one
+// along x or y vanished edge on. Now a beam along each world axis covers the
+// screen from every one of the four cameras.
+TEST_F(BeamsTest, aBeamAlongEachAxisHasAreaFromEveryAngle) {
+  for (const auto &axis :
+       {glm::vec3{1.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 1.0F, 0.0F},
+        glm::vec3{0.0F, 0.0F, 1.0F}}) {
+    const auto from = axis * -20.0F;
+    const auto to   = axis * 20.0F;
+    const Beams::Row row{
+        {from.x, from.y, from.z}, 2.0F, {to.x, to.y, to.z}, 0, 0};
+    for (const auto &angles : oblique) {
+      EXPECT_GT(screenArea(row, lookingAtOrigin(orbit(angles, 150.0F))), 50.0F)
+          << "axis " << axis.x << axis.y << axis.z << " from " << angles[0]
+          << "," << angles[1];
+    }
+  }
+}
+
+// Exactly end on, a ribbon is a line whichever way it turns: the fallback
+// keeps the arithmetic finite, and nothing is drawn. A cap for that case is
+// outside this rule (design/view-system-implementation-plan.md, R3).
+TEST_F(BeamsTest, exactlyEndOnABeamIsALine) {
+  const Beams::Row row{{0.0F, 0.0F, -20.0F}, 2.0F, {0.0F, 0.0F, 20.0F}, 0, 0};
+  for (int corner = 0; corner < 4; ++corner) {
+    const auto at = cornerOf(row, corner, headOn);
+    EXPECT_TRUE(std::isfinite(at.x) && std::isfinite(at.y));
+  }
+  EXPECT_NEAR(screenArea(row, headOn), 0.0F, 1e-2F);
+}
+
+// Vulkan rewrites the matrix it draws with -- y negated, z remapped -- and the
+// ray is taken from that matrix. Only the sign of across changes, so the same
+// four corners are drawn, each pair swapped.
+TEST_F(BeamsTest, vulkansRewrittenMatrixDrawsTheSameRibbon) {
+  const auto mvp      = lookingAtOrigin(orbit(oblique[0], 60.0F));
+  glm::mat4 rewritten = mvp;
+  for (int column = 0; column < 4; ++column) {
+    rewritten[column][1] = -mvp[column][1];
+    rewritten[column][2] = (mvp[column][3] - mvp[column][2]) * 0.5F;
+  }
+  const Beams::Row row{{1.0F, -2.0F, -4.0F}, 1.0F, {-3.0F, 2.0F, 6.0F}, 0, 0};
+  for (int corner = 0; corner < 4; ++corner) {
+    const auto a = cornerOf(row, corner, mvp);
+    const auto b = cornerOf(row, corner ^ 1, rewritten);
+    EXPECT_NEAR(glm::distance(a, b), 0.0F, 1e-4F) << "corner " << corner;
   }
 }
 
@@ -321,3 +473,65 @@ TEST_F(BeamsTest, drawingWithoutAPipelineIsQuiet) {
   beams.commit();
   EXPECT_CALL(*device, drawGlyphs(_, _, _, _)).Times(0);
 }
+
+namespace {
+
+class BeamsDrawnTest : public testing::TestWithParam<render::Backend> {};
+
+/// Pixels where the red beam clearly dominates the black clear colour.
+int litPixels(const render::FrameImage &image) {
+  int count = 0;
+  for (std::size_t i = 0; i + 3 < image.rgba.size(); i += 4) {
+    if (image.rgba[i] - std::max(image.rgba[i + 1], image.rgba[i + 2]) > 40) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+} // namespace
+
+// The gate for F3 on the device, not only in the arithmetic above: a beam
+// along each world axis is drawn from each of the four cameras.
+TEST_P(BeamsDrawnTest, aBeamAlongEachAxisIsDrawnFromEveryAngle) {
+  auto opened = headless::open(GetParam(), 640, 480);
+  if (!opened) {
+    GTEST_SKIP() << opened.error();
+  }
+  auto &device = *(*opened)->device;
+  {
+    RenderState state(&device);
+    const auto shaders = gleditor::assetPath("shaders");
+    for (const auto &axis :
+         {glm::vec3{1.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 1.0F, 0.0F},
+          glm::vec3{0.0F, 0.0F, 1.0F}}) {
+      Beams beam(&device);
+      beam.createPipeline(shaders, shaders + "/vulkan", true);
+      beam.add(axis * -30.0F, axis * 30.0F, 3.0F, 0xFF2020FFU, 1);
+      beam.commit();
+      for (const auto &angles : oblique) {
+        render::FrameImage image;
+        // Twice, so the capture follows a frame already drawn.
+        for (int frame = 0; frame < 2; ++frame) {
+          ASSERT_TRUE(device.beginFrame());
+          device.setHighlights({});
+          beam.draw(state, lookingAtOrigin(orbit(angles, 150.0F)), 1.0F, 0);
+          device.endFrame();
+          device.waitIdle();
+          image = device.captureColorTarget();
+        }
+        EXPECT_GT(litPixels(image), 100)
+            << render::backendName(GetParam()) << " axis " << axis.x << axis.y
+            << axis.z << " from " << angles[0] << "," << angles[1];
+      }
+      device.waitIdle();
+    }
+    EXPECT_TRUE(device.takeDiagnostics().empty());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Backends, BeamsDrawnTest, testing::ValuesIn(headless::compiledBackends()),
+    [](const testing::TestParamInfo<render::Backend> &info) {
+      return render::backendName(info.param);
+    });

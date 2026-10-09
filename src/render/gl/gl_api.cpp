@@ -112,6 +112,7 @@ void GLApi::load() {
 
   GLEDITOR_RESOLVE(Enable);
   GLEDITOR_RESOLVE(DepthFunc);
+  GLEDITOR_RESOLVE(DepthMask);
   GLEDITOR_RESOLVE(Disable);
   GLEDITOR_RESOLVE(BlendFunc);
   GLEDITOR_RESOLVE(Viewport);

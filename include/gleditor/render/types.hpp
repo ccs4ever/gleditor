@@ -179,7 +179,7 @@ struct PipelineDesc {
   std::string shaderName{"glyph"};
   VertexLayout layout;
   /**
-   * @brief Whether fragments are depth tested and depth written.
+   * @brief Whether fragments are depth tested.
    *
    * Off for overlays: a screen-space notification has no meaningful depth to
    * compare against a perspective document, so it relies on being submitted
@@ -188,6 +188,19 @@ struct PipelineDesc {
    * depth conventions, which no single value satisfies.
    */
   bool depthTest{true};
+  /**
+   * @brief Whether fragments that pass the depth test write their depth.
+   *
+   * Off for translucent draws. Those are drawn after everything opaque, back
+   * to front, and must be hidden by what is in front of them without hiding
+   * what is behind them: a faded page that wrote its depth would cut a hole in
+   * every translucent thing drawn after it and behind it, which is a page
+   * seen through being drawn as if it were not there.
+   *
+   * Ignored when @ref depthTest is off, since neither OpenGL nor Vulkan
+   * writes depth for a fragment it does not test.
+   */
+  bool depthWrite{true};
 };
 
 /**
