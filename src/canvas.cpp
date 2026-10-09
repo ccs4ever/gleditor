@@ -161,10 +161,11 @@ void Canvas::createPipeline(const render::PipelineDesc &documentDesc,
   imageDesc.vertexSource = render::readShaderBody(shaders + "/image.vert.glsl");
   imageDesc.fragmentSource =
       render::readShaderBody(shaders + "/image.frag.glsl");
-  imageDesc.spirvDir  = documentDesc.spirvDir;
-  imageDesc.layout    = imageLayout();
-  imageDesc.depthTest = depthTest;
-  imagePipeline       = device->createPipeline(imageDesc);
+  imageDesc.spirvDir   = documentDesc.spirvDir;
+  imageDesc.layout     = imageLayout();
+  imageDesc.depthTest  = depthTest;
+  imageDesc.depthWrite = documentDesc.depthWrite;
+  imagePipeline        = device->createPipeline(imageDesc);
 }
 
 void Canvas::clear() {

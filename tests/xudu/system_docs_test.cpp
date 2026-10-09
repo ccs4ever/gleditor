@@ -478,6 +478,42 @@ TEST(SystemDocsTest, PageBaseCoalesceSettingsFromStore) {
   EXPECT_FLOAT_EQ(page.physicsUnitPx, 9.0F);
 }
 
+// The base page view's arrangement and motion, and what every page view
+// shares, are read from system://layout beside the coalescing settings.
+TEST(SystemDocsTest, PageViewSettingsFromStore) {
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
+  EXPECT_EQ(LayoutConfig::fromStore(store).pages, xanadu::PageViewsConfig{});
+
+  namespace s = xanadu::settings;
+  auto head   = store.primaryCurrentVersion();
+  head        = xanadu::setSetting(store, head, s::kPageBaseDocumentGap, 100.0);
+  head        = xanadu::setSetting(store, head, s::kPageBasePageGap, 10.0);
+  head        = xanadu::setSetting(store, head, s::kPageBaseLiftDepth, 30.0);
+  head        = xanadu::setSetting(store, head, s::kPageBaseBandContext,
+                                   static_cast<std::int64_t>(5));
+  head = xanadu::setSetting(store, head, s::kPageBaseContextOpacity, 0.25);
+  head = xanadu::setSetting(store, head, s::kPageBaseSubjectMs, 700.0);
+  head = xanadu::setSetting(store, head, s::kPageBaseRowMs, 300.0);
+  head = xanadu::setSetting(store, head, s::kPageBaseRowDelayMs, 40.0);
+  head = xanadu::setSetting(store, head, s::kPageBackgroundDepth, 500.0);
+  head = xanadu::setSetting(store, head, s::kPageBackgroundOpacity, 0.5);
+  store.repointCurrentVersion(head);
+
+  const auto layout = LayoutConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(layout.pageBase.documentGap, 100.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.pageGap, 10.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.liftDepth, 30.0F);
+  EXPECT_EQ(layout.pageBase.bandContext, 5U);
+  EXPECT_FLOAT_EQ(layout.pageBase.contextOpacity, 0.25F);
+  EXPECT_FLOAT_EQ(layout.pageBase.subjectMs, 700.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.rowMs, 300.0F);
+  EXPECT_FLOAT_EQ(layout.pageBase.rowDelayMs, 40.0F);
+  EXPECT_FLOAT_EQ(layout.pages.backgroundDepth, 500.0F);
+  EXPECT_FLOAT_EQ(layout.pages.backgroundOpacity, 0.5F);
+}
+
 TEST(SystemDocsTest, GetSetVaryingCellValues) {
   Store store;
   store.setSystem(true);
@@ -512,6 +548,51 @@ TEST(SystemDocsTest, GetSetVaryingCellValues) {
   EXPECT_EQ(std::get<std::int64_t>(updated[1]), 100);
   EXPECT_EQ(std::get<bool>(updated[2]), false);
   EXPECT_EQ(std::get<std::string>(updated[3]), "updated");
+}
+
+TEST(SystemDocsTest, DimensionCueSettingsAreKeyedByTheWholeDimensionName) {
+  namespace settings = xanadu::settings;
+  EXPECT_EQ(settings::dimensionColourKey("d.clone"),
+            "ui.dimension.d.clone.colour");
+  EXPECT_EQ(settings::dimensionDashKey("d.clone"), "ui.dimension.d.clone.dash");
+  EXPECT_EQ(settings::dimensionOfColourKey("ui.dimension.d.clone.colour"),
+            "d.clone");
+  EXPECT_EQ(
+      settings::dimensionOfColourKey(settings::dimensionColourKey("x.colour")),
+      "x.colour");
+  EXPECT_FALSE(settings::dimensionOfColourKey("ui.dimension.d.clone.dash"));
+  EXPECT_FALSE(settings::dimensionOfColourKey("ui.dimension..colour"));
+  EXPECT_FALSE(settings::dimensionOfColourKey("linkPanel.textColour"));
+
+  // Minted into system://ui, they take a reader's value and reset to what
+  // the palette assigned.
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::UI);
+  auto ver = store.primaryCurrentVersion();
+  for (const auto &spec :
+       xanadu::dimensionCueSettingSpecs("d.clone", 0x8BAAFFFFU, "dot")) {
+    EXPECT_FALSE(spec.notes.empty());
+    ver = xanadu::ensureSetting(store, ver, spec);
+  }
+  store.repointCurrentVersion(ver);
+  const auto colourKey = settings::dimensionColourKey("d.clone");
+  const auto dashKey   = settings::dimensionDashKey("d.clone");
+  const auto colourOf  = [&] {
+    return std::get<std::int64_t>(xanadu::getSetting(store, colourKey).at(0));
+  };
+  EXPECT_EQ(colourOf(), std::int64_t{0x8BAAFFFFU});
+  EXPECT_EQ(std::get<std::string>(xanadu::getSetting(store, dashKey).at(0)),
+            "dot");
+  ver = xanadu::setSetting(store, ver, colourKey, std::int64_t{0x102030FFU});
+  store.repointCurrentVersion(ver);
+  EXPECT_EQ(colourOf(), std::int64_t{0x102030FFU});
+  EXPECT_THROW(
+      (void)xanadu::setSetting(store, ver, colourKey, std::string{"red"}),
+      std::invalid_argument);
+  ver = xanadu::resetSettingToDefault(store, ver, colourKey);
+  store.repointCurrentVersion(ver);
+  EXPECT_EQ(colourOf(), std::int64_t{0x8BAAFFFFU});
 }
 
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {

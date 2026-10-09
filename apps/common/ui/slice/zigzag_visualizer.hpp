@@ -103,6 +103,8 @@ struct DimensionVisual {
 struct SceneVisual {
   glm::vec3 background{0.05F, 0.05F, 0.07F};
   glm::vec3 focus_color{0.956F, 0.773F, 0.259F};
+  /// A quotation cell, focused or not, in place of its focus or axis colour.
+  glm::vec3 quote_color{0.22F, 0.74F, 0.97F};
   float focus_scale{1.4F};
   float cell_radius{0.35F};
   float layout_speed{12.0F};

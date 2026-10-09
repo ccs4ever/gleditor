@@ -4,32 +4,38 @@ The running record of the view project that [`start-view-project.md`](start-view
 Updated with every package. A session that picks the project up reads this first and continues from
 **Next**.
 
-Last updated: 2026-10-08.
+Last updated: 2026-10-09.
 
 ## Where it stands
 
-| Milestone                 | State                              |
-| ------------------------- | ---------------------------------- |
-| M0, the tree in its shape | A1 and A2 done; closed             |
-| M1, spikes                | done; closed                       |
-| M2, the spine             | in progress: E0 to E4, E6, U0 done |
-| M3 onward                 | not started                        |
+| Milestone                 | State                                  |
+| ------------------------- | -------------------------------------- |
+| M0, the tree in its shape | A1 and A2 done; closed                 |
+| M1, spikes                | done; closed                           |
+| M2, the spine             | in progress: E0 to E6, E8, U0, U1 done |
+| M3 onward                 | not started                            |
 
 ## Done
 
-| Package or change              | Commit                                     | Notes                                                                                                                                                                                                                                                                                                 |
-| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A1 moves                       | `66afa4b`                                  | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them.                                   |
-| Build without ThorVG           | `a863fbe`                                  | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                                                        |
-| `compare-backends.sh` isolated | `5142e20`                                  | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                                                              |
-| No xvfb for GL and GLES        | `0d52fa3`                                  | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                                                                |
-| A1 remainder                   | `3e48652`                                  | See below.                                                                                                                                                                                                                                                                                            |
-| A2, `zigzag_test` to `ui_test` | `0270fc7`                                  | See below.                                                                                                                                                                                                                                                                                            |
-| M1, the spikes                 | `a1b8bf0`                                  | Results and what each changes: the plan's §3.1.                                                                                                                                                                                                                                                       |
-| L1, L2, L8                     | `90960b7`, `5b69a19`, `55699d7`            | Unprojection to a world ray; `insideFrustum`; `ui::PaneTree`. The pane tree's mutators return `std::expected`, and it gains `dividers()` and `resizeDivider()` (amended in the rendering plan).                                                                                                       |
-| E2, E1, E3, E6                 | `e5e6292`, `e2bfb3a`, `a8572c2`, `178ef87` | `ViewError` with its own `ViewMessage` keys (G8); records, `SubjectId` factories and `LayoutSink` (G13); `ViewRegistry`, refusing duplicate kinds and chords in one scope; the raster. `ViewEpoch` and `ViewAxisId` live in `view_ids.hpp`. The chord normaliser moved to `xanadu::canonicalChord()`. |
-| E0, E4                         | `5d9adad`, `bff4a36`                       | The `release()` guard and `shadowCount()`; `ViewManifold` over a binding and a derived arena, the layer rule (G1), toss, counts (G3) and `verifyViewSpace`, with S4 as the first test and random sequences against a model. I6 waits for E8's cursor.                                                 |
-| U0                             | `282b6e9`, `74c2e05`                       | `SlicePresentation` in `apps/common/ui/view/`; `xuzz_app` and `ViewCoordinator` hold the slice through it, except `vortexHost()` and the visualizer's own command set (X0's). The drawing roles left the engine's `presentation_surface.hpp`, which now includes no library header.                   |
+| Package or change              | Commit                                     | Notes                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------ | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1 moves                       | `66afa4b`                                  | Landed upstream before this project started, inside "Add private reader layers for signed link packages": every file of `apps/xudu/` to `apps/common/ui/xanadoc/` and of `apps/zigzag/` to `apps/common/ui/slice/`, include spellings and Makefile lists with them.                                                                             |
+| Build without ThorVG           | `a863fbe`                                  | `readFile` in `tests/lib/svg_cache_test.cpp` was unused, and fatal under `-Werror`, wherever ThorVG is absent.                                                                                                                                                                                                                                  |
+| `compare-backends.sh` isolated | `5142e20`                                  | Writes under `build/compare-backends/`; the E2E tests take their workspace from `XUDU_WORKSPACE_DIR`. It can now run beside `make test`.                                                                                                                                                                                                        |
+| No xvfb for GL and GLES        | `0d52fa3`                                  | Offscreen SDL over llvmpipe needs no display; the Makefile exports `GALLIUM_DRIVER=llvmpipe`. Only a Vulkan capture under SDL2 still needs `xvfb-run`.                                                                                                                                                                                          |
+| A1 remainder                   | `3e48652`                                  | See below.                                                                                                                                                                                                                                                                                                                                      |
+| A2, `zigzag_test` to `ui_test` | `0270fc7`                                  | See below.                                                                                                                                                                                                                                                                                                                                      |
+| M1, the spikes                 | `a1b8bf0`                                  | Results and what each changes: the plan's §3.1.                                                                                                                                                                                                                                                                                                 |
+| L1, L2, L8                     | `90960b7`, `5b69a19`, `55699d7`            | Unprojection to a world ray; `insideFrustum`; `ui::PaneTree`. The pane tree's mutators return `std::expected`, and it gains `dividers()` and `resizeDivider()` (amended in the rendering plan).                                                                                                                                                 |
+| E2, E1, E3, E6                 | `e5e6292`, `e2bfb3a`, `a8572c2`, `178ef87` | `ViewError` with its own `ViewMessage` keys (G8); records, `SubjectId` factories and `LayoutSink` (G13); `ViewRegistry`, refusing duplicate kinds and chords in one scope; the raster. `ViewEpoch` and `ViewAxisId` live in `view_ids.hpp`. The chord normaliser moved to `xanadu::canonicalChord()`.                                           |
+| E0, E4                         | `5d9adad`, `bff4a36`                       | The `release()` guard and `shadowCount()`; `ViewManifold` over a binding and a derived arena, the layer rule (G1), toss, counts (G3) and `verifyViewSpace`, with S4 as the first test and random sequences against a model. I6 waits for E8's cursor.                                                                                           |
+| U0                             | `282b6e9`, `74c2e05`                       | `SlicePresentation` in `apps/common/ui/view/`; `xuzz_app` and `ViewCoordinator` hold the slice through it, except `vortexHost()` and the visualizer's own command set (X0's). The drawing roles left the engine's `presentation_surface.hpp`, which now includes no library header.                                                             |
+| E14                            | `5c44044`                                  | Walk summaries kept in `system://activity` as cells and dimensions (a run cell, its ends, a cell per dimension and pair with its count), ranking by use with decay. The Markov order is deferred as §4.1 says; the pair counts it needs are recorded.                                                                                           |
+| P1, P2                         | `8cf7583`, `f866b75`                       | `PageCatalog` and the page cursor; `TensionCoalesce` per §3.1's S2 row. The engine's tie gains a side. Parity with the `docSlots` row holds when every row document is a body.                                                                                                                                                                  |
+| E5, E8                         | `cbdef9a`, `de166ff`                       | `ViewAxisSet` over the binding arena, with `d.axis-role` and `d.view-groups` added; a group resolves as a pack does. The slice cursor survives a toss (I6).                                                                                                                                                                                     |
+| U1                             | `65983bd`                                  | The colour rule of §3.1 in the engine, colour maths in `<gleditor/color_space.hpp>`. Each band's open arcs are also cut where its colour comes within ΔE₀₀ 10 of a reserved colour, which the V1 rule failed for 7 of 40. The band constants are `constexpr`, not settings: the reader overrides a dimension's colour, not the rule.            |
+| P3                             | `3e228de`, `b4b6c5a`                       | The base view, with `documents` (parity) and `pages` (the default) sub-views. The tension engine no longer allocates per step.                                                                                                                                                                                                                  |
+| L5, R5, L9                     | `8a8eb1b`                                  | `PipelineDesc::depthWrite`; `TranslucentList` sorted by camera depth with beams cut at sheets (R5's scene: 0 of 480,000 pixels wrong from either side); beam width from the view ray. Off-axis head-on beams draw slightly wider, contrary to R3's "unchanged". The UI's own beams still draw after the list until their contributors adopt it. |
 
 What the A1 remainder changed:
 
@@ -65,20 +71,13 @@ changed.
 
 ## Next
 
-Four workers stopped mid-package on 2026-10-08 at the organisation's monthly spend limit. Their work
-is saved, ungated, as a `WIP` commit in each worktree under `.claude/worktrees/` (local only; lost
-if the container is reclaimed):
-
-| Package | Worktree branch                    | State                                                                                                                                                                  |
-| ------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| E14     | `worktree-agent-a4fe70719502d1802` | `c9b6b88` complete and gated; `48e2cea` part of the rework the orchestrator asked for: a walk summary as cells and dimensions, not counts in text (owner's rule, VU5). |
-| P1, P2  | `worktree-agent-a7e182e3ccdb456ba` | `cc190dc`: `page_view.hpp`, `view/page/`, a side on the tension constraint, settings and tests in progress.                                                            |
-| E5, E8  | `worktree-agent-abf454dd6a47d2db9` | `48e5087`: `view_binding.hpp` begun.                                                                                                                                   |
-| U1      | none                               | Not begun. The rule is fixed by §3.1's V1 row.                                                                                                                         |
-
-Then, in order of dependency: E9 after E8; U2, U5a, U6a, U7a; the red team, the frame inspector
-(re-check colours 0, 6 and 27), the UX validator and go or no-go for M2. Kept from M1: R3's shader
-change (`worktree-agent-a52dc9e4e229f8f88`, `903c1ba`) for L9; R4's test (`7a776fb`) for L7.
+1. **M2**: E9 (stretch vanishing) and U6a (animation) are with workers, their work saved in their
+   worktrees after the API session limit stopped them. Then U2, U5a, U7a; then the red team, the
+   frame inspector (re-check colours 0, 6 and 27, and the off-axis beam width), the UX validator and
+   go or no-go.
+1. The UI adopts the translucent list: `LinkBeams`, the visualizer, tethers and world panels draw in
+   `drawScene()` and hand beams to `ctx.translucent`.
+1. Ahead of their milestones: L10, L6 (after L3), L7 with R4's test, P4.
 
 ## Fixed along the way
 
@@ -90,6 +89,7 @@ change (`worktree-agent-a52dc9e4e229f8f88`, `903c1ba`) for L9; R4's test (`7a776
 | `f5d7218` | `rebuild()` walked the whole ancestry to find the active xanadoc in a store with none, so a checkpointed Chronofilade rebuild cost O(K) again (5 us at 500 operations against the documented 0.29). Now a per-operation lookup: 0.23 us. Fixed `ChronofiladeBenchmarkTest.ScalabilityAndSpeedup`.                                                                                                                                                                   |
 | `0331519` | `aDraggedSelectionLandsWhereItIsDropped` dropped "into empty space" at a fixed x = 770, which a monospace page now covers. The drop point is found in the calibration frame, beside the page's right edge.                                                                                                                                                                                                                                                          |
 | `f5bd52d` | The `config.h` race: only the two `main.o` files waited for the generated header; `xuzz_app.cpp` and `cli.cpp` include it too. The list of users is now read from the sources.                                                                                                                                                                                                                                                                                      |
+| `edaf732` | The document view compared every open store's link spans with the document's by bare offset; system xanadocs' schema Comment links then coloured unrelated text in documents read against another permascroll. Caught by `compare-backends.sh`'s fresh data directory, hidden by `make test`'s. `spanIn()` names a span in the reader's coordinates first.                                                                                                          |
 | `bb3b39b` | `log_at()` kept its logger in a function-local static, which is per instantiation of the template and so per argument types: the first category to log with a set of types took every later call with them.                                                                                                                                                                                                                                                         |
 | `f43ea6a` | The "key-hint race" was not a race. System xanadocs were written against the permascroll of the session's first document, so a launch with `--permascroll` wrote the keymap's text into that scroll and every later launch without it read a keymap with no bindings: no chords, and no hint bar. System xanadocs now always use the user's own permascroll, and one that loads but cannot be resolved is moved aside like an unreadable one and a default written. |
 
@@ -118,6 +118,8 @@ None. After the fixes under "Fixed along the way", a full `make -k test` exits 0
 743, `xudu_test` 1301, `xuzz_test` 61, `ui_test` 193, both swarm runs) and `compare-backends.sh`
 exits 0, every image check and every E2E scenario agreeing between OpenGL and GLES.
 
+`PublicationUiTest.aSliceCanBeAddedToTheCurrentTextStoreAndReopened` failed once under four
+concurrent builds (it runs `xuzz` under a 120-second timeout) and passed alone and in a whole run.
 Two speedup benchmarks failed once each under a loaded `make -k test` and passed in every run alone:
 `ArrayfiladeBenchmarkTest.VQLPredicatePushdownPruning` and
 `VortexBenchmarkTest.MemoizedVsUnmemoizedExecution`. Watch them; neither is known to be a bug.

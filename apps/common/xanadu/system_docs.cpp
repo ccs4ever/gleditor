@@ -45,6 +45,26 @@ std::string settings::uiFontPointsKey(gleditor::ui::FontRole role) {
          ".points";
 }
 
+std::string settings::dimensionColourKey(const std::string_view dimension) {
+  return std::string{kDimensionPrefix} + std::string{dimension} +
+         std::string{kDimensionColourField};
+}
+std::string settings::dimensionDashKey(const std::string_view dimension) {
+  return std::string{kDimensionPrefix} + std::string{dimension} +
+         std::string{kDimensionDashField};
+}
+std::optional<std::string_view>
+settings::dimensionOfColourKey(const std::string_view key) noexcept {
+  if (key.size() <= kDimensionPrefix.size() + kDimensionColourField.size() ||
+      !key.starts_with(kDimensionPrefix) ||
+      !key.ends_with(kDimensionColourField)) {
+    return std::nullopt;
+  }
+  return key.substr(kDimensionPrefix.size(), key.size() -
+                                                 kDimensionPrefix.size() -
+                                                 kDimensionColourField.size());
+}
+
 std::string defaultSystemDocSchema(const SystemDocKind kind) {
   switch (kind) {
   case SystemDocKind::Keymap:
@@ -168,6 +188,27 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "tie may end up. Default is 2.\n"
            "  physicsUnitPx: Pixels in one unit of the physics settings, which "
            "are tuned in world units. Default is 18.\n"
+           "  documentGap: Gap between neighbouring documents of the row. "
+           "Default is 432.\n"
+           "  pageGap: Gap between the pages of one document. Default is "
+           "32.\n"
+           "  liftDepth: How far towards the reader the pages of an active "
+           "link come. Default is 90.\n"
+           "  bandContext: Lines shown either side of a passage on a page "
+           "shown only round it. Default is 2.\n"
+           "  contextOpacity: Opacity of pages not taking part while a link "
+           "is active. Default is 0.42.\n"
+           "  subjectMs: Milliseconds the page brought to the reader takes to "
+           "arrive. Default is 620.\n"
+           "  rowMs: Milliseconds pages making room take to move. Default is "
+           "450.\n"
+           "  rowDelayMs: Milliseconds pages making room wait before moving. "
+           "Default is 90.\n"
+           "page: What every page view shares. Lengths are pixels.\n"
+           "  backgroundDepth: How far behind the row a document opened for "
+           "context stands. Default is 720.\n"
+           "  backgroundOpacity: Opacity of a document opened for context. "
+           "Default is 0.42.\n"
            "beams:\n"
            "  bandStrandLimit: Maximum number of ribbon strands per link band. "
            "Default is 7.\n"
@@ -294,7 +335,17 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "view and buttons that would be refused.\n"
            "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
            "Highlights behind the chosen occurrence and behind the chosen "
-           "member's other occurrences in the text, as RGBA integers.\n";
+           "member's other occurrences in the text, as RGBA integers.\n"
+           "ui.dimension.<name>.colour and ui.dimension.<name>.dash: The "
+           "colour, as an RGBA integer, and the stroke pattern a dimension is "
+           "drawn with everywhere: solid, dash, dot, dash-dot-dot, dash-dot "
+           "or long-short. Both are added the first time the dimension is "
+           "seen, defaulting to what the palette assigns it in the order "
+           "dimensions are seen: hues clear of the colours that mean a link "
+           "type, transclusion, focus or the accent, in a vivid, a deep and a "
+           "pale tier in turn, each with its own dash and glyph. Change "
+           "either to override the palette; resetting restores its "
+           "assignment.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -643,6 +694,51 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .schemas = {{.expectedTypes = {"float"},
                       .defaultValues = {double{
                           PageBaseConfig{}.physicsUnitPx}}}}},
+        {.name    = std::string(settings::kPageBaseDocumentGap),
+         .notes   = "Gap between neighbouring documents, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageBaseConfig{}.documentGap}}}}},
+        {.name    = std::string(settings::kPageBasePageGap),
+         .notes   = "Gap between the pages of a document, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{PageBaseConfig{}.pageGap}}}}},
+        {.name    = std::string(settings::kPageBaseLiftDepth),
+         .notes   = "How far linked pages come forward, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{PageBaseConfig{}.liftDepth}}}}},
+        {.name    = std::string(settings::kPageBaseBandContext),
+         .notes   = "Lines either side of a passage in a windowed page",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {static_cast<std::int64_t>(
+                          PageBaseConfig{}.bandContext)}}}},
+        {.name    = std::string(settings::kPageBaseContextOpacity),
+         .notes   = "Opacity of pages not taking part in a link",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageBaseConfig{}.contextOpacity}}}}},
+        {.name    = std::string(settings::kPageBaseSubjectMs),
+         .notes   = "Time the linked page takes to arrive, in ms",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{PageBaseConfig{}.subjectMs}}}}},
+        {.name    = std::string(settings::kPageBaseRowMs),
+         .notes   = "Time pages making room take, in ms",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{PageBaseConfig{}.rowMs}}}}},
+        {.name    = std::string(settings::kPageBaseRowDelayMs),
+         .notes   = "Wait before pages make room, in ms",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{PageBaseConfig{}.rowDelayMs}}}}},
+        {.name    = std::string(settings::kPageBackgroundDepth),
+         .notes   = "How far behind the row a context document is, in px",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageViewsConfig{}.backgroundDepth}}}}},
+        {.name    = std::string(settings::kPageBackgroundOpacity),
+         .notes   = "Opacity of a document opened for context",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{
+                          PageViewsConfig{}.backgroundOpacity}}}}},
         {.name    = std::string(settings::kBeamsBandStrandLimit),
          .notes   = "Max strands in a ribbon band",
          .schemas = {{.expectedTypes = {"integer"},
@@ -1841,6 +1937,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     break;
   }
   return specs;
+}
+
+std::vector<SettingSpec>
+dimensionCueSettingSpecs(const std::string_view dimension,
+                         const std::uint32_t colour,
+                         const std::string_view dash) {
+  return {
+      {.name    = settings::dimensionColourKey(dimension),
+       .notes   = "RGBA colour this dimension is drawn with everywhere",
+       .schemas = {{.expectedTypes = {"integer"},
+                    .defaultValues = {std::int64_t{colour}}}}},
+      {.name    = settings::dimensionDashKey(dimension),
+       .notes   = "Stroke pattern beside the colour: solid, dash, dot, "
+                  "dash-dot-dot, dash-dot or long-short",
+       .schemas = {{.expectedTypes = {"string"},
+                    .defaultValues = {std::string{dash}}}}},
+  };
 }
 
 MicroversionId initializeSystemStoreGenesis(Store &store,
@@ -3147,6 +3260,24 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.pageBase.physicsUnitPx = static_cast<float>(
       model.getDouble(settings::kPageBasePhysicsUnitPx,
                       static_cast<double>(cfg.pageBase.physicsUnitPx)));
+  {
+    const auto read = [&model](const std::string_view key, float &field) {
+      field =
+          static_cast<float>(model.getDouble(key, static_cast<double>(field)));
+    };
+    read(settings::kPageBaseDocumentGap, cfg.pageBase.documentGap);
+    read(settings::kPageBasePageGap, cfg.pageBase.pageGap);
+    read(settings::kPageBaseLiftDepth, cfg.pageBase.liftDepth);
+    read(settings::kPageBaseContextOpacity, cfg.pageBase.contextOpacity);
+    read(settings::kPageBaseSubjectMs, cfg.pageBase.subjectMs);
+    read(settings::kPageBaseRowMs, cfg.pageBase.rowMs);
+    read(settings::kPageBaseRowDelayMs, cfg.pageBase.rowDelayMs);
+    read(settings::kPageBackgroundDepth, cfg.pages.backgroundDepth);
+    read(settings::kPageBackgroundOpacity, cfg.pages.backgroundOpacity);
+    cfg.pageBase.bandContext = static_cast<std::uint32_t>(
+        model.getInt64(settings::kPageBaseBandContext,
+                       static_cast<std::int64_t>(cfg.pageBase.bandContext)));
+  }
 
   cfg.beams.bandStrandLimit = static_cast<std::uint32_t>(
       model.getInt64(settings::kBeamsBandStrandLimit,

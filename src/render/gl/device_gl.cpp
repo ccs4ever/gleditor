@@ -608,6 +608,7 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
 
   record.layout      = desc.layout;
   record.depthTest   = desc.depthTest;
+  record.depthWrite  = desc.depthWrite;
   record.mvpLoc      = api.GetUniformLocation(record.program, "uMVP");
   record.opacityLoc  = api.GetUniformLocation(record.program, "uOpacity");
   record.identityLoc = api.GetUniformLocation(record.program, "uIdentity");
@@ -632,6 +633,10 @@ bool DeviceGL::beginFrame() {
                                              GL_COLOR_ATTACHMENT1};
   api.DrawBuffers(static_cast<GLsizei>(targets.size()), targets.data());
   api.Viewport(0, 0, targetWidth, targetHeight);
+  // The depth mask governs clears as well as draws, and the last pipeline of
+  // the previous frame may have turned it off; without this a frame that ended
+  // on a translucent draw would leave the next one testing against its depth.
+  api.DepthMask(GL_TRUE);
   api.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   // The picking attachment is an integer target, which the fixed-point clear
   // does not touch.
@@ -677,6 +682,7 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   } else {
     api.Disable(GL_DEPTH_TEST);
   }
+  api.DepthMask(it->second.depthWrite ? GL_TRUE : GL_FALSE);
   // Left on for every pipeline, because a draw that is not fading passes
   // opacity one and blends to exactly what it would have written unblended.
   // The picking attachment is an integer target, and the spec says blending is

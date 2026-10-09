@@ -365,6 +365,14 @@ Each settles an argument an implementer would otherwise have.
 
 V1 checks the rule before anything depends on it.
 
+As built (U1, `apps/common/xanadu/view/dimension_colour.hpp`): the guarded family bands alone left
+seven of V1's forty colours within ΔE₀₀ 10 of a reserved colour (colour 6 at 4.2), so each tier's
+open arcs are also cut wherever that tier's colour comes within ΔE₀₀ 10 of one. The tiers' hues
+therefore differ for the same *u*: vivid keeps 84.5° of hue, deep 156° and pale 123°. The reserved
+colours are one table beside the rule; a `ui_test` reads each from its definition and fails when the
+table misses one. "First seen" is recorded: the first sight mints both settings in `system://ui`,
+defaulting to the rule's assignment, and a dimension's ordinal is its place among them.
+
 ### 5.3 Motion
 
 Three families, so the program moves as one thing: *chrome* is quick, *content* reuses the timings
@@ -579,3 +587,6 @@ Three challengers attacked the first draft. What each said that mattered, and wh
   M6, so E14 builds "most used" only and tests that the summaries count which dimension followed
   which, the input the deferred Markov order reads. The row's "Markov order" predated the deferral.
 - 2026-10-08 — G11's seeding moved to E5, which holds the ring order; E10 keeps the reordering.
+- 2026-10-09 — §5.2: U1 as built. The ΔE₀₀ floor cuts each tier's open arcs, the reserved colours
+  are one table that a `ui_test` checks against their definitions, and "first seen" is the order of
+  the dimension settings in `system://ui`.

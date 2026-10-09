@@ -1033,7 +1033,7 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
   }
   if (dimension == "d.quotes" || dimension == "d.quotes-state") {
     return DimensionVisual{
-        .color   = glm::vec3{0.22F, 0.74F, 0.97F},
+        .color   = SceneVisual{}.quote_color,
         .spacing = 180.0F,
         .label   = "Quotes",
     };
@@ -1281,7 +1281,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, depth_tier_};
   focusRenderState.target_alpha = depth_tier_opacity_;
   focusRenderState.base_color =
-      focusInfo.is_quote ? glm::vec3{0.22F, 0.74F, 0.97F} : scene_.focus_color;
+      focusInfo.is_quote ? scene_.quote_color : scene_.focus_color;
   updateCellFormatting(focusRenderState, focusRef);
 
   auto mapNeighbor = [&](const CellRef parentId, const CellRef childId,
@@ -1333,8 +1333,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     auto &childCell        = visible_cells_[childId];
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
     childCell.target_alpha = depth_tier_opacity_;
-    childCell.base_color =
-        childInfo.is_quote ? glm::vec3{0.22F, 0.74F, 0.97F} : axisColor;
+    childCell.base_color = childInfo.is_quote ? scene_.quote_color : axisColor;
     updateCellFormatting(childCell, childId);
   };
 

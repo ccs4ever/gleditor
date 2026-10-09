@@ -13,6 +13,7 @@
 #ifndef XUDU_TENSION_LAYOUT_HPP
 #define XUDU_TENSION_LAYOUT_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -244,9 +245,24 @@ public:
   void toggleRunning() noexcept { running_ = !running_; }
 
 private:
+  /// The four stages of one RK4 step. Kept between steps, and through
+  /// clear(), because a solve is hundreds of steps (TensionCoalesce caps it
+  /// at page.base.coalesceStepCap) and a layout allocates nothing once it has
+  /// reached its size (view-system.md V-R2). Every element is written before
+  /// it is read, so what an earlier step left here never shows.
+  struct StepScratch {
+    static constexpr std::size_t kStages = 4;
+    std::array<std::vector<glm::vec3>, kStages> forces;
+    std::array<std::vector<glm::vec3>, kStages> dv; // acceleration
+    std::array<std::vector<glm::vec3>, kStages> dx; // velocity
+    /// The state each later stage evaluates its forces on.
+    std::array<std::vector<TensionBody>, kStages - 1> state;
+  };
+
   TensionParams params_;
   std::vector<TensionBody> bodies_;
   std::vector<TensionConstraint> constraints_;
+  StepScratch scratch_;
   bool running_{false};
 };
 

@@ -1011,3 +1011,36 @@ TEST(PublicationSequenceTest, anUnknownCounterVersionCannotResetTheSequence) {
                xanadu::PublicationSequenceUnreadable);
   std::filesystem::remove_all(dir);
 }
+
+// Local offsets are into the store's own permascroll, so two stores reading
+// different ones can only be compared once one names the other's span.
+TEST(PublicationTest, aSpanIsComparedOnlyWhereTheOtherStoreCanNameIt) {
+  const auto shared = std::make_shared<xanadu::UserPermascroll>();
+  xanadu::Store mine(shared);
+  xanadu::Store sameScroll(shared);
+  xanadu::Store otherScroll(std::make_shared<xanadu::UserPermascroll>());
+  const xanadu::PrimediaSpan local{xanadu::localScroll, 10, 5};
+
+  EXPECT_EQ(xanadu::spanIn(sameScroll, mine, local), local);
+  EXPECT_EQ(xanadu::spanIn(mine, mine, local), local);
+  EXPECT_FALSE(xanadu::spanIn(otherScroll, mine, local).has_value())
+      << "offsets into another permascroll name other text";
+
+  // An external scroll is renamed to the id the reading store knows it by,
+  // and not named at all where that store has never heard of it.
+  const auto author = xanadu::createMutableKeys();
+  const auto scroll = namedScroll(author.publicKey, "permascroll", 1000);
+  const auto there  = otherScroll.addScroll(
+      namedScroll(xanadu::createMutableKeys().publicKey, "other", 1000));
+  ASSERT_EQ(there, 1U);
+  const auto fromId = otherScroll.addScroll(scroll);
+  const xanadu::PrimediaSpan external{fromId, 100, 20};
+  EXPECT_FALSE(xanadu::spanIn(otherScroll, mine, external).has_value());
+  const auto hereId = mine.addScroll(scroll);
+  ASSERT_NE(hereId, fromId);
+  const auto named = xanadu::spanIn(otherScroll, mine, external);
+  ASSERT_TRUE(named.has_value());
+  EXPECT_EQ(named->scroll, hereId);
+  EXPECT_EQ(named->start, 100U);
+  EXPECT_EQ(named->length, 20U);
+}
