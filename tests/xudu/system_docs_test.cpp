@@ -487,6 +487,51 @@ TEST(SystemDocsTest, GetSetVaryingCellValues) {
   EXPECT_EQ(std::get<std::string>(updated[3]), "updated");
 }
 
+TEST(SystemDocsTest, DimensionCueSettingsAreKeyedByTheWholeDimensionName) {
+  namespace settings = xanadu::settings;
+  EXPECT_EQ(settings::dimensionColourKey("d.clone"),
+            "ui.dimension.d.clone.colour");
+  EXPECT_EQ(settings::dimensionDashKey("d.clone"), "ui.dimension.d.clone.dash");
+  EXPECT_EQ(settings::dimensionOfColourKey("ui.dimension.d.clone.colour"),
+            "d.clone");
+  EXPECT_EQ(
+      settings::dimensionOfColourKey(settings::dimensionColourKey("x.colour")),
+      "x.colour");
+  EXPECT_FALSE(settings::dimensionOfColourKey("ui.dimension.d.clone.dash"));
+  EXPECT_FALSE(settings::dimensionOfColourKey("ui.dimension..colour"));
+  EXPECT_FALSE(settings::dimensionOfColourKey("linkPanel.textColour"));
+
+  // Minted into system://ui, they take a reader's value and reset to what
+  // the palette assigned.
+  Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, SystemDocKind::UI);
+  auto ver = store.primaryCurrentVersion();
+  for (const auto &spec :
+       xanadu::dimensionCueSettingSpecs("d.clone", 0x8BAAFFFFU, "dot")) {
+    EXPECT_FALSE(spec.notes.empty());
+    ver = xanadu::ensureSetting(store, ver, spec);
+  }
+  store.repointCurrentVersion(ver);
+  const auto colourKey = settings::dimensionColourKey("d.clone");
+  const auto dashKey   = settings::dimensionDashKey("d.clone");
+  const auto colourOf  = [&] {
+    return std::get<std::int64_t>(xanadu::getSetting(store, colourKey).at(0));
+  };
+  EXPECT_EQ(colourOf(), std::int64_t{0x8BAAFFFFU});
+  EXPECT_EQ(std::get<std::string>(xanadu::getSetting(store, dashKey).at(0)),
+            "dot");
+  ver = xanadu::setSetting(store, ver, colourKey, std::int64_t{0x102030FFU});
+  store.repointCurrentVersion(ver);
+  EXPECT_EQ(colourOf(), std::int64_t{0x102030FFU});
+  EXPECT_THROW(
+      (void)xanadu::setSetting(store, ver, colourKey, std::string{"red"}),
+      std::invalid_argument);
+  ver = xanadu::resetSettingToDefault(store, ver, colourKey);
+  store.repointCurrentVersion(ver);
+  EXPECT_EQ(colourOf(), std::int64_t{0x8BAAFFFFU});
+}
+
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,

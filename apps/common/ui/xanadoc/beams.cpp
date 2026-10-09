@@ -1016,7 +1016,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     anchor.width      = farHalfWidth * 2.0F;
     anchor.height     = farPage ? (farPage->heightPixels() * Doc::pixelsToWorld)
                                 : fallbackDocHeight;
-    anchor.colour     = 0x38BDF855; // Ethereal cyan with ~33% alpha
+    anchor.colour     = BeamColours::flyingTether;
     anchor.active     = true;
     tetherOverlay_->setTether(anchor);
   }
@@ -1294,7 +1294,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
     sat.width     = bridgeConfig_.satelloid.defaultWidth;
     sat.height    = bridgeConfig_.satelloid.defaultHeight;
     sat.dimName   = "d.sequence";
-    sat.accentColor = 0x38BDF8FF; // Cyan
+    sat.accentColor = BeamColours::cellEnd;
     sat.alpha       = 1.0F;
     sat.active      = true;
     satelloidOverlay_->setSatelloid(sat);
@@ -1611,7 +1611,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       if (strand.from.isDocument()) {
         const std::uint32_t marginCol =
-            strand.to.isCell() ? 0x38BDF8FF : colour;
+            strand.to.isCell() ? BeamColours::cellEnd : colour;
         allAnchors.push_back(MarginAnchor{
             .edge         = *nearEdge,
             .colour       = marginCol,
@@ -1628,7 +1628,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       if (strand.to.isDocument()) {
         const std::uint32_t marginCol =
-            strand.from.isCell() ? 0x38BDF8FF : colour;
+            strand.from.isCell() ? BeamColours::cellEnd : colour;
         allAnchors.push_back(MarginAnchor{
             .edge         = *farEdge,
             .colour       = marginCol,
@@ -1700,7 +1700,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       Edge nearEdge{};
       Edge farEdge{};
       std::size_t docSpan{1};
-      std::uint32_t baseColour{0xFFD700FFU};
+      std::uint32_t baseColour{BeamColours::transclusion};
       float alphaFactor{1.0F};
       float phase{0.0F};
     };
@@ -1773,7 +1773,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       const auto docAlpha = std::min(fromOpacity, toOpacity);
 
       // Check if transcluded span is withheld or transcopyright-locked
-      std::uint32_t baseBeamColour = 0xFFD700FFU; // Default Identity Gold
+      std::uint32_t baseBeamColour = BeamColours::transclusion;
       float phase                  = 0.0F;
 
       std::optional<ResolveResult> res;
@@ -1791,10 +1791,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       if (res.has_value()) {
         if (res->isWithheld()) {
-          baseBeamColour = 0x1F2937FFU; // Obsidian Redaction Beam
+          baseBeamColour = BeamColours::withheld;
         } else if (res->isLocked()) {
-          baseBeamColour = 0xF59E0BFFU; // Transcopyright Amber Gold Beam
-          phase          = pulsePhase;  // Active photonic energy pulse
+          baseBeamColour = BeamColours::transcopyrightLocked;
+          phase          = pulsePhase; // Active photonic energy pulse
         }
       }
 

@@ -45,6 +45,26 @@ std::string settings::uiFontPointsKey(gleditor::ui::FontRole role) {
          ".points";
 }
 
+std::string settings::dimensionColourKey(const std::string_view dimension) {
+  return std::string{kDimensionPrefix} + std::string{dimension} +
+         std::string{kDimensionColourField};
+}
+std::string settings::dimensionDashKey(const std::string_view dimension) {
+  return std::string{kDimensionPrefix} + std::string{dimension} +
+         std::string{kDimensionDashField};
+}
+std::optional<std::string_view>
+settings::dimensionOfColourKey(const std::string_view key) noexcept {
+  if (key.size() <= kDimensionPrefix.size() + kDimensionColourField.size() ||
+      !key.starts_with(kDimensionPrefix) ||
+      !key.ends_with(kDimensionColourField)) {
+    return std::nullopt;
+  }
+  return key.substr(kDimensionPrefix.size(), key.size() -
+                                                 kDimensionPrefix.size() -
+                                                 kDimensionColourField.size());
+}
+
 std::string defaultSystemDocSchema(const SystemDocKind kind) {
   switch (kind) {
   case SystemDocKind::Keymap:
@@ -283,7 +303,17 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "view and buttons that would be refused.\n"
            "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
            "Highlights behind the chosen occurrence and behind the chosen "
-           "member's other occurrences in the text, as RGBA integers.\n";
+           "member's other occurrences in the text, as RGBA integers.\n"
+           "ui.dimension.<name>.colour and ui.dimension.<name>.dash: The "
+           "colour, as an RGBA integer, and the stroke pattern a dimension is "
+           "drawn with everywhere: solid, dash, dot, dash-dot-dot, dash-dot "
+           "or long-short. Both are added the first time the dimension is "
+           "seen, defaulting to what the palette assigns it in the order "
+           "dimensions are seen: hues clear of the colours that mean a link "
+           "type, transclusion, focus or the accent, in a vivid, a deep and a "
+           "pale tier in turn, each with its own dash and glyph. Change "
+           "either to override the palette; resetting restores its "
+           "assignment.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -1798,6 +1828,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
     break;
   }
   return specs;
+}
+
+std::vector<SettingSpec>
+dimensionCueSettingSpecs(const std::string_view dimension,
+                         const std::uint32_t colour,
+                         const std::string_view dash) {
+  return {
+      {.name    = settings::dimensionColourKey(dimension),
+       .notes   = "RGBA colour this dimension is drawn with everywhere",
+       .schemas = {{.expectedTypes = {"integer"},
+                    .defaultValues = {std::int64_t{colour}}}}},
+      {.name    = settings::dimensionDashKey(dimension),
+       .notes   = "Stroke pattern beside the colour: solid, dash, dot, "
+                  "dash-dot-dot, dash-dot or long-short",
+       .schemas = {{.expectedTypes = {"string"},
+                    .defaultValues = {std::string{dash}}}}},
+  };
 }
 
 MicroversionId initializeSystemStoreGenesis(Store &store,

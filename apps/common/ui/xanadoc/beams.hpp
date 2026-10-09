@@ -56,6 +56,24 @@ class LinkContext;
 class TenuousTetherOverlay;
 class SatelloidOverlay;
 
+/// Beam colours with a fixed meaning. Named so that the test keeping
+/// dimension colours clear of every such colour reads them from here
+/// (view-system-implementation-plan.md §5.2).
+struct BeamColours {
+  /// Identity Gold: the same primedia in two places.
+  static constexpr std::uint32_t transclusion = 0xFFD700FFU;
+  /// Transcluded content behind a transcopyright lock; the beam pulses.
+  static constexpr std::uint32_t transcopyrightLocked = 0xF59E0BFFU;
+  /// Withheld content: obsidian, the colour of redaction.
+  static constexpr std::uint32_t withheld = 0x1F2937FFU;
+  /// The sky cyan of a ZigZag cell's end of a link: margin anchors, tethers
+  /// and satelloid accents.
+  static constexpr std::uint32_t cellEnd = 0x38BDF8FFU;
+  /// A flying document's tether to where it came from: the cell-end cyan,
+  /// faint.
+  static constexpr std::uint32_t flyingTether = 0x38BDF855U;
+};
+
 /**
  * @class LinkBeams
  * @brief Links between open documents, as beams that can be followed.

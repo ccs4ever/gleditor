@@ -131,6 +131,18 @@ inline constexpr std::string_view kUiMinFontPx       = "ui.minFontPx";
 inline constexpr std::string_view kUiMinTouchPx      = "ui.minTouchPx";
 [[nodiscard]] std::string uiFontFamilyKey(gleditor::ui::FontRole);
 [[nodiscard]] std::string uiFontPointsKey(gleditor::ui::FontRole);
+/// A dimension's colour (RGBA) and dash pattern in system://ui, minted the
+/// first time the dimension is seen (view-system-implementation-plan.md
+/// §5.2). Dimension names may hold dots; the key still ends in the field.
+inline constexpr std::string_view kDimensionPrefix      = "ui.dimension.";
+inline constexpr std::string_view kDimensionColourField = ".colour";
+inline constexpr std::string_view kDimensionDashField   = ".dash";
+[[nodiscard]] std::string dimensionColourKey(std::string_view dimension);
+[[nodiscard]] std::string dimensionDashKey(std::string_view dimension);
+/// The dimension a key from dimensionColourKey() names; nothing for any
+/// other key.
+[[nodiscard]] std::optional<std::string_view>
+dimensionOfColourKey(std::string_view key) noexcept;
 
 // Layout
 inline constexpr std::string_view kColumns      = "columns";
@@ -897,6 +909,14 @@ MicroversionId ensureAllSettings(Store &store, SystemDocKind kind);
 void initializeSystemStore(Store &store, SystemDocKind kind);
 
 [[nodiscard]] std::vector<SettingSpec> defaultSettingSpecs(SystemDocKind kind);
+
+/// The system://ui settings that record a dimension as seen: its colour and
+/// its dash, defaulting to @p colour (0xRRGGBBAA) and the dash named @p dash
+/// that the rule assigned it. Not among defaultSettingSpecs(): which
+/// dimensions a reader meets is known only when they are met.
+[[nodiscard]] std::vector<SettingSpec>
+dimensionCueSettingSpecs(std::string_view dimension, std::uint32_t colour,
+                         std::string_view dash);
 
 /// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
 /// the pane that has the keyboard.
