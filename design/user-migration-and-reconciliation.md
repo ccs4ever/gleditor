@@ -342,34 +342,137 @@ ______________________________________________________________________
 To make transferring sessions between machines completely painless without requiring cloud servers
 or BitTorrent swarms, `xuzz` defines the **Session Package Container** (`.xuzzpkg`).
 
-### 7.1 Container Specification
+### 7.1 Container Specification & Architecture
 
-A `.xuzzpkg` is a lightweight, single-file uncompressed tar or zstd archive containing:
+A `.xuzzpkg` is a single-file POSIX `ustar` tar archive with optional transparent `libzstd` frame
+compression and decompression. When stored on disk or transmitted over peer transports, the archive
+encapsulates five mandatory member files:
 
 ```
-session.xuzzpkg
-├── MANIFEST.tsv           <- Metadata: author fingerprint, device ID, base version, head version
-├── primedia.slice         <- Unsealed primedia bytes typed since fork point P_0
-├── ops.nodes              <- CompactOpNode records since base microversion
-├── device.crt             <- X.509 v3 device delegation certificate
-└── signature.sig          <- Ed25519 signature over MANIFEST.tsv
+session.xuzzpkg (.tar or .tar.zst)
+├── MANIFEST.tsv           <- Hardened TSV metadata: author fingerprint, versions, offsets
+├── primedia.slice         <- Raw unsealed primedia bytes typed since fork point P_0
+├── ops.nodes              <- Binary CompactOpNode records (exact 64-byte alignment)
+├── device.crt             <- Base64 DER RFC 8410 X.509 v3 device delegation certificate
+└── signature.sig          <- Raw 64-byte Ed25519 signature over raw MANIFEST.tsv
 ```
 
-#### Canonical `MANIFEST.tsv`
+### 7.2 Member File Specifications
 
-```tsv
-manifest_version	1
-master_fingerprint	a1b2c3d4... (64-hex SHA-256)
-device_id	laptop
-device_key	e5f6a7b8... (64-hex Ed25519)
-base_version	4
-head_version	4a2
-primedia_offset	1048576
-primedia_length	4096
-timestamp	1791480000
+1. **`MANIFEST.tsv` (Metadata Manifest)**:
+
+   - Encoded as UTF-8 tab-separated values.
+   - Enforces the project-wide **Hardened TSV Standard**:
+     - Strict field key format matching regex `^[a-z_][a-z0-9_]*$`.
+     - Zero tolerance for carriage returns (`\r` / `0x0D`), triggering immediate parse failure.
+     - Prohibition of duplicate keys; duplicate entries abort with `DuplicateKey`.
+     - Mandatory fields: `manifest_version`, `master_fingerprint`, `device_id`, `device_key`,
+       `base_version`, `head_version`, `primedia_offset`, `primedia_length`, `timestamp`.
+     - Optional extensible fields preserved in `extraFields`.
+
+   ```tsv
+   manifest_version	1
+   master_fingerprint	a1b2c3d4e5f6... (64-hex SHA-256)
+   device_id	laptop
+   device_key	e5f6a7b8c9d0... (64-hex Ed25519)
+   base_version	4
+   head_version	4a2
+   primedia_offset	1048576
+   primedia_length	4096
+   timestamp	1791480000
+   ```
+
+1. **`primedia.slice` (Unsealed Primedia Payload)**:
+
+   - Raw binary bytes representing new keystrokes appended on the authoring device since base offset
+     `primedia_offset`.
+   - Length must match `primedia_length` in the manifest bit-for-bit.
+
+1. **`ops.nodes` (Operation Records)**:
+
+   - Packed sequence of 64-byte `CompactOpNode` structures representing document operations minted
+     on the peer device since `base_version`.
+   - Total byte size must be an exact integer multiple of `sizeof(CompactOpNode)` (64 bytes).
+
+1. **`device.crt` (X.509 Delegation Certificate)**:
+
+   - Single-line Base64-encoded DER representation of an RFC 5280 / RFC 8410 X.509 v3 certificate.
+   - Issued and signed by the Master Root CA Key (`master_fingerprint`), granting signing authority
+     to the workstation/laptop key (`device_key`).
+
+1. **`signature.sig` (Cryptographic Detached Signature)**:
+
+   - Exactly 64 bytes of raw binary Ed25519 signature computed over the exact byte stream of
+     `MANIFEST.tsv` using the authoring device's private key.
+
+### 7.3 Error Taxonomy (`SessionValidationError`)
+
+Implementations return explicit error codes via `std::expected<T, SessionValidationError>`:
+
+| Error Code               | Meaning                                                                 |
+| :----------------------- | :---------------------------------------------------------------------- |
+| `MissingManifest`        | Archive lacks `MANIFEST.tsv`                                            |
+| `MissingPrimedia`        | Archive lacks `primedia.slice`                                          |
+| `MissingOps`             | Archive lacks `ops.nodes`                                               |
+| `MissingDeviceCert`      | Archive lacks `device.crt`                                              |
+| `MissingSignature`       | Archive lacks `signature.sig`                                           |
+| `CorruptArchive`         | Archive is malformed, truncated, or invalid tar header                  |
+| `CorruptManifest`        | Manifest line structure is invalid                                      |
+| `DuplicateKey`           | Manifest contains duplicate field names                                 |
+| `InvalidKeyFormat`       | Manifest key violates regex `^[a-z_][a-z0-9_]*$`                        |
+| `CarriageReturnRejected` | Manifest contains forbidden `\r`                                        |
+| `MissingRequiredField`   | Manifest is missing a mandatory key                                     |
+| `InvalidFieldFormat`     | Field value cannot be parsed into expected numeric type                 |
+| `IdentityMismatch`       | Author binding check failed: `master_fingerprint` does not match target |
+| `InvalidDeviceKey`       | Public key format or length is invalid                                  |
+| `InvalidSignature`       | Ed25519 signature verification failed                                   |
+| `InvalidDeviceCert`      | Delegation certificate signature or constraints invalid                 |
+| `CorruptOpsNodes`        | `ops.nodes` size is not a multiple of 64 bytes                          |
+| `PrimediaLengthMismatch` | `primedia.slice` byte count does not match manifest                     |
+| `IoError`                | Filesystem read/write error                                             |
+| `SerializationError`     | Archive packing or compression error                                    |
+
+### 7.4 C++ Programming Interface (`session_container.hpp`)
+
+The interface provides chaining setters and explicit `std::expected` return types:
+
+```cpp
+namespace xanadu {
+
+struct SessionPackage {
+  std::uint32_t manifestVersion{1};
+  std::string masterFingerprint;
+  std::string deviceId;
+  std::string deviceKey;
+  std::string baseVersion;
+  std::string headVersion;
+  std::uint64_t primediaOffset{0};
+  std::uint64_t primediaLength{0};
+  std::uint64_t timestamp{0};
+  std::vector<std::pair<std::string, std::string>> extraFields;
+
+  std::vector<std::uint8_t> primediaSlice;
+  std::vector<CompactOpNode> opsNodes;
+  std::string deviceCert;
+  std::array<std::uint8_t, 64> signature{};
+
+  SessionPackage *setMasterFingerprint(std::string fp) noexcept;
+  SessionPackage *setDeviceId(std::string id) noexcept;
+  SessionPackage *setPrimediaSlice(std::span<const std::uint8_t> slice);
+  SessionPackage *setOpsNodes(std::vector<CompactOpNode> ops) noexcept;
+};
+
+[[nodiscard]] std::expected<std::vector<std::uint8_t>, SessionValidationError>
+exportPackage(const SessionPackage &pkg);
+
+[[nodiscard]] std::expected<SessionPackage, SessionValidationError>
+importPackage(std::span<const std::uint8_t> archiveBytes,
+              std::optional<std::string_view> expectedMasterFp = std::nullopt);
+
+} // namespace xanadu
 ```
 
-### 7.2 CLI & GUI Exchange Commands
+### 7.5 CLI & GUI Exchange Commands
 
 - **Export Session (Laptop)**:
   `xuzz session export --doc "design-spec" --out ~/laptop_flight_edits.xuzzpkg`
@@ -382,6 +485,8 @@ On import, `xuzz`:
 1. Writes `primedia.slice` into
    `~/.local/share/xuzz/permascroll/<fp>/devices/laptop/active.primedia`.
 1. Appends operations into the target store's `ops.nodes` under branch `4a1...`.
+1. Preserves the **Zero-Shift Invariant**: character spans and primedia slices round-trip
+   bit-for-bit with exact coordinate stability.
 1. Automatically launches the **Branch Convergence Assistant** modal.
 
 ______________________________________________________________________
