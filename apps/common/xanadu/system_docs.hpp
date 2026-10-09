@@ -144,11 +144,15 @@ inline constexpr std::string_view kTransclusionLoom   = "transclusionLoom";
 inline constexpr std::string_view kXanalinkRibbons    = "xanalinkRibbons";
 inline constexpr std::string_view kPouchDock          = "pouchDock";
 inline constexpr std::string_view kPouchWidthPx       = "pouchWidthPx";
-inline constexpr std::string_view kPhysicsKRepel      = "physics.kRepel";
-inline constexpr std::string_view kPhysicsKPlane      = "physics.kPlane";
-inline constexpr std::string_view kPhysicsKAlign      = "physics.kAlign";
-inline constexpr std::string_view kPhysicsKTier       = "physics.kTier";
-inline constexpr std::string_view kPhysicsKDamping    = "physics.kDamping";
+/// A slice placement's binding points, in order: each a name, then its role
+/// (view-system.md §7.3). Name and role are a cell each, so a point is added
+/// by adding two cells, never by editing text that would need parsing.
+inline constexpr std::string_view kBindingPoints   = "bindingPoints";
+inline constexpr std::string_view kPhysicsKRepel   = "physics.kRepel";
+inline constexpr std::string_view kPhysicsKPlane   = "physics.kPlane";
+inline constexpr std::string_view kPhysicsKAlign   = "physics.kAlign";
+inline constexpr std::string_view kPhysicsKTier    = "physics.kTier";
+inline constexpr std::string_view kPhysicsKDamping = "physics.kDamping";
 inline constexpr std::string_view kPhysicsBackgroundDepthZ =
     "physics.backgroundDepthZ";
 inline constexpr std::string_view kPhysicsDefaultGap = "physics.defaultGap";

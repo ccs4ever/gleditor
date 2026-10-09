@@ -5,10 +5,16 @@
  */
 #include "common/xanadu/view/view_manifold.hpp"
 
+#include <algorithm>
 #include <array>
+#include <memory>
+#include <span>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include "common/xanadu/ops.hpp"
+#include "common/xanadu/view/view_binding.hpp"
 
 namespace xanadu::view {
 
@@ -23,7 +29,19 @@ ViewManifold::ViewManifold(const zigzag::Manifold &base)
     // No store, so that no provenance cells are projected into either arena:
     // a view arena holds what a view minted and nothing else (§6.1).
     : base_(base), bindings_(&base, nullptr), derived_(&base, nullptr),
-      empty_(derived_.mark()) {}
+      empty_(derived_.mark()), axes_(std::make_unique<ViewAxisSet>(*this)) {}
+
+ViewManifold::ViewManifold(ViewManifold &&other) noexcept
+    : base_(other.base_), bindings_(std::move(other.bindings_)),
+      derived_(std::move(other.derived_)), empty_(other.empty_),
+      epoch_(other.epoch_), packDim_(other.packDim_),
+      packingDim_(other.packingDim_),
+      axisStepDims_(std::move(other.axisStepDims_)),
+      axes_(std::move(other.axes_)) {
+  axes_->space_ = this;
+}
+
+ViewManifold::~ViewManifold() = default;
 
 bool ViewManifold::isCurrent(const ViewCellRef cell) const noexcept {
   return cell.epoch == epochOf(cell.layer);
@@ -83,7 +101,7 @@ std::expected<ViewCellRef, ViewError>
 ViewManifold::mintOccurrence(const Layer layer, const zigzag::CellRef target) {
   auto handle = realCell(target);
   if (!handle.has_value() && Layer::Binding == layer &&
-      isViewCell(Layer::Binding, target)) {
+      axes_->isGroup(target)) {
     handle = target;
   }
   if (!handle.has_value()) {
@@ -144,6 +162,30 @@ ViewResult ViewManifold::unlink(const Layer layer, const ViewCellRef from,
   return this;
 }
 
+ViewResult ViewManifold::setText(const Layer layer, const ViewCellRef cell,
+                                 const std::string_view text) {
+  if (const auto ok = check(layer, cell); !ok) {
+    return std::unexpected{ok.error()};
+  }
+  auto &space = arena(layer);
+  try {
+    const auto span = space.intern(text);
+    if (!space.setContent(cell.ref, std::span{&span, 1})) {
+      return std::unexpected{ViewError::ArenaRefused};
+    }
+  } catch (const std::runtime_error &) {
+    return std::unexpected{ViewError::ArenaRefused};
+  }
+  return this;
+}
+
+std::optional<std::string> ViewManifold::text(const ViewCellRef cell) const {
+  if (!check(cell.layer, cell)) {
+    return std::nullopt;
+  }
+  return arena(cell.layer).textOf(cell.ref);
+}
+
 std::optional<ViewCellRef>
 ViewManifold::linked(const ViewCellRef from, const ViewDim dim,
                      const zigzag::DimVector dir) const noexcept {
@@ -188,9 +230,29 @@ ViewManifold::resolveIn(const Layer layer, const zigzag::CellRef cell,
   }
   --budget;
   const auto &space = arena(layer);
+  auto group        = std::optional<zigzag::CellRef>{};
   if (const auto handle = space.handleTarget(cell); handle.has_value()) {
     if (const auto real = realCell(*handle); real.has_value()) {
       return *real;
+    }
+    if (Layer::Binding != layer || !axes_->isGroup(*handle)) {
+      return std::unexpected{ViewError::UnknownTarget};
+    }
+    group = *handle;
+  } else if (Layer::Binding == layer && axes_->isGroup(cell)) {
+    group = cell;
+  }
+  if (group.has_value()) {
+    // A group is a pack's rule before it is a pack (§9.3.2), so it resolves
+    // as one: its first member that does.
+    const auto members = axes_->frame_->members;
+    for (auto member = space.linked(*group, members, zigzag::DimVector::POS);
+         member.has_value() && budget > 0;
+         member = space.linked(*member, members, zigzag::DimVector::POS)) {
+      if (const auto real = resolveIn(layer, *member, budget);
+          real.has_value()) {
+        return real;
+      }
     }
     return std::unexpected{ViewError::UnknownTarget};
   }
@@ -248,9 +310,9 @@ class ArenaVerifier {
 public:
   ArenaVerifier(
       const zigzag::ArenaManifold &arena, const zigzag::Manifold &base,
-      const Layer layer, const ViewEpoch epoch,
+      const Layer layer, const ViewEpoch epoch, const ViewAxisSet &axes,
       gleditor::cpp26::function_ref<void(const ViewSpaceViolation &)> report)
-      : arena_(arena), base_(base), layer_(layer), epoch_(epoch),
+      : arena_(arena), base_(base), layer_(layer), epoch_(epoch), axes_(axes),
         report_(report) {}
 
   [[nodiscard]] std::size_t count() const noexcept { return count_; }
@@ -284,8 +346,9 @@ public:
       if (const auto handle = arena_.handleTarget(ref); handle.has_value()) {
         const bool real =
             !zigzag::isEphemeral(*handle) && base_.slot(*handle).has_value();
-        const bool binding = Layer::Binding == layer_ && isViewCell(*handle);
-        if (!real && !binding) {
+        const bool group = Layer::Binding == layer_ && isViewCell(*handle) &&
+                           (axes_.isGroup(*handle) || !onAnyRank(ref));
+        if (!real && !group) {
           flag(ref, "occurrence-target");
         }
       }
@@ -338,6 +401,12 @@ private:
     return zigzag::isEphemeral(ref) && arena_.denseOf(ref).has_value();
   }
 
+  [[nodiscard]] bool onAnyRank(const zigzag::CellRef ref) const noexcept {
+    return std::ranges::any_of(arena_.dimensionsOf(ref), [](const auto &edge) {
+      return zigzag::noCell != edge.pos || zigzag::noCell != edge.neg;
+    });
+  }
+
   [[nodiscard]] bool onDimension(const zigzag::CellRef ref,
                                  const zigzag::CellRef dim) const noexcept {
     return arena_.linked(ref, dim, zigzag::DimVector::POS).has_value() ||
@@ -357,6 +426,7 @@ private:
   const zigzag::Manifold &base_;
   Layer layer_;
   ViewEpoch epoch_;
+  const ViewAxisSet &axes_;
   gleditor::cpp26::function_ref<void(const ViewSpaceViolation &)> report_;
   std::size_t count_{0};
 };
@@ -368,8 +438,8 @@ std::size_t verifyViewSpace(
     gleditor::cpp26::function_ref<void(const ViewSpaceViolation &)> report) {
   std::size_t total = 0;
   for (const auto layer : {Layer::Binding, Layer::Derived}) {
-    ArenaVerifier verifier{space.arena(layer), space.base(), layer,
-                           space.epochOf(layer), report};
+    ArenaVerifier verifier{space.arena(layer),   space.base(), layer,
+                           space.epochOf(layer), *space.axes_, report};
     verifier.cells();
     if (Layer::Derived == layer) {
       verifier.acyclic(space.packDim_);
@@ -379,7 +449,7 @@ std::size_t verifyViewSpace(
     }
     total += verifier.count();
   }
-  return total;
+  return total + space.axes_->verify(report);
 }
 
 } // namespace xanadu::view

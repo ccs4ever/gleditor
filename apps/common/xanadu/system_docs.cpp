@@ -578,6 +578,18 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPouchWidthPx),
          .notes   = "Width of pouch drawer in pixels",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {360.0}}}},
+        // No u (subspace) or t (hypertime) point by default: the owner
+        // waits for their roles' cursor rules (plan E16).
+        {.name  = std::string(settings::kBindingPoints),
+         .notes = "Binding points of a slice view, in order: each point's "
+                  "name (its compass label and selector key), then its "
+                  "role: spatial, subspace or hypertime",
+         .schemas =
+             {{.expectedTypes = {"string", "string", "string", "string",
+                                 "string", "string"},
+               .defaultValues = {std::string{"x"}, std::string{"spatial"},
+                                 std::string{"y"}, std::string{"spatial"},
+                                 std::string{"z"}, std::string{"spatial"}}}}},
         {.name    = std::string(settings::kPhysicsKRepel),
          .notes   = "Repulsion spring stiffness",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {4500.0}}}},

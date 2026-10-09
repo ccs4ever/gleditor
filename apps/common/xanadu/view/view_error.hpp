@@ -35,6 +35,7 @@ enum class ViewError : std::uint8_t {
   ChordCollision,
   PromotionRefused, // promote()'s own budget or refusal
   ArenaRefused,     // the arena refused; carries nothing more
+  UnknownPlace,     // a member, ring or list position past the end
 };
 
 /// Everything a view tells the reader, in a toast, the raster or an
@@ -57,6 +58,10 @@ enum class ViewMessage : std::uint8_t {
   ViewKindTaken,
   ChordTaken,
   ViewSpaceRefused,
+  PlaceUnknown,
+  BindingsReplayed,
+  SavedMemberGone,
+  SavedNameGone,
 };
 
 /// Every enumerator, in declaration order, so a test can visit each one.
@@ -66,7 +71,7 @@ inline constexpr std::array kViewErrors{
     ViewError::UnknownAxis,       ViewError::GroupCycle,
     ViewError::EmptyGroupBind,    ViewError::DuplicateViewKind,
     ViewError::ChordCollision,    ViewError::PromotionRefused,
-    ViewError::ArenaRefused,
+    ViewError::ArenaRefused,      ViewError::UnknownPlace,
 };
 
 inline constexpr std::array kViewMessages{
@@ -78,7 +83,9 @@ inline constexpr std::array kViewMessages{
     ViewMessage::RealCellRefused,     ViewMessage::ViewCellDiscarded,
     ViewMessage::TargetUnknown,       ViewMessage::AxisUnknown,
     ViewMessage::ViewKindTaken,       ViewMessage::ChordTaken,
-    ViewMessage::ViewSpaceRefused,
+    ViewMessage::ViewSpaceRefused,    ViewMessage::PlaceUnknown,
+    ViewMessage::BindingsReplayed,    ViewMessage::SavedMemberGone,
+    ViewMessage::SavedNameGone,
 };
 
 /// The message a refusal is reported with. The switch has no default, so an
@@ -107,6 +114,8 @@ inline constexpr std::array kViewMessages{
     return ViewMessage::PackTooLargeToKeep;
   case ViewError::ArenaRefused:
     return ViewMessage::ViewSpaceRefused;
+  case ViewError::UnknownPlace:
+    return ViewMessage::PlaceUnknown;
   }
   return ViewMessage::ViewSpaceRefused;
 }
@@ -150,6 +159,14 @@ messageId(ViewMessage message) noexcept {
     return "view.chordTaken";
   case ViewMessage::ViewSpaceRefused:
     return "view.viewSpaceRefused";
+  case ViewMessage::PlaceUnknown:
+    return "view.placeUnknown";
+  case ViewMessage::BindingsReplayed:
+    return "view.bindingsReplayed";
+  case ViewMessage::SavedMemberGone:
+    return "view.savedMemberGone";
+  case ViewMessage::SavedNameGone:
+    return "view.savedNameGone";
   }
   return {};
 }
@@ -195,6 +212,15 @@ messageText(ViewMessage message) noexcept {
     return "{chord} already runs {action}; '{kind}' was not installed.";
   case ViewMessage::ViewSpaceRefused:
     return "The view space refused the change.";
+  case ViewMessage::PlaceUnknown:
+    return "There is no place {place} in {where}.";
+  case ViewMessage::BindingsReplayed:
+    return "Restored {restored} bindings and groups; {missing} saved names "
+           "are gone.";
+  case ViewMessage::SavedMemberGone:
+    return "'{name}' is gone; group '{group}' no longer contains it.";
+  case ViewMessage::SavedNameGone:
+    return "'{name}' is gone; it is no longer in {where}.";
   }
   return {};
 }

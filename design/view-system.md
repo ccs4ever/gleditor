@@ -611,6 +611,13 @@ whose handle is not a real cell of the base or a live group; a group reachable f
 `d.binds`, `d.dim-group`, `d.pack` or `d.packing` rank of the wrong shape. Every test that mutates a
 view space calls it before asserting anything else.
 
+The binding model's ranks are checked from their heads (E5): every cell on `d.axes`,
+`d.view-groups`, `d.ring-order` or `d.dim-pouch` must be reached from that rank's head, every cell
+on `d.binds` or `d.axis-role` must be the one cell after an axis slot, every cell on `d.dim-group`
+must follow a live group, and each must be what its rank holds — an occurrence of a real dimension
+or a live group, a role's name, or a bare cell. An occurrence on no rank at all is garbage an undo
+or a deleted group left behind; it may name a group that is gone, because nothing can reach it.
+
 ### 6.7 Derivation is windowed
 
 A view mints derived cells only for what it is about to show: the packs within the viewport of the
@@ -635,6 +642,20 @@ Bindings are cells in the binding arena. Five view-owned dimensions carry them:
 | `d.dim-group`  | a group cell, then one occurrence per member, in order | "this group contains these"        |
 | `d.ring-order` | the ring head, then one occurrence per dimension       | "this is the order round the ring" |
 | `d.dim-pouch`  | the pouch head, then one occurrence per dimension kept | "these are at hand" (§7.7)         |
+
+Two more carry what the five leave unsaid (E5):
+
+| Dimension       | Rank                                      | Reads as                         |
+| --------------- | ----------------------------------------- | -------------------------------- |
+| `d.axis-role`   | an axis slot, then a cell naming its role | "this point is spatial"          |
+| `d.view-groups` | the group head, then every live group     | "these are the groups, in order" |
+
+A role is the placement's to remember per point, and a cell is where a placement remembers things. A
+group with no members yet is on no other rank, so without a list of its own a group could not be
+told from any other bare cell; with one, "is this a live group" is one read (its negward neighbour
+on `d.view-groups`), and a deleted group is simply off the list, which is what lets undo bring it
+back as the same cell. Refused: a side table of roles and of group cells in `ViewAxisSet`, which
+would be a second record of what the arena already holds.
 
 ```text
  d.axes:        [head] --- [axis 0] --- [axis 1] --- [axis 2]
@@ -668,7 +689,14 @@ can be created.
 
 A group is created, renamed, reordered, extended, shrunk and deleted through `ViewAxisSet` (§8.3). A
 member is a dimension or another group; a group that would become reachable from itself is refused
-(`GroupCycle`). An empty group can exist but cannot be bound (`EmptyGroupBind`).
+(`GroupCycle`). An empty group can exist but cannot be bound (`EmptyGroupBind`); a group is empty
+when no dimension is reachable through it, so a group holding only empty groups is empty too.
+Removing the last member of a group already bound is allowed: the axis then has nowhere to step,
+which is "nothing further that way", not a refusal of the edit a reader is in the middle of.
+
+A group resolves as a pack does (I5): to its first member that resolves, depth first. That is what
+`resolveReal()` answers for a group or an occurrence of one, so a binding occurrence names a real
+cell like any other, and an occurrence may name a binding cell only if it is a live group.
 
 A group is bound as a dimension is, by an occurrence under the axis slot, so binding code never asks
 which it has. "Rebinding a whole set at once" is editing the group: every axis that shows it reads
@@ -705,6 +733,13 @@ These five are the defaults. Binding points are configuration, not code: `layout
 of `system://keymap`. Adding a point is adding a row. The binding arena has one slot on `d.axes` per
 configured point, whose content is the point's name. Roles are an extension point (§8.10): a role is
 registered as a view is, and a binding point names one.
+
+As built (E5, plan G2): the setting is the key `bindingPoints` of `system://layout`, a flat list of
+cells, a point's name then its role, so a point is added by adding two cells and nothing parses
+text. Its default is `x`, `y` and `z`, all spatial; `u` and `t` are deferred by the owner until
+their roles' cursor rules exist (E16). `AxisRole` is one small interface — an id and whether a view
+gives the point a direction — with the three roles in the engine and no registry, which waits for a
+fourth role to exist.
 
 **Spatial.** A view gives each spatial point a direction (`axisDirection`, §8.5). Stretch vanishing
 and the pack view put `x` and `y` in the plane and `z` in depth; all-dim walk makes them spokes.
@@ -752,9 +787,24 @@ tosses. It is not hypertime, and it appends nothing to any store.
 Bindings, groups and ring order are written to `system://layout`, and the dimension pouch to
 `system://pouches`, per slice, by dimension *name* (refs do not survive a session), under
 `layout.slice.<sliceId>.axes`, `.groups` and `.ringOrder`. On attach they are replayed through
-`ViewAxisSet`; a name that no longer resolves is skipped and reported. They are not written to the
-slice's own store — how a reader looks is not a fact about the document (R8) — and not to
-`system://activity`, which records visits.
+`ViewAxisSet`; a name that no longer resolves is skipped and reported.
+
+As built (E5, plan G9): `saveBindings()` and `replayBindings()` turn the binding arena into
+`SavedBindings` and back; writing it under those keys is the host's. A dimension is saved by name
+and a group by its place in the saved list of groups, because two groups may share a name and a
+place cannot be mistaken for a dimension's name. Groups are replayed leaves first, so a parent saved
+before its child still finds it; a member that would close a cycle is skipped. The report is one
+summary (`BindingsReplayed`) plus one notice per name that did not resolve: `SavedBindingGone` for
+an axis, `SavedMemberGone` for a group member, `GroupInsideItself` for a cycle, `SavedNameGone` for
+a binding point, the ring order or the pouch. Replaying, like configuring the binding points, is not
+an edit, so it leaves nothing to undo.
+
+Undo keeps each edit as the links and texts it changed, applied backwards; a ring move alone is kept
+as two places, because `ringPlace()` appends at the ring's tail between edits without an undo entry
+of its own, which would leave a recorded link stale. Cells are never unminted: undo leaves an
+occurrence on no rank, unreachable, and redo links the same cell again, so a later entry that names
+a group still names it. They are not written to the slice's own store — how a reader looks is not a
+fact about the document (R8) — and not to `system://activity`, which records visits.
 
 ### 7.6 Ways to bind
 
@@ -1127,7 +1177,7 @@ public:
   [[nodiscard]] class ViewAxisSet &axes() noexcept;
   [[nodiscard]] const class ViewAxisSet &axes() const noexcept;
 
-  // -- mint: every write of a view cell goes through these four ------------
+  // -- mint: every write of a view cell goes through these five ------------
   [[nodiscard]] std::expected<ViewCellRef, ViewError> mint(Layer layer);
   [[nodiscard]] std::expected<ViewCellRef, ViewError>
   mint(Layer layer, std::string_view text);
@@ -1140,6 +1190,9 @@ public:
   [[nodiscard]] ViewResult
   unlink(Layer layer, ViewCellRef from, ViewDim dim,
          zigzag::DimVector dir) noexcept;
+  /// A view cell's text, as renaming a group restates it (E5).
+  [[nodiscard]] ViewResult setText(Layer layer, ViewCellRef cell,
+                                   std::string_view text);
 
   // -- read ----------------------------------------------------------------
   [[nodiscard]] std::optional<ViewCellRef>
@@ -1194,6 +1247,17 @@ joins a real cell to a view cell (§6.2).
 // view_binding.hpp
 using ViewAxisId = std::uint32_t; // position on the d.axes rank
 
+class AxisRole { // G2: three in the engine, no registry yet
+public:
+  virtual ~AxisRole() = default;
+  [[nodiscard]] virtual std::string_view id() const noexcept = 0;
+  [[nodiscard]] virtual bool spatial() const noexcept = 0;
+};
+struct BindingPoint {
+  std::string name;
+  std::reference_wrapper<const AxisRole> role;
+};
+
 /// A real dimension cell, or a group cell of this placement's binding arena.
 using BindTarget = zigzag::CellRef;
 using AxisResult = std::expected<class ViewAxisSet *, ViewError>;
@@ -1202,7 +1266,9 @@ class ViewAxisSet {
 public:
   // -- axes ----------------------------------------------------------------
   [[nodiscard]] std::size_t axisCount() const noexcept; // not a cap
-  ViewAxisId addAxis();
+  std::expected<ViewAxisId, ViewError> addAxis(std::string_view name,
+                                               const AxisRole &role);
+  AxisResult configure(std::span<const BindingPoint> points); // not undone
   AxisResult removeAxis(ViewAxisId axis);
   /// Replace what the axis shows. The target's other axes are left alone.
   AxisResult bind(ViewAxisId axis, BindTarget target);
@@ -1229,12 +1295,17 @@ public:
   member(BindTarget group, std::size_t position) const noexcept;
 
   // -- ring order (§9.2) ---------------------------------------------------
-  /// The dimension's place in the order, appending it if it is new.
-  std::size_t ringPlace(zigzag::DimRef dimension);
+  /// The dimension's place in the order, appending it if it is new. The
+  /// order begins as the slice's d.dims order (G11).
+  std::expected<std::size_t, ViewError> ringPlace(zigzag::DimRef dimension);
   [[nodiscard]] std::optional<std::size_t>
   ringPlaceIfKnown(zigzag::DimRef dimension) const noexcept;
   AxisResult moveInRing(zigzag::DimRef dimension,
                                             std::size_t place);
+
+  // -- the pouch (§7.7) ----------------------------------------------------
+  AxisResult addToPouch(zigzag::DimRef dimension);
+  AxisResult removeFromPouch(zigzag::DimRef dimension);
 
   // -- who uses what: scans of a handful of cells --------------------------
   void forEachAxisShowing(
@@ -1250,9 +1321,13 @@ public:
 };
 ```
 
-Every mutator edits the binding arena through `ViewManifold::mint` and `link`, and the caller tosses
-afterwards (§7.4). `ringPlace()` is the one mutator a view calls for itself, and only from
-`prepare()`.
+Every mutator edits the binding arena through `ViewManifold::mint`, `link`, `unlink` and `setText`,
+and the caller tosses afterwards (§7.4). Readers not shown here — `axisNamed`, `pointName`, `role`,
+`groupName`, `forEachGroup`, `forEachLeaf`, `forEachInRing`, `inPouch`, `forEachInPouch` — answer
+the compass and the selector. `addAxis` takes the point's name and role, because a slot's content is
+its name. `ringPlace` answers `std::expected` because it may mint, and a mint can be refused. A
+position past the end of a group, the ring or a list is `UnknownPlace`. `ringPlace()` is the one
+mutator a view calls for itself, and only from `prepare()`.
 
 ### 8.4 Layout records
 
@@ -1691,6 +1766,7 @@ enum class ViewError : std::uint8_t {
   ChordCollision,
   PromotionRefused,   // promote()'s own budget or refusal
   ArenaRefused,       // the arena refused; carries nothing more
+  UnknownPlace,       // a member, ring or list position past the end (E5)
 };
 /// Everything a view tells the reader (§12.2), errors or not.
 enum class ViewMessage : std::uint8_t { NothingThatWay, /* ... */ };
@@ -2794,6 +2870,9 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 | Binding an empty group           | "Group '*name*' has no dimensions yet."                        | `EmptyGroupBind`   |
 | A group inside itself            | "'*inner*' already contains '*outer*'."                        | `GroupCycle`       |
 | A saved binding no longer exists | "Dimension '*name*' is gone; axis *n* is unbound."             | none               |
+| A saved group member is gone     | "'*name*' is gone; group '*group*' no longer contains it."     | none               |
+| Another saved name is gone       | "'*name*' is gone; it is no longer in *where*."                | none               |
+| Saved bindings replayed          | "Restored *N* bindings and groups; *M* saved names are gone."  | none               |
 | Deleting a group in use          | "Removed '*name*' from axes *…* and groups *…*."               | none               |
 | Keeping a pack refused           | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
 | Pages still arriving             | "*document*: *N* pages so far, still paginating."              | none               |
@@ -2811,6 +2890,7 @@ rather than of the reader, but a third-party view can still surface them, so eac
 | A view kind installed twice            | "A view of kind '*kind*' is already installed."                             | `DuplicateViewKind`  |
 | A view's default chord is taken        | "*chord* already runs *action*; '*kind*' was not installed."                | `ChordCollision`     |
 | The arena refused                      | "The view space refused the change."                                        | `ArenaRefused`       |
+| No such place in a group or list       | "There is no place *n* in *where*."                                         | `UnknownPlace`       |
 
 The full words are in `messageText()`; the table elides the two longest.
 
@@ -3565,3 +3645,11 @@ ______________________________________________________________________
   `page.base.coalesceStepCap`, and ends with an order-keeping non-overlap pass.
   `page.base.coalesceSteps` is gone; `coalesceStepCap` and `physicsUnitPx` are new, and
   `CoalesceBody::position` is output only.
+- 2026-10-08 — §7 and §8.3 as built (E5, plan G2, G9, G11): `d.axis-role` and `d.view-groups` join
+  the binding dimensions, because a point's role and a group with no members had nowhere else to
+  live; `AxisRole` with three roles and no registry; `bindingPoints` in `system://layout` as name
+  and role cells, `x`, `y`, `z` by default; a group resolves as a pack does, and only a live group
+  may be a binding occurrence's target; the ring order is seeded from `d.dims`; undo as reversed
+  link steps with ring moves as places; `saveBindings()` and `replayBindings()` with leaves-first
+  groups and one notice per lost name. `ViewManifold` gains `setText()` and `text()`, `ViewError`
+  gains `UnknownPlace`, and §12.2 gains four messages. §6.6 states the binding-model shape checks.
