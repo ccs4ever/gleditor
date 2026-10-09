@@ -29,7 +29,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -69,6 +71,7 @@ struct ViewCellRef {
 using ViewDim = ViewCellRef;
 
 class ViewManifold;
+class ViewAxisSet;
 using ViewResult = std::expected<ViewManifold *, ViewError>;
 
 /// One thing verifyViewSpace() found wrong. An arena-wide violation, such as
@@ -94,17 +97,22 @@ public:
 
   ViewManifold(const ViewManifold &)            = delete;
   ViewManifold &operator=(const ViewManifold &) = delete;
-  ViewManifold(ViewManifold &&)                 = default;
-  ViewManifold &operator=(ViewManifold &&)      = delete;
-  ~ViewManifold()                               = default;
+  /// The axis set keeps a pointer back to its space, re-seated here.
+  ViewManifold(ViewManifold &&other) noexcept;
+  ViewManifold &operator=(ViewManifold &&) = delete;
+  ~ViewManifold();
 
   [[nodiscard]] const zigzag::Manifold &base() const noexcept { return base_; }
   [[nodiscard]] ViewEpoch epoch() const noexcept { return epoch_; }
 
+  /// The placement's bindings (§7, §8.3), which live in the binding arena.
+  [[nodiscard]] ViewAxisSet &axes() noexcept { return *axes_; }
+  [[nodiscard]] const ViewAxisSet &axes() const noexcept { return *axes_; }
+
   /// Whether @p cell belongs to the current generation of its own layer.
   [[nodiscard]] bool isCurrent(ViewCellRef cell) const noexcept;
 
-  // -- mint: every write of a view cell goes through these four ------------
+  // -- mint: every write of a view cell goes through these five ------------
 
   /// A bare cell.
   [[nodiscard]] std::expected<ViewCellRef, ViewError> mint(Layer layer);
@@ -116,9 +124,9 @@ public:
    *
    * @p target is a real cell of the base, kept as the cell's own ref so that
    * two occurrences of one cell hold the same value; or, for the binding
-   * layer only, a cell of the binding arena (a group, once E5 has them). A
-   * derived occurrence of a binding cell is refused: the two arenas' refs can
-   * be numerically equal, so the handle would not say which it meant.
+   * layer only, a live group of axes(). A derived occurrence of a group is
+   * refused: the two arenas' refs can be numerically equal, so the handle
+   * would not say which it meant.
    */
   [[nodiscard]] std::expected<ViewCellRef, ViewError>
   mintOccurrence(Layer layer, zigzag::CellRef target);
@@ -140,6 +148,10 @@ public:
   /// reciprocal. Nothing there is a success that writes nothing.
   [[nodiscard]] ViewResult unlink(Layer layer, ViewCellRef from, ViewDim dim,
                                   zigzag::DimVector dir) noexcept;
+  /// Restate a view cell's text, as renaming a group does. The text lives in
+  /// the arena's own scratch buffer, never in a permascroll.
+  [[nodiscard]] ViewResult setText(Layer layer, ViewCellRef cell,
+                                   std::string_view text);
 
   // -- read ----------------------------------------------------------------
 
@@ -148,6 +160,8 @@ public:
   /// never be answered from the other.
   [[nodiscard]] std::optional<ViewCellRef>
   linked(ViewCellRef from, ViewDim dim, zigzag::DimVector dir) const noexcept;
+  /// A view cell's text, or nothing for a stale or foreign ref.
+  [[nodiscard]] std::optional<std::string> text(ViewCellRef cell) const;
   /// What an occurrence stands for, or nothing for any other cell.
   [[nodiscard]] std::optional<zigzag::CellRef>
   target(ViewCellRef occurrence) const noexcept;
@@ -157,8 +171,9 @@ public:
    * An occurrence answers its target in one read. A pack container answers
    * its first constituent that resolves, at most one step per nesting level:
    * d.pack from the container to its first constituent, then d.packing along
-   * the constituents. Anything else, and an occurrence of a binding cell, is
-   * UnknownTarget.
+   * the constituents. A group, and an occurrence of one, answers as a pack
+   * does: its first member that resolves, depth first, so an empty group is
+   * UnknownTarget. Anything else is UnknownTarget.
    */
   [[nodiscard]] std::expected<zigzag::CellRef, ViewError>
   resolveReal(ViewCellRef cell) const noexcept;
@@ -169,6 +184,22 @@ public:
   [[nodiscard]] ViewDim packDim();    ///< d.pack: container, then first
   [[nodiscard]] ViewDim packingDim(); ///< d.packing: constituents in order
   [[nodiscard]] ViewDim axisStepDim(ViewAxisId axis); ///< packs along an axis
+
+  /// The same dimensions as read by a caller that must not mint, such as
+  /// cellAt(): nothing until a prepare() of this epoch has minted them.
+  [[nodiscard]] std::optional<ViewDim> findPackDim() const noexcept;
+  [[nodiscard]] std::optional<ViewDim> findPackingDim() const noexcept;
+  [[nodiscard]] std::optional<ViewDim>
+  findAxisStepDim(ViewAxisId axis) const noexcept;
+  /**
+   * @brief An occurrence of @p target in @p dim's layer that is on @p dim.
+   *
+   * The way back from a real cell into derived structure, as the origin of a
+   * rank of packs is found from the cursor's real origin (§9.3.3). A scan of
+   * the arena, which derivation keeps to what is on screen (§6.7).
+   */
+  [[nodiscard]] std::optional<ViewCellRef>
+  findOccurrence(ViewDim dim, zigzag::CellRef target) const noexcept;
 
   [[nodiscard]] std::size_t derivedCellCount() const noexcept {
     return derived_.cellCount();
@@ -206,6 +237,7 @@ public:
   }
 
 private:
+  friend class ViewAxisSet;
   friend std::size_t verifyViewSpace(
       const ViewManifold &space,
       gleditor::cpp26::function_ref<void(const ViewSpaceViolation &)> report);
@@ -249,6 +281,8 @@ private:
   std::optional<zigzag::CellRef> packDim_;
   std::optional<zigzag::CellRef> packingDim_;
   std::vector<std::optional<zigzag::CellRef>> axisStepDims_;
+
+  std::unique_ptr<ViewAxisSet> axes_;
 };
 
 /**
@@ -256,13 +290,15 @@ private:
  *
  * Checks, in both arenas: I3 (a shadowed real cell); a link key or far end
  * that is not a view cell of the same arena; links that are not two-sided; an
- * occurrence whose target is not a real cell of the base (or, in the binding
- * arena, a binding cell); a d.pack or d.packing rank that loops. On the
- * derived arena it also reports a trail or an attached space, either of which
- * would make the toss cost more than a fixed number of steps (I4).
+ * occurrence whose target is not a real cell of the base or, in the binding
+ * arena, a live group; a d.pack or d.packing rank that loops. On the derived
+ * arena it also reports a trail or an attached space, either of which would
+ * make the toss cost more than a fixed number of steps (I4). On the binding
+ * arena it reports every rank of the binding model with the wrong shape and
+ * a group reachable from itself (ViewAxisSet).
  *
- * The binding arena's own ranks (d.binds, d.dim-group) belong to the binding
- * model and are checked there.
+ * An occurrence on no rank at all is garbage an undo or a deleted group left
+ * behind, unreachable from anything; it may name a group that is gone.
  *
  * @return how many violations @p report was called with.
  */

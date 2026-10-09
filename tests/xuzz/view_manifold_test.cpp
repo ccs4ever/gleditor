@@ -9,6 +9,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -18,6 +19,7 @@
 #include <tuple>
 #include <vector>
 
+#include "common/xanadu/view/view_binding.hpp"
 #include "common/xanadu/view/view_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "view_space_fixture.hpp"
@@ -255,7 +257,11 @@ TEST(ViewManifoldTest, anOccurrenceOfWhatIsNotThereIsRefused) {
   RealSlice slice;
   const auto base = slice.manifold();
   ViewManifold space{base};
-  const auto group = mint(space, Layer::Binding);
+  const auto bare = mint(space, Layer::Binding);
+  const auto made = space.axes().createGroup("g", std::array{slice.dim});
+  ASSERT_TRUE(made.has_value());
+  const auto group =
+      ViewCellRef{.ref = *made, .epoch = 0, .layer = Layer::Binding};
 
   // Not a cell of the base.
   constexpr zigzag::CellRef nowhere = 0x7fff'0000U;
@@ -263,9 +269,14 @@ TEST(ViewManifoldTest, anOccurrenceOfWhatIsNotThereIsRefused) {
             std::unexpected{ViewError::UnknownTarget});
   EXPECT_EQ(space.mintOccurrence(Layer::Derived, zigzag::noCell),
             std::unexpected{ViewError::UnknownTarget});
-  // A binding cell may be the target of a binding occurrence (a group)...
+  // A live group may be the target of a binding occurrence, and resolves as
+  // its first member does...
   const auto ofGroup = occurrence(space, Layer::Binding, group.ref);
   EXPECT_EQ(space.target(ofGroup), group.ref);
+  EXPECT_EQ(space.resolveReal(ofGroup), slice.dim);
+  // ...any other binding cell may not...
+  EXPECT_EQ(space.mintOccurrence(Layer::Binding, bare.ref),
+            std::unexpected{ViewError::UnknownTarget});
   // ...but not of a derived one, whose handle could not say which arena.
   EXPECT_EQ(space.mintOccurrence(Layer::Derived, group.ref),
             std::unexpected{ViewError::UnknownTarget});
