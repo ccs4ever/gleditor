@@ -556,6 +556,6 @@ capture under SDL2 still wants `xvfb-run`).
   in place of the old run × z copy, and draws a beam along each world axis from four cameras on each
   backend. Exactly end on a ribbon is still a line. Head on, a beam centred in the view is where it
   was; one off the axis faces the ray to it rather than lying in z = 0, so on screen it is wider by
-  up to 1/cos of the ray's angle off the axis: in a four-beam head-on scene, 2,252 of its 3,235
-  beam pixels changed by more than 2 in a channel (11 by more than 40) and total intensity rose
-  4.6%, which is not visible side by side.
+  up to 1/cos of the ray's angle off the axis: in a four-beam head-on scene, 2,252 of its 3,235 beam
+  pixels changed by more than 2 in a channel (11 by more than 40) and total intensity rose 4.6%,
+  which is not visible side by side.
