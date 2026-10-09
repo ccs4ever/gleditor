@@ -538,3 +538,15 @@ capture under SDL2 still wants `xvfb-run`).
   `Beams::createPipeline` takes it too. The GL backend sets the mask back on before its frame clear,
   since `glClear` obeys it and a frame that ended on a translucent draw would otherwise keep its
   depth. §4's cases are `tests/lib/depth_write_test.cpp`, on each backend the machine can open.
+- 2026-10-09 — R5's decision built, before steps 6 and 7: `gleditor::TranslucentList`
+  (`include/gleditor/translucent_list.hpp`) is the frame's one translucent list. Sheets (any flat
+  glyph batch) and `Beams` batches go in; it sorts them by clip-space w of a reference point (the
+  sheet's origin, a piece's midpoint), cuts each beam where it crosses a sheet's plane, uploads the
+  pieces in draw order and draws runs of them as one call. The renderer no longer sorts documents by
+  world z (`src/renderer.cpp`); a page batch with opacity under one goes to the list and is drawn
+  with a second glyph pipeline that does not write depth, after the opaque pages. A
+  `FrameContributor` gains `drawScene()`, called before the list is drawn, with the list in
+  `FrameContext::translucent`; `drawFrame()` now comes after it. So §4's "after the opaque ones,
+  back to front" and §6.2's sort of page batches are this list, and §5.2's `PlaneSet::draw` should
+  hand its translucent planes to it rather than sort them itself. The R5 scene is
+  `TranslucentSceneTest` in `tests/lib/translucent_list_test.cpp`.

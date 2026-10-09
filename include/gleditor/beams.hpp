@@ -147,6 +147,22 @@ public:
   [[nodiscard]] std::uint32_t committed() const { return committedRows; }
 
   /**
+   * @brief The beams the last commit() handed the device.
+   *
+   * For a caller that draws them in pieces rather than in one call -- a
+   * TranslucentList cutting them where they cross a translucent sheet. A copy
+   * rather than the pending rows, which add() may have changed since.
+   */
+  [[nodiscard]] std::span<const Row> committedBeams() const {
+    return committedCopy;
+  }
+
+  /// The pipeline draw() binds, for the same caller.
+  [[nodiscard]] render::PipelineHandle pipelineHandle() const {
+    return pipeline;
+  }
+
+  /**
    * @brief Draw the committed beams.
    * @param transform projection * view, with any model transform already on
    *        it: beam ends are given in the space this maps from.
@@ -163,6 +179,7 @@ private:
   BufferPool::Allocation backing{};
   std::uint32_t committedRows{};
   std::vector<Row> rows;
+  std::vector<Row> committedCopy;
 };
 
 } // namespace gleditor

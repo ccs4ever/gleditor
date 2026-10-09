@@ -139,6 +139,7 @@ void Beams::commit() {
     backing = {};
   }
   committedRows = static_cast<std::uint32_t>(rows.size());
+  committedCopy.assign(rows.begin(), rows.end());
   if (0 == committedRows) {
     return;
   }
