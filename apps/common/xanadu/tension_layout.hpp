@@ -14,6 +14,7 @@
 #define XUDU_TENSION_LAYOUT_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include <glm/ext/vector_float3.hpp>
@@ -70,6 +71,12 @@ struct TensionBody {
   }
 };
 
+/// Which side of the near body a constraint draws the far one to. A row of
+/// documents read left to right has linked pages on both sides of the one the
+/// reader is at, and pulling every one of them to the right would make those
+/// on the left cross the row.
+enum class AlignSide : std::uint8_t { Right, Left };
+
 /**
  * @struct TensionConstraint
  * @brief Relational spring constraint connecting two bodies (document or cell).
@@ -98,6 +105,8 @@ struct TensionConstraint {
 
   /// True if the link is active, hovered, or selected.
   bool active{false};
+
+  AlignSide side{AlignSide::Right};
 };
 
 /**

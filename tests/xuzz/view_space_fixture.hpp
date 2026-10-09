@@ -7,7 +7,11 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+#include <initializer_list>
+#include <map>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -40,6 +44,61 @@ struct RealSlice {
 
   [[nodiscard]] zigzag::Manifold manifold() const {
     return store.rebuildManifold(at);
+  }
+};
+
+/**
+ * The worked example of design/view-system.md §9.3.4. Person c has e-mails
+ * e1, e2, one phone p1 and addresses a1, a2, a3; a name n1; and a contact
+ * that leads to e1 as well. d.spare is a dimension no cell links on.
+ */
+struct ContactSlice {
+  xanadu::Store store;
+  xanadu::MicroversionId at;
+  std::map<std::string, zigzag::DimRef, std::less<>> dims;
+  std::map<std::string, zigzag::CellRef, std::less<>> cells;
+
+  ContactSlice() {
+    at = store.sliceGenesis(xanadu::MicroversionId{});
+    for (const auto *const name : {"d.email", "d.phone", "d.address", "d.name",
+                                   "d.contact", "d.spare"}) {
+      const auto minted = store.makeDimension(at, name);
+      at                = minted.version;
+      dims[name]        = minted.dim;
+    }
+    for (const auto *const text :
+         {"c", "e1", "e2", "p1", "a1", "a2", "a3", "n1"}) {
+      at          = store.makeCell(at, text);
+      cells[text] = store.cellRefOf(at);
+    }
+    rank("d.email", {"c", "e1", "e2"});
+    rank("d.phone", {"c", "p1"});
+    rank("d.address", {"c", "a1", "a2", "a3"});
+    rank("d.name", {"c", "n1"});
+    rank("d.contact", {"c", "e1"});
+  }
+
+  [[nodiscard]] zigzag::DimRef dim(const std::string_view name) const {
+    return dims.find(name)->second;
+  }
+  [[nodiscard]] zigzag::CellRef cell(const std::string_view name) const {
+    return cells.find(name)->second;
+  }
+  [[nodiscard]] zigzag::Manifold manifold() const {
+    return store.rebuildManifold(at);
+  }
+
+private:
+  void rank(const std::string_view dimension,
+            std::initializer_list<const char *> along) {
+    const char *previous = nullptr;
+    for (const auto *const name : along) {
+      if (previous != nullptr) {
+        at = store.setLink(at, cell(previous), dim(dimension),
+                           zigzag::DimVector::POS, cell(name));
+      }
+      previous = name;
+    }
   }
 };
 

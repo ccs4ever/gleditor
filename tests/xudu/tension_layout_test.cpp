@@ -157,6 +157,49 @@ TEST(TensionLayoutTest, CollinearAlignmentSpring) {
   EXPECT_THAT(std::abs(resFar->position.z - 0.0F), Lt(3.5F));
 }
 
+// A linked document whose home is left of the reader's is drawn to the left
+// side, the same distance out as a right-hand one would be.
+TEST(TensionLayoutTest, AlignmentToTheLeftSide) {
+  TensionParams params;
+  params.kAlign   = 35.0F;
+  params.kDamping = 12.0F;
+
+  TensionLayoutEngine engine(params);
+
+  TensionBody nearDoc;
+  nearDoc.docIndex = 10;
+  nearDoc.width    = 50.0F;
+  nearDoc.height   = 70.0F;
+  nearDoc.pinned   = true;
+
+  TensionBody farDoc;
+  farDoc.docIndex = 20;
+  farDoc.position = glm::vec3(-120.0F, 0.0F, 0.0F);
+  farDoc.width    = 50.0F;
+  farDoc.height   = 70.0F;
+
+  engine.setBody(nearDoc);
+  engine.setBody(farDoc);
+
+  TensionConstraint link;
+  link.fromDoc   = 10;
+  link.toDoc     = 20;
+  link.targetGap = 8.0F;
+  link.active    = true;
+  link.side      = AlignSide::Left;
+  engine.addConstraint(link);
+
+  constexpr float dt = 0.016F;
+  for (int i = 0; i < 300; ++i) {
+    engine.step(dt);
+  }
+
+  const auto resFar = engine.findBody(20);
+  ASSERT_TRUE((resFar).has_value());
+  // target far X = 0 - (0.5 * (50 + 50) + 8) = -58
+  EXPECT_THAT(std::abs(resFar->position.x + 58.0F), Lt(3.5F));
+}
+
 TEST(TensionLayoutTest, AnalyticalEquilibriumSolver) {
   TensionLayoutEngine engine;
 
