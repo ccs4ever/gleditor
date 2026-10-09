@@ -25,8 +25,8 @@ against the code. Until the packages it names amend the sections below, these ho
 
 - A page's matrix is rewritten, and read back, by reflow (`src/doc.cpp`). §6 must first split a
   page's flow matrix from its pose and close `Page::setModel`.
-- A beam along world Z has no width (`assets/shaders/beam.vert.glsl`). The beam shader needs a fix,
-  so "no shader change" is not quite true.
+- A beam along world Z had no width (`assets/shaders/beam.vert.glsl`). The beam shader needed a fix,
+  so "no shader change" was not quite true; L9 made it (see the change history).
 - A soft band is a quad textured from a gradient baked into the glyph atlas, since the solid-fill
   path has one alpha per quad.
 - `PlaneSet::draw` also takes the camera's view matrix; `faceCamera` cannot be had from the combined
@@ -550,3 +550,12 @@ capture under SDL2 still wants `xvfb-run`).
   back to front" and §6.2's sort of page batches are this list, and §5.2's `PlaneSet::draw` should
   hand its translucent planes to it rather than sort them itself. The R5 scene is
   `TranslucentSceneTest` in `tests/lib/translucent_list_test.cpp`.
+- 2026-10-09 — L9 built (F3, from spike R3): `beam.vert.glsl` takes a beam's sideways vector across
+  the run and the camera ray through its midpoint, found from `uMVP` alone, with a fixed axis as
+  fallback when the two are parallel. `tests/lib/beams.cpp` tests that rule with a matrix argument
+  in place of the old run × z copy, and draws a beam along each world axis from four cameras on each
+  backend. Exactly end on a ribbon is still a line. Head on, a beam centred in the view is where it
+  was; one off the axis faces the ray to it rather than lying in z = 0, so on screen it is wider by
+  up to 1/cos of the ray's angle off the axis: in a four-beam head-on scene, 2,252 of its 3,235
+  beam pixels changed by more than 2 in a channel (11 by more than 40) and total intensity rose
+  4.6%, which is not visible side by side.

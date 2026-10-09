@@ -10,9 +10,10 @@
  * So this is a second pipeline with a record of its own: one instance per
  * beam, holding its two ends. The corners come from the vertex index as
  * before, but from the *ends* rather than from a centre, and the width is
- * taken perpendicular to the run within the plane the pages lie in -- so a
- * beam foreshortens with what it connects rather than facing the camera like
- * a label.
+ * taken perpendicular both to the run and to the camera ray through the
+ * beam's middle: the ribbon turns about its own length to face the camera.
+ * Taken within the plane the pages lie in instead, as it once was, a beam
+ * running in depth had no width at all, and any beam vanished edge on.
  *
  * Nothing here knows what a beam means. A beam has two ends, a colour and a
  * tag; whether it stands for a link, a reference, a dependency or a wire is
