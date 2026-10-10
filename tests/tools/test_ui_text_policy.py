@@ -71,7 +71,10 @@ class UiTextPolicyTest(unittest.TestCase):
         for path in ('apps/xudu/satelloid.cpp', 'include/gleditor/form.hpp',
                      'apps/common/ui/new_widget.cpp', 'apps/xudu/new_overlay.hpp',
                      'src/floating_toolbar_3d.cpp', 'include/gleditor/floating_toolbar_3d.hpp',
-                     'apps/xudu/world_card_presentation.hpp', 'src/ui/world_panel.cpp'):
+                     'apps/xudu/world_card_presentation.hpp', 'src/ui/world_panel.cpp',
+                     # The view framework's presenter and chrome (view-system.md §16.2).
+                     'apps/common/ui/view/view_presenter.cpp',
+                     'apps/common/ui/view/presentation_palette.cpp'):
             self.assertTrue(POLICY.is_ui(Path(path)))
         self.assertFalse(POLICY.is_ui(Path('apps/common/xanadu/system_docs.cpp')))
 

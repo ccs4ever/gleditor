@@ -946,6 +946,16 @@ TEST(StretchVanishingTest, EachTunableIsASettingSeededFromTheDefaults) {
   EXPECT_FLOAT_EQ(read.gap, 9.0F);
   EXPECT_FLOAT_EQ(read.overfill, StretchConfig{}.overfill);
   EXPECT_EQ(read.breadcrumbs, 3U);
+
+  // A host hands the view its settings through the SliceView seam, with the
+  // shared cell settings beside them.
+  StretchVanishingView view;
+  xanadu::view::SliceView &seam = view;
+  xanadu::ZigzagPresentationConfig cells;
+  cells.cellHorizontalPaddingPx = 11.0F;
+  seam.applySettings(xanadu::SystemStoreModel::fromStore(store), cells);
+  EXPECT_EQ(view.config().stretch, read);
+  EXPECT_FLOAT_EQ(view.config().cells.cellHorizontalPaddingPx, 11.0F);
 }
 
 TEST(StretchVanishingTest, IsInstalledByTheBuiltInRegistration) {

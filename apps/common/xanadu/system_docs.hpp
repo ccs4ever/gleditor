@@ -159,7 +159,15 @@ inline constexpr std::string_view kPouchWidthPx       = "pouchWidthPx";
 /// A slice placement's binding points, in order: each a name, then its role
 /// (view-system.md §7.3). Name and role are a cell each, so a point is added
 /// by adding two cells, never by editing text that would need parsing.
-inline constexpr std::string_view kBindingPoints   = "bindingPoints";
+inline constexpr std::string_view kBindingPoints = "bindingPoints";
+/// Which presentation shows a slice: kSlicePresentationLegacy for the ZigZag
+/// visualizer, or the kind of a slice view in the view registry
+/// (view-system-implementation-plan.md §4.6, U2). One setting per slice,
+/// keyed by its store's DocumentId, minted the first time one is chosen.
+inline constexpr std::string_view kSlicePrefix             = "slice.";
+inline constexpr std::string_view kSlicePresentationField  = ".presentation";
+inline constexpr std::string_view kSlicePresentationLegacy = "legacy";
+[[nodiscard]] std::string slicePresentationKey(std::string_view sliceId);
 inline constexpr std::string_view kPhysicsKRepel   = "physics.kRepel";
 inline constexpr std::string_view kPhysicsKPlane   = "physics.kPlane";
 inline constexpr std::string_view kPhysicsKAlign   = "physics.kAlign";
@@ -647,6 +655,9 @@ inline constexpr std::string_view kKeymapViewXanadocs =
     "std:xuzz/view_xanadocs";
 inline constexpr std::string_view kKeymapViewSlices = "std:xuzz/view_slices";
 inline constexpr std::string_view kKeymapViewBoth   = "std:xuzz/view_both";
+/// The view palette: which presentation shows the slice (view-system.md
+/// §12.1, view.palette).
+inline constexpr std::string_view kKeymapViewPalette = "std:view/palette";
 // Caret movement and editing: the document pane's own keys.
 inline constexpr std::string_view kKeymapCaretLeft  = "std:edit/caret_left";
 inline constexpr std::string_view kKeymapCaretRight = "std:edit/caret_right";
@@ -968,6 +979,12 @@ void initializeSystemStore(Store &store, SystemDocKind kind);
 [[nodiscard]] std::vector<SettingSpec>
 dimensionCueSettingSpecs(std::string_view dimension, std::uint32_t colour,
                          std::string_view dash);
+
+/// The system://layout setting that says which presentation shows the slice
+/// whose store is @p sliceId, defaulting to the legacy visualizer. Not among
+/// defaultSettingSpecs(): which slices a reader opens is known only then.
+[[nodiscard]] SettingSpec
+slicePresentationSettingSpec(std::string_view sliceId);
 
 /// Keyboard scopes a key binding can be confined to (gleditor::Command::scope):
 /// the pane that has the keyboard.

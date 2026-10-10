@@ -8,6 +8,8 @@
 #include <initializer_list>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include <gleditor/app.hpp>
@@ -19,16 +21,42 @@ namespace zigzag {
 
 namespace settings = xanadu::settings;
 
+namespace {
+
+/// A command that acts through whichever presentation is in front, so it
+/// runs whether or not the visualizer is the one shown.
+struct Routed {
+  std::function<void()> run;
+};
+
+} // namespace
+
 void registerZigzagCommands(gleditor::CommandTable &table,
                             const std::shared_ptr<ZigzagVisualizer> &viz,
                             ZigzagCommandHooks hooks) {
   const auto hooksPtr = std::make_shared<ZigzagCommandHooks>(std::move(hooks));
   // One action under both its names: the bare key while ZigZag has the
-  // keyboard, the Alt twin from anywhere.
+  // keyboard, the Alt twin from anywhere. An action only the visualizer has
+  // is offered to the presentation in front instead while another is shown,
+  // which says it cannot do it rather than act on a slice nobody sees.
   const auto both = [&table, hooksPtr](const std::string_view name,
                                        const std::string_view twin,
                                        const std::string &help,
-                                       const std::function<void()> &run) {
+                                       const auto &command) {
+    std::function<void()> run;
+    if constexpr (std::is_same_v<std::decay_t<decltype(command)>, Routed>) {
+      run = command.run;
+    } else {
+      run = [hooksPtr, name = std::string(name),
+             visualizerOnly = std::function<void()>(command)] {
+        if (hooksPtr->front && hooksPtr->visualizerShown &&
+            !hooksPtr->visualizerShown()) {
+          std::ignore = hooksPtr->front->dispatchAction(name);
+          return;
+        }
+        visualizerOnly();
+      };
+    }
     const auto action = [hooksPtr, run] {
       if (hooksPtr->dispatch)
         hooksPtr->dispatch(run);
@@ -40,13 +68,20 @@ void registerZigzagCommands(gleditor::CommandTable &table,
       table.registerAction(std::string(twin), help, action);
     }
   };
-  const auto moving = [viz, hooksPtr](const std::string_view action) {
-    return [viz, hooksPtr, action] {
-      viz->dispatchAction(action);
+  // The presentation a movement or an edit goes to: whichever is in front.
+  const auto front = [viz, hooksPtr]() -> xanadu::view::SlicePresentation & {
+    if (hooksPtr->front) {
+      return *hooksPtr->front;
+    }
+    return *viz;
+  };
+  const auto moving = [front, hooksPtr](const std::string_view action) {
+    return Routed{[front, hooksPtr, action] {
+      std::ignore = front().dispatchAction(action);
       if (hooksPtr->focusMoved) {
         hooksPtr->focusMoved();
       }
-    };
+    }};
   };
 
   // Views and bundles.
@@ -124,7 +159,9 @@ void registerZigzagCommands(gleditor::CommandTable &table,
   both(settings::kKeymapConfirmAction, {},
        "run the Omnibar, clone the palette's symbol, or follow the focused "
        "cell",
-       [viz, hooksPtr] {
+       // A hidden visualizer has neither open, so these reach the hooks,
+       // which act on whichever presentation is in front.
+       Routed{[viz, hooksPtr] {
          if (viz->isCommandBarVisible()) {
            viz->executeCommandBar();
          } else if (viz->isPaletteVisible()) {
@@ -133,9 +170,10 @@ void registerZigzagCommands(gleditor::CommandTable &table,
          } else if (hooksPtr->activateFocus) {
            hooksPtr->activateFocus();
          }
-       });
+       }});
   both(settings::kKeymapDismissOverlay, {},
-       "dismiss the Omnibar or palette, or leave ZigZag", [viz, hooksPtr] {
+       "dismiss the Omnibar or palette, or leave ZigZag",
+       Routed{[viz, hooksPtr] {
          if (viz->isCommandBarVisible()) {
            viz->setCommandBarVisible(false);
          } else if (viz->isPaletteVisible()) {
@@ -143,24 +181,24 @@ void registerZigzagCommands(gleditor::CommandTable &table,
          } else if (hooksPtr->leave) {
            hooksPtr->leave();
          }
-       });
+       }});
 
   // Moving the focus. Up and down walk the palette while it is open.
   both(settings::kKeymapStepXPos, settings::kKeymapZigzagStepXPos,
        "step focus positive along X dimension", moving("step-x-pos"));
   both(settings::kKeymapStepXNeg, settings::kKeymapZigzagStepXNeg,
        "step focus negative along X dimension", moving("step-x-neg"));
-  const auto upDown = [viz, hooksPtr](const bool up) {
-    return [viz, hooksPtr, up] {
+  const auto upDown = [viz, front, hooksPtr](const bool up) {
+    return Routed{[viz, front, hooksPtr, up] {
       if (viz->isPaletteVisible()) {
         up ? viz->palettePrev() : viz->paletteNext();
         return;
       }
-      viz->dispatchAction(up ? "step-y-pos" : "step-y-neg");
+      std::ignore = front().dispatchAction(up ? "step-y-pos" : "step-y-neg");
       if (hooksPtr->focusMoved) {
         hooksPtr->focusMoved();
       }
-    };
+    }};
   };
   both(settings::kKeymapStepYPos, settings::kKeymapZigzagStepYPos,
        "step focus positive along Y dimension", upDown(true));

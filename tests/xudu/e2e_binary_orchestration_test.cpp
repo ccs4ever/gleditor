@@ -2752,4 +2752,95 @@ TEST(E2EBinaryOrchestrationTest, importedMediaRetainsSeedAfterSourceDeletion) {
   EXPECT_EQ(reopened.exitCode, 0) << reopened.output;
 }
 
+/**
+ * U2 (view-system-implementation-plan.md §4.6): the second slice
+ * presentation is chosen from the view palette, by keyboard, beside today's;
+ * it draws the slice, moves with the existing step keys, says what it cannot
+ * do, and stays chosen for that slice across a restart. The two captures are
+ * what compare-backends.sh holds OpenGL and GLES to.
+ */
+TEST(E2EBinaryOrchestrationTest, aSliceViewIsChosenFromThePaletteAndKept) {
+  const auto binary = findXuduBinary();
+  ASSERT_TRUE(fs::exists(binary)) << "xudu binary not found at " << binary;
+  const auto root = workspaceRoot() / "integration_workspace_slice_view";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(root);
+  fs::create_directories(root);
+  fs::create_directories(screenshotDir);
+  const auto scroll = root / "permascroll";
+  const auto path   = root / "store";
+  {
+    Store slice(permascrollAt(scroll));
+    auto head         = slice.sliceGenesis({});
+    const auto across = slice.makeDimension(head, "d.across");
+    head              = across.version;
+    const auto down   = slice.makeDimension(head, "d.down");
+    head              = down.version;
+    const auto make   = [&](const std::string &words) {
+      head = slice.makeCell(head, words);
+      return slice.cellRefOf(head);
+    };
+    const auto link = [&](const zigzag::CellRef from, const zigzag::DimRef dim,
+                          const zigzag::CellRef to) {
+      head = slice.setLink(head, from, dim, zigzag::DimVector::POS, to);
+    };
+    const std::array<std::string, 4> names{
+        "Ada Lovelace", "Analytical Engine notes, 1843", "Charles Babbage",
+        "Difference Engine No. 2"};
+    std::vector<zigzag::CellRef> row;
+    for (const auto &name : names) {
+      row.push_back(make(name));
+    }
+    link(slice.homeCell(), across.dim, row[0]);
+    for (std::size_t i = 0; i + 1 < row.size(); ++i) {
+      link(row[i], across.dim, row[i + 1]);
+    }
+    zigzag::CellRef above = slice.homeCell();
+    for (const auto *const words :
+         {"Mathematician", "Born 1815, London", "Notes on Menabrea"}) {
+      const auto cell = make(words);
+      link(above, down.dim, cell);
+      above = cell;
+    }
+    slice.repointCurrentVersion(head);
+    slice.save(path.string());
+  }
+  const auto ppm = [&](const std::string &name) {
+    return screenshotDir / ("slice_view_" + name + ".ppm");
+  };
+  const auto xuzz = [&](const std::string &steps) {
+    return executeProcess("XDG_CONFIG_HOME=" + (root / "config").string() +
+                          " XDG_DATA_HOME=" + (root / "data").string() +
+                          " timeout 120 " + binary.string() +
+                          permascrollFlag(scroll) + " --backend " +
+                          activeBackend() + " --profile --view zigzag" + steps +
+                          " " + path.string());
+  };
+
+  // The palette's second entry is the first slice view; Enter takes it.
+  const auto chosen = xuzz(
+      " --do std:view/palette --key right --key enter --capture " +
+      ppm("chosen").string() + " --do std:nav/zigzag_step_x_pos --capture " +
+      ppm("stepped").string() +
+      " --do std:ui/zigzag_toggle_palette --dump-a11y");
+  ASSERT_EQ(chosen.exitCode, 0) << chosen.output;
+  EXPECT_THAT(
+      chosen.output,
+      testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
+  EXPECT_THAT(chosen.output, testing::HasSubstr("Ada Lovelace"));
+  EXPECT_THAT(chosen.output, testing::HasSubstr("cannot"));
+  for (const auto *const name : {"chosen", "stepped"}) {
+    ASSERT_TRUE(fs::exists(ppm(name))) << name;
+    exportToPng(ppm(name),
+                screenshotDir / ("slice_view_" + std::string(name) + ".png"));
+  }
+
+  // Chosen for this slice, so a restart opens it the same way.
+  const auto reopened = xuzz(" --dump-a11y");
+  ASSERT_EQ(reopened.exitCode, 0) << reopened.output;
+  EXPECT_THAT(
+      reopened.output,
+      testing::HasSubstr("slice presentation -> slice.stretch-vanishing"));
+}
+
 } // namespace

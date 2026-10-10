@@ -289,6 +289,37 @@ Plane counts that R1 must hold for: a stretch pane, about 300 cells in a handful
 at depth 2 with valence 20, about 1,300 planes; a deck, 30 to 60 pages; a selector's third tier, a
 few hundred.
 
+As built (U2), in `apps/common/ui/view/`:
+
+- `SlicePresenter` (`view_presenter`) draws a flat placement as §4.1 says, with one pair of world
+  canvases per depth plane (cell content in `Body`, ticks in `Caption`), edges as beams handed to
+  the frame's translucent list, and the chrome strip — notice, breadcrumbs, key hints — on a screen
+  canvas. It rebuilds and uploads only when the records' stamp or the typography changes, and fits
+  through one `ShapingCache`, so a settled frame lays out, shapes and uploads nothing. A cell's
+  colour, dash and the rule under a tick come from U1's cue by the edge's dimension name; the
+  layout's `dashClass` is left to the raster. The clip margin's hysteresis is here (§9.1.5); the
+  detail step's is not yet, for want of a setting that says how wide its band is.
+- `ViewSlicePresentation` is the placement of §8.8 behind the U0 seam: a `ViewManifold`, a cursor,
+  the registry's `SliceView`, a sink and U6a's `ViewAnimation` between layouts. It seeds the view's
+  settings into `system://settings` when made, mints a bound dimension's cue in `system://ui`
+  between frames, records each completed move as a `Visit` and reads the breadcrumbs back from that
+  log. Commands posted from another thread run on the owner thread. Steps along a binding point and
+  the jump home are supported; anything else answers false and says `ActionNotSupported` in the
+  chrome and as a polite announcement. The slice is folded only when the presentation is shown.
+- `SlicePresentationSwitch` holds the legacy visualizer and every slice view behind one seam and one
+  set of renderer roles, handing the focus, the axes, the link's highlights and the preview over on
+  a switch; `ViewCoordinator` shows the one `slice.<DocumentId>.presentation` in `system://layout`
+  names (the spec's `layout.slice.<id>.presentation`), the legacy one by default and for a view the
+  program does not have. ZigZag's shared commands step through whichever is shown.
+- The view palette (`std:view/palette`, `Ctrl+Alt+V`) is a form listing the visualizer and every
+  slice view of the registry; U5a makes it the palette proper.
+
+Two choices the spec left open: a placement standing on its own takes `Doc::pixelsToWorld` as the
+legacy visualizer does, and it is enlarged in quarter steps until a line of cell text reaches
+`zigzag.minReadableTextPx` whether or not it is embedded, since at the world's scale every cell past
+the focus would otherwise step down to bars. Real cells are announced as list items, as the legacy
+visualizer's are: the library's accessibility roles have no cell yet.
+
 ### 4.7 Track X: cut-over
 
 | #   | Package                                                                                                                                                                                   | Depends    | Tests                                                                             | Size |
@@ -603,3 +634,7 @@ Three challengers attacked the first draft. What each said that mattered, and wh
   the dimension settings in `system://ui`.
 - 2026-10-09 — §5.3: U6a as built. `view.motion.*` in `system://ui`, the rows the animation layer
   applies now and the rest with their components; the held-key rule measured from the steps' timing.
+- 2026-10-14 — §4.6: U2 as built. The presenter, the placement behind the seam and the switch beside
+  the legacy visualizer; the per-slice presentation setting; the palette as a form until U5a; the
+  scale a standalone placement takes, and real cells announced as list items for want of a cell
+  role.

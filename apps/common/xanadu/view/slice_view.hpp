@@ -108,6 +108,19 @@ public:
   [[nodiscard]] virtual std::optional<glm::vec3>
   axisDirection(ViewAxisId axis) const noexcept = 0;
 
+  /**
+   * @brief Read the settings the view's descriptor seeded, and the zigzag.*
+   *        cell settings every slice view shares (§12.3).
+   *
+   * The host calls it once the settings exist and whenever either store
+   * changes; the next prepare() and layout() use what it read. How a view
+   * turns a setting into a number is its own business, so a third-party view
+   * reads its settings here the way a built-in one does. The default reads
+   * nothing.
+   */
+  virtual SliceView *applySettings(const SystemStoreModel &settings,
+                                   const ZigzagPresentationConfig &cells);
+
   /// The only phase that may mint, extend the ring order or fill caches.
   /// Runs when the cursor, the epoch, the store or the frame changed.
   virtual std::expected<SliceView *, ViewError>

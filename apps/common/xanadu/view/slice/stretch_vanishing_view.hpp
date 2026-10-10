@@ -150,6 +150,10 @@ public:
   [[nodiscard]] const StretchVanishingConfig &config() const noexcept {
     return config_;
   }
+  /// The stretch.* settings and the shared cell padding and width.
+  StretchVanishingView *
+  applySettings(const SystemStoreModel &settings,
+                const ZigzagPresentationConfig &cells) override;
 
   [[nodiscard]] std::string_view kind() const noexcept override {
     return kKind;

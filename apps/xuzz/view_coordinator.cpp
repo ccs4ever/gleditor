@@ -6,6 +6,12 @@
 #include "view_coordinator.hpp"
 
 #include <iostream>
+#include <string>
+#include <tuple>
+
+#include <gleditor/logging.hpp>
+
+#include "common/xanadu/system_docs.hpp"
 
 namespace xuzz {
 
@@ -37,6 +43,33 @@ void ViewCoordinator::cycleViewMode() {
   case ViewMode::ZigzagOnly:
     setViewMode(ViewMode::Unified);
     break;
+  }
+}
+
+void ViewCoordinator::applySlicePresentation(const xanadu::Store &layout) {
+  if (!presentations_) {
+    return;
+  }
+  const auto *const slice = presentations_->store();
+  if (nullptr == slice) {
+    return;
+  }
+  const auto key =
+      xanadu::settings::slicePresentationKey(slice->documentId().str());
+  const auto chosen = xanadu::SystemStoreModel::fromStore(layout).getString(
+      key, xanadu::settings::kSlicePresentationLegacy);
+  const auto before = std::string(presentations_->shownKind());
+  if (!presentations_->show(chosen)) {
+    GLEDITOR_LOG_WARN("xuzz.view",
+                      "{} names a view this program does not "
+                      "have: {}; showing the visualizer",
+                      key, chosen);
+    std::ignore =
+        presentations_->show(xanadu::settings::kSlicePresentationLegacy);
+  }
+  if (before != presentations_->shownKind()) {
+    std::cout << "xuzz: slice presentation -> " << presentations_->shownKind()
+              << "\n";
   }
 }
 

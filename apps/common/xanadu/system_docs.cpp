@@ -50,6 +50,10 @@ std::string settings::dimensionColourKey(const std::string_view dimension) {
   return std::string{kDimensionPrefix} + std::string{dimension} +
          std::string{kDimensionColourField};
 }
+std::string settings::slicePresentationKey(const std::string_view sliceId) {
+  return std::string{kSlicePrefix} + std::string{sliceId} +
+         std::string{kSlicePresentationField};
+}
 std::string settings::dimensionDashKey(const std::string_view dimension) {
   return std::string{kDimensionPrefix} + std::string{dimension} +
          std::string{kDimensionDashField};
@@ -1578,6 +1582,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Delete the selection or the character after the caret",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Delete"}}}}},
+        {.name    = std::string(settings::kKeymapViewPalette),
+         .notes   = "Choose which presentation shows the slice",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+V"}}}}},
         {.name    = std::string(settings::kKeymapNewSlice),
          .notes   = "Shortcut to start a new ZigZag slice in a new store",
          .schemas = {{.expectedTypes = {"string"},
@@ -2024,6 +2032,15 @@ dimensionCueSettingSpecs(const std::string_view dimension,
        .schemas = {{.expectedTypes = {"string"},
                     .defaultValues = {std::string{dash}}}}},
   };
+}
+
+SettingSpec slicePresentationSettingSpec(const std::string_view sliceId) {
+  return {.name    = settings::slicePresentationKey(sliceId),
+          .notes   = "Which presentation shows this slice: legacy for the "
+                     "ZigZag visualizer, or the kind of a slice view",
+          .schemas = {{.expectedTypes = {"string"},
+                       .defaultValues = {
+                           std::string{settings::kSlicePresentationLegacy}}}}};
 }
 
 MicroversionId initializeSystemStoreGenesis(Store &store,

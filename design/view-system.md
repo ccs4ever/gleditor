@@ -1592,6 +1592,13 @@ becomes the origin; `MoveOutcome::step` carries E14's `SliceStep` for a step bet
 along a real dimension, which is exactly what plan G6 feeds the walk recorder, and nothing for a
 retrieve.
 
+As built (U2): `SliceView` gains
+`applySettings(const SystemStoreModel &settings, const ZigzagPresentationConfig &cells)`, which the
+host calls once the descriptor's settings are seeded and whenever `system://settings` or the
+`zigzag.*` cell settings change, with the cell lengths already in pixels. §8.1 has the host seed a
+descriptor's settings but says nothing of how a view reads them back; without this a host would have
+to know each view's own configuration type, which §8.10 forbids. The default reads nothing.
+
 Editing is write-through and belongs to the host: it resolves `cellAt(cursor)`, which is always a
 real cell, and hands it to the existing edit path. Keeping a pack is explicit and separate:
 
@@ -2998,6 +3005,7 @@ a page (click, or page and link actions); scrub a deck (drag or wheel, or hold n
 | Deleting a group in use          | "Removed '*name*' from axes *…* and groups *…*."               | none               |
 | Keeping a pack refused           | "This pack is too large to keep (*N* cells)."                  | `PromotionRefused` |
 | Pages still arriving             | "*document*: *N* pages so far, still paginating."              | none               |
+| An action this view cannot do    | "*view* cannot *action* yet; the ZigZag visualizer can, …"     | none               |
 
 Each is also an accessibility announcement. The refusals below are faults of a view or of the host
 rather than of the reader, but a third-party view can still surface them, so each has words:
@@ -3095,6 +3103,12 @@ palette when first seen and the reader's to change; it is the one colour that di
 everywhere. The dimension pouch is kept in `system://pouches`. Per-slice state —
 `layout.slice.<id>.view`, `.subview`, `.axes`, `.groups`, `.ringOrder` — and per-document-set state
 — `layout.pages.<id>.view` — live in `system://layout`.
+
+As built (U2): until the host replaces the legacy presentations, which presentation shows a slice is
+`layout.slice.<id>.presentation`: `legacy`, the default, or a slice view's kind. Like the keys above
+it is stored without the store's own name, as `slice.<id>.presentation` beside `bindingPoints`, and
+`<id>` is the slice store's `DocumentId`. It is minted when the reader first chooses from the view
+palette.
 
 ______________________________________________________________________
 
@@ -3804,3 +3818,7 @@ ______________________________________________________________________
   sink; `PlacedFrame` gains `opacity` so a frame fades with its contents; the held-key rule measured
   from the steps' own timing. `view.motion.*` — `reduced` and the step, toss, view-switch,
   sub-view-switch and hint timings and curves — are in `system://ui`.
+- 2026-10-14 — §8.5, §12.2 and §12.3 as built (U2): `SliceView::applySettings`, through which a host
+  hands any view the settings its descriptor seeded; the message for an action the shown view cannot
+  do yet; `layout.slice.<id>.presentation`, which chooses the legacy visualizer or a slice view per
+  slice.

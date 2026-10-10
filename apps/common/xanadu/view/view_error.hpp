@@ -62,6 +62,9 @@ enum class ViewMessage : std::uint8_t {
   BindingsReplayed,
   SavedMemberGone,
   SavedNameGone,
+  /// An action the presentation in front cannot do yet, said rather than
+  /// swallowed while a new presentation stands beside the legacy one.
+  ActionNotSupported,
 };
 
 /// Every enumerator, in declaration order, so a test can visit each one.
@@ -85,7 +88,7 @@ inline constexpr std::array kViewMessages{
     ViewMessage::ViewKindTaken,       ViewMessage::ChordTaken,
     ViewMessage::ViewSpaceRefused,    ViewMessage::PlaceUnknown,
     ViewMessage::BindingsReplayed,    ViewMessage::SavedMemberGone,
-    ViewMessage::SavedNameGone,
+    ViewMessage::SavedNameGone,       ViewMessage::ActionNotSupported,
 };
 
 /// The message a refusal is reported with. The switch has no default, so an
@@ -167,6 +170,8 @@ messageId(ViewMessage message) noexcept {
     return "view.savedMemberGone";
   case ViewMessage::SavedNameGone:
     return "view.savedNameGone";
+  case ViewMessage::ActionNotSupported:
+    return "view.actionNotSupported";
   }
   return {};
 }
@@ -221,6 +226,9 @@ messageText(ViewMessage message) noexcept {
     return "'{name}' is gone; group '{group}' no longer contains it.";
   case ViewMessage::SavedNameGone:
     return "'{name}' is gone; it is no longer in {where}.";
+  case ViewMessage::ActionNotSupported:
+    return "{view} cannot {action} yet; the ZigZag visualizer can, from the "
+           "view palette.";
   }
   return {};
 }

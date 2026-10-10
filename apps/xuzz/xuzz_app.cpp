@@ -53,7 +53,10 @@
 #include "common/ui/hypertime_graph.hpp"
 #include "common/ui/slice/zigzag_commands.hpp"
 #include "common/ui/slice/zigzag_visualizer.hpp"
+#include "common/ui/view/presentation_palette.hpp"
 #include "common/ui/view/slice_presentation.hpp"
+#include "common/ui/view/slice_presentation_switch.hpp"
+#include "common/ui/view/view_slice_presentation.hpp"
 #include "common/ui/xanadoc/batch_orchestrator.hpp"
 #include "common/ui/xanadoc/beams.hpp"
 #include "common/ui/xanadoc/bridge_coordinator.hpp"
@@ -71,6 +74,7 @@
 #include "common/xanadu/link_navigation.hpp"
 #include "common/xanadu/link_panel.hpp"
 #include "common/xanadu/reading_place.hpp"
+#include "common/xanadu/view/builtin_views.hpp"
 #include <gleditor/caret_motion.hpp>
 #include <gleditor/logging.hpp>
 
@@ -882,8 +886,49 @@ int XuzzApp::run(const int argc, char **argv) {
   // The application talks to the slice through the seam; only the Vortex host
   // and the visualizer's own commands still need the concrete type.
   const auto zigzagVisualizer = std::make_shared<zigzag::ZigzagVisualizer>("");
+  // Every slice view in the registry stands beside the visualizer, chosen per
+  // slice from the view palette (plan §4.6, U2); the visualizer stays the
+  // default until cut-over.
+  xanadu::view::ViewRegistry viewRegistry;
+  if (const auto installed = xanadu::view::registerBuiltinViews(viewRegistry);
+      !installed) {
+    GLEDITOR_LOG_WARN(
+        "xuzz.view", "a built-in view was refused: {}",
+        xanadu::view::messageId(xanadu::view::messageKey(installed.error())));
+  }
+  const auto slicePresentations =
+      std::make_shared<xanadu::view::SlicePresentationSwitch>(zigzagVisualizer);
+  std::vector<std::shared_ptr<xanadu::view::ViewSlicePresentation>>
+      viewPresentations;
+  for (const auto &descriptor : viewRegistry.views()) {
+    if (xanadu::view::ViewSubject::Slice != descriptor.subject) {
+      continue;
+    }
+    auto presentation = std::make_shared<xanadu::view::ViewSlicePresentation>(
+        viewRegistry, descriptor.kind,
+        xanadu::view::ViewSlicePresentation::Host{
+            .post =
+                [renderer](std::function<void()> task) {
+                  renderer->runWithState(
+                      [task = std::move(task)](RenderState &) { task(); });
+                },
+            .systemStore = [&session](const xanadu::SystemDocKind kind)
+                -> xanadu::Store * { return &session->systemStore(kind); },
+            .repoint =
+                [&session](const xanadu::SystemDocKind kind,
+                           const xanadu::MicroversionId &version) {
+                  session->repointSystemDoc(kind, version);
+                }});
+    viewPresentations.push_back(presentation);
+    std::ignore = slicePresentations->add(
+        descriptor.kind, presentation,
+        [presentation](xanadu::view::SlicePresentation &,
+                       const xanadu::view::SlicePresentation &leaving) {
+          presentation->adoptAxes(leaving.currentView());
+        });
+  }
   const std::shared_ptr<xanadu::view::SlicePresentation> zigzagPresentation =
-      zigzagVisualizer;
+      slicePresentations;
   auto &bridgeStore = session->store(0);
   zigzagPresentation->bindXuduStore(bridgeStore,
                                     bridgeStore.primaryCurrentVersion());
@@ -956,6 +1001,11 @@ int XuzzApp::run(const int argc, char **argv) {
   };
 
   bridgeCoordinator.attach(*zigzagPresentation);
+  ViewCoordinator viewCoordinator(views, zigzagPresentation, bridgeCoordinator,
+                                  renderer, state);
+  viewCoordinator.setPresentations(slicePresentations);
+  viewCoordinator.applySlicePresentation(
+      session->systemStore(xanadu::SystemDocKind::Layout));
   linkContext.setManifold(bridgeCoordinator.manifold(), 0,
                           session->store().primaryCurrentVersion());
   linkContext.setFocusCell(
@@ -1042,13 +1092,16 @@ int XuzzApp::run(const int argc, char **argv) {
 
   const auto bindZigzag = [&session, &zigzagPresentation, &linkContext,
                            &bridgeCoordinator, &views, &map, &zigzagStoreIndex,
-                           &sliceHeads](RenderState &rState,
-                                        const std::size_t storeIndex,
-                                        const xanadu::MicroversionId &version) {
+                           &sliceHeads, &viewCoordinator](
+                              RenderState &rState, const std::size_t storeIndex,
+                              const xanadu::MicroversionId &version) {
     if (!zigzagPresentation->sliceHead().isZero()) {
       sliceHeads[zigzagStoreIndex] = zigzagPresentation->sliceHead();
     }
     zigzagPresentation->bindXuduStore(session->store(storeIndex), version);
+    // Each slice keeps the presentation chosen for it.
+    viewCoordinator.applySlicePresentation(
+        session->systemStore(xanadu::SystemDocKind::Layout));
     zigzagStoreIndex       = storeIndex;
     sliceHeads[storeIndex] = version;
     map.setStoreIndex(storeIndex);
@@ -1135,8 +1188,6 @@ int XuzzApp::run(const int argc, char **argv) {
   bridgeCoordinator.applyConfig(initialLayout.bridge);
 
   // 6. ViewCoordinator (Unified, XanadocOnly, ZigzagOnly)
-  ViewCoordinator viewCoordinator(views, zigzagPresentation, bridgeCoordinator,
-                                  renderer, state);
   viewCoordinator.setViewMode(opts.viewMode);
 
   links.setOpener([&views](const xanadu::MicroversionId &version) {
@@ -2440,7 +2491,48 @@ int XuzzApp::run(const int argc, char **argv) {
            [renderer](std::function<void()> action) {
              renderer->runWithState(
                  [action = std::move(action)](RenderState &) { action(); });
+           },
+       .front = zigzagPresentation,
+       .visualizerShown =
+           [slicePresentations] {
+             return slicePresentations->shownKind() ==
+                    xanadu::settings::kSlicePresentationLegacy;
            }});
+
+  // The view palette: which presentation shows the slice. The choice is the
+  // slice's own setting in system://layout, so it survives a restart and the
+  // layout watcher below applies it.
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewPalette),
+      "choose which view shows the slice",
+      [&renderer, &publishForm, &viewRegistry, &session, slicePresentations] {
+        renderer->runWithState([&renderer, &publishForm, &viewRegistry,
+                                &session, slicePresentations](RenderState &) {
+          xanadu::view::openSlicePresentationPalette(
+              publishForm, viewRegistry, slicePresentations->shownKind(),
+              [&renderer, &session, slicePresentations](std::string chosen) {
+                renderer->runWithState(
+                    [&session, slicePresentations,
+                     chosen = std::move(chosen)](RenderState &) {
+                      const auto *const slice = slicePresentations->store();
+                      if (nullptr == slice) {
+                        return;
+                      }
+                      auto &layout =
+                          session->systemStore(xanadu::SystemDocKind::Layout);
+                      const auto id = slice->documentId().str();
+                      auto head     = xanadu::ensureSetting(
+                          layout, layout.primaryCurrentVersion(),
+                          xanadu::slicePresentationSettingSpec(id));
+                      head = xanadu::setSetting(
+                          layout, head,
+                          xanadu::settings::slicePresentationKey(id), chosen);
+                      session->repointSystemDoc(xanadu::SystemDocKind::Layout,
+                                                head);
+                    });
+              });
+        });
+      });
 
   const auto startSlice =
       [&views, &session, &keyboardPane, &bindZigzag, &state,
@@ -2786,8 +2878,8 @@ int XuzzApp::run(const int argc, char **argv) {
        &swarmTelescope, &satelloidOverlay, &kineticTetherOverlay,
        &wireframeHullOverlay, readablePx, &session, zigzagPresentation,
        zigzagVisualizer, &bridgeCoordinator, &showKeyHints, state,
-       applyTypography](const xanadu::SystemDocKind kind,
-                        const xanadu::Store &store) {
+       applyTypography, &viewPresentations, &viewCoordinator](
+          const xanadu::SystemDocKind kind, const xanadu::Store &store) {
         std::cout << "xuzz: system doc updated (" << xanadu::systemDocUri(kind)
                   << ")\n";
         const auto model = xanadu::SystemStoreModel::fromStore(store);
@@ -2808,6 +2900,9 @@ int XuzzApp::run(const int argc, char **argv) {
           break;
         }
         case xanadu::SystemDocKind::Settings: {
+          for (const auto &presentation : viewPresentations) {
+            presentation->applySettings();
+          }
           session->setAutoSave(std::chrono::seconds(
               xanadu::SettingsConfig::fromStore(store).autoSaveSeconds));
           if (auto vHost = zigzagVisualizer->vortexHost()) {
@@ -2827,6 +2922,10 @@ int XuzzApp::run(const int argc, char **argv) {
                                       : xanadu::PouchDrawer::DockSide::Right);
           zigzagPresentation->setPresentationConfig(layout.zigzag);
           bridgeCoordinator.applyConfig(layout.bridge);
+          for (const auto &presentation : viewPresentations) {
+            presentation->applySettings();
+          }
+          viewCoordinator.applySlicePresentation(store);
           break;
         }
         case xanadu::SystemDocKind::UI: {
@@ -2845,6 +2944,9 @@ int XuzzApp::run(const int argc, char **argv) {
           map.setConfig(uiCfg.hypertimeModal);
           docSwitcher->setVisible(uiCfg.tabBarVisible);
           map.setVisible(uiCfg.hypertimeMapVisible);
+          for (const auto &presentation : viewPresentations) {
+            presentation->applySettings();
+          }
           break;
         }
         case xanadu::SystemDocKind::Pouches:

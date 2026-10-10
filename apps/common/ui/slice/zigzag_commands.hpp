@@ -15,6 +15,10 @@ namespace gleditor {
 class CommandTable;
 }
 
+namespace xanadu::view {
+class SlicePresentation;
+} // namespace xanadu::view
+
 namespace zigzag {
 
 class ZigzagVisualizer;
@@ -33,6 +37,13 @@ struct ZigzagCommandHooks {
   /// Marshal the whole action to the host thread that owns the visualizer,
   /// including layout caches and accessibility. Empty for single-thread hosts.
   std::function<void(std::function<void()>)> dispatch;
+  /// The presentation the reader sees, where a host stands another beside
+  /// the visualizer (view-system-implementation-plan.md §4.6, U2): steps go
+  /// to it, and an action only the visualizer has is offered to it while
+  /// visualizerShown() says the visualizer is not the one shown, so it can
+  /// say it cannot. Empty: everything goes to the visualizer.
+  std::shared_ptr<xanadu::view::SlicePresentation> front;
+  std::function<bool()> visualizerShown;
 };
 
 /**

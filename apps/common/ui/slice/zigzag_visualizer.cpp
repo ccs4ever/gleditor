@@ -3,6 +3,7 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
+#include "common/ui/readable_scale.hpp"
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/overlay.hpp"
 #include "common/xanadu/published_vocabulary.hpp"
@@ -1590,11 +1591,7 @@ bool ZigzagVisualizer::picked(const render::PickingResult &pick,
 
 float ZigzagVisualizer::readableScaleFor(const float lineOnScreenPx,
                                          const float wantedPx) noexcept {
-  if (lineOnScreenPx <= 0.0F || wantedPx <= 0.0F) {
-    return 1.0F;
-  }
-  constexpr float kSteps = 4.0F;
-  return std::max(1.0F, std::ceil(wantedPx / lineOnScreenPx * kSteps) / kSteps);
+  return xanadu::ui::readableScaleFor(lineOnScreenPx, wantedPx);
 }
 
 void ZigzagVisualizer::applyReadableScale(const gleditor::FrameContext &ctx) {

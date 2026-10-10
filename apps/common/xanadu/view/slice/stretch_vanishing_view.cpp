@@ -892,6 +892,13 @@ StretchVanishingView::configure(const StretchVanishingConfig &config) {
   return this;
 }
 
+StretchVanishingView *
+StretchVanishingView::applySettings(const SystemStoreModel &settings,
+                                    const ZigzagPresentationConfig &cells) {
+  return configure(StretchVanishingConfig{
+      .stretch = StretchConfig::fromSettings(settings), .cells = cells});
+}
+
 std::optional<glm::vec3>
 StretchVanishingView::axisDirection(const ViewAxisId axis) const noexcept {
   if (axis >= directions_.size()) {

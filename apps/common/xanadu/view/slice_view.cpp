@@ -84,6 +84,12 @@ std::optional<zigzag::CellRef> cellAt(const ViewManifold &space,
   return real.has_value() ? std::optional{*real} : std::nullopt;
 }
 
+SliceView *
+SliceView::applySettings(const SystemStoreModel & /*settings*/,
+                         const ZigzagPresentationConfig & /*cells*/) {
+  return this;
+}
+
 std::expected<SliceView *, ViewError>
 SliceView::prepare(ViewManifold & /*space*/, const SliceCursor & /*cursor*/,
                    const PaneFrame & /*frame*/, Measure /*measure*/) {
