@@ -43,6 +43,7 @@ bool PageBreakOverlay::busy() const {
 }
 
 void PageBreakOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!canvas_ || ctx.state.docs.empty()) {
     hasHover_ = false;
     selectTarget(std::nullopt);

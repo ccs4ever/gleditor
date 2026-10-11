@@ -138,7 +138,7 @@ bool Renderer::hasPendingWork() const {
   // An animation counts as pending work, which is what keeps a screenshot
   // honest: the frame a capture wants is the finished one, and a document
   // halfway through fading in is not it.
-  return !renderQueue.empty() || !pendingDocLoads.empty() ||
+  return chromeChanged || !renderQueue.empty() || !pendingDocLoads.empty() ||
          !pickAnswers.empty() || !timeline.empty() ||
          (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now())) ||
          std::ranges::any_of(frameContributors,
@@ -384,6 +384,24 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // the atlas; rebuild the rest of the chain before anything samples it.
   state.glyphCache.flush();
 
+  const auto pixelInset = [](const float inset, const int size) {
+    return static_cast<int>(
+        std::ceil(std::clamp(inset, 0.F, static_cast<float>(size))));
+  };
+  const int contentLeft   = pixelInset(lastChrome.left, screenWidth);
+  const int contentBottom = pixelInset(lastChrome.bottom, screenHeight);
+  const int contentRight =
+      screenWidth - pixelInset(lastChrome.right, screenWidth);
+  const int contentTop =
+      screenHeight - pixelInset(lastChrome.top, screenHeight);
+  const auto contentRegion = device->defineRegion(
+      {.viewWidth  = screenWidth,
+       .viewHeight = screenHeight,
+       .clipLeft   = contentLeft,
+       .clipBottom = contentBottom,
+       .clipWidth  = std::max(0, contentRight - contentLeft),
+       .clipHeight = std::max(0, contentTop - contentBottom)});
+  device->setRegion(contentRegion);
   device->bindPipeline(state.glyphPipeline);
   device->bindAtlasTexture(state.glyphCache.textureHandle());
 
@@ -396,7 +414,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
   budget.screenWidth = static_cast<float>(screenWidth);
   budget.coarseBelow = this->state->coarseBelow;
   budget.cull        = this->state->cullPages;
-  lastDraw           = DrawStats{};
+  if (const auto palette = this->state->documentPalette.load()) {
+    budget.documentPalette = *palette;
+  }
+  lastDraw = DrawStats{};
   // Sort documents back-to-front (lowest Z first) so that alpha blending
   // correctly composites semi-transparent layers in 3D onion-skinning mode.
   auto sortedDocs = state.docs;
@@ -423,6 +444,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // across threads, so an improvement there would be invisible in a figure
   // that also counted a matrix multiply per page.
   const auto recordStart = std::chrono::steady_clock::now();
+  for (auto &batch : state.pageBatches) batch.region = contentRegion;
   device->drawGlyphBatches(state.pageBatches);
   const auto recordEnd = std::chrono::steady_clock::now();
 
@@ -431,6 +453,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
       doc->drawCaret(state, viewProjection, *caret);
     }
   }
+
+  device->setRegion(std::nullopt);
 
   // Whatever the program draws for itself: after the documents, so it can sit
   // over them, and before the notifications, which must be over everything.
@@ -450,12 +474,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
                            .screenWidth  = screenWidth,
                            .screenHeight = screenHeight,
                            .marginShare  = this->state->uiSafeMarginShare.load()},
-        .theme          = theme ? *theme : gleditor::ui::defaultTheme()};
+        .theme          = theme ? *theme : gleditor::ui::defaultTheme(),
+        .contentRegion  = contentRegion};
     for (auto *const contributor : frameContributors) {
       ctx.metrics.chrome = ctx.chrome;
       contributor->drawFrame(ctx);
     }
-    lastChrome = ctx.chrome;
+    chromeChanged = lastChrome != ctx.chrome;
+    lastChrome    = ctx.chrome;
   }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so
@@ -530,7 +556,31 @@ bool Renderer::update(RenderState &state, const bool settled) {
       answer->requestId = requestPick(state, answer->x, answer->y);
     }
   }
-  if (settled) {
+  using ScriptKind = AppState::AutomationStep::Kind;
+  const bool liveNext =
+      nextStep + 1 < this->state->script.size() &&
+      this->state->script[nextStep + 1].kind == ScriptKind::CaptureLive;
+  const bool handledKey =
+      awaitingInput && this->state->syntheticHandled.load() >= *awaitingInput &&
+      nextStep < this->state->script.size() &&
+      this->state->script[nextStep].kind == ScriptKind::Input &&
+      this->state->script[nextStep].input.kind ==
+          AppState::SyntheticInput::Kind::KeyDown;
+  if (awaitingSettle && handledKey && liveNext && !awaitingClick) {
+    // Give queued render-thread effects one full frame, then let diagnostic
+    // captures observe motion; subsequent input still waits for settlement.
+    if (inputSettledOnce) {
+      awaitingSettle = awaitingStep = inputSettledOnce = false;
+      awaitingInput.reset();
+      ++nextStep;
+    } else
+      inputSettledOnce = true;
+  }
+  const bool liveCapture =
+      !awaitingStep && !scriptFinished() &&
+      this->state->script[nextStep].kind == ScriptKind::CaptureLive;
+  if (liveCapture) advanceScript(state);
+  if (settled && !liveCapture) {
     const auto serviceClickOrDrag = [&]() {
       if (const auto click = this->state->takePointerPick()) {
         requestClick(state, *click);
@@ -951,6 +1001,15 @@ void Renderer::advanceScript(RenderState &state) {
     }
     return;
   }
+  case Kind::CaptureLive: {
+    const auto now = std::chrono::steady_clock::now();
+    if (!scriptWaitUntil) scriptWaitUntil = now + step.delay;
+    if (now >= *scriptWaitUntil) {
+      scriptWaitUntil.reset();
+      pendingScriptCapture = step.text;
+    }
+    return;
+  }
   case Kind::Capture:
     pendingScriptCapture = step.text;
     return;
@@ -1128,19 +1187,24 @@ void Renderer::updateHighlights(RenderState &state) {
     return;
   }
 
-  // The selection goes in first, and both reasons are properties of what
-  // consumes this table. The fragment stage returns on the first span that
-  // covers it, so an earlier entry wins where two overlap; and the device
-  // keeps the first render::maxHighlightRanges and drops the rest, so an
-  // earlier entry survives a table that fills up. A user who cannot see what
-  // they have selected has lost track of something they were doing, where a
-  // decoration that loses to it is only telling them something.
+  // Reserve table capacity for the editing selection before decorations.
   if (caret->hasSelection() && caret->documentIndex() < state.docs.size()) {
-    state.docs[caret->documentIndex()]->highlightsFor(
-        caret->selectionStart(), caret->selectionEnd(), selectionColour,
-        highlights);
+    const auto &doc = *state.docs[caret->documentIndex()];
+    std::optional<gleditor::SpanStyle> style;
+    for (auto *decorator : spanDecorators)
+      if (auto owned = decorator->selectionStyle(doc, *caret)) {
+        style = *owned;
+        break;
+      }
+    doc.highlightsFor(caret->selectionStart(), caret->selectionEnd(),
+                      style ? style->colour : selectionColour, highlights);
+    if (style && style->layer)
+      for (auto &range : highlights)
+        range.layer = {static_cast<std::uint32_t>(*style->layer),
+                       static_cast<std::uint32_t>(*style->layer >> 32U)};
   }
 
+  auto emphasisEnd = highlights.size();
   if (!spanDecorators.empty()) {
     for (const auto &doc : state.docs) {
       decoratedSpans.clear();
@@ -1149,7 +1213,23 @@ void Renderer::updateHighlights(RenderState &state) {
       }
       for (const auto &span : decoratedSpans) {
         if (span.end > span.start) {
+          const auto first = highlights.size();
           doc->highlightsFor(span.start, span.end, span.colour, highlights);
+          for (auto i = first; i < highlights.size(); ++i) {
+            highlights[i].emphasis = static_cast<std::uint32_t>(span.emphasis);
+            highlights[i].edgeWidthPx = span.edgeWidthPx;
+            if (span.layer)
+              highlights[i].layer = {
+                  static_cast<std::uint32_t>(*span.layer),
+                  static_cast<std::uint32_t>(*span.layer >> 32U)};
+          }
+          if (span.emphasis != gleditor::SpanEmphasis::Background) {
+            // Preserve focus accents before the fixed GPU table drops quiet
+            // semantic fills; rotation uses the existing storage.
+            std::rotate(highlights.begin() + emphasisEnd,
+                        highlights.begin() + first, highlights.end());
+            emphasisEnd += highlights.size() - first;
+          }
         }
       }
     }

@@ -149,12 +149,12 @@ TEST(Picking, aHighlightRangeDefaultsToCoveringWholeClusters) {
   EXPECT_FLOAT_EQ(range.endFraction, 1.0F);
 }
 
-// The table is read per fragment and each element is eight words, so its size
+// The table is read per fragment and each element is twelve words, so its size
 // has to stay well inside the 16 KB uniform block OpenGL ES 3.0 guarantees.
 TEST(Picking, theHighlightTableFitsTheSmallestGuaranteedUniformBlock) {
   constexpr auto bytes =
       sizeof(render::HighlightRange) * render::maxHighlightRanges;
-  EXPECT_EQ(sizeof(render::HighlightRange), 32U)
+  EXPECT_EQ(sizeof(render::HighlightRange), 48U)
       << "std140 stride must be a multiple of 16";
   EXPECT_LE(bytes, 16U * 1024U);
 }

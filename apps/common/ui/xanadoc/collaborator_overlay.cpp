@@ -87,6 +87,7 @@ void CollaboratorCaretOverlay::deviceReady(
 bool CollaboratorCaretOverlay::busy() const { return false; }
 
 void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!enabled_ || !canvas_) {
     return;
   }

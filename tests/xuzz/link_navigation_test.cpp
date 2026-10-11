@@ -590,6 +590,27 @@ TEST(LinkNavigationTest, ErrorsAndCommandsHaveNames) {
             "enter at");
 }
 
+TEST(LinkNavigationTest, CancelEntryPreservesBothCursorsAndCompletedVisits) {
+  Harness h;
+  const auto origin = arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectLink{.key = h.link()}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{
+      .key = h.link(), .side = LinkSide::Left, .member = 1, .occurrence = 0}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{
+      .key = h.link(), .side = LinkSide::Right, .member = 2, .occurrence = 1}));
+  const auto left = h.selected().left, right = h.selected().right;
+  const auto result = h.run(nav::CancelEntry{});
+  ASSERT_TRUE(result);
+  EXPECT_FALSE(result->focus);
+  EXPECT_FALSE(result->visit);
+  EXPECT_EQ(h.selected().left, left);
+  EXPECT_EQ(h.selected().right, right);
+  EXPECT_EQ(h.navigator.currentVisit(), origin);
+  const auto action = xanadu::commandForAction("std:xuzz/link_cancel_entry");
+  ASSERT_TRUE(action);
+  EXPECT_TRUE(std::holds_alternative<nav::CancelEntry>(*action));
+}
+
 TEST(LinkNavigationTest, EveryUiActionHasAnUnclaimedDefaultChord) {
   using namespace xanadu::settings;
   const std::vector<std::string_view> ours{

@@ -72,6 +72,11 @@ public:
   void setFocusDocument(FocusDocument handler) {
     focusDocument = std::move(handler);
   }
+  LinkContext *setDocumentEntryHandler(
+      std::function<void(std::size_t, Extent, RenderState &)> handler) {
+    documentEntry = std::move(handler);
+    return this;
+  }
   void setFocusCell(FocusCell handler) { focusCell = std::move(handler); }
   void setCaretQuery(CaretQuery query) { caretQuery = std::move(query); }
   void setCellFocusQuery(CellFocusQuery query) {
@@ -117,6 +122,12 @@ public:
    */
   xanadu::NavigationResult execute(const xanadu::NavigationCommand &command);
 
+  /// Revisit a pending entry only after its exact local page geometry exists.
+  void advanceFrame(RenderState &state);
+  [[nodiscard]] bool entryPending() const noexcept {
+    return pendingEntry.has_value();
+  }
+
   /// Rehydrate the selected link after reopened views can resolve its ends.
   void restoreCurrentSelection();
 
@@ -129,6 +140,7 @@ public:
     return previewing;
   }
   [[nodiscard]] ReadingStamp readingStamp() const;
+  [[nodiscard]] std::optional<LinkKey> enteredLink() const;
   [[nodiscard]] std::vector<xanadu::Visit> forwardChoices() const;
 
   /**
@@ -165,6 +177,15 @@ private:
   void apply(xanadu::NavigationEffect effect);
   void focus(const xanadu::OccurrenceSite &site);
 
+  struct PendingEntry {
+    NavigationCommand command;
+    std::uint64_t views{};
+    std::size_t view{};
+    DocumentSite site;
+  };
+  std::optional<PendingEntry> pendingEntry;
+  RenderState *renderState_{};
+
   Session &session;
   const zigzag::Manifold *manifold{};
   std::size_t manifoldStoreIndex{};
@@ -172,6 +193,7 @@ private:
   xanadu::StoreActivityLog activity;
   xanadu::LinkNavigator navigator{activity};
   FocusDocument focusDocument;
+  std::function<void(std::size_t, Extent, RenderState &)> documentEntry;
   FocusCell focusCell;
   CaretQuery caretQuery;
   CellFocusQuery cellFocusQuery;

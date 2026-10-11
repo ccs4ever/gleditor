@@ -38,11 +38,17 @@ struct PanelLine {
   /// is a colour and not everybody can see one. Drawn in a gutter of its own
   /// so the side names line up whichever is active.
   bool active{};
+  /// Prefix whose exact range must survive wrapping and context truncation.
+  std::size_t requiredBytes{};
+  /// Reading/origin status may share a compact row when height is scarce.
+  std::string compactContext;
+  /// Inspector heading must retain the link type and author identity.
+  std::optional<std::string> compactIdentity;
 
   bool operator==(const PanelLine &) const = default;
 };
 
-/// Names a site for a reader: "document 2, bytes 10 to 14".
+/// Names the location; the panel supplies exact byte ranges from the site.
 using SiteNamer =
     gleditor::cpp26::function_ref<std::string(const OccurrenceSite &)>;
 

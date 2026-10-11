@@ -11,11 +11,12 @@ namespace xuzz {
 
 ViewCoordinator::ViewCoordinator(
     xanadu::Views &views, std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
-    xanadu::BridgeCoordinator &bridgeCoordinator, RendererRef renderer,
+    xanadu::BridgeCoordinator &bridgeCoordinator,
+    xanadu::SatelloidOverlay &satelloids, RendererRef renderer,
     AppStateRef state)
     : views_(views), visualizer_(std::move(visualizer)),
-      bridgeCoordinator_(bridgeCoordinator), renderer_(std::move(renderer)),
-      state_(std::move(state)) {}
+      bridgeCoordinator_(bridgeCoordinator), satelloids_(satelloids),
+      renderer_(std::move(renderer)), state_(std::move(state)) {}
 
 void ViewCoordinator::setViewMode(const ViewMode mode) {
   if (mode_ == mode) {
@@ -43,6 +44,7 @@ void ViewCoordinator::apply() {
   if (!visualizer_) {
     return;
   }
+  satelloids_.setPresentationVisible(mode_ != ViewMode::XanadocOnly);
 
   switch (mode_) {
   case ViewMode::Unified: {

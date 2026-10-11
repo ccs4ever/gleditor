@@ -98,8 +98,9 @@ TEST(LinkPanelTest, UnsetCursorsExplainTheChoiceAndAreMuted) {
                                  .active = true}));
   EXPECT_EQ(lines[2], (PanelLine{.text = "Right: choose member (3)",
                                  .tone = PanelLine::Tone::Muted}));
-  EXPECT_EQ(lines[3], (PanelLine{.text = "origin: none",
-                                 .tone = PanelLine::Tone::Muted}));
+  EXPECT_EQ(lines[3], (PanelLine{.text           = "origin: none",
+                                 .tone           = PanelLine::Tone::Muted,
+                                 .compactContext = "origin none"}));
 }
 
 TEST(LinkPanelTest, EachSideShowsItsOwnChoice) {
@@ -112,16 +113,17 @@ TEST(LinkPanelTest, EachSideShowsItsOwnChoice) {
 
   // Left keeps its member and its preselected sole occurrence while Right,
   // now active, shows the partial cell it chose.
-  EXPECT_EQ(lines[1], (PanelLine{.text = "Left 2/2 · occurrence 1/1 "
-                                         "· document",
-                                 .tone = PanelLine::Tone::Normal}));
-  EXPECT_EQ(lines[2],
-            (PanelLine{.text = "Right 3/3 · occurrence "
-                               "5/5 · cell " +
-                               std::to_string(p.f.partCell) + " (part)",
-                       .tone   = PanelLine::Tone::Active,
-                       .active = true}));
-  EXPECT_EQ(lines[3].text, "origin: document");
+  EXPECT_EQ(lines[1].text, "Left 2/2 · place 1/1 · bytes\n11–16\ndocument");
+  EXPECT_EQ(lines[1].tone, PanelLine::Tone::Normal);
+  EXPECT_EQ(lines[1].text.substr(0, lines[1].requiredBytes),
+            "Left 2/2 · place 1/1 · bytes\n11–16");
+  EXPECT_EQ(lines[2].text, "Right 3/3 · place 5/5 · bytes\n0–3 (part)\ncell " +
+                               std::to_string(p.f.partCell));
+  EXPECT_EQ(lines[2].tone, PanelLine::Tone::Active);
+  EXPECT_TRUE(lines[2].active);
+  EXPECT_EQ(lines[2].text.substr(0, lines[2].requiredBytes),
+            "Right 3/3 · place 5/5 · bytes\n0–3 (part)");
+  EXPECT_EQ(lines[3].text, "origin: document · bytes 0–0");
 }
 
 TEST(LinkPanelTest, AMemberWithSeveralOccurrencesWaitsForAChoice) {
@@ -205,8 +207,8 @@ TEST(LinkPanelTest, ReadingNamesTheMembersTheCaretIsOn) {
   const auto atThreeEnd =
       p.lines({}, {.here = p.inHead(threeEnd, threeEnd), .entered = true});
 
-  EXPECT_EQ(onGamma[3], (PanelLine{.text = "reading: left member 2"}));
-  EXPECT_EQ(atThreeEnd[3], (PanelLine{.text = "reading: right member 3"}));
+  EXPECT_EQ(onGamma[3].text, "reading: left member 2");
+  EXPECT_EQ(atThreeEnd[3].text, "reading: right member 3");
 }
 
 TEST(LinkPanelTest, MovingOffTheLinkAfterEnteringSaysSo) {
@@ -218,8 +220,8 @@ TEST(LinkPanelTest, MovingOffTheLinkAfterEnteringSaysSo) {
   const auto entered  = p.lines({}, {.here = between, .entered = true});
   const auto selected = p.lines({}, {.here = between, .entered = false});
 
-  EXPECT_EQ(entered[3], (PanelLine{.text = "reading: outside the linked range",
-                                   .tone = PanelLine::Tone::Muted}));
+  EXPECT_EQ(entered[3].text, "reading: outside the linked range");
+  EXPECT_EQ(entered[3].tone, PanelLine::Tone::Muted);
   // Selected from elsewhere, being off the link is not news.
   ASSERT_EQ(selected.size(), 4U);
   EXPECT_EQ(selected[3].text, "origin: none");
@@ -237,6 +239,9 @@ TEST(LinkPanelTest, ButtonsSendTheKeymapsCommands) {
   };
 
   using namespace xanadu::settings;
+  EXPECT_EQ(command("Previous link"),
+            xanadu::commandForAction(kKeymapLinkPrevious));
+  EXPECT_EQ(command("Next link"), xanadu::commandForAction(kKeymapLinkNext));
   EXPECT_EQ(command("Cross"), xanadu::commandForAction(kKeymapLinkCross));
   EXPECT_EQ(command("Enter"), xanadu::commandForAction(kKeymapLinkEnter));
   EXPECT_EQ(command("Origin"), xanadu::commandForAction(kKeymapLinkOrigin));

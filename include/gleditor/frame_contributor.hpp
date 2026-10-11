@@ -69,6 +69,8 @@ struct FrameContext {
   ScreenInsets settledChrome{};
   ui::UiMetrics metrics;
   const ui::Theme &theme{ui::defaultTheme()};
+  /// Whole-target projection, writable only outside settled edge chrome.
+  std::optional<render::RegionId> contentRegion;
 };
 
 /**

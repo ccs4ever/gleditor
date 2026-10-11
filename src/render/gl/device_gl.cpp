@@ -71,6 +71,9 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   }
 
   api.load();
+  if ((backendKind == Backend::OpenGL && !api.DepthRange) ||
+      (backendKind == Backend::OpenGLES && !api.DepthRangef))
+    throw std::runtime_error("Missing GL depth-range entry point");
   setupDebugOutput();
 
   std::cout << std::format(
@@ -606,12 +609,18 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   api.DeleteShader(vertexShader);
   api.DeleteShader(fragmentShader);
 
-  record.layout      = desc.layout;
-  record.depthTest   = desc.depthTest;
-  record.mvpLoc      = api.GetUniformLocation(record.program, "uMVP");
-  record.opacityLoc  = api.GetUniformLocation(record.program, "uOpacity");
-  record.identityLoc = api.GetUniformLocation(record.program, "uIdentity");
-  record.atlasLoc    = api.GetUniformLocation(record.program, "uGlyphAtlas");
+  record.layout        = desc.layout;
+  record.depthTest     = desc.depthTest;
+  record.writesPicking = desc.writesPicking;
+  record.mvpLoc        = api.GetUniformLocation(record.program, "uMVP");
+  record.opacityLoc    = api.GetUniformLocation(record.program, "uOpacity");
+  record.identityLoc   = api.GetUniformLocation(record.program, "uIdentity");
+  record.paperColourLoc =
+      api.GetUniformLocation(record.program, "uPaperColour");
+  record.inkColourLoc = api.GetUniformLocation(record.program, "uInkColour");
+  record.paletteEnabledLoc =
+      api.GetUniformLocation(record.program, "uPaletteEnabled");
+  record.atlasLoc = api.GetUniformLocation(record.program, "uGlyphAtlas");
 
   if (const GLuint blockIndex =
           api.GetUniformBlockIndex(record.program, "Highlights");
@@ -626,12 +635,32 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   return handle;
 }
 
+RenderDevice *DeviceGL::setRegion(const std::optional<RegionId> region) {
+  RenderDevice::setRegion(region);
+  const auto &r = regionOf(region);
+  api.Viewport(r.viewLeft, r.viewBottom, r.viewWidth, r.viewHeight);
+  if (backendKind == Backend::OpenGL)
+    api.DepthRange(r.nearDepth, r.farDepth);
+  else
+    api.DepthRangef(r.nearDepth, r.farDepth);
+  if (region) {
+    api.Enable(GL_SCISSOR_TEST);
+    api.Scissor(r.clipLeft, r.clipBottom, r.clipWidth, r.clipHeight);
+  } else {
+    api.Disable(GL_SCISSOR_TEST);
+  }
+  return this;
+}
+
 bool DeviceGL::beginFrame() {
+  beginRegions(targetWidth, targetHeight);
+  setRegion(std::nullopt);
   api.BindFramebuffer(GL_FRAMEBUFFER, offscreenFbo);
   constexpr std::array<GLenum, 2> targets = {GL_COLOR_ATTACHMENT0,
                                              GL_COLOR_ATTACHMENT1};
   api.DrawBuffers(static_cast<GLsizei>(targets.size()), targets.data());
   api.Viewport(0, 0, targetWidth, targetHeight);
+  api.DepthMask(GL_TRUE);
   api.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   // The picking attachment is an integer target, which the fixed-point clear
   // does not touch.
@@ -641,6 +670,8 @@ bool DeviceGL::beginFrame() {
 }
 
 void DeviceGL::endFrame() {
+  setRegion(std::nullopt);
+  endRegions();
   // Debug output is synchronous, so anything the driver objected to during this
   // frame has already been recorded. Raise it here, from our own stack, rather
   // than from inside the driver callback where unwinding is undefined.
@@ -681,6 +712,10 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   // opacity one and blends to exactly what it would have written unblended.
   // The picking attachment is an integer target, and the spec says blending is
   // not applied to those, so this cannot disturb a tag.
+  const std::array<GLenum, 2> targets{GL_COLOR_ATTACHMENT0,
+                                      GL_COLOR_ATTACHMENT1};
+  api.DrawBuffers(it->second.writesPicking ? 2 : 1, targets.data());
+  api.DepthMask(it->second.writesPicking ? GL_TRUE : GL_FALSE);
   api.Enable(GL_BLEND);
   api.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
@@ -767,6 +802,12 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
   if (-1 != record.identityLoc) {
     api.Uniform1ui(record.identityLoc, uniforms.identity);
   }
+  if (-1 != record.paperColourLoc)
+    api.Uniform1ui(record.paperColourLoc, uniforms.paperColour);
+  if (-1 != record.inkColourLoc)
+    api.Uniform1ui(record.inkColourLoc, uniforms.inkColour);
+  if (-1 != record.paletteEnabledLoc)
+    api.Uniform1ui(record.paletteEnabledLoc, uniforms.paletteEnabled);
 
   // The draw starts partway into the vertex buffer. Baking that offset into
   // the attribute pointers works on OpenGL ES too, where the base-instance

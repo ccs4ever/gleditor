@@ -99,6 +99,7 @@ constexpr int glyphPadding   = 1 << (atlasMipLevels - 1);
 struct PaddedCoverage {
   std::vector<std::byte> data;
   float meanInk{};
+  std::array<std::uint16_t, 2> inkRows{};
 };
 
 /**
@@ -118,6 +119,7 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                     static_cast<std::size_t>(paddedHeight),
                                 std::byte{0});
   std::uint64_t totalInk = 0;
+  std::array<std::uint16_t, 2> inkRows{};
   for (int row = 0; row < height; row++) {
     const auto *src = surface.data() + static_cast<std::size_t>(row) *
                                            static_cast<std::size_t>(stride);
@@ -130,6 +132,10 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
       const auto val = static_cast<std::byte>(src[col]);
       dst[col]       = val;
       totalInk += std::to_integer<std::uint64_t>(val);
+      if (val != std::byte{0}) {
+        if (inkRows[1] == 0) inkRows[0] = static_cast<std::uint16_t>(row);
+        inkRows[1] = static_cast<std::uint16_t>(row + 1);
+      }
     }
   }
   const auto totalPixels =
@@ -138,7 +144,8 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                            ? static_cast<float>(static_cast<double>(totalInk) /
                                                 (255.0 * totalPixels))
                            : 0.0F;
-  return PaddedCoverage{.data = std::move(padded), .meanInk = meanInk};
+  return PaddedCoverage{
+      .data = std::move(padded), .meanInk = meanInk, .inkRows = inkRows};
 }
 
 /// Paint rows [top, top + thickness) of a width * height, stride-wide 8-bit
@@ -671,7 +678,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   const auto sizes = Sizes{.texCoords = inner,
                            .dims      = extents,
                            .layer     = palette->layerIndex(),
-                           .ink       = inked};
+                           .ink       = inked,
+                           .inkRows   = paddedCoverage.inkRows};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
   atlasDirty = true;
   glyphs[chr][keyFor(font)].push_back(

@@ -4,6 +4,8 @@
  */
 #include "link_context.hpp"
 
+#include <gleditor/render_state.hpp>
+
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -223,6 +225,12 @@ void LinkContext::noteOrigin() {
 
 xanadu::NavigationResult
 LinkContext::execute(const xanadu::NavigationCommand &command) {
+  if (pendingEntry) {
+    pendingEntry.reset();
+    ++changes;
+  }
+  if (std::holds_alternative<nav::CancelEntry>(command))
+    return NavigationEffect{};
   const auto named    = keyNamed(command);
   const auto selected = navigator.selection();
   if (named && named->authority != session.store().documentId() &&
@@ -249,7 +257,8 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
             [this](const auto &where) {
               using Site = std::decay_t<decltype(where)>;
               if constexpr (std::is_same_v<Site, DocumentSite>)
-                return bool(focusDocument) && viewIndexOf(where).has_value();
+                return (bool(focusDocument) || bool(documentEntry)) &&
+                       viewIndexOf(where).has_value();
               else
                 return bool(focusCell) && manifold &&
                        manifold->contains(where.cell) &&
@@ -267,6 +276,43 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
       }
     }
   }
+  if (selected && selected->occurrences && renderState_) {
+    auto side           = selected->active;
+    auto cursor         = selected->cursor(side);
+    const auto *at      = std::get_if<nav::EnterAt>(&command);
+    const bool entering = std::holds_alternative<nav::Enter>(command) ||
+                          (at && at->key == selected->key);
+    if (at && at->key == selected->key) {
+      side              = at->side;
+      cursor.member     = at->member;
+      cursor.occurrence = at->occurrence;
+    }
+    if (entering && cursor.member && cursor.occurrence &&
+        *cursor.member < selected->occurrences->members(side).size()) {
+      const auto &member = selected->occurrences->members(side)[*cursor.member];
+      if (*cursor.occurrence < member.occurrences.size()) {
+        const auto *site = std::get_if<DocumentSite>(
+            &member.occurrences[*cursor.occurrence].site);
+        const auto view = site ? viewIndexOf(*site) : std::nullopt;
+        if (view && *view < renderState_->docs.size() &&
+            renderState_->docs[*view]) {
+          auto &doc = *renderState_->docs[*view];
+          const std::array offsets{site->range.start,
+                                   site->range.end > site->range.start
+                                       ? site->range.end - 1
+                                       : site->range.start};
+          if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
+            doc.setPriorityOffsets(offsets);
+            pendingEntry =
+                PendingEntry{command, session.generation(), *view, *site};
+            ++changes;
+            return NavigationEffect{};
+          }
+        }
+      }
+    }
+  }
+
   const bool starting =
       std::holds_alternative<xanadu::nav::StepLink>(command) ||
       (named && (!selected || selected->key != *named));
@@ -282,6 +328,30 @@ LinkContext::execute(const xanadu::NavigationCommand &command) {
   }
   apply(*result);
   return result;
+}
+
+void LinkContext::advanceFrame(RenderState &state) {
+  renderState_ = &state;
+  if (!pendingEntry) return;
+  const auto &request = *pendingEntry;
+  if (request.views != session.generation() ||
+      request.view >= state.docs.size() || !state.docs[request.view]) {
+    pendingEntry.reset();
+    ++changes;
+    return;
+  }
+  auto &doc = *state.docs[request.view];
+  const std::array offsets{request.site.range.start,
+                           request.site.range.end > request.site.range.start
+                               ? request.site.range.end - 1
+                               : request.site.range.start};
+  if (!doc.anchorFor(offsets[0]) || !doc.anchorFor(offsets[1])) {
+    doc.setPriorityOffsets(offsets);
+    return;
+  }
+  const auto command = request.command;
+  pendingEntry.reset();
+  std::ignore = execute(command);
 }
 
 void LinkContext::apply(xanadu::NavigationEffect effect) {
@@ -349,18 +419,48 @@ LinkContext::viewIndexOf(const xanadu::DocumentSite &site) const {
 std::string LinkContext::describe(const xanadu::OccurrenceSite &site) const {
   return std::visit(
       [this]<typename Site>(const Site &at) {
-        const auto bytes = "bytes " + std::to_string(at.range.start) + " to " +
-                           std::to_string(at.range.end);
         if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
           if (const auto view = viewIndexOf(at)) {
-            return "document " + std::to_string(*view) + ", " + bytes;
+            const auto &opened = session.views()[*view];
+            auto label = std::filesystem::path(session.path(opened.storeIndex))
+                             .filename()
+                             .string();
+            if (renderState_ && *view < renderState_->docs.size() &&
+                renderState_->docs[*view]) {
+              const auto &doc = *renderState_->docs[*view];
+              if (const auto page = doc.pageIndexForOffset(at.range.start)) {
+                const auto last = doc.pageIndexForOffset(
+                    at.range.end > at.range.start ? at.range.end - 1
+                                                  : at.range.start);
+                const bool crosses = last && *last != *page;
+                label += crosses ? " · pages " : " · page ";
+                label += std::to_string(*page + 1);
+                if (crosses) label += "–" + std::to_string(*last + 1);
+                label += "/" + std::to_string(doc.numPages()) +
+                         (doc.isFullyLoaded() ? "" : "+");
+                if (crosses)
+                  label += " · continues across page breaks";
+                else if (!last)
+                  label += " · end layout pending";
+              } else
+                label += " · layout pending";
+            }
+            return label;
           }
-          return "a closed version, " + bytes;
+          return std::string{"a closed version"};
         } else {
-          return "cell " + std::to_string(at.cell) + ", " + bytes;
+          return "cell " + std::to_string(at.cell);
         }
       },
       site);
+}
+
+std::optional<LinkKey> LinkContext::enteredLink() const {
+  if (const auto current = navigator.currentVisit())
+    if (const auto visit = activity.find(*current);
+        visit && visit->arrival == Arrival::EnteredEndpoint && visit->link)
+      return visit->link->key;
+  return std::nullopt;
 }
 
 void LinkContext::focus(const xanadu::OccurrenceSite &site) {
@@ -368,7 +468,9 @@ void LinkContext::focus(const xanadu::OccurrenceSite &site) {
       [this]<typename Site>(const Site &at) {
         if constexpr (std::is_same_v<Site, xanadu::DocumentSite>) {
           if (const auto view = viewIndexOf(at)) {
-            if (focusDocument) {
+            if (documentEntry && renderState_) {
+              documentEntry(*view, at.range, *renderState_);
+            } else if (focusDocument) {
               focusDocument(*view, at.range);
             }
             return;

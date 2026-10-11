@@ -60,6 +60,7 @@ void TenuousTetherOverlay::deviceReady(
 }
 
 void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!ctx.state.documentsVisible || !visible_ || tethers_.empty() || !beams_ ||
       !beams_->ready()) {
     return;

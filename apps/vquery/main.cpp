@@ -353,23 +353,15 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     permaConfig.storageDir = permaDir;
-  } else if (!storePaths.empty()) {
-    std::filesystem::path p(storePaths[0]);
-    if (std::filesystem::exists(p / "permascroll")) {
-      permaConfig.storageDir = p / "permascroll";
-    } else if (p.has_parent_path() &&
-               std::filesystem::exists(p.parent_path() / "permascroll")) {
-      permaConfig.storageDir = p.parent_path() / "permascroll";
-    } else if (p.has_parent_path() && p.parent_path().has_parent_path() &&
-               std::filesystem::exists(p.parent_path().parent_path() /
-                                       "permascroll")) {
-      permaConfig.storageDir = p.parent_path().parent_path() / "permascroll";
-    }
   }
 
   const auto permaSource = permaConfig.storageDir;
+  // Native stores address the registered author scroll; nearby directories
+  // can be registry containers or belong to another author.
   auto permascroll =
-      std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
+      permaConfig.storageDir.empty()
+          ? xanadu::PermascrollRegistry::instance().defaultUser()
+          : std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
   // A store holds no text of its own; read against a permascroll that is
   // not the one it was written against, every answer comes back blank. Say
   // so rather than print nothing.

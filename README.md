@@ -111,6 +111,11 @@ comparison. `Doc::collect()` submits page draws across open documents as one lis
 chunks on worker threads; GL and GLES record in order on their context thread. Vulkan measures the
 choice at run time; `GLEDITOR_RECORD_THREADS` overrides it for comparison.
 
+Per-frame render regions keep viewport mapping separate from the writable clip rectangle and depth
+range. Batches carry their region into worker recording; immediate draws use a restoring scope.
+World content and its picking are clipped outside settled edge chrome while screen controls retain
+the whole target. The camera projection is unchanged.
+
 Picking writes an identity attachment beside color. `requestPickingTag()` queues an asynchronous
 read and `takePickingTag()` returns a completed result with its pixel coordinates. GL/GLES use a PBO
 ring and fences; Vulkan uses per-frame host-visible buffers. The renderer also collects driver

@@ -1703,6 +1703,7 @@ void ZigzagVisualizer::describeCellBounds(gleditor::a11y::Node &node,
 }
 
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!presentation_visible_) {
     last_frame_time_ = std::chrono::steady_clock::now();
     return;
@@ -2069,8 +2070,9 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   worldCanvas_->draw(ctx.state, vpPresentation, 1.F);
   ancillaryCanvas_->draw(ctx.state, vpPresentation, 1.F);
 
-  const auto width        = static_cast<float>(ctx.screenWidth);
-  const auto height       = static_cast<float>(ctx.screenHeight);
+  const auto width  = static_cast<float>(ctx.screenWidth);
+  const auto height = static_cast<float>(ctx.screenHeight);
+  ctx.state.device->setRegion(std::nullopt);
   const auto beforeChrome = ctx.chrome;
   const bool rebuildHud =
       hudRevision_ != revision_ || hudMetrics_ != uiMetrics_ ||

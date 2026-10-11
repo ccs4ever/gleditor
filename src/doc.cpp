@@ -238,7 +238,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
            const BufferPool::Allocation &inherited)
     : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
       textOffset(aTextOffset), clusters(std::move(aShaping.clusters)),
-      pageIndex(aPageIndex),
+      clusterCarets(clusters.size()), pageIndex(aPageIndex),
       identity(render::packTagIdentity(0, doc->documentIndex(), aPageIndex)) {
   const auto color = Doc::VBORow::color;
   const auto box   = Doc::VBORow::box;
@@ -276,6 +276,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
   auto font = gleditor::text::FontManager::instance().getFont(
       std::string{this->doc->renderer->defaultFontName()});
+  lineHeight = font ? font->metrics().lineHeight : 16.0F;
 
   const auto extent = [](const float value) {
     return static_cast<unsigned int>(std::clamp(
@@ -285,7 +286,16 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   std::vector<float> lineInk(aShaping.lineCount, 0.0F);
 
   for (std::size_t gi = 0; gi < aShaping.glyphs.size(); ++gi) {
-    const auto &g          = aShaping.glyphs[gi];
+    const auto &g = aShaping.glyphs[gi];
+    // Caret placement belongs to the original layout even when the atlas
+    // cannot upload its glyph. Combining marks can contribute several glyphs
+    // to a cluster; the old query selected its first one.
+    if (g.clusterIndex < clusterCarets.size() && !clusterCarets[g.clusterIndex])
+      clusterCarets[g.clusterIndex] =
+          CaretSpot{.left = g.clusterLeft,
+                    .top  = g.lineIndex < aShaping.lines.size()
+                                ? aShaping.lines[g.lineIndex].top
+                                : 0.F};
     const auto glyphPlaced = state.glyphCache.put(
         g.chr, font, gleditor::decorationSetFor(g.decorations));
     if (!glyphPlaced) {
@@ -331,6 +341,13 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
                   extent(glyphHeight), render::tagKindGlyph),
           .paper = Doc::VBORow::paperAt(
               color(255), static_cast<unsigned int>(g.clusterIndex))});
+      if (g.clusterIndex < clusters.size()) {
+        auto &cluster = clusters[g.clusterIndex];
+        if (cluster.quad) singleQuadClusters = false;
+        cluster.quadCentre = vertexData.back().pos;
+        cluster.quad       = vertexData.back().quad;
+        cluster.inkRows    = glyph.inkRows;
+      }
     }
   }
 
@@ -356,6 +373,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
   coarseInstances =
       static_cast<std::uint32_t>(vertexData.size()) - detailInstances;
+  lines = std::move(aShaping.lines);
+  boxes = std::move(aShaping.boxes);
   if (1 >= coarseInstances) {
     vertexData.resize(detailInstances);
     coarseInstances = 0;
@@ -387,6 +406,32 @@ std::string_view Page::pageText() const {
   return whole.substr(textOffset, textBytes);
 }
 
+std::optional<Page::TextBand> Page::textBandFor(const std::uint32_t start,
+                                                const std::uint32_t end) const {
+  const auto from = std::max(start, textOffset);
+  const auto to   = std::min(end, textOffset + textBytes);
+  if (from >= to || lines.empty()) return std::nullopt;
+  const auto relativeStart = from - textOffset;
+  const auto relativeEnd   = to - textOffset;
+  const auto first         = std::ranges::upper_bound(
+      lines, relativeStart, std::ranges::less{},
+      [](const auto &line) { return line.byteStart + line.byteLength; });
+  std::optional<TextBand> result;
+  for (auto line = first; line != lines.end() && line->byteStart < relativeEnd;
+       ++line) {
+    if (!line->byteLength) continue;
+    const auto top    = originY - pageMargin - line->top;
+    const auto bottom = top - lineHeight;
+    if (!result)
+      result = TextBand{top, bottom, lineHeight};
+    else {
+      result->top    = std::max(result->top, top);
+      result->bottom = std::min(result->bottom, bottom);
+    }
+  }
+  return result;
+}
+
 PageShaping Page::ensureShaping() const { return doc->layoutFrom(textOffset); }
 
 std::optional<CaretGeometry>
@@ -394,10 +439,7 @@ Page::caretGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
     return std::nullopt;
   }
-  const auto shaped = ensureShaping();
-  auto font         = gleditor::text::FontManager::instance().getFont(
-      std::string{doc->renderer->defaultFontName()});
-  const float height = font ? font->metrics().lineHeight : 16.0F;
+  const float height = lineHeight;
 
   const auto relOffset = globalOffset - textOffset;
   // Exclusive upper bound: relOffset sitting exactly on the boundary between
@@ -416,10 +458,7 @@ Page::caretGeometry(const std::uint32_t globalOffset) const {
     return relOffset >= start && relOffset < start + length;
   };
   // Left and top of the caret, relative to the page's text edge.
-  using Spot       = std::pair<float, float>;
-  const auto topOf = [&](const std::size_t lineIndex) {
-    return lineIndex < shaped.lines.size() ? shaped.lines[lineIndex].top : 0.0F;
-  };
+  using Spot          = std::pair<float, float>;
   const auto endOfInk = [](const auto &line) {
     // Past the end of the line's own ink, which starts at line.left rather
     // than at the text edge for anything not left-aligned.
@@ -427,15 +466,13 @@ Page::caretGeometry(const std::uint32_t globalOffset) const {
   };
 
   const auto onCluster = [&]() -> std::optional<Spot> {
-    const auto glyph = std::ranges::find_if(shaped.glyphs, [&](const auto &g) {
-      return g.clusterIndex < shaped.clusters.size() &&
-             covers(shaped.clusters[g.clusterIndex].byteStart,
-                    shaped.clusters[g.clusterIndex].byteLength);
-    });
-    if (glyph == shaped.glyphs.end()) {
-      return std::nullopt;
-    }
-    return Spot{glyph->clusterLeft, topOf(glyph->lineIndex)};
+    for (std::size_t index = 0; index < clusters.size(); ++index)
+      if (covers(clusters[index].byteStart, clusters[index].byteLength) &&
+          clusterCarets[index]) {
+        const auto &spot = *clusterCarets[index];
+        return Spot{spot.left, spot.top};
+      }
+    return std::nullopt;
   };
   // No cluster covers this offset -- the common reason is a blank line, a
   // media placeholder's reserved newlines having no glyph of their own. Locate
@@ -443,19 +480,19 @@ Page::caretGeometry(const std::uint32_t globalOffset) const {
   // last line regardless of where relOffset falls: two placeholders on the
   // same page would otherwise both land on that one last line.
   const auto onLine = [&]() -> std::optional<Spot> {
-    const auto line = std::ranges::find_if(shaped.lines, [&](const auto &ln) {
+    const auto line = std::ranges::find_if(lines, [&](const auto &ln) {
       return covers(ln.byteStart, ln.byteLength);
     });
-    if (line == shaped.lines.end()) {
+    if (line == lines.end()) {
       return std::nullopt;
     }
     return endOfInk(*line);
   };
   const auto afterLastLine = [&]() -> std::optional<Spot> {
-    if (shaped.lines.empty()) {
+    if (lines.empty()) {
       return std::nullopt;
     }
-    return endOfInk(shaped.lines.back());
+    return endOfInk(lines.back());
   };
 
   const auto [left, top] = onCluster()
@@ -474,12 +511,10 @@ Page::boxGeometry(const std::uint32_t globalOffset) const {
   if (!contains(globalOffset)) {
     return std::nullopt;
   }
-  const auto shaped    = ensureShaping();
   const auto relOffset = globalOffset - textOffset;
   const auto placed    = std::ranges::find(
-      shaped.boxes, relOffset,
-      &std::ranges::range_value_t<decltype(shaped.boxes)>::anchorByteOffset);
-  if (placed == shaped.boxes.end()) {
+      boxes, relOffset, &PageShaping::PlacedBox::anchorByteOffset);
+  if (placed == boxes.end()) {
     return std::nullopt;
   }
   return BoxGeometry{
@@ -597,12 +632,17 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
   // Both draws live in the one allocation, the coarse one straight after the
   // detailed one, so choosing between them is a matter of where the draw
   // starts and how many instances it covers.
-  const auto first = coarse ? detailInstances : 0U;
-  const auto count = coarse ? coarseInstances : detailInstances;
+  const auto first   = coarse ? detailInstances : 0U;
+  const auto count   = coarse ? coarseInstances : detailInstances;
+  const auto palette = budget.documentPalette.value_or(DocumentPalette{});
   batches.push_back(render::GlyphBatch{
-      .uniforms = render::DrawUniforms{.mvp      = toArray(mvp),
-                                       .opacity  = opacity,
-                                       .identity = identity},
+      .uniforms = render::DrawUniforms{.mvp         = toArray(mvp),
+                                       .opacity     = opacity,
+                                       .identity    = identity,
+                                       .paperColour = palette.paper,
+                                       .inkColour   = palette.ink,
+                                       .paletteEnabled =
+                                           budget.documentPalette ? 1U : 0U},
       .vertices = doc->pool->buffer(),
       .vertexByteOffset =
           doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
@@ -625,7 +665,10 @@ void Doc::collect(std::vector<render::GlyphBatch> &batches,
 }
 
 glm::mat4 Doc::modelMatrix() const {
-  return glm::translate(glm::mat4(1.0F), position());
+  // Animation changes the origin, while the placed plane keeps its basis.
+  auto placed = model;
+  placed[3]   = glm::vec4(position(), 1.0F);
+  return placed;
 }
 
 std::optional<std::uint32_t> Doc::pageHolding(const std::uint32_t at) const {
@@ -761,7 +804,7 @@ void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target,
                         const double seconds, const double delay) {
   // The resting place is recorded as well as animated towards: a later
   // arrival or departure reads it back out of the base matrix.
-  model = glm::translate(glm::mat4(1.0F), target);
+  model[3] = glm::vec4(target, 1.0F);
   // apply() replaces whatever motion was on this output, so a move that
   // interrupts another one continues from where that one had got to rather
   // than restarting from the old target.
@@ -841,6 +884,84 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   range.startFraction = fractionInto(clusters[*first], localStart);
   range.endFraction   = fractionInto(clusters[last], localEnd);
   return range;
+}
+
+std::optional<Page::RangeTerminal>
+Page::rangeTerminal(const std::uint32_t start, const std::uint32_t end,
+                    const bool first, const bool towardsRight,
+                    const float clearancePx) const {
+  if (!singleQuadClusters) {
+    GLEDITOR_LOG_TRACE(
+        "text.layout",
+        "Range terminal unavailable: multiple glyph quads per cluster");
+    return std::nullopt;
+  }
+  const auto range = highlightFor(start, end, 0);
+  const auto band  = textBandFor(start, end);
+  if (!range || !band || !std::isfinite(clearancePx) || clearancePx < 0)
+    return std::nullopt;
+  const auto bounds = [](const ClusterBox &box) {
+    const float width  = (box.quad >> 20U) & 4095U;
+    const float height = (box.quad >> 8U) & 4095U;
+    return std::array{
+        box.quadCentre[0] - width / 2, box.quadCentre[1] - height / 2,
+        box.quadCentre[0] + width / 2, box.quadCentre[1] + height / 2};
+  };
+  auto index      = first ? range->firstCluster : range->lastCluster;
+  const auto line = std::ranges::find_if(lines, [&](const auto &entry) {
+    return clusters[index].byteStart >= entry.byteStart &&
+           clusters[index].byteStart < entry.byteStart + entry.byteLength;
+  });
+  if (line == lines.end()) return std::nullopt;
+  const auto edgeX = [&](const std::size_t i) {
+    const auto rect = bounds(clusters[i]);
+    const float lo  = i == range->firstCluster ? range->startFraction : 0;
+    const float hi  = i == range->lastCluster ? range->endFraction : 1;
+    return std::lerp(rect[0], rect[2], towardsRight ? hi : lo);
+  };
+  // Meet the facing contour on the terminal line, not its first logical
+  // character: a right-margin route should not traverse the whole first row.
+  for (std::size_t i = range->firstCluster; i <= range->lastCluster; ++i) {
+    if (clusters[i].byteStart < line->byteStart ||
+        clusters[i].byteStart >= line->byteStart + line->byteLength)
+      continue;
+    if (towardsRight ? edgeX(i) > edgeX(index) : edgeX(i) < edgeX(index))
+      index = i;
+  }
+  const auto rect = bounds(clusters[index]);
+  if (rect[0] >= rect[2] || rect[1] >= rect[3]) return std::nullopt;
+  const float x = edgeX(index);
+  const float y = first ? rect[3] : rect[1];
+  if (y > band->top || y < band->bottom) return std::nullopt;
+  const float corridor = y + (first ? clearancePx : -clearancePx);
+  const float margin   = towardsRight ? textRightPixels() : textLeftPixels();
+  // Full highlight quads fill the line height. Test actual raster ink so
+  // the whitespace between lines remains available without crossing text.
+  for (std::size_t i = 0; i < clusters.size(); ++i) {
+    if (i >= range->firstCluster && i <= range->lastCluster) continue;
+    auto other = bounds(clusters[i]);
+    if (clusters[i].inkRows[0] == clusters[i].inkRows[1]) continue;
+    const float top = other[3];
+    other[3]        = top - clusters[i].inkRows[0];
+    other[1]        = top - clusters[i].inkRows[1];
+    if (other[0] >= other[2] || other[1] >= other[3]) continue;
+    const bool horizontal =
+        std::max(x, margin) > other[0] && std::min(x, margin) < other[2] &&
+        corridor + clearancePx > other[1] && corridor - clearancePx < other[3];
+    const bool vertical =
+        x + clearancePx > other[0] && x - clearancePx < other[2] &&
+        std::max(y, corridor) > other[1] && std::min(y, corridor) < other[3];
+    if (horizontal || vertical) {
+      GLEDITOR_LOG_TRACE(
+          "text.layout",
+          "Range terminal blocked: first={} cluster={} x={} y={} corridor={} "
+          "rectangle={},{},{},{} horizontal={} vertical={}",
+          first, i, x, y, corridor, other[0], other[1], other[2], other[3],
+          horizontal, vertical);
+      return std::nullopt;
+    }
+  }
+  return RangeTerminal{{x, y}, corridor};
 }
 
 void Doc::highlightsFor(const std::uint32_t selStart,

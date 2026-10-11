@@ -488,6 +488,8 @@ void Views::focusSpan(const std::size_t docIndex, const std::uint32_t charStart,
 void Views::focusSpanAt(RenderState &rState, const std::size_t docIndex,
                         const std::uint32_t charStart,
                         const std::uint32_t charEnd) {
+  GLEDITOR_LOG_DEBUG("xudu.links", "focus document {} range [{},{})", docIndex,
+                     charStart, charEnd);
   if (docIndex >= session.views().size() || docIndex >= rState.docs.size() ||
       !rState.docs[docIndex])
     return;

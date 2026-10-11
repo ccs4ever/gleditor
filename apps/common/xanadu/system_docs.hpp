@@ -238,6 +238,8 @@ inline constexpr std::string_view kAutoSaveSeconds = "autoSaveSeconds";
 inline constexpr std::string_view kPublicationPollSeconds =
     "publicationPollSeconds";
 inline constexpr std::string_view kThemeBackground = "theme.background";
+inline constexpr std::string_view kPagePaperColour = "page.paperColour";
+inline constexpr std::string_view kPageInkColour   = "page.inkColour";
 
 // UI
 inline constexpr std::string_view kTabBarVisible       = "tabBarVisible";
@@ -351,10 +353,10 @@ inline constexpr std::string_view kLinkPanelMutedColour =
     "linkPanel.mutedColour";
 inline constexpr std::string_view kLinkPanelButtonColour =
     "linkPanel.buttonColour";
-inline constexpr std::string_view kLinkPanelChosenHighlightColour =
-    "linkPanel.chosenHighlightColour";
-inline constexpr std::string_view kLinkPanelMemberHighlightColour =
-    "linkPanel.memberHighlightColour";
+inline constexpr std::string_view kLinkPanelChosenEdgeWidthPx =
+    "linkPanel.chosenEdgeWidthPx";
+inline constexpr std::string_view kLinkPanelMemberEdgeWidthPx =
+    "linkPanel.memberEdgeWidthPx";
 
 // Keymap - Xudu Core Actions (Sovereign Vortex Function Calls)
 inline constexpr std::string_view kKeymapQuit        = "std:xudu/quit";
@@ -950,6 +952,8 @@ struct SettingsConfig {
   std::string theme{"system"};
   std::uint32_t autoSaveSeconds{5};
   std::vector<double> themeBackgroundRgb{0.1, 0.1, 0.1};
+  std::uint32_t pagePaperColour{0xFFFFFFFFU};
+  std::uint32_t pageInkColour{0x000000FFU};
 
   [[nodiscard]] static SettingsConfig fromStore(const Store &store);
 };
@@ -1012,8 +1016,14 @@ struct PhysicsConfig {
 };
 
 struct BeamConfig {
+  float connectorWidthOfLine{0.40F};
+  float gutterMinimumWidthOfLine{0.30F};
+  float bracketWidthOfLine{0.10F};
+  float bracketInkShare{0.60F};
+  float anchorReachSeconds{0.25F};
+  bool anchorReducedMotion{false};
   float curveHandleShare{0.3F}, curveWeight{1.F}, gatheringShare{0.32F};
-  float inactiveLinkAlpha{0.35F};
+  float inactiveLinkAlpha{0.70F};
   std::size_t curveSegments{32};
   std::size_t bandStrandLimit{7};
   float bandStrandPitch{2.2F};
@@ -1130,6 +1140,7 @@ struct LinkPanelConfig {
   std::uint16_t maxLines{3};
   float maxWidthShare{0.9F};
   float maxHeightShare{1.0F};
+  float dockMaxHeightShare{0.65F};
   /// Gap between the panel and the window's right edge.
   float marginPx{16.0F};
   /// Gap between the panel and the window's top edge: clear of the document
@@ -1143,10 +1154,10 @@ struct LinkPanelConfig {
   std::uint32_t mutedColour{0x94A3B8FFU};
   /// Behind the panel's buttons.
   std::uint32_t buttonColour{0x334155FFU};
-  /// Behind the chosen occurrence in the document text.
-  std::uint32_t chosenHighlightColour{0xFACC1570U};
-  /// Behind the chosen member's other occurrences.
-  std::uint32_t memberHighlightColour{0xFACC1530U};
+  /// Same-hue edge width for the active chosen occurrence, in pixels.
+  float chosenEdgeWidthPx{2.5F};
+  /// Same-hue edge width for secondary occurrences, in pixels.
+  float memberEdgeWidthPx{1.0F};
 
   bool operator==(const LinkPanelConfig &) const = default;
 };

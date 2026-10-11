@@ -296,13 +296,26 @@ int medianLinePitch(const fs::path &path) {
     const auto i = (static_cast<std::size_t>(y) * width + x) * 3U;
     return (rgb[i] * 299 + rgb[i + 1] * 587 + rgb[i + 2] * 114) / 1000;
   };
-  // A row carries ink when a dark pixel sits between paper on both sides,
-  // which is what countInkOnPaper() counts, row by row.
-  const auto inked = [&](const int y) {
-    for (int x = 3; x < width - 3; ++x) {
-      if (luma(x, y) < 160 && luma(x - 3, y) >= 230 && luma(x + 3, y) >= 230) {
-        return true;
+  const auto onPaper = [&](const int x, const int y) {
+    constexpr int lineNeighbourhoodPx = 24;
+    for (int offset = 1; offset <= lineNeighbourhoodPx; ++offset)
+      for (const int row : {y - offset, y + offset}) {
+        if (row < 0 || row >= height) continue;
+        const auto at = (static_cast<std::size_t>(row) * width + x) * 3U;
+        if (rgb[at] > 235 && rgb[at + 1] > 235 && rgb[at + 2] > 235)
+          return true;
       }
+    return false;
+  };
+  // Highlighted paper is not white. Require nearby paper ownership and
+  // local contrast instead; several ink pixels exclude a lone thin caret.
+  const auto inked = [&](const int y) {
+    int inkPixels = 0;
+    for (int x = 3; x < width - 3; ++x) {
+      const auto ink = luma(x, y);
+      if (ink < 160 && luma(x - 3, y) - ink >= 80 &&
+          luma(x + 3, y) - ink >= 80 && onPaper(x, y) && ++inkPixels >= 3)
+        return true;
     }
     return false;
   };

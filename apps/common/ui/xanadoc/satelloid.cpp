@@ -152,12 +152,24 @@ void SatelloidOverlay::deviceReady(render::RenderDevice &device,
 }
 
 bool SatelloidOverlay::busy() const {
-  return std::ranges::any_of(satelloids_, [](const auto &s) {
-    return s.pulseAlpha > 0.01F || std::abs(s.alpha - s.targetAlpha) > 0.02F ||
-           (s.screenPlaced &&
-            glm::distance(s.screenPos, s.screenTarget) > 0.5F) ||
-           std::abs(s.depth - s.targetDepth) > 0.02F;
-  });
+  return visible_ && std::ranges::any_of(satelloids_, [](const auto &s) {
+           return s.pulseAlpha > 0.01F ||
+                  std::abs(s.alpha - s.targetAlpha) > 0.02F ||
+                  (s.screenPlaced &&
+                   glm::distance(s.screenPos, s.screenTarget) > 0.5F) ||
+                  std::abs(s.depth - s.targetDepth) > 0.02F;
+         });
+}
+
+SatelloidOverlay *SatelloidOverlay::setPresentationVisible(const bool visible) {
+  if (visible_ == visible) return this;
+  visible_ = visible;
+  if (!visible) {
+    for (auto &slot : presentation_->slots) slot->drawn = false;
+    presentation_->pending.clear();
+  }
+  ++presentation_->revision;
+  return this;
 }
 
 void SatelloidOverlay::synchronizeSelection() {
@@ -224,6 +236,7 @@ void SatelloidOverlay::synchronizeSelection() {
 }
 
 void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!visible_ || !device_) {
     return;
   }
@@ -548,6 +561,7 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
 bool SatelloidOverlay::picked(const render::PickingResult &pick,
                               RenderState & /*state*/) {
+  if (!visible_) return false;
   auto &p = *presentation_;
   if (pick.tag.kind != render::tagKindOverlay || pick.tag.docIndex != p.scope ||
       !p.scope)
@@ -591,11 +605,13 @@ std::uint64_t SatelloidOverlay::accessibilityRevision() const {
 std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>>
 SatelloidOverlay::snapshots() const {
   std::vector<std::shared_ptr<const gleditor::ui::WidgetScene>> result;
+  if (!visible_) return result;
   for (const auto &slot : presentation_->slots)
     if (slot->drawn) result.push_back(slot->panel.snapshot());
   return result;
 }
 void SatelloidOverlay::describe(gleditor::a11y::Builder &into) {
+  if (!visible_) return;
   for (const auto &slot : presentation_->slots)
     if (slot->drawn) {
       auto description = slot->text;

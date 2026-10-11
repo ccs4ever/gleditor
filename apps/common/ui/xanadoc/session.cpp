@@ -716,6 +716,13 @@ std::uint64_t Session::packageRenderId(const LinkKey &key) {
   packageRenderIds_.emplace(name, id);
   return id;
 }
+std::uint32_t Session::selectedLinkColour(const LinkKey &key,
+                                          const Link &link) {
+  const bool package = readerLinkPackages().find(key) != nullptr;
+  return linkColourWithInstanceShift(
+      package ? packageRenderId(key) : key.id, link.type,
+      package ? ProminenceTier::Curated : link.tier);
+}
 LinkKey Session::presentationLinkKey(const std::uint64_t id) const {
   if (const auto found = packageRenderKeys_.find(id);
       found != packageRenderKeys_.end())
@@ -2200,8 +2207,38 @@ Session::mediaSpansFor(const MicroversionId &version,
   if (storeIndex >= stores.size() || !stores[storeIndex].store) {
     return {};
   }
-  const auto &st     = store(storeIndex);
+  const auto &st = store(storeIndex);
+  if (mediaClassificationEpoch_ != epoch) {
+    mediaClassifications_.clear();
+    mediaClassificationEpoch_ = epoch;
+  }
+  const auto stableLocal = [&st](const auto &pieces) {
+    if (st.publishedLocalScroll() != localScroll) return false;
+    const auto available = st.userPermascroll().size();
+    for (const auto &run : pieces) {
+      if (run.scroll == breakMarkerScroll) continue;
+      if (!run.isLocal() || run.start > available ||
+          run.length > available - run.start ||
+          !st.segmentsOverlapping(localScroll, run.start, run.length).empty())
+        return false;
+    }
+    return true;
+  };
+  const auto key = std::pair{storeIndex, version};
+  if (const auto cached = mediaClassifications_.find(key);
+      cached != mediaClassifications_.end()) {
+    const auto &entry = cached->second;
+    if (entry.document == st.documentId() &&
+        entry.operationCount == st.opCount() && stableLocal(entry.pieces)) {
+      GLEDITOR_LOG_TRACE("xudu.media", "Reusing local media classification");
+      return entry.spans;
+    }
+    mediaClassifications_.erase(cached);
+  }
   const auto rebuilt = st.rebuild(version);
+  // Missing/bootstrap/external content can arrive without a new operation.
+  // Segment metadata can also change without one, so check it on every hit.
+  const bool retain = stableLocal(rebuilt.pieces());
   gleditor::MagicMimeDetector magic;
 
   std::vector<MediaSpanInfo> list;
@@ -2263,6 +2300,12 @@ Session::mediaSpansFor(const MicroversionId &version,
       docOffset += static_cast<std::uint32_t>(kMediaAnchor.size());
     }
   }
+  if (retain)
+    mediaClassifications_.emplace(
+        key, MediaClassification{.document       = st.documentId(),
+                                 .operationCount = st.opCount(),
+                                 .pieces         = rebuilt.pieces(),
+                                 .spans          = list});
   return list;
 }
 
@@ -2876,6 +2919,13 @@ void Session::applyRemoteScrollSealed(
   }
 }
 
+std::uint64_t Session::linkHighlightLayer(const LinkKey &key) {
+  const auto name = key.authority.str() + ":" + std::to_string(key.id);
+  const auto [at, inserted] =
+      highlightLayers_.try_emplace(name, highlightLayers_.size() + 1);
+  return at->second;
+}
+
 void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
@@ -2924,7 +2974,10 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
         for (const auto &span : *ends) {
           for (const auto &extent : mine.occurrencesOf(span)) {
             found.push_back(gleditor::SpanStyle{
-                .start = extent.start, .end = extent.end, .colour = colour});
+                .start  = extent.start,
+                .end    = extent.end,
+                .colour = colour,
+                .layer  = linkHighlightLayer({entry.store->documentId(), id})});
           }
         }
       }
@@ -2950,7 +3003,8 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
           found.push_back(
               {.start  = std::get<DocumentSite>(match.site).range.start,
                .end    = std::get<DocumentSite>(match.site).range.end,
-               .colour = colour});
+               .colour = colour,
+               .layer  = linkHighlightLayer(key)});
   }
 
   // Passages that are withheld or transcopyright-locked in this document's
@@ -3048,6 +3102,7 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
 }
 
 void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   if (!canvas || !ctx.state.documentsVisible) {
     return;
   }

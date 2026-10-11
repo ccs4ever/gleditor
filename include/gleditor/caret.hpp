@@ -86,7 +86,13 @@ public:
   void extendTo(std::uint32_t aByteOffset);
 
   /// Forget the selection but keep the caret where it is.
-  void clearSelection() { anchored = false; }
+  void clearSelection() {
+    anchored = false;
+    ++selectionRevision_;
+  }
+  [[nodiscard]] std::uint64_t selectionRevision() const {
+    return selectionRevision_;
+  }
 
   [[nodiscard]] bool hasSelection() const {
     return anchored && anchor != byteOffset_;
@@ -101,6 +107,7 @@ public:
   /// Hide the caret and drop any selection; the editor goes back to navigating
   /// rather than typing. This is what clicking on empty space does.
   void clear() {
+    ++selectionRevision_;
     visible  = false;
     anchored = false;
   }
@@ -151,6 +158,7 @@ private:
   std::uint32_t byteOffset_{};
   /// Where a selection began. The caret itself is the other end.
   std::uint32_t anchor{};
+  std::uint64_t selectionRevision_{};
   bool anchored{};
 };
 

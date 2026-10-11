@@ -80,9 +80,16 @@ public:
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool busy() const override {
     const std::scoped_lock lock(actionGuard);
-    return !pending.empty();
+    return !pending.empty() || !pendingToggles.empty() ||
+           !pendingPages.empty() || dockClipPending || context.entryPending();
   }
+  void toggleControls();
+  void pageControls(int direction);
   void decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) override;
+  LinkPanelOverlay *noteNavigationSelection(const Caret &caret,
+                                            std::optional<LinkKey> key);
+  std::optional<gleditor::SpanStyle>
+  selectionStyle(const Doc &doc, const Caret &caret) override;
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
   void describe(gleditor::a11y::Builder &into) override {
@@ -100,7 +107,24 @@ public:
     return panel.snapshot();
   }
 
+  /// Geometry retained from the last frame, without choosing any link cursor.
+  [[nodiscard]] std::span<const DocumentSite> visibleCompanions() const {
+    const auto selected = context.selection();
+    if (!selected || visibleCompanionOwner != selected->key) return {};
+    return std::span(visibleCompanionSites).first(visibleCompanionCount);
+  }
+
 private:
+  std::array<DocumentSite, 3> visibleCompanionSites;
+  std::size_t visibleCompanionCount{};
+  std::optional<LinkKey> visibleCompanionOwner;
+  struct OwnedSelection {
+    LinkKey key;
+    std::uint64_t revision, generation, viewsGeneration;
+    std::uint32_t view;
+    DocumentSite site;
+  };
+  std::optional<OwnedSelection> ownedSelection;
   /// What the committed geometry and highlights were built from.
   struct Stamp {
     std::uint64_t selection{};
@@ -110,7 +134,7 @@ private:
     int height{};
     LinkContext::ReadingStamp reading;
     std::optional<std::array<glm::vec2, 2>> anchors;
-    std::optional<std::array<float, 4>> protectedContent;
+    std::array<std::optional<std::array<float, 4>>, 3> protectedContent;
     bool operator==(const Stamp &) const = default;
   };
 
@@ -136,19 +160,35 @@ private:
   std::shared_ptr<const common_ui::LinkPanelPresentation> currentPresentation;
   std::uint64_t presentationSelection{};
   std::vector<PendingAction> pending;
+  std::vector<std::uint64_t> pendingToggles;
+  std::vector<std::pair<std::uint64_t, int>> pendingPages;
+  std::size_t controlsPage{};
+  std::optional<std::pair<gleditor::ui::WidgetId, gleditor::ui::WidgetId>>
+      pageIds;
+  std::vector<gleditor::ui::WidgetId> buttonIds;
+  std::vector<xanadu::PanelButton> identifiedButtons;
+  std::optional<std::uint64_t> identifiedSelection;
+  bool controlsCollapsed{};
+  bool dockClipPending{};
+  std::optional<xanadu::LinkKey> dockLink;
+  std::optional<std::pair<int, int>> dockViewport;
+  std::optional<gleditor::ui::WidgetId> toggleId;
   std::uint32_t nextActionId{1024};
   std::optional<Stamp> panelBuiltFor;
   std::optional<Stamp> highlightsBuiltFor;
   /// Open view index and the range to colour in it.
   std::vector<std::pair<std::size_t, gleditor::SpanStyle>> highlights;
   std::vector<xanadu::CellHighlight> cellHighlights;
+  std::uint32_t cellHighlightColour{};
   CellHighlighter cellHighlighter;
   AnchorResolver anchorResolver;
   FramingHandler framingHandler;
   std::optional<std::uint64_t> framedSelection;
+  std::optional<xanadu::VisitId> framedVisit;
   std::optional<AnchorPair> framedAnchors;
   std::optional<std::array<glm::vec2, 2>> panelAnchors;
-  std::optional<gleditor::ui::Rect> protectedContent;
+  std::array<gleditor::ui::Rect, 3> protectedContent;
+  std::size_t protectedContentCount{};
   /// The buttons drawn, in tag order, so a pick can be mapped back.
   std::vector<xanadu::PanelButton> buttons;
 };

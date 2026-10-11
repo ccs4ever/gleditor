@@ -9,6 +9,7 @@
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -72,7 +73,8 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "Selected-link navigation, all on Alt+Shift: link next and "
            "previous N and P; member next and previous J and K; place next "
            "and previous L and H; cross X; enter Return; return to origin O; "
-           "dismiss D; activity back B, which steps back through visits "
+           "docked controls/read I; dismiss D; activity back B, which steps "
+           "back through visits "
            "rather than document versions. overview-toggle: show or hide the "
            "overview of every open page, Alt+Shift+V.\n";
   case SystemDocKind::Settings:
@@ -286,9 +288,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "linkPanel.mutedColour, linkPanel.buttonColour: Panel colours as "
            "RGBA integers, the muted one for unset choices, members not in "
            "view and buttons that would be refused.\n"
-           "linkPanel.chosenHighlightColour, linkPanel.memberHighlightColour: "
-           "Highlights behind the chosen occurrence and behind the chosen "
-           "member's other occurrences in the text, as RGBA integers.\n";
+           "linkPanel.chosenEdgeWidthPx, linkPanel.memberEdgeWidthPx: "
+           "Same-hue edge widths for the active chosen occurrence and "
+           "secondary occurrences, in device pixels. Defaults are 2.5 and 1.\n";
   case SystemDocKind::Pouches:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -605,6 +607,25 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kPhysicsTimeStep),
          .notes   = "Physics simulation time delta in seconds",
          .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.016}}}},
+        {.name    = "beams.connectorWidthOfLine",
+         .notes   = "Authored connector thickness relative to text line height",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.40}}}},
+        {.name  = "beams.gutterMinimumWidthOfLine",
+         .notes = "Minimum connector stroke allowed when fitting gutter lanes",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.30}}}},
+        {.name  = "beams.anchorReachSeconds",
+         .notes = "Selected occurrence terminal extension/retraction seconds; "
+                  "zero cuts",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.25}}}},
+        {.name    = "beams.anchorReducedMotion",
+         .notes   = "Cut selected anchor terminals directly to their target",
+         .schemas = {{.expectedTypes = {"bool"}, .defaultValues = {false}}}},
+        {.name    = "beams.bracketInkShare",
+         .notes   = "Authored bracket ink intensity on paper",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.60}}}},
+        {.name    = "beams.bracketWidthOfLine",
+         .notes   = "Exact margin bracket stroke relative to text line height",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.10}}}},
         {.name    = std::string(settings::kBeamsBandStrandLimit),
          .notes   = "Max strands in a ribbon band",
          .schemas = {{.expectedTypes = {"integer"},
@@ -637,7 +658,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name  = "beams.inactiveLinkAlpha",
          .notes = "Other link opacity while one link is selected; bounded 0.15 "
                   "to 0.8",
-         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.35}}}},
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.70}}}},
         {.name    = "beams.curveWeight",
          .notes   = "Positive rational weight of the inner NURBS controls; "
                     "bounded 0.25 to 4",
@@ -781,6 +802,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Active UI theme name",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"system"}}}}},
+        {.name    = std::string(settings::kPagePaperColour),
+         .notes   = "Document paper colour, packed RGBA8 (red in high byte)",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0xFFFFFFFFU}}}}},
+        {.name    = std::string(settings::kPageInkColour),
+         .notes   = "Document ink colour, packed RGBA8 (red in high byte)",
+         .schemas = {{.expectedTypes = {"integer"},
+                      .defaultValues = {std::int64_t{0x000000FFU}}}}},
         {.name  = std::string(settings::kThemeBackground),
          .notes = "Theme background color (RGB as 3 floats 0..1 or 3 integers "
                   "0..255)",
@@ -1046,6 +1075,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Gap between the link panel and the window edge in pixels",
          .schemas = {{.expectedTypes = {"float"},
                       .defaultValues = {double{panel.marginPx}}}}},
+        {.name = "linkPanel.dockMaxHeightShare",
+         .notes =
+             "Maximum share of reading space used by the link inspector dock",
+         .schemas = {{.expectedTypes = {"float"}, .defaultValues = {0.65}}}},
         {.name    = std::string(settings::kLinkPanelTopPx),
          .notes   = "Gap between the link panel and the window top in pixels",
          .schemas = {{.expectedTypes = {"float"},
@@ -1075,16 +1108,14 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Link panel button RGBA hexadecimal colour",
          .schemas = {{.expectedTypes = {"integer"},
                       .defaultValues = {std::int64_t{panel.buttonColour}}}}},
-        {.name    = std::string(settings::kLinkPanelChosenHighlightColour),
-         .notes   = "Highlight behind the chosen occurrence in the text",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {std::int64_t{
-                          panel.chosenHighlightColour}}}}},
-        {.name    = std::string(settings::kLinkPanelMemberHighlightColour),
-         .notes   = "Highlight behind the chosen member's other occurrences",
-         .schemas = {{.expectedTypes = {"integer"},
-                      .defaultValues = {std::int64_t{
-                          panel.memberHighlightColour}}}}},
+        {.name    = std::string(settings::kLinkPanelChosenEdgeWidthPx),
+         .notes   = "Same-hue edge width of the active occurrence in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.chosenEdgeWidthPx}}}}},
+        {.name    = std::string(settings::kLinkPanelMemberEdgeWidthPx),
+         .notes   = "Same-hue edge width of secondary occurrences in pixels",
+         .schemas = {{.expectedTypes = {"float"},
+                      .defaultValues = {double{panel.memberEdgeWidthPx}}}}},
     };
     for (std::size_t i = 0; i < gleditor::ui::kFontRoleCount; ++i) {
       const auto role  = static_cast<gleditor::ui::FontRole>(i);
@@ -1274,6 +1305,10 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Make the other side of the selected link active",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+X"}}}}},
+        {.name    = "std:xuzz/link_cancel_entry",
+         .notes   = "Cancel pending endpoint entry without dismissing the link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+Escape"}}}}},
         {.name    = std::string(settings::kKeymapLinkEnter),
          .notes   = "Go to the chosen place of the selected link",
          .schemas = {{.expectedTypes = {"string"},
@@ -1282,6 +1317,19 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Return to where the selected link was selected",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+O"}}}}},
+        {.name    = "std:xuzz/link_controls_previous",
+         .notes   = "Previous controls page without changing the link endpoint",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+PageUp"}}}}},
+        {.name    = "std:xuzz/link_controls_next",
+         .notes   = "Next controls page without changing the link endpoint",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+PageDown"}}}}},
+        {.name    = "std:xuzz/link_controls",
+         .notes   = "Toggle between reading and docked link controls without "
+                    "changing the link",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Alt+Shift+I"}}}}},
         {.name    = std::string(settings::kKeymapLinkDismiss),
          .notes   = "Put the selected link away",
          .schemas = {{.expectedTypes = {"string"},
@@ -3028,8 +3076,17 @@ SettingsConfig SettingsConfig::fromStore(const Store &store) {
   cfg.autoSaveSeconds = static_cast<std::uint32_t>(
       model.getInt64(settings::kAutoSaveSeconds,
                      static_cast<std::int64_t>(cfg.autoSaveSeconds)));
-  cfg.theme        = model.getString(settings::kTheme, cfg.theme);
-  const auto bgRgb = model.getDoubleList(settings::kThemeBackground);
+  const auto colour = [&model](const std::string_view name,
+                               const std::uint32_t fallback) {
+    const auto value = model.getInt64(name, fallback);
+    return value >= 0 && value <= std::numeric_limits<std::uint32_t>::max()
+               ? static_cast<std::uint32_t>(value)
+               : fallback;
+  };
+  cfg.pagePaperColour = colour(settings::kPagePaperColour, cfg.pagePaperColour);
+  cfg.pageInkColour   = colour(settings::kPageInkColour, cfg.pageInkColour);
+  cfg.theme           = model.getString(settings::kTheme, cfg.theme);
+  const auto bgRgb    = model.getDoubleList(settings::kThemeBackground);
   if (bgRgb.size() == 3) {
     cfg.themeBackgroundRgb = bgRgb;
   }
@@ -3095,6 +3152,19 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
                                       value, double(low), double(high)))
                                 : fallback;
   };
+  cfg.beams.connectorWidthOfLine = curveNumber(
+      "beams.connectorWidthOfLine", cfg.beams.connectorWidthOfLine, .04F, .5F);
+  cfg.beams.gutterMinimumWidthOfLine = curveNumber(
+      "beams.gutterMinimumWidthOfLine", cfg.beams.gutterMinimumWidthOfLine,
+      .04F, cfg.beams.connectorWidthOfLine);
+  cfg.beams.bracketWidthOfLine = curveNumber(
+      "beams.bracketWidthOfLine", cfg.beams.bracketWidthOfLine, .04F, .3F);
+  cfg.beams.anchorReachSeconds = curveNumber(
+      "beams.anchorReachSeconds", cfg.beams.anchorReachSeconds, 0.F, 2.F);
+  cfg.beams.anchorReducedMotion =
+      model.getBool("beams.anchorReducedMotion", false);
+  cfg.beams.bracketInkShare =
+      curveNumber("beams.bracketInkShare", cfg.beams.bracketInkShare, .2F, 1.F);
   cfg.beams.inactiveLinkAlpha = curveNumber(
       "beams.inactiveLinkAlpha", cfg.beams.inactiveLinkAlpha, .15F, .8F);
   cfg.beams.curveHandleShare = curveNumber(
@@ -3445,10 +3515,21 @@ UIConfig UIConfig::fromStore(const Store &store) {
   colour(settings::kLinkPanelTextColour, panel.textColour);
   colour(settings::kLinkPanelMutedColour, panel.mutedColour);
   colour(settings::kLinkPanelButtonColour, panel.buttonColour);
-  colour(settings::kLinkPanelChosenHighlightColour,
-         panel.chosenHighlightColour);
-  colour(settings::kLinkPanelMemberHighlightColour,
-         panel.memberHighlightColour);
+  length("linkPanel.dockMaxHeightShare", panel.dockMaxHeightShare);
+  panel.dockMaxHeightShare =
+      std::isfinite(panel.dockMaxHeightShare)
+          ? std::clamp(panel.dockMaxHeightShare, .2F, .8F)
+          : defaults.dockMaxHeightShare;
+  length(settings::kLinkPanelChosenEdgeWidthPx, panel.chosenEdgeWidthPx);
+  length(settings::kLinkPanelMemberEdgeWidthPx, panel.memberEdgeWidthPx);
+  panel.chosenEdgeWidthPx =
+      std::isfinite(panel.chosenEdgeWidthPx)
+          ? std::clamp(panel.chosenEdgeWidthPx, 0.5F, 8.0F)
+          : defaults.chosenEdgeWidthPx;
+  panel.memberEdgeWidthPx =
+      std::isfinite(panel.memberEdgeWidthPx)
+          ? std::clamp(panel.memberEdgeWidthPx, 0.5F, 8.0F)
+          : defaults.memberEdgeWidthPx;
   return cfg;
 }
 

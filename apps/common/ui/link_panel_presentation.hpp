@@ -13,12 +13,25 @@ struct LinkPanelAction {
   xanadu::NavigationCommand command;
   bool enabled{};
 };
+struct LinkPanelPageRequest {
+  gleditor::ui::WidgetId previousId, nextId;
+  std::size_t page{};
+};
+struct LinkPanelPages {
+  LinkPanelPageRequest request;
+  std::size_t count{};
+};
 /// Plain presentation values: navigation and store access remain in the host.
 struct LinkPanelPresentation {
   gleditor::ui::Widget model;
   gleditor::ui::Rect bounds;
   gleditor::ui::Theme theme;
   std::vector<LinkPanelAction> actions;
+  bool safePlacement{true};
+  bool completeContent{true};
+  std::optional<gleditor::ui::WidgetId> toggleControls;
+  std::optional<float> reservedBottom;
+  std::optional<LinkPanelPages> pages;
   [[nodiscard]] const LinkPanelAction *find(gleditor::ui::WidgetId) const;
 };
 [[nodiscard]] LinkPanelPresentation linkPanelPresentation(
@@ -27,6 +40,15 @@ struct LinkPanelPresentation {
     const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &,
     const xanadu::LinkPanelConfig &, std::optional<gleditor::ui::Rect> anchor,
     gleditor::text::ShapingCache &,
-    std::optional<gleditor::ui::Rect> protectedContent = {});
+    std::optional<gleditor::ui::Rect> protectedContent             = {},
+    std::span<const gleditor::ui::Rect> additionalProtectedContent = {},
+    std::optional<std::string_view> controlsLabel                  = {});
+[[nodiscard]] LinkPanelPresentation linkPanelDockPresentation(
+    std::span<const xanadu::PanelLine>, std::span<const xanadu::PanelButton>,
+    std::span<const gleditor::ui::WidgetId> actionIds,
+    gleditor::ui::WidgetId toggleId, bool collapsed,
+    const gleditor::ui::UiMetrics &, const gleditor::ui::Theme &,
+    const xanadu::LinkPanelConfig &, gleditor::text::ShapingCache &,
+    std::optional<LinkPanelPageRequest> = {});
 } // namespace common_ui
 #endif

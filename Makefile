@@ -624,6 +624,7 @@ ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
 XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 UI_TEXT_BASELINE_OBJS := $(call obj,tools/ui-text-baseline.cpp)
+LINK_STRESS_OBJS := $(call obj,tools/render-link-stress.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
 VQUERY_SRCS     := $(shell find apps/vquery -name '*.cpp' 2>/dev/null)
@@ -698,7 +699,7 @@ ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_TEST_OBJS) $(COMMON_UI_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS) \
-	$(UI_TEXT_BASELINE_OBJS))
+	$(UI_TEXT_BASELINE_OBJS) $(LINK_STRESS_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -1033,6 +1034,17 @@ ui-text-baseline: shaders
 endif
 $(OBJDIR)/ui-text-baseline: $(UI_TEXT_BASELINE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(UI_TEXT_BASELINE_OBJS) $(APP_LDFLAGS) $(LIBS)
+
+# Real Session/LinkBeams component evidence over cloned diagnostic fixtures.
+# Optional: prepared scene placement does not replace an interactive journey.
+.PHONY: render-link-stress
+render-link-stress: $(OBJDIR)/render-link-stress
+ifdef GLEDITOR_ENABLE_VULKAN
+render-link-stress: shaders
+endif
+$(OBJDIR)/render-link-stress: $(LINK_STRESS_OBJS) $(COMMON_UI_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(LINK_STRESS_OBJS) $(COMMON_UI_OBJS) $(XUDU_CORE_OBJS) \
+	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 
 # Proves the decode-index prototype (design/decode-index-spike.md) on real
 # files rather than leaving it a paper design: a PNG scanline checkpoint
@@ -1593,3 +1605,9 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))
 include $(DEPS)
 endif
+
+# This prepares a native, full-text reading fixture; navigation remains the
+# program's normal member/occurrence, Cross, Enter and Origin controls.
+.PHONY: prototype/kjv-links
+prototype/kjv-links: xuzz
+	python3 tools/create-kjv-link-prototype.py

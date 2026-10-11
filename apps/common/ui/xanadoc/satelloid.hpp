@@ -196,6 +196,7 @@ public:
     anchorResolver_ = std::move(resolver);
   }
   void setSiteFilter(SiteFilter filter) { siteFilter_ = std::move(filter); }
+  SatelloidOverlay *setPresentationVisible(bool visible);
 
   // -- FrameContributor implementation ---------------------------------------
   void deviceReady(render::RenderDevice &device,

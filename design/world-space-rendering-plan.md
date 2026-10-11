@@ -1,6 +1,8 @@
 # World-Space Rendering: An Implementation Plan
 
-Status: plan, unbuilt. Date: 2026-10-07.
+Status: partially implemented. Date: 2026-10-07. Render regions (§3) now provide the generic
+viewport/clip/depth seam, including worker-recorded batches and world/chrome clipping. Unprojection,
+placed planes and the other workstreams remain planned.
 
 ## Purpose
 
@@ -34,7 +36,8 @@ against the code. Until the packages it names amend the sections below, these ho
 - One draw per plane may cost too much on OpenGL, which re-issues every attribute pointer per draw
   and does not record on worker threads. A spike decides how planes are batched before §5 is built.
 - A `PlaneSet` uses one persistent picking scope; scopes are a shared budget of about 8,000.
-- The OpenGL loader has none of `Scissor`, `DepthMask` or `DepthRangef` yet.
+- The region seam adds `Scissor` and each profile's depth-range entry point to the OpenGL loader.
+  `DepthMask` remains to be added.
 - Translucent pages, planes and beams must be ordered in one list where they overlap.
 
 ## 1. Conventions that exist and must not change
@@ -232,7 +235,8 @@ and `requestPickingTag` is unchanged. `captureColorTarget` is unchanged.
 A region's `[nearDepth, farDepth]` is stated once, with 0 nearest, and each backend maps it to its
 own convention:
 
-- **OpenGL and GLES**: `glDepthRangef(nearDepth, farDepth)`.
+- **OpenGL 3.3**: `glDepthRange(nearDepth, farDepth)`; **GLES 3.0**:
+  `glDepthRangef(nearDepth, farDepth)`. The loader requires the entry point for the active profile.
 - **Vulkan**, whose depth is reversed: the viewport's `minDepth = 1 − farDepth` and
   `maxDepth = 1 − nearDepth`, so the nearest thing in the region still has the greatest depth value
   and `GREATER_OR_EQUAL` still means "nearer".

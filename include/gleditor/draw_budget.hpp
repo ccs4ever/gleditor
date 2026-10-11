@@ -13,12 +13,20 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <optional>
 
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float2.hpp>
 #include <glm/ext/vector_float4.hpp>
 #include <glm/geometric.hpp>
 #include <limits>
+
+/// RGB colours packed as RGBA, matching glyph and decoration colours. Page
+/// opacity remains a separate draw property; palette alpha is not a fade.
+struct DocumentPalette {
+  std::uint32_t paper{0xFFFFFFFFU};
+  std::uint32_t ink{0x000000FFU};
+};
 
 /**
  * @brief How much of the frame a page is allowed to cost, and what it takes to
@@ -41,6 +49,9 @@ struct DrawBudget {
   float coarseBelow{};
   /// Whether pages outside the view frustum are skipped.
   bool cull{true};
+  /// Recolour monochrome document rows without rebuilding their glyph buffers.
+  /// An absent palette preserves the authored colours and existing rendering.
+  std::optional<DocumentPalette> documentPalette;
 };
 
 /// What one frame's collection decided, for reporting. Culling that is not

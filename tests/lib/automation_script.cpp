@@ -116,6 +116,22 @@ TEST(AutomationScript, capturesAtThePointItWasWritten) {
   EXPECT_EQ(script[2].text, "after.ppm");
 }
 
+TEST(AutomationScript, LiveCaptureRetainsKeyboardOrderAndDelay) {
+  const auto script = scriptOf({"--chord", "Alt+Shift+X", "--capture-live",
+                                "80,mid.ppm", "--capture", "end.ppm"});
+  ASSERT_EQ(script.size(), 3U);
+  EXPECT_EQ(script[0].kind, Kind::Input);
+  EXPECT_EQ(script[1].kind, Kind::CaptureLive);
+  EXPECT_EQ(script[1].delay.count(), 80);
+  EXPECT_EQ(script[1].text, "mid.ppm");
+  EXPECT_EQ(script[2].kind, Kind::Capture);
+  EXPECT_THROW(scriptOf({"--capture-live", "80x,bad.ppm"}),
+               std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--capture-live", "-1,bad.ppm"}),
+               std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--capture-live", "80,"}), std::invalid_argument);
+}
+
 TEST(AutomationScript, ignoresEverythingThatIsNotAnAutomationOption) {
   const auto script =
       scriptOf({"--font", "Serif 12", "file.txt", "--profile", "--click", "1,2",
@@ -219,6 +235,20 @@ TEST(AutomationScript, typeCanBracketDecorateEmptyText) {
 }
 
 } // namespace
+
+TEST(AutomationScript, resizePreservesInputOrderAndRejectsEmptyWindows) {
+  const auto script = scriptOf(
+      {"--resize=1600,1000", "--capture", "large.ppm", "--resize", "800,600"});
+  ASSERT_EQ(script.size(), 3U);
+  EXPECT_EQ(script[0].kind, Kind::Input);
+  EXPECT_EQ(script[0].input.kind, AppState::SyntheticInput::Kind::Resize);
+  EXPECT_EQ(script[0].input.x, 1600);
+  EXPECT_EQ(script[0].input.y, 1000);
+  EXPECT_EQ(script[1].kind, Kind::Capture);
+  EXPECT_EQ(script[2].input.x, 800);
+  EXPECT_THROW(scriptOf({"--resize", "0,600"}), std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--resize", "800,-1"}), std::invalid_argument);
+}
 
 TEST(AutomationScript, chordIsAKeyDownThroughTheKeymap) {
   const auto script =
@@ -327,4 +357,19 @@ TEST(AutomationScript, aRunAskingForNoFrameWantsNone) {
   EXPECT_FALSE(wantsFramesFor({}));
   EXPECT_FALSE(wantsFramesFor({"--font", "Serif 12", "--fov", "9"}));
   EXPECT_FALSE(wantsFramesFor({"--profile"}));
+}
+
+TEST(AutomationScript, ModifierHoldSurroundsTheOrdinaryPointerGesture) {
+  const auto script = scriptOf({"--hold-mods", "Alt+Shift", "--drag",
+                                "10,20:30,40", "--hold-mods", "None"});
+  ASSERT_GE(script.size(), 4U);
+  using Input = AppState::SyntheticInput;
+  EXPECT_EQ(script.front().input.kind, Input::Kind::Modifiers);
+  EXPECT_NE(script.front().input.mods, 0U);
+  EXPECT_EQ(script[1].input.kind, Input::Kind::ButtonDown);
+  EXPECT_EQ(script[script.size() - 2].input.kind, Input::Kind::ButtonUp);
+  EXPECT_EQ(script.back().input.kind, Input::Kind::Modifiers);
+  EXPECT_EQ(script.back().input.mods, 0U);
+  EXPECT_THROW(scriptOf({"--hold-mods", "Alt+Oops"}), std::invalid_argument);
+  EXPECT_THROW(scriptOf({"--hold-mods", "Alt+"}), std::invalid_argument);
 }

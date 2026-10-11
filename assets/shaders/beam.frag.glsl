@@ -24,11 +24,10 @@ void main() {
   // glass remains a separate surface for broad ribbons.
   if (vSurface < 0.5) {
     if (edge <= 0.0) discard;
-    float core = exp(-pow(abs(vAcross) * 3.2, 2.0));
-    vec3 colour =
-        mix(vColour.rgb * (0.78 + 0.22 * core), vec3(1.0), core * 0.12);
-    outColour = vec4(colour, vColour.a * edge * vOpacity);
-    outTag    = uvec4(vTag, 0u, 0u);
+    float core  = 1.0 - smoothstep(0.15, 0.85, abs(vAcross));
+    vec3 colour = vColour.rgb * (0.88 + 0.12 * core);
+    outColour   = vec4(colour, vColour.a * edge * vOpacity);
+    outTag      = uvec4(vTag, 0u, 0u);
     return;
   }
 

@@ -1253,3 +1253,35 @@ TEST(LinkLayout, GroupedAttachmentsKeepDisjointMembersAndAvoidCartesianFanout) {
   xanadu::placeGroupedLinks(links, views, placed, unplaced);
   EXPECT_EQ(placed.size(), 1999U);
 }
+
+TEST(LinkLayout, MissingOppositeEndsetKeepsEveryLocalAttachment) {
+  Store store;
+  const auto a  = store.insert({}, 0, "alpha gap gamma");
+  const auto b  = store.insert({}, 0, "one gap two gap three");
+  const auto av = store.rebuild(a), bv = store.rebuild(b);
+  Link link;
+  link.left  = {av.spansFor(0, 5).front(), av.spansFor(10, 5).front()};
+  link.right = {bv.spansFor(0, 3).front(), bv.spansFor(8, 3).front(),
+                bv.spansFor(16, 5).front()};
+  const std::map<zigzag::CellRef, Link> links{{42, link}};
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  for (const auto *view : {&av, &bv}) {
+    xanadu::placeGroupedLinks(links, std::vector<const Version *>{view}, placed,
+                              unplaced);
+    EXPECT_TRUE(placed.empty());
+    const bool isLeft = view == &av;
+    ASSERT_EQ(unplaced.size(), isLeft ? 2U : 3U);
+    std::set<std::pair<unsigned, unsigned>> ranges;
+    for (const auto &row : unplaced) {
+      EXPECT_EQ(row.link, 42U);
+      EXPECT_EQ(row.elsewhere, isLeft ? link.right : link.left);
+      ranges.emplace(row.here.start, row.here.end);
+    }
+    EXPECT_EQ(ranges,
+              isLeft
+                  ? (std::set<std::pair<unsigned, unsigned>>{{0, 5}, {10, 15}})
+                  : (std::set<std::pair<unsigned, unsigned>>{
+                        {0, 3}, {8, 11}, {16, 21}}));
+  }
+}

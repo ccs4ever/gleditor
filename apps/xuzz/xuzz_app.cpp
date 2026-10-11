@@ -757,12 +757,117 @@ int XuzzApp::run(const int argc, char **argv) {
   KeyboardPane keyboardPane(state);
   renderer->addPickObserver(&keyboardPane);
 
-  linkContext.setFocusDocument(
-      [&views, &keyboardPane](const std::size_t viewIndex,
-                              const xanadu::Extent range) {
-        keyboardPane.leaveZigzag(false);
-        views.focusSpan(viewIndex, range.start, range.end);
-      });
+  xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
+  linkContext.setDocumentEntryHandler([&views, &keyboardPane, &linkContext,
+                                       &links, &state, &linkPanel,
+                                       &renderer](const std::size_t viewIndex,
+                                                  const xanadu::Extent range,
+                                                  RenderState &rState) {
+    const auto visible = linkPanel.visibleCompanions();
+    std::vector<xanadu::DocumentSite> companions(visible.begin(),
+                                                 visible.end());
+    keyboardPane.leaveZigzag(false);
+    links.releaseCamera();
+    views.cancelReadingFrame();
+    views.focusSpanAt(rState, viewIndex, range.start, range.end);
+    if (const auto caret = renderer->editCaret())
+      linkPanel.noteNavigationSelection(*caret, linkContext.enteredLink());
+    if (viewIndex >= rState.docs.size() || !rState.docs[viewIndex]) return;
+    const auto &focused = *rState.docs[viewIndex];
+    const auto anchor   = focused.anchorFor(range.start);
+    const auto point    = anchor ? focused.worldPoint(*anchor) : std::nullopt;
+    const auto selected = linkContext.selection();
+    if (!point || !selected || !selected->occurrences) return;
+    // Keep previously visible companion geometry when a cursor is unchosen.
+    // Framing a page does not choose a navigation occurrence or record a visit.
+    for (const auto side : {xanadu::LinkSide::Left, xanadu::LinkSide::Right}) {
+      const auto &cursor  = selected->cursor(side);
+      const auto &members = selected->occurrences->members(side);
+      if (!cursor.member || !cursor.occurrence ||
+          *cursor.member >= members.size() ||
+          *cursor.occurrence >= members[*cursor.member].occurrences.size())
+        continue;
+      const auto *site = std::get_if<xanadu::DocumentSite>(
+          &members[*cursor.member].occurrences[*cursor.occurrence].site);
+      if (site) {
+        std::erase_if(companions, [&](const auto &visibleSite) {
+          return linkContext.viewIndexOf(visibleSite) ==
+                 linkContext.viewIndexOf(*site);
+        });
+        companions.push_back(*site);
+      }
+    }
+    if (const auto origin = linkContext.originSite();
+        origin && std::ranges::none_of(companions, [&](const auto &site) {
+          return linkContext.viewIndexOf(site) != viewIndex;
+        })) {
+      if (const auto *site = std::get_if<xanadu::DocumentSite>(&*origin))
+        if (std::ranges::find(companions, *site) == companions.end())
+          companions.push_back(*site);
+    }
+    for (const auto &site : companions) {
+      const auto other = linkContext.viewIndexOf(site);
+      if (!other || *other == viewIndex || *other >= rState.docs.size() ||
+          !rState.docs[*other])
+        continue;
+      auto &companion        = *rState.docs[*other];
+      const auto otherAnchor = companion.anchorFor(site.range.start);
+      const auto otherPoint =
+          otherAnchor ? companion.worldPoint(*otherAnchor) : std::nullopt;
+      if (!otherPoint) continue;
+      const auto focusedFrame   = focused.pageFrame(anchor->pageIndex);
+      const auto companionFrame = companion.pageFrame(otherAnchor->pageIndex);
+      if (!focusedFrame || !companionFrame) continue;
+      const auto pageEdges = [](const Doc::PageFrame &frame) {
+        return std::array{
+            glm::vec3(frame.localToWorld *
+                      glm::vec4(frame.leftPx, frame.topPx, 0, 1)),
+            glm::vec3(frame.localToWorld *
+                      glm::vec4(frame.rightPx, frame.topPx, 0, 1))};
+      };
+      const auto targetEdges = pageEdges(*focusedFrame);
+      const auto sourceEdges = pageEdges(*companionFrame);
+      const auto gap         = focusedFrame->marginPx *
+                       glm::length(glm::vec3(focusedFrame->localToWorld[0]));
+      auto model = companion.modelMatrix();
+      model[3].y += point->y - otherPoint->y;
+      model[3].x += otherPoint->x >= point->x
+                        ? targetEdges[1].x + gap - sourceEdges[0].x
+                        : targetEdges[0].x - gap - sourceEdges[1].x;
+      const auto delta =
+          glm::vec3(model[3]) - glm::vec3(companion.modelMatrix()[3]);
+      companion.animateMoveTo(*renderer->animTimeline(), glm::vec3(model[3]),
+                              0);
+      const auto paired = *otherPoint + delta;
+      {
+        const auto page      = focused.page(anchor->pageIndex);
+        const auto otherPage = companion.page(otherAnchor->pageIndex);
+        if (page && otherPage) {
+          std::scoped_lock lock(state->view);
+          auto &camera = state->view;
+          const float aspect =
+              camera.screenHeight > 0
+                  ? static_cast<float>(camera.screenWidth) / camera.screenHeight
+                  : 1.F;
+          const std::array movedEdges{sourceEdges[0] + delta,
+                                      sourceEdges[1] + delta};
+          const float left  = std::min(targetEdges[0].x, movedEdges[0].x);
+          const float right = std::max(targetEdges[1].x, movedEdges[1].x);
+          camera.pos.x      = (left + right) * .5F;
+          camera.pos.y      = point->y;
+          auto distance     = gleditor::spatial::framingDistance(
+              right - left, anchor->height * Doc::pixelsToWorld, camera.fov,
+              aspect);
+          if (const auto readable = xanadu::readableCameraDistance(
+                  anchor->height * Doc::pixelsToWorld,
+                  static_cast<float>(camera.screenHeight), camera.fov,
+                  views.readableTextPx()))
+            distance = std::min(distance, *readable);
+          camera.pos.z = std::max(point->z, paired.z) + distance;
+        }
+      }
+    }
+  });
   linkContext.setCaretQuery(
       [&renderer]() -> std::optional<xanadu::LinkContext::CaretPosition> {
         const auto *const caret = renderer->editCaret();
@@ -780,7 +885,6 @@ int XuzzApp::run(const int argc, char **argv) {
       });
   links.setLinkContext(&linkContext);
 
-  xanadu::LinkPanelOverlay linkPanel(linkContext, *session);
   const auto selectedPair = [&linkContext](const RenderState &rState,
                                            const auto &cellPoint)
       -> std::optional<xanadu::LinkPanelOverlay::AnchorPair> {
@@ -832,28 +936,7 @@ int XuzzApp::run(const int argc, char **argv) {
           return std::nullopt;
         });
   });
-  linkPanel.setFramingHandler(
-      [&links, &state](const xanadu::LinkPanelOverlay::AnchorPair &points,
-                       ch::Timeline &timeline) {
-        const auto midpoint = 0.5F * (points[0] + points[1]);
-        glm::vec3 target;
-        {
-          std::scoped_lock locker(state->view);
-          const auto &view   = state->view;
-          const float aspect = view.screenHeight > 0
-                                   ? static_cast<float>(view.screenWidth) /
-                                         static_cast<float>(view.screenHeight)
-                                   : 4.0F / 3.0F;
-          const float fit    = gleditor::spatial::framingDistance(
-              std::max(std::abs(points[0].x - points[1].x) + 20.0F, 10.0F),
-              std::max(std::abs(points[0].y - points[1].y) + 20.0F, 10.0F),
-              view.fov, aspect, 1.5F);
-          target =
-              glm::vec3{midpoint.x, midpoint.y,
-                        std::clamp(std::max(view.pos.z, fit), 50.0F, 9500.0F)};
-        }
-        links.sworphCameraTo(target, timeline);
-      });
+  // Preview changes cursors and markings; explicit entry owns composition.
 
   xanadu::OverviewOverlay overview(state);
   const auto chosenPlaces = [&linkContext](const RenderState &rState,
@@ -1142,8 +1225,17 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // 6. ViewCoordinator (Unified, XanadocOnly, ZigzagOnly)
   ViewCoordinator viewCoordinator(views, zigzagPresentation, bridgeCoordinator,
-                                  renderer, state);
+                                  satelloidOverlay, renderer, state);
   viewCoordinator.setViewMode(opts.viewMode);
+  linkContext.setFocusCell(
+      [&bridgeCoordinator, &keyboardPane, &showZigzagFocus,
+       &viewCoordinator](const zigzag::CellRef cell, xanadu::Extent) {
+        if (viewCoordinator.viewMode() == ViewMode::XanadocOnly)
+          viewCoordinator.setViewMode(ViewMode::Unified);
+        bridgeCoordinator.onDocumentLinkActivated(cell);
+        keyboardPane.enterZigzag();
+        showZigzagFocus();
+      });
 
   links.setOpener([&views](const xanadu::MicroversionId &version) {
     views.showAlongside(version);
@@ -2514,6 +2606,7 @@ int XuzzApp::run(const int argc, char **argv) {
        "choose the previous place the member appears"},
       {kKeymapLinkCross, "make the other side of the link active"},
       {kKeymapLinkEnter, "go to the chosen place"},
+      {"std:xuzz/link_cancel_entry", "cancel pending endpoint entry"},
       {kKeymapLinkOrigin, "return to where the link was selected"},
       {kKeymapLinkDismiss, "put the selected link away"},
       {kKeymapActivityBack, "return to the previous visit"},
@@ -2530,6 +2623,25 @@ int XuzzApp::run(const int argc, char **argv) {
           });
         });
   }
+
+  app.commands().registerAction(
+      "std:xuzz/link_controls_previous", "previous link controls page",
+      [renderer, &linkPanel] {
+        renderer->runWithState(
+            [&linkPanel](RenderState &) { linkPanel.pageControls(-1); });
+      });
+  app.commands().registerAction(
+      "std:xuzz/link_controls_next", "next link controls page",
+      [renderer, &linkPanel] {
+        renderer->runWithState(
+            [&linkPanel](RenderState &) { linkPanel.pageControls(1); });
+      });
+  app.commands().registerAction(
+      "std:xuzz/link_controls", "show link controls or return to reading",
+      [renderer, &linkPanel] {
+        renderer->runWithState(
+            [&linkPanel](RenderState &) { linkPanel.toggleControls(); });
+      });
 
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapOverviewToggle),
@@ -2931,8 +3043,11 @@ int XuzzApp::run(const int argc, char **argv) {
           break;
         }
         case xanadu::SystemDocKind::Settings: {
-          session->setAutoSave(std::chrono::seconds(
-              xanadu::SettingsConfig::fromStore(store).autoSaveSeconds));
+          const auto settings = xanadu::SettingsConfig::fromStore(store);
+          session->setAutoSave(std::chrono::seconds(settings.autoSaveSeconds));
+          state->documentPalette.store(std::make_shared<const DocumentPalette>(
+              DocumentPalette{.paper = settings.pagePaperColour,
+                              .ink   = settings.pageInkColour}));
           if (auto vHost = zigzagPresentation->vortexHost()) {
             vHost->loadConfigFromStore(store);
           }
@@ -2979,10 +3094,12 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // Apply active system doc configurations at launch
   {
-    session->setAutoSave(std::chrono::seconds(
-        xanadu::SettingsConfig::fromStore(
-            session->systemStore(xanadu::SystemDocKind::Settings))
-            .autoSaveSeconds));
+    const auto settings = xanadu::SettingsConfig::fromStore(
+        session->systemStore(xanadu::SystemDocKind::Settings));
+    session->setAutoSave(std::chrono::seconds(settings.autoSaveSeconds));
+    state->documentPalette.store(
+        std::make_shared<const DocumentPalette>(DocumentPalette{
+            .paper = settings.pagePaperColour, .ink = settings.pageInkColour}));
     const auto kmIdx = session->systemStoreIndex(xanadu::SystemDocKind::Keymap);
     const auto &kmStore = session->store(kmIdx);
     state->focusManager.setGlobalCommandAllowList(

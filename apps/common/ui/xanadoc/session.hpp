@@ -464,6 +464,9 @@ public:
   [[nodiscard]] std::expected<Session *, std::string>
   setLinkPackageEnabled(const LinkPackageStatus &package, bool enabled);
   [[nodiscard]] std::uint64_t packageRenderId(const LinkKey &key);
+  [[nodiscard]] std::uint32_t selectedLinkColour(const LinkKey &key,
+                                                 const Link &link);
+  [[nodiscard]] std::uint64_t linkHighlightLayer(const LinkKey &key);
   [[nodiscard]] LinkKey presentationLinkKey(std::uint64_t id) const;
   std::vector<Publication> packagePublicationSources();
   PublicationPin pinPublication(const Publication &publication) const;
@@ -856,6 +859,7 @@ private:
 
   /// Where the bytes of torrent-backed scrolls come from.
   void loadRetainedScrolls(const Store &store, const std::string &storePath);
+  std::unordered_map<std::string, std::uint64_t> highlightLayers_;
   DirectoryContentSource contentSource;
   std::vector<PublicationSeed> mountedSeeds_;
   mutable std::unique_ptr<ContentRetention> contentRetention_;
@@ -901,6 +905,17 @@ private:
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.
   std::uint64_t epoch{1};
+  struct MediaClassification {
+    DocumentId document;
+    std::size_t operationCount{};
+    std::vector<PrimediaSpan> pieces;
+    std::vector<MediaSpanInfo> spans;
+  };
+  // Session reads already run on the serialized owner path. Retain only
+  // complete local classifications; remote readiness has no revision yet.
+  mutable std::optional<std::uint64_t> mediaClassificationEpoch_;
+  mutable std::map<std::pair<std::size_t, MicroversionId>, MediaClassification>
+      mediaClassifications_;
   std::vector<OpenView> open;
   /// This machine's key pair, read or minted the first time it is wanted.
   std::optional<MutableKeys> keys;

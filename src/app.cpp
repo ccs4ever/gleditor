@@ -326,11 +326,12 @@ std::string defaultBackendName() {
 /// run needs its render loop by its own list of options is how --chord came to
 /// be dropped without a word under --headless.
 constexpr std::array scriptedOptions = {
-    "--pick",        "--click",      "--capture",    "--type",
-    "--select",      "--do",         "--key",        "--chord",
-    "--mouse-down",  "--mouse-move", "--mouse-up",   "--drag",
-    "--right-click", "--wheel",      "--ctrl-wheel", "--shift-wheel",
-    "--wait-ms",     "--click-label"};
+    "--pick",        "--click",       "--capture",    "--type",
+    "--select",      "--do",          "--key",        "--chord",
+    "--mouse-down",  "--mouse-move",  "--mouse-up",   "--drag",
+    "--right-click", "--wheel",       "--ctrl-wheel", "--shift-wheel",
+    "--wait-ms",     "--click-label", "--resize",     "--capture-live",
+    "--hold-mods"};
 
 } // namespace
 
@@ -380,6 +381,39 @@ readAutomationScript(const int argc, const char *const *const argv) {
   const auto add = [&script, &held, &input,
                     &point](const std::string_view option,
                             const std::string &value) {
+    if ("--hold-mods" == option) {
+      std::uint32_t mods{};
+      if (value != "None") {
+        std::string_view remaining{value};
+        while (!remaining.empty()) {
+          const auto plus  = remaining.find('+');
+          const auto token = remaining.substr(0, plus);
+          if (token == "Shift")
+            mods |= SDL_KMOD_SHIFT;
+          else if (token == "Ctrl")
+            mods |= SDL_KMOD_CTRL;
+          else if (token == "Alt")
+            mods |= SDL_KMOD_ALT;
+          else
+            throw std::invalid_argument("--hold-mods requires Shift, Ctrl, "
+                                        "Alt, their combinations, or None");
+          if (plus == std::string_view::npos) break;
+          remaining.remove_prefix(plus + 1);
+          if (remaining.empty())
+            throw std::invalid_argument(
+                "--hold-mods requires a modifier after +");
+        }
+      }
+      input(Input{.kind = Input::Kind::Modifiers, .mods = mods});
+      return;
+    }
+    if ("--resize" == option) {
+      const auto [width, height] = parsePair(value, option, "WIDTH,HEIGHT");
+      if (width <= 0 || height <= 0)
+        throw std::invalid_argument("--resize requires positive dimensions");
+      input(Input{.kind = Input::Kind::Resize, .x = width, .y = height});
+      return;
+    }
     if ("--wait-ms" == option) {
       std::size_t consumed{};
       const auto duration = std::stoll(value, &consumed);
@@ -469,6 +503,18 @@ readAutomationScript(const int argc, const char *const *const argv) {
       script.push_back(std::move(step));
     } else if ("--click-label" == option) {
       script.push_back(Step{.kind = Step::Kind::ClickLabel, .text = value});
+    } else if ("--capture-live" == option) {
+      const auto comma = value.find(',');
+      if (comma == std::string::npos || comma + 1 == value.size())
+        throw std::invalid_argument("--capture-live requires MS,PATH");
+      std::size_t consumed{};
+      const auto delay = std::stoll(value.substr(0, comma), &consumed);
+      if (consumed != comma || delay < 0 || delay > 60000)
+        throw std::invalid_argument(
+            "--capture-live requires 0 through 60000 milliseconds");
+      script.push_back(Step{.kind  = Step::Kind::CaptureLive,
+                            .text  = value.substr(comma + 1),
+                            .delay = std::chrono::milliseconds(delay)});
     } else if ("--capture" == option) {
       Step step{.kind = Step::Kind::Capture};
       step.text = value;
@@ -965,6 +1011,10 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "out, every document loaded, and every animation finished -- so a "
              "capture shows the finished result rather than the middle of a "
              "fade.");
+  automation(parser.add_argument("--capture-live").append(),
+             "capture MS,PATH during motion; repeatable diagnostic",
+             "After handled keyboard input, wait MS milliseconds and capture "
+             "without waiting for animation settlement. No input bypass.");
   automation(parser.add_argument("--capture").append(),
              "write the frame at this scripted point as a PPM; repeatable",
              "Capture the frame after every preceding scripted action. Unlike "
@@ -994,6 +1044,10 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
       "Report the picking tag at pixel X,Y once the document has "
       "settled. Repeatable. The read is asynchronous, so a run waits for "
       "every query to come back before it exits.");
+  automation(parser.add_argument("--resize").append(),
+             "resize the window to WIDTH,HEIGHT; repeatable",
+             "Resize the native window in logical pixels through the ordinary "
+             "window-size handler, in script order. Repeatable.");
   automation(parser.add_argument("--click-label").append(),
              "click a visible control by its full accessibility label",
              "Resolve one visible actionable accessibility label to its drawn "
@@ -1051,6 +1105,12 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "keyboard takes: a dialog that is up first, then the key "
              "bindings. Carried out in order with the other automation "
              "options.");
+  automation(
+      parser.add_argument("--hold-mods").append(),
+      "hold Shift, Ctrl, Alt or combinations until None; repeatable",
+      "Set the keyboard's held modifier state for subsequent pointer "
+      "gestures, for example --hold-mods Alt --drag ... --hold-mods None. "
+      "The gesture uses the ordinary pointer handlers.");
   automation(parser.add_argument("--mouse-down").append(),
              "press a mouse button at X,Y[,BUTTON]; repeatable",
              "Press a mouse button at pixel X,Y (1 left, the default; 2 "
@@ -1580,6 +1640,15 @@ int Application::run() {
     touchWasMultiFinger = false;
   };
 
+  const auto onResize = [&](const int width, const int height) {
+    {
+      const std::scoped_lock locker(state->view);
+      state->view.screenWidth  = width;
+      state->view.screenHeight = height;
+    }
+    renderer->push(RenderItemResize(width, height));
+  };
+
   while (state->alive) {
     sayWhatIsWaiting(true);
 
@@ -1625,6 +1694,9 @@ int Application::run() {
           onKeyDown(input.scancode, static_cast<Mod>(input.mods),
                     input.codepoint);
           break;
+        case Kind::Modifiers:
+          SDL_SetModState(static_cast<SDL_Keymod>(input.mods));
+          break;
         case Kind::Motion:
           onMotion(input.x, input.y, input.held);
           break;
@@ -1640,6 +1712,13 @@ int Application::run() {
         case Kind::FocusLost:
           onFocusLost();
           break;
+        case Kind::Resize: {
+          SDL_SetWindowSize(window.window, input.x, input.y);
+          int width{}, height{};
+          SDL_GetWindowSizeInPixels(window.window, &width, &height);
+          onResize(width, height);
+          break;
+        }
         case Kind::Wheel:
           onWheel(input.wheelX, input.wheelY,
                   static_cast<std::uint16_t>(input.mods));
@@ -1857,14 +1936,7 @@ int Application::run() {
         if (!sdl::windowSizeChanged(evt, width, height)) {
           break;
         }
-        {
-          // The render thread reads these under the same lock while building
-          // its projection matrix.
-          const std::scoped_lock locker(state->view);
-          state->view.screenWidth  = width;
-          state->view.screenHeight = height;
-        }
-        renderer->push(RenderItemResize(width, height));
+        onResize(width, height);
         break;
       }
       }

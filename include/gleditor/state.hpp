@@ -16,6 +16,7 @@
 #include <vector>
 
 #include <gleditor/a11y/publisher.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/ui/focus_manager.hpp>
@@ -32,6 +33,7 @@ struct AppState {
   // copying font descriptions on every frame.
   std::atomic<std::shared_ptr<const gleditor::ui::Theme>> uiTheme{
       std::make_shared<const gleditor::ui::Theme>()};
+  std::atomic<std::shared_ptr<const DocumentPalette>> documentPalette{};
   std::atomic<float> contentScale{1.0F};
   std::atomic<float> uiScale{1.0F};
   std::atomic<float> fontScale{1.0F};
@@ -80,12 +82,14 @@ struct AppState {
   struct SyntheticInput {
     enum class Kind : std::uint8_t {
       KeyDown,
+      Modifiers,
       Motion,
       ButtonDown,
       ButtonUp,
       Wheel,
       Text,
-      FocusLost
+      FocusLost,
+      Resize
     };
     Kind kind{};
     int x{}; ///< Pointer events: window pixels, top-down.
@@ -110,6 +114,7 @@ struct AppState {
       Command, ///< Run a bound command by name.
       Press,   ///< A key a modal takes: tab, enter, escape and friends.
       Capture, ///< Write the frame drawn for this point in the script.
+      CaptureLive, ///< Timed diagnostic capture without waiting for motion.
       DumpAccessibility, ///< Print the accessibility tree at this point.
       Input,             ///< Make one input event; see SyntheticInput.
       Wait,              ///< Let asynchronous work progress without input.

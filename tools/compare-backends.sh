@@ -523,7 +523,12 @@ if [ -x "$XUDU_TEST_BIN" ]; then
 
   for backend in $backends; do
     mkdir -p "$OUT/xudu_$backend"
-    XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
+    # System documents address the run's permascroll. Sharing configuration
+    # across backend runs lets a previous author's settings change the frame.
+    XDG_DATA_HOME="$OUT/xudu_$backend/data" \
+      XDG_CONFIG_HOME="$OUT/xudu_$backend/config" \
+      XDG_CACHE_HOME="$OUT/xudu_$backend/cache" \
+      XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
       "$XUDU_TEST_BIN" --gtest_filter='*E2EBinaryOrchestration*' \
       >"$OUT/xudu_$backend.log" 2>&1 ||
       {

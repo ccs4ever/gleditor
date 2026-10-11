@@ -8,9 +8,9 @@
  * cannot link both; and it keeps the choice of desktop GL versus ES a runtime
  * decision made from the context SDL actually created.
  *
- * Only the subset the renderer uses is loaded. Every entry here exists in both
- * OpenGL 3.3 core and OpenGL ES 3.0 with identical signatures and token
- * values, which is what lets one backend implementation drive both.
+ * Only the subset the renderer uses is loaded. Common entries exist in both
+ * OpenGL 3.3 core and OpenGL ES 3.0 with identical signatures and tokens.
+ * Depth range uses the profile's double or float entry point.
  *
  * GL/glcorearb.h is included purely for its typedefs and enum values; it
  * declares no prototypes unless GL_GLEXT_PROTOTYPES is defined, so nothing
@@ -127,8 +127,12 @@ struct GLApi {
   PFNGLENABLEPROC Enable{};
   PFNGLDISABLEPROC Disable{};
   PFNGLDEPTHFUNCPROC DepthFunc{};
+  PFNGLDEPTHMASKPROC DepthMask{};
   PFNGLBLENDFUNCPROC BlendFunc{};
   PFNGLVIEWPORTPROC Viewport{};
+  PFNGLSCISSORPROC Scissor{};
+  PFNGLDEPTHRANGEFPROC DepthRangef{};
+  PFNGLDEPTHRANGEPROC DepthRange{};
   PFNGLCLEARPROC Clear{};
   PFNGLCLEARCOLORPROC ClearColor{};
   PFNGLFRONTFACEPROC FrontFace{};

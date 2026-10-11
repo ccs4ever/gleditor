@@ -23,6 +23,8 @@ enum class Tone : unsigned char { Normal, Muted, Accent };
 struct Label {
   std::string text;
   TextPurpose purpose{TextPurpose::Label};
+  /// A compact drawn caption can retain its complete semantic description.
+  std::string accessibleLabel;
 };
 struct Button {
   std::string text, action;

@@ -70,7 +70,8 @@ public:
    * the machine might allow.
    */
   [[nodiscard]] DeviceCapabilities capabilities() const override {
-    return DeviceCapabilities{.parallelCommandRecording =
+    return DeviceCapabilities{.regions = true,
+                              .parallelCommandRecording =
                                   recorders.parallelism() > 1,
                               .recordingThreads = recorders.parallelism()};
   }

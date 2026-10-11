@@ -328,6 +328,7 @@ protected:
   /// What the last frame's contributors claimed; see
   /// FrameContext::settledChrome.
   gleditor::ScreenInsets lastChrome;
+  bool chromeChanged{};
   /// See setShutdownHook().
   std::function<void(RenderState &)> shutdownHook;
   /// pickThen() requests still waiting on their answer.

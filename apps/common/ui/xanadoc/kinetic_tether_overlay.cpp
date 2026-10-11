@@ -16,6 +16,7 @@
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
 namespace xanadu {
@@ -141,6 +142,7 @@ void KineticTetherOverlay::describe(gleditor::a11y::Builder &into) {
                         engine_.payload().previewText);
 }
 void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  const render::RegionScope contentClip(*ctx.state.device, ctx.contentRegion);
   auto &p = *presentation_;
   if (!canvas_ || !engine_.busy()) {
     if (p.visible) {

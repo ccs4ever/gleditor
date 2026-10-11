@@ -123,6 +123,8 @@ bool DeviceVK::beginFrame() {
   vkCmdBeginRenderPass(frame.commands, &passInfo,
                        VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
+  beginRegions(static_cast<int>(swapchainExtent.width),
+               static_cast<int>(swapchainExtent.height));
   frameActive = true;
   return true;
 }
@@ -309,6 +311,24 @@ void DeviceVK::recordBatch(const VkCommandBuffer commands,
         "DeviceVK::recordBatch: unknown pipeline or buffer");
   }
 
+  const auto &r = regionOf(batch.region);
+  const VkViewport viewport{
+      .x        = static_cast<float>(r.viewLeft),
+      .y        = static_cast<float>(static_cast<int>(swapchainExtent.height) -
+                                     r.viewBottom - r.viewHeight),
+      .width    = static_cast<float>(r.viewWidth),
+      .height   = static_cast<float>(r.viewHeight),
+      .minDepth = 1.F - r.farDepth,
+      .maxDepth = 1.F - r.nearDepth};
+  const VkRect2D scissor{
+      .offset = {.x = r.clipLeft,
+                 .y = static_cast<int>(swapchainExtent.height) - r.clipBottom -
+                      r.clipHeight},
+      .extent = {.width  = static_cast<std::uint32_t>(r.clipWidth),
+                 .height = static_cast<std::uint32_t>(r.clipHeight)}};
+  vkCmdSetViewport(commands, 0, 1, &viewport);
+  vkCmdSetScissor(commands, 0, 1, &scissor);
+
   // Vulkan's clip space has +Y pointing down, OpenGL's points up. Callers hand
   // over one conventional transform, so the backend that differs is the one
   // that adapts: negating the row of the transform that produces clip-space Y
@@ -355,7 +375,8 @@ void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
               GlyphBatch{.uniforms         = uniforms,
                          .vertices         = vertices,
                          .vertexByteOffset = vertexByteOffset,
-                         .instanceCount    = instanceCount});
+                         .instanceCount    = instanceCount,
+                         .region           = currentRegion()});
 }
 
 void DeviceVK::recordSequentially(const std::span<const GlyphBatch> batches) {
@@ -557,6 +578,7 @@ void DeviceVK::endFrame() {
   if (!frameActive) {
     return;
   }
+  endRegions();
   frameActive = false;
 
   // Raise anything validation objected to while this frame was recorded, from

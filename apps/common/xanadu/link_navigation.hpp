@@ -205,11 +205,18 @@ struct Dismiss {
 
 } // namespace nav
 
+namespace nav {
+struct CancelEntry {
+  bool operator==(const CancelEntry &) const = default;
+};
+} // namespace nav
+
 using NavigationCommand =
     std::variant<nav::SelectLink, nav::StepLink, nav::SelectMember,
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
-                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss>;
+                 nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
+                 nav::CancelEntry>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,

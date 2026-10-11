@@ -193,7 +193,10 @@ accesskit_node *nodeOf(const Node &node) {
     accesskit_node_set_label_with_length(built, node.label.data(),
                                          node.label.size());
   }
-  if (!node.value.empty()) {
+  // Empty text is still a value: native text traversal requires every run
+  // to expose it, including the trailing run of a document ending in a newline.
+  if (!node.value.empty() || node.role == Role::TextRun ||
+      node.role == Role::TextInput || node.role == Role::MultilineTextInput) {
     accesskit_node_set_value_with_length(built, node.value.data(),
                                          node.value.size());
   }

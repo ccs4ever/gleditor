@@ -69,6 +69,9 @@ public:
   }
 
   void setReadableTextPx(const float px) noexcept { readableTextPx_ = px; }
+  [[nodiscard]] float readableTextPx() const noexcept {
+    return readableTextPx_;
+  }
   void frameForReading(const gleditor::FrameContext &ctx);
   void placeCameraWhenReady(std::function<bool()> place) {
     pendingCamera_ = std::move(place);

@@ -195,6 +195,8 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return activityForward(c.child);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
+        } else if constexpr (std::is_same_v<Command, nav::CancelEntry>) {
+          return NavigationEffect{};
         } else {
           static_assert(std::is_same_v<Command, nav::Dismiss>);
           return dismiss();
@@ -537,7 +539,8 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "activity back",
                                                "activity forward",
                                                "return to origin",
-                                               "dismiss"};
+                                               "dismiss",
+                                               "cancel entry"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
   return names[command.index()];
 }
@@ -571,6 +574,7 @@ commandForAction(const std::string_view action) {
   if (kKeymapLinkCross == action) {
     return nav::Cross{};
   }
+  if (action == "std:xuzz/link_cancel_entry") return nav::CancelEntry{};
   if (kKeymapLinkEnter == action) {
     return nav::Enter{};
   }

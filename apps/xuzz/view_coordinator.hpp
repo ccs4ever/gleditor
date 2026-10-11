@@ -24,7 +24,8 @@ public:
   ViewCoordinator(xanadu::Views &views,
                   std::shared_ptr<zigzag::ZigzagVisualizer> visualizer,
                   xanadu::BridgeCoordinator &bridgeCoordinator,
-                  RendererRef renderer, AppStateRef state);
+                  xanadu::SatelloidOverlay &satelloids, RendererRef renderer,
+                  AppStateRef state);
 
   void setViewMode(ViewMode mode);
   [[nodiscard]] ViewMode viewMode() const noexcept { return mode_; }
@@ -36,6 +37,7 @@ private:
   xanadu::Views &views_;
   std::shared_ptr<zigzag::ZigzagVisualizer> visualizer_;
   xanadu::BridgeCoordinator &bridgeCoordinator_;
+  xanadu::SatelloidOverlay &satelloids_;
   RendererRef renderer_;
   AppStateRef state_;
   ViewMode mode_{ViewMode::Unified};
