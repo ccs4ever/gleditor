@@ -120,8 +120,10 @@ TEST(KeyboardSliceTest, aRelaunchedSessionCarriesOnWhereItStopped) {
   };
   const auto dumpOf = [&](const fs::path &store) {
     fs::path permascroll;
-    for (const auto &entry :
-         fs::directory_iterator(root / "data" / "xudu" / "permascroll")) {
+    const auto permaDir = fs::exists(root / "data" / "xuzz" / "permascroll")
+                              ? root / "data" / "xuzz" / "permascroll"
+                              : root / "data" / "xudu" / "permascroll";
+    for (const auto &entry : fs::directory_iterator(permaDir)) {
       permascroll = entry.path();
     }
     return run(built("xudu-dump").string() + " --section=ops --permascroll=" +

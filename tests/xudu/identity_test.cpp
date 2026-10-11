@@ -9,11 +9,12 @@
 #include "common/xanadu/identity/identity_network_controller.hpp"
 #include "common/xanadu/identity/identity_serialization.hpp"
 #include "common/xanadu/identity/identity_validation.hpp"
+#include "common/xanadu/identity/standard_crypto_engine.hpp"
 #include "common/xanadu/lt_compat.hpp"
 #include "common/xanadu/swarm.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
-#include "pgp_fixture.hpp"
+#include "identity_fixture.hpp"
 
 namespace xanadu::identity {
 namespace {
@@ -295,6 +296,13 @@ TEST(IdentityValidationTest, OracleVotingPowerAndConsensus) {
   const auto candidateOracle =
       *Fingerprint::fromString("BBBB111122223333444455556666777788889999");
 
+  // Register candidate oracle as an identity
+  IdentityEntry candEntry;
+  candEntry.fingerprint = candidateOracle;
+  candEntry.email       = "oracle@domain.org";
+  candEntry.timestamp   = 1000000;
+  std::ignore           = pipeline.appendIdentity(candEntry);
+
   // Vote cast 10 days after registration (< 30 days) -> voting power = 0
   const std::uint64_t voteTimeYoung = 1000000 + 10 * 86400;
   EXPECT_THAT(pipeline.calculateVotingPower(voter.fingerprint, voteTimeYoung),
@@ -323,6 +331,98 @@ TEST(IdentityValidationTest, OracleVotingPowerAndConsensus) {
   ASSERT_THAT(quorum.size(), Eq(1U));
   EXPECT_THAT(quorum[0], Eq(candidateOracle));
   EXPECT_TRUE(pipeline.isOracleAuthorized(candidateOracle, voteTimeMature));
+}
+
+TEST(IdentityValidationTest, SelfAttestationIsRejected) {
+  OracleAttestation att;
+  att.oracleFingerprint =
+      *Fingerprint::fromString("AAAABBBBCCCCDDDDEEEEFFFF0000111122223333");
+  att.targetFingerprint = att.oracleFingerprint; // Self-attestation!
+  att.verifiedEmail     = "self@domain.com";
+  att.issuedTimestamp   = 1700000000;
+  att.expiresTimestamp  = 1700000000 + 86400 * 90;
+  att.oracleSignature.bytes.fill(0xEE);
+  EXPECT_FALSE(att.isValid());
+}
+
+TEST(IdentityValidationTest, StageBlockRejectsDuplicateVoter) {
+  EnginePipeline pipeline;
+  IdentityEntry voter;
+  voter.fingerprint =
+      *Fingerprint::fromString("AAAA111122223333444455556666777788889999");
+  voter.email     = "voter@domain.org";
+  voter.timestamp = 1000000;
+  std::ignore     = pipeline.appendIdentity(voter);
+
+  IdentityEntry cand1;
+  cand1.fingerprint =
+      *Fingerprint::fromString("BBBB111122223333444455556666777788889999");
+  std::ignore = pipeline.appendIdentity(cand1);
+
+  IdentityEntry cand2;
+  cand2.fingerprint =
+      *Fingerprint::fromString("CCCC111122223333444455556666777788889999");
+  std::ignore = pipeline.appendIdentity(cand2);
+
+  VoteEntry v1;
+  v1.voterFingerprint = voter.fingerprint;
+  v1.candidateOracle  = cand1.fingerprint;
+  v1.timestamp        = 1000000 + 30 * 86400;
+
+  VoteEntry v2;
+  v2.voterFingerprint = voter.fingerprint;
+  v2.candidateOracle  = cand2.fingerprint;
+  v2.timestamp        = 1000000 + 31 * 86400;
+
+  BlockHeader header;
+  header.blockIndex    = 0;
+  header.previousHash  = Hash32{};
+  header.identityCount = 0;
+  header.voteCount     = 2;
+
+  std::vector<IdentityEntry> ids = {};
+  std::vector<VoteEntry> votes   = {v1, v2};
+
+  // Staging block with two votes from same voter must be rejected
+  auto res = pipeline.stageBlock(header, ids, votes, 1000000 + 40 * 86400);
+  EXPECT_FALSE(res.has_value());
+  EXPECT_EQ(res.error(), ValidationError::DuplicateEntry);
+}
+
+TEST(IdentityValidationTest, CandidateOracleMustBeRegisteredAndNonRevoked) {
+  EnginePipeline pipeline;
+  IdentityEntry voter;
+  voter.fingerprint =
+      *Fingerprint::fromString("AAAA111122223333444455556666777788889999");
+  voter.email     = "voter@domain.org";
+  voter.timestamp = 1000000;
+  std::ignore     = pipeline.appendIdentity(voter);
+
+  const auto unregCandidate =
+      *Fingerprint::fromString("BBBB111122223333444455556666777788889999");
+  const std::uint64_t voteTime = 1000000 + 30 * 86400;
+
+  VoteEntry vote;
+  vote.voterFingerprint = voter.fingerprint;
+  vote.candidateOracle  = unregCandidate;
+  vote.timestamp        = voteTime;
+  std::ignore           = pipeline.appendVote(vote);
+
+  // Unregistered candidate cannot be in quorum
+  EXPECT_TRUE(pipeline.getActiveOracleQuorum(5, voteTime).empty());
+
+  // Register candidate -> now in quorum
+  IdentityEntry candEntry;
+  candEntry.fingerprint = unregCandidate;
+  candEntry.email       = "oracle@domain.org";
+  candEntry.timestamp   = 1000000;
+  std::ignore           = pipeline.appendIdentity(candEntry);
+  EXPECT_EQ(pipeline.getActiveOracleQuorum(5, voteTime).size(), 1U);
+
+  // Revoke candidate -> removed from quorum
+  candEntry.revoked = true;
+  std::ignore       = pipeline.appendIdentity(candEntry);
+  EXPECT_TRUE(pipeline.getActiveOracleQuorum(5, voteTime + 20).empty());
 }
 
 // ============================================================================
@@ -358,12 +458,14 @@ TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
   const auto *m = h.find_key("m");
   ASSERT_THAT(m, NotNull());
   EXPECT_THAT(m->type(), Eq(libtorrent::entry::dictionary_t));
-  EXPECT_THAT(m->find_key("xudu_identity_lookup")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_identity_lookup")->integer(),
               Eq(kExtIdentityLookupMsgId));
-  EXPECT_THAT(m->find_key("xudu_oracle_vote")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_oracle_vote")->integer(),
               Eq(kExtOracleVoteMsgId));
-  EXPECT_THAT(m->find_key("xudu_oracle_verify")->integer(),
+  EXPECT_THAT(m->find_key("xanadu_oracle_verify")->integer(),
               Eq(kExtOracleVerifyMsgId));
+  EXPECT_THAT(m->find_key("xanadu_transcopyright")->integer(),
+              Eq(kExtTranscopyrightMsgId));
 }
 
 namespace {
@@ -402,20 +504,14 @@ xanadu::MutableKeys testDeviceKeys() {
 /// key -- the state a peer must reach before any of its signatures count.
 [[nodiscard]] bool
 trustFixtureDelegation(IdentityNetworkController &controller) {
-  xanadu::DeviceDelegation cert;
-  cert.masterFingerprint =
-      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
-  cert.devicePublicKey = testDeviceKeys().publicKey;
-  cert.deviceName      = "peer-under-test";
-  cert.issuedTimestamp = 1700000000;
-  cert.gpgSignatureArmored =
-      std::string(xanadu::testing::kDelegationForTestDeviceKey);
+  const auto cert = xanadu::testing::fixtureDelegation(
+      testDeviceKeys().publicKey, "peer-under-test", 1700000000);
   return controller.trustDelegation(cert, xanadu::testing::kAuthorPublicKey);
 }
 
 /// Signs a challenge nonce the way a well-behaved peer does.
 Signature64 signNonce(const Hash32 &nonce, const xanadu::MutableKeys &keys) {
-  std::string buffer = "xudu-peer-auth-v1:";
+  std::string buffer = "xanadu-peer-auth-v2:";
   buffer.append(reinterpret_cast<const char *>(nonce.bytes.data()),
                 nonce.bytes.size());
   const auto sig = xanadu::signMutableItem(buffer, keys);
@@ -435,8 +531,9 @@ bool deliver(IdentityPeerPlugin &plugin, const MessageType type,
 
 } // namespace
 
-// The whole chain, end to end: a master OpenPGP key delegates to an Ed25519
-// device key, and that device key signs the nonce this connection chose.
+// The whole chain, end to end: a master Ed25519 identity delegates to an
+// Ed25519 device key, and that device key signs the nonce this connection
+// chose.
 TEST(IdentityBEP10Test, AuthenticatesAPeerWithADelegatedDeviceKey) {
   IdentityNetworkController controller;
   ASSERT_TRUE(trustFixtureDelegation(controller));
@@ -612,6 +709,47 @@ TEST(IdentityBEP10Test, RejectsAVoteCastUnderAnotherIdentity) {
       << "an authenticated peer voted as somebody else";
 }
 
+TEST(IdentityBEP10Test, QuarantinesRevokedDeviceViaBroadcastAndRejectsAuth) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  // Verify before quarantine, device is not quarantined
+  EXPECT_FALSE(controller.isDeviceQuarantined(
+      PubKey32{testDeviceKeys().publicKey.bytes}));
+
+  // Deliver DeviceRevocationBroadcast to quarantine the device
+  auto plugin1 = challengedPlugin(controller);
+  DeviceRevocationRecord rev;
+  rev.serialNumber    = 42;
+  rev.devicePublicKey = PubKey32{testDeviceKeys().publicKey.bytes};
+  rev.masterFingerprint =
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
+  rev.revocationDate = 1700001000;
+  rev.reason         = RevocationReason::KeyCompromise;
+
+  deliver(*plugin1, MessageType::DeviceRevocationBroadcast, serialize(rev));
+
+  // TQC should now report device is quarantined and serial is quarantined
+  EXPECT_TRUE(controller.isDeviceQuarantined(
+      PubKey32{testDeviceKeys().publicKey.bytes}));
+  EXPECT_TRUE(controller.isSerialQuarantined(42));
+
+  // Now, a new peer attempting to authenticate with this device key must be
+  // rejected
+  auto plugin2 = challengedPlugin(controller);
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin2->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, testDeviceKeys());
+
+  deliver(*plugin2, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin2->isAuthenticated());
+  EXPECT_TRUE(plugin2->isIsolated());
+}
+
 // ============================================================================
 // Hashcash Proof-of-Work Tests
 // ============================================================================
@@ -725,6 +863,63 @@ TEST(IdentityHashcashTest, EmailVerifyRequestPoWSerializationRoundTrip) {
   EXPECT_THAT(decodedRes->powNonce, Eq(123456789ULL));
   EXPECT_THAT(decodedRes->difficultyBits, Eq(22U));
   EXPECT_THAT(*decodedRes, Eq(req));
+}
+
+TEST(StandardCryptoEngineTest, SmallOrderPointRejectionTable) {
+  // All 8 canonical small-order points on Curve25519 (torsion subgroup E[8])
+  static constexpr std::array<std::array<std::uint8_t, 32>, 8>
+      kCanonicalSmallOrderPoints = {
+          {// 1. Order 1: (0, 1) - identity
+           {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+           // 2. Order 2: (0, -1)
+           {0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
+           // 3. Order 4: (I, 0)
+           {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+           // 4. Order 4: (-I, 0)
+           {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80},
+           // 5. Order 8: y = d^{-1/4}, sign bit 0
+           {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+            0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+            0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x05},
+           // 6. Order 8: y = d^{-1/4}, sign bit 1
+           {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+            0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+            0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x85},
+           // 7. Order 8: y = -d^{-1/4}, sign bit 0
+           {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+            0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+            0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0x7a},
+           // 8. Order 8: y = -d^{-1/4}, sign bit 1
+           {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+            0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+            0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0xfa}}};
+
+  // 1. All 8 small-order points must be rejected
+  for (std::size_t i = 0; i < kCanonicalSmallOrderPoints.size(); ++i) {
+    EXPECT_TRUE(isSmallOrderPoint(kCanonicalSmallOrderPoints[i]))
+        << "Failed to reject canonical small order point " << i;
+  }
+
+  // 2. Standard basepoint B (RFC 8032 Section 5.1: y = 4/5) must NOT be
+  // rejected
+  static constexpr std::array<std::uint8_t, 32> kBasepoint = {
+      0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+      0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+      0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66};
+  EXPECT_FALSE(isSmallOrderPoint(kBasepoint));
+
+  // 3. A newly generated valid Ed25519 keypair must NOT be rejected
+  auto genRes = StandardCryptoEngine::generate();
+  ASSERT_TRUE(genRes.has_value());
+  EXPECT_FALSE(isSmallOrderPoint(genRes->publicKey().bytes));
 }
 
 } // namespace

@@ -25,7 +25,7 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 
-#include "pgp_fixture.hpp"
+#include "identity_fixture.hpp"
 
 namespace {
 
@@ -306,20 +306,8 @@ TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {
 
 namespace {
 
-/// The delegation kDeviceDelegationSignature was generated over. Built by
-/// hand rather than with createMutableKeys() because the signature covers the
-/// device key, so it has to be the same key every run.
 xanadu::DeviceDelegation fixtureDelegation() {
-  xanadu::DeviceDelegation cert;
-  cert.masterFingerprint =
-      *Fingerprint::fromString(xanadu::testing::kAuthorFingerprint);
-  cert.devicePublicKey = xanadu::PublicKey{};
-  cert.devicePublicKey.bytes.fill(0x11);
-  cert.deviceName      = "thinkpad-laptop";
-  cert.issuedTimestamp = 1700000000;
-  cert.gpgSignatureArmored =
-      std::string(xanadu::testing::kDeviceDelegationSignature);
-  return cert;
+  return xanadu::testing::fixtureDelegation();
 }
 
 } // namespace
@@ -364,11 +352,10 @@ TEST(UserPermascrollTest, DeviceDelegationVerifiesAgainstItsMasterKey) {
 TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
   const auto good = fixtureDelegation();
 
-  auto mockSignature = good;
-  mockSignature.gpgSignatureArmored =
-      "-----BEGIN PGP SIGNATURE-----\nmock\n-----END PGP SIGNATURE-----";
+  auto mockSignature            = good;
+  mockSignature.certificate.der = {0x01, 0x02, 0x03};
   EXPECT_FALSE(mockSignature.verify(xanadu::testing::kAuthorPublicKey))
-      << "the word 'mock' passed as an OpenPGP signature";
+      << "a corrupt X.509 certificate must not verify";
 
   // A different key, with a real signature of its own, is still not this
   // delegation's master.
@@ -379,20 +366,69 @@ TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
   renamed.deviceName = "someone-elses-laptop";
   EXPECT_FALSE(renamed.verify(xanadu::testing::kAuthorPublicKey));
 
-  auto reissued            = good;
-  reissued.issuedTimestamp = 1700000001;
-  EXPECT_FALSE(reissued.verify(xanadu::testing::kAuthorPublicKey));
+  // Temporal validity RFC 5280 check:
+  // Before notBefore (1700000000)
+  auto beforeNotBefore            = good;
+  beforeNotBefore.issuedTimestamp = 1699999999;
+  EXPECT_FALSE(beforeNotBefore.verify(xanadu::testing::kAuthorPublicKey));
+
+  // After notAfter (1700000000 + 365 * 86400)
+  auto afterNotAfter            = good;
+  afterNotAfter.issuedTimestamp = 1700000000 + 365 * 86400 + 1;
+  EXPECT_FALSE(afterNotAfter.verify(xanadu::testing::kAuthorPublicKey));
+
+  // Valid timestamp within [notBefore, notAfter]
+  auto withinWindow            = good;
+  withinWindow.issuedTimestamp = 1700000000 + 1000;
+  EXPECT_TRUE(withinWindow.verify(xanadu::testing::kAuthorPublicKey));
+
+  // Master fingerprint mismatch must be rejected
+  auto badMasterFp              = good;
+  badMasterFp.masterFingerprint = *xanadu::identity::Fingerprint::fromString(
+      xanadu::testing::kImpostorFingerprint);
+  EXPECT_FALSE(badMasterFp.verify(xanadu::testing::kAuthorPublicKey));
 
   auto swappedDevice = good;
   swappedDevice.devicePublicKey.bytes.fill(0x22);
   EXPECT_FALSE(swappedDevice.verify(xanadu::testing::kAuthorPublicKey))
       << "a delegation was retargeted to a different device key";
 
-  auto unsignedCert = good;
-  unsignedCert.gpgSignatureArmored.clear();
+  auto unsignedCert        = good;
+  unsignedCert.certificate = {};
   EXPECT_FALSE(unsignedCert.verify(xanadu::testing::kAuthorPublicKey));
 
   EXPECT_FALSE(good.verify("")) << "no master key means no verification";
+}
+
+TEST(UserPermascrollTest, MainDeviceIdIsProtectedAndBlockedInConfig) {
+  UserPermascroll::Config cfg;
+  cfg.deviceId = "main";
+  EXPECT_THROW(UserPermascroll scroll(cfg), std::invalid_argument);
+}
+
+TEST(UserPermascrollTest, SubscrollRejectsPrimaryOrEmptyDeviceId) {
+  UserPermascroll scroll;
+  EXPECT_THROW(scroll.registerSubscroll("main", "/tmp/nonexistent"),
+               std::invalid_argument);
+  EXPECT_THROW(scroll.registerSubscroll("", "/tmp/nonexistent"),
+               std::invalid_argument);
+  EXPECT_THROW(scroll.ingestSubscroll("main", {}), std::invalid_argument);
+  EXPECT_THROW(scroll.ingestSubscroll("", {}), std::invalid_argument);
+}
+
+TEST(UserPermascrollTest, UniqueUuidDeviceIdGeneration) {
+  const auto id1 = UserPermascroll::generateUniqueDeviceId();
+  const auto id2 = UserPermascroll::generateUniqueDeviceId();
+  EXPECT_NE(id1, id2);
+  EXPECT_EQ(id1.size(), 36U);
+  EXPECT_EQ(id2.size(), 36U);
+  EXPECT_EQ(id1[8], '-');
+  EXPECT_EQ(id1[13], '-');
+  EXPECT_EQ(id1[14], '4'); // RFC 4122 version 4
+  EXPECT_EQ(id1[18], '-');
+  EXPECT_TRUE(id1[19] == '8' || id1[19] == '9' || id1[19] == 'a' ||
+              id1[19] == 'b'); // RFC 4122 variant 1
+  EXPECT_EQ(id1[23], '-');
 }
 
 TEST(UserPermascrollTest, PermascrollRegistrySingleton) {

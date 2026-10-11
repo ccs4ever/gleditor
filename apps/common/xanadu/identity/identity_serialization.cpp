@@ -675,6 +675,48 @@ decodeTcKeyDelivery(const libtorrent::bdecode_node &node) {
 
 std::expected<TcKeyDeliveryMsg, SerializationError>
 decodeTcKeyDelivery(std::span<const std::uint8_t> bytes) {
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  const char *data = reinterpret_cast<const char *>(bytes.data());
+  if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeTcKeyDelivery(node);
+}
+
+std::expected<DeviceRevocationRecord, SerializationError>
+decodeDeviceRevocationRecord(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  DeviceRevocationRecord rec;
+  rec.serialNumber =
+      static_cast<std::uint64_t>(node.dict_find_int_value("serial", 0));
+
+  const auto devRes = extractPubKey32(node, "device_key");
+  if (!devRes) return std::unexpected(devRes.error());
+  rec.devicePublicKey = *devRes;
+
+  const auto fpRes = extractFingerprint(node, "master_fp");
+  if (!fpRes) return std::unexpected(fpRes.error());
+  rec.masterFingerprint = *fpRes;
+
+  rec.revocationDate =
+      static_cast<std::uint64_t>(node.dict_find_int_value("date", 0));
+  rec.reason = static_cast<RevocationReason>(node.dict_find_int_value(
+      "reason", static_cast<std::int64_t>(RevocationReason::KeyCompromise)));
+
+  const auto sigRes = extractSignature64(node, "sig");
+  if (sigRes) {
+    rec.masterSignature = *sigRes;
+  }
+
+  return rec;
+}
+
+std::expected<DeviceRevocationRecord, SerializationError>
+decodeDeviceRevocationRecord(std::span<const std::uint8_t> bytes) {
   if (bytes.size() > kMaxPayloadBytes) {
     return std::unexpected(SerializationError::PayloadOverflow);
   }
@@ -684,7 +726,7 @@ decodeTcKeyDelivery(std::span<const std::uint8_t> bytes) {
   if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
     return std::unexpected(SerializationError::InvalidBencode);
   }
-  return decodeTcKeyDelivery(node);
+  return decodeDeviceRevocationRecord(node);
 }
 
 // ============================================================================
@@ -882,6 +924,23 @@ libtorrent::entry encodeToEntry(const TcKeyDeliveryMsg &delivery) {
   return e;
 }
 
+libtorrent::entry encodeToEntry(const DeviceRevocationRecord &revocation) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["serial"]     = static_cast<std::int64_t>(revocation.serialNumber);
+  e["device_key"] = std::string(
+      reinterpret_cast<const char *>(revocation.devicePublicKey.bytes.data()),
+      32);
+  e["master_fp"] = revocation.masterFingerprint.toString();
+  e["date"]      = static_cast<std::int64_t>(revocation.revocationDate);
+  e["reason"]    = static_cast<std::int64_t>(revocation.reason);
+  if (!revocation.masterSignature.isZero()) {
+    e["sig"] = std::string(
+        reinterpret_cast<const char *>(revocation.masterSignature.bytes.data()),
+        64);
+  }
+  return e;
+}
+
 // ============================================================================
 // String Serializers
 // ============================================================================
@@ -973,6 +1032,12 @@ std::string serialize(const TcSettleRequestMsg &req) {
 std::string serialize(const TcKeyDeliveryMsg &delivery) {
   std::string out;
   libtorrent::bencode(std::back_inserter(out), encodeToEntry(delivery));
+  return out;
+}
+
+std::string serialize(const DeviceRevocationRecord &revocation) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(revocation));
   return out;
 }
 

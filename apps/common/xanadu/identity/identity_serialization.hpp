@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 
+#include "identity_engine.hpp"
 #include "identity_layout.hpp"
 
 namespace xanadu::identity {
@@ -106,6 +107,12 @@ decodeTcKeyDelivery(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::expected<TcKeyDeliveryMsg, SerializationError>
 decodeTcKeyDelivery(const libtorrent::bdecode_node &node);
 
+[[nodiscard]] std::expected<DeviceRevocationRecord, SerializationError>
+decodeDeviceRevocationRecord(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<DeviceRevocationRecord, SerializationError>
+decodeDeviceRevocationRecord(const libtorrent::bdecode_node &node);
+
 // Bencoding conversion functions to libtorrent::entry.
 //
 // The two signed record types take a flag rather than having a second
@@ -128,6 +135,8 @@ encodeToEntry(const PeerChallengeResponse &resp);
 [[nodiscard]] libtorrent::entry encodeToEntry(const TcInvoiceResponseMsg &resp);
 [[nodiscard]] libtorrent::entry encodeToEntry(const TcSettleRequestMsg &req);
 [[nodiscard]] libtorrent::entry encodeToEntry(const TcKeyDeliveryMsg &delivery);
+[[nodiscard]] libtorrent::entry
+encodeToEntry(const DeviceRevocationRecord &revocation);
 
 // Serialization to bencoded binary string
 [[nodiscard]] std::string serialize(const IdentityEntry &entry);
@@ -143,6 +152,7 @@ encodeToEntry(const PeerChallengeResponse &resp);
 [[nodiscard]] std::string serialize(const TcInvoiceResponseMsg &resp);
 [[nodiscard]] std::string serialize(const TcSettleRequestMsg &req);
 [[nodiscard]] std::string serialize(const TcKeyDeliveryMsg &delivery);
+[[nodiscard]] std::string serialize(const DeviceRevocationRecord &revocation);
 
 /**
  * @brief The bytes a record's signature is over: everything but the signature.

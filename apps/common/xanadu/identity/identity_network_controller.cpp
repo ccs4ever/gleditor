@@ -34,6 +34,13 @@ std::uint64_t unixNow() {
 /// one purpose cannot be replayed as one made for another: a bare 32-byte
 /// nonce is the same shape as plenty of other things this program signs.
 std::string challengeSigningBuffer(const Hash32 &nonce) {
+  std::string out = "xanadu-peer-auth-v2:";
+  out.append(reinterpret_cast<const char *>(nonce.bytes.data()),
+             nonce.bytes.size());
+  return out;
+}
+
+std::string legacyChallengeSigningBuffer(const Hash32 &nonce) {
   std::string out = "xudu-peer-auth-v1:";
   out.append(reinterpret_cast<const char *>(nonce.bytes.data()),
              nonce.bytes.size());
@@ -54,7 +61,10 @@ bool verifyChallengeSignature(const Hash32 &nonce,
   key.bytes = devicePubKey;
   Signature wire;
   std::memcpy(wire.bytes.data(), sig.bytes.data(), wire.bytes.size());
-  return verifyMutableItem(challengeSigningBuffer(nonce), wire, key);
+  if (verifyMutableItem(challengeSigningBuffer(nonce), wire, key)) {
+    return true;
+  }
+  return verifyMutableItem(legacyChallengeSigningBuffer(nonce), wire, key);
 }
 
 } // namespace
@@ -97,21 +107,33 @@ bool IdentityPeerPlugin::on_extension_handshake(
   const auto idNode = m.dict_find_int(kExtIdentityLookupName);
   if (idNode) {
     remoteIdentityLookupId_ = static_cast<int>(idNode.int_value());
+  } else if (const auto legacyIdNode =
+                 m.dict_find_int(kExtLegacyIdentityLookupName)) {
+    remoteIdentityLookupId_ = static_cast<int>(legacyIdNode.int_value());
   }
 
   const auto voteNode = m.dict_find_int(kExtOracleVoteName);
   if (voteNode) {
     remoteOracleVoteId_ = static_cast<int>(voteNode.int_value());
+  } else if (const auto legacyVoteNode =
+                 m.dict_find_int(kExtLegacyOracleVoteName)) {
+    remoteOracleVoteId_ = static_cast<int>(legacyVoteNode.int_value());
   }
 
   const auto verifyNode = m.dict_find_int(kExtOracleVerifyName);
   if (verifyNode) {
     remoteOracleVerifyId_ = static_cast<int>(verifyNode.int_value());
+  } else if (const auto legacyVerifyNode =
+                 m.dict_find_int(kExtLegacyOracleVerifyName)) {
+    remoteOracleVerifyId_ = static_cast<int>(legacyVerifyNode.int_value());
   }
 
   const auto tcNode = m.dict_find_int(kExtTranscopyrightName);
   if (tcNode) {
     remoteTranscopyrightId_ = static_cast<int>(tcNode.int_value());
+  } else if (const auto legacyTcNode =
+                 m.dict_find_int(kExtLegacyTranscopyrightName)) {
+    remoteTranscopyrightId_ = static_cast<int>(legacyTcNode.int_value());
   }
 
   // Issue peer authentication challenge. The nonce has to be unpredictable:
@@ -239,6 +261,11 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
       isolateAndDisconnect("No controller to check the delegation against");
       return false;
     }
+    if (controller_->isDeviceQuarantined(PubKey32{respRes->devicePublicKey})) {
+      isolateAndDisconnect("Device is quarantined/revoked");
+      return false;
+    }
+
     const auto delegated = controller_->deviceKeyFor(respRes->claimedIdentity);
     if (!delegated) {
       isolateAndDisconnect("No verified delegation for the claimed identity");
@@ -455,6 +482,18 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     return true;
   }
 
+  case MessageType::DeviceRevocationBroadcast: {
+    const auto revRes = decodeDeviceRevocationRecord(frame.payload);
+    if (!revRes) {
+      isolateAndDisconnect("Malformed device revocation broadcast payload");
+      return false;
+    }
+    if (controller_) {
+      controller_->handleIncomingDeviceRevocation(*revRes);
+    }
+    return true;
+  }
+
   default:
     break;
   }
@@ -619,6 +658,14 @@ bool IdentityPeerPlugin::sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery) {
   return sendExtendedRaw(remoteTranscopyrightId_, frame);
 }
 
+bool IdentityPeerPlugin::sendDeviceRevocationBroadcast(
+    const DeviceRevocationRecord &rec) {
+  const std::string bencoded = serialize(rec);
+  const std::string frame =
+      encodeExtendedMessage(MessageType::DeviceRevocationBroadcast, bencoded);
+  return sendExtendedRaw(remoteIdentityLookupId_, frame);
+}
+
 void IdentityPeerPlugin::isolateAndDisconnect(std::string_view /* reason*/) {
   isIsolated_ = true;
   // Same weak reference as in sendExtendedRaw: nothing below may touch the
@@ -691,6 +738,21 @@ void IdentityTorrentPlugin::broadcastIdentity(const IdentityEntry &entry,
     if (auto peer = it->lock()) {
       if (!peer->isIsolated()) {
         peer->sendIdentityResponse(entry, proof);
+      }
+      ++it;
+    } else {
+      it = peers_.erase(it);
+    }
+  }
+}
+
+void IdentityTorrentPlugin::broadcastDeviceRevocation(
+    const DeviceRevocationRecord &rec) {
+  std::scoped_lock lock(mutex_);
+  for (auto it = peers_.begin(); it != peers_.end();) {
+    if (auto peer = it->lock()) {
+      if (!peer->isIsolated()) {
+        peer->sendDeviceRevocationBroadcast(rec);
       }
       ++it;
     } else {
@@ -850,6 +912,71 @@ bool IdentityNetworkController::isPeerQuarantined(
   return quarantinedPeers_.contains(std::string(peerAddress));
 }
 
+void IdentityNetworkController::handleIncomingDeviceRevocation(
+    const DeviceRevocationRecord &rec) {
+  // Quarantine the revoked device immediately in local TQC
+  quarantineDevice(rec);
+  // Re-broadcast to connected peers across all attached torrent plugins
+  // (gossip)
+  broadcastDeviceRevocation(rec);
+}
+
+void IdentityNetworkController::quarantineDevice(
+    const DeviceRevocationRecord &rec) {
+  std::scoped_lock lock(tqcMutex_);
+  tqc_.revokedDeviceKeys.insert(rec.devicePublicKey);
+  if (rec.serialNumber != 0) {
+    tqc_.revokedSerials.insert(rec.serialNumber);
+  }
+  tqc_.records.push_back(rec);
+}
+
+void IdentityNetworkController::quarantineDevice(const PubKey32 &deviceKey,
+                                                 std::uint64_t serial) {
+  std::scoped_lock lock(tqcMutex_);
+  tqc_.revokedDeviceKeys.insert(deviceKey);
+  if (serial != 0) {
+    tqc_.revokedSerials.insert(serial);
+  }
+}
+
+bool IdentityNetworkController::isDeviceQuarantined(
+    const PubKey32 &deviceKey) const {
+  std::scoped_lock lock(tqcMutex_);
+  return tqc_.revokedDeviceKeys.contains(deviceKey);
+}
+
+bool IdentityNetworkController::isSerialQuarantined(
+    std::uint64_t serial) const {
+  std::scoped_lock lock(tqcMutex_);
+  return tqc_.revokedSerials.contains(serial);
+}
+
+void IdentityNetworkController::registerTorrentPlugin(
+    std::shared_ptr<IdentityTorrentPlugin> plugin) {
+  std::scoped_lock lock(tqcMutex_);
+  torrentPlugins_.push_back(plugin);
+}
+
+void IdentityNetworkController::broadcastDeviceRevocation(
+    const DeviceRevocationRecord &rec) {
+  std::vector<std::shared_ptr<IdentityTorrentPlugin>> active;
+  {
+    std::scoped_lock lock(tqcMutex_);
+    for (auto it = torrentPlugins_.begin(); it != torrentPlugins_.end();) {
+      if (auto p = it->lock()) {
+        active.push_back(p);
+        ++it;
+      } else {
+        it = torrentPlugins_.erase(it);
+      }
+    }
+  }
+  for (const auto &p : active) {
+    p->broadcastDeviceRevocation(rec);
+  }
+}
+
 void IdentityNetworkController::attachToSession(libtorrent::session &session,
                                                 const InfoHash &ledgerHash) {
   session.add_extension([this, ledgerHash](libtorrent::torrent_handle const &h,
@@ -857,7 +984,9 @@ void IdentityNetworkController::attachToSession(libtorrent::session &session,
                             -> std::shared_ptr<libtorrent::torrent_plugin> {
     const auto hash = fromLt(h.info_hashes().v1);
     if (hash == ledgerHash) {
-      return std::make_shared<IdentityTorrentPlugin>(h, hash, this);
+      auto plugin = std::make_shared<IdentityTorrentPlugin>(h, hash, this);
+      this->registerTorrentPlugin(plugin);
+      return plugin;
     }
     return nullptr;
   });

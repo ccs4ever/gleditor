@@ -49,10 +49,18 @@ struct TranscopyrightOffer {
   crypto::Key32 cek{};
 };
 
-inline constexpr const char *kExtIdentityLookupName = "xudu_identity_lookup";
-inline constexpr const char *kExtOracleVoteName     = "xudu_oracle_vote";
-inline constexpr const char *kExtOracleVerifyName   = "xudu_oracle_verify";
-inline constexpr const char *kExtTranscopyrightName = "xudu_transcopyright";
+inline constexpr const char *kExtIdentityLookupName = "xanadu_identity_lookup";
+inline constexpr const char *kExtOracleVoteName     = "xanadu_oracle_vote";
+inline constexpr const char *kExtOracleVerifyName   = "xanadu_oracle_verify";
+inline constexpr const char *kExtTranscopyrightName = "xanadu_transcopyright";
+
+// Legacy xudu extension names for wire backward compatibility
+inline constexpr const char *kExtLegacyIdentityLookupName =
+    "xudu_identity_lookup";
+inline constexpr const char *kExtLegacyOracleVoteName   = "xudu_oracle_vote";
+inline constexpr const char *kExtLegacyOracleVerifyName = "xudu_oracle_verify";
+inline constexpr const char *kExtLegacyTranscopyrightName =
+    "xudu_transcopyright";
 
 inline constexpr int kExtIdentityLookupMsgId = 2;
 inline constexpr int kExtOracleVoteMsgId     = 3;
@@ -102,6 +110,7 @@ public:
   bool sendTcInvoiceResponse(const TcInvoiceResponseMsg &resp);
   bool sendTcSettleRequest(const TcSettleRequestMsg &req);
   bool sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery);
+  bool sendDeviceRevocationBroadcast(const DeviceRevocationRecord &rec);
 
   void isolateAndDisconnect(std::string_view reason);
 
@@ -215,6 +224,7 @@ public:
   void broadcastVote(const VoteEntry &vote);
   void broadcastIdentity(const IdentityEntry &entry,
                          const LedgerMerkleProof &proof);
+  void broadcastDeviceRevocation(const DeviceRevocationRecord &rec);
 
   [[nodiscard]] const InfoHash &swarmHash() const noexcept {
     return swarmHash_;
@@ -351,20 +361,44 @@ public:
   /// Handles incoming vote from a peer.
   void handleIncomingVote(const VoteEntry &vote);
 
+  /// Handles incoming fast-path device revocation broadcast.
+  void handleIncomingDeviceRevocation(const DeviceRevocationRecord &rec);
+
   /// Peer quarantine tracking.
   void quarantinePeer(std::string_view peerAddress);
   [[nodiscard]] bool isPeerQuarantined(std::string_view peerAddress) const;
+
+  // --- Tier 1 Fast-Path Transient Quarantine Cache (TQC) ---
+  void quarantineDevice(const DeviceRevocationRecord &rec);
+  void quarantineDevice(const PubKey32 &deviceKey, std::uint64_t serial = 0);
+  [[nodiscard]] bool isDeviceQuarantined(const PubKey32 &deviceKey) const;
+  [[nodiscard]] bool isSerialQuarantined(std::uint64_t serial) const;
 
   /// Hook to attach IdentityTorrentPlugin to a libtorrent session.
   void attachToSession(libtorrent::session &session,
                        const InfoHash &ledgerHash);
 
+  /// Access to active torrent plugin for broadcasting, if attached.
+  void registerTorrentPlugin(std::shared_ptr<IdentityTorrentPlugin> plugin);
+  void broadcastDeviceRevocation(const DeviceRevocationRecord &rec);
+
 private:
+  /// In-memory Tier 1 Transient Quarantine Cache (TQC)
+  struct TransientQuarantineCache {
+    std::unordered_set<PubKey32, PubKeyHash> revokedDeviceKeys;
+    std::unordered_set<std::uint64_t> revokedSerials;
+    std::vector<DeviceRevocationRecord> records;
+  };
+
   Options options_;
   EnginePipeline pipeline_;
   HashcashEngine hashcashEngine_;
   std::mutex quarantineMutex_;
   std::unordered_set<std::string> quarantinedPeers_;
+
+  mutable std::mutex tqcMutex_;
+  TransientQuarantineCache tqc_;
+  std::vector<std::weak_ptr<IdentityTorrentPlugin>> torrentPlugins_;
 
   mutable std::mutex delegationMutex_;
   std::map<Fingerprint, std::array<std::uint8_t, 32>> delegatedDeviceKeys_;

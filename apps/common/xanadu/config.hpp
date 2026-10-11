@@ -47,6 +47,32 @@ struct Config {
   /// empty fields is a different answer and means the file said nothing.
   [[nodiscard]] static std::optional<Config> fromTsv(std::string_view text);
 
+  // Fluent programmatic configuration helper methods (chaining `this`)
+  Config *setAuthor(Author a) noexcept {
+    author = std::move(a);
+    return this;
+  }
+
+  Config *setAuthorName(std::string name) {
+    author.name = std::move(name);
+    return this;
+  }
+
+  Config *setEmail(std::string email) {
+    author.email = std::move(email);
+    return this;
+  }
+
+  Config *setGpgKey(std::string key) {
+    author.gpgKey = std::move(key);
+    return this;
+  }
+
+  Config *setGpgHome(std::string home) {
+    gpgHome = std::move(home);
+    return this;
+  }
+
   /**
    * @brief How this record asks to be signed.
    *
@@ -63,10 +89,10 @@ struct Config {
 /**
  * @brief Where the configuration file is.
  *
- * `$XDG_CONFIG_HOME/xudu/config.tsv`, falling back to `~/.config/xudu` as the
- * specification says to. `$XUDU_CONFIG` names a file directly, which is what
- * lets a test -- or somebody with two identities -- point at another one
- * without touching what is in the home directory.
+ * `$XDG_CONFIG_HOME/xuzz/config.tsv`, falling back to `~/.config/xuzz` as the
+ * specification says to. `$XUZZ_CONFIG` (or `$XUDU_CONFIG`) names a file
+ * directly, which is what lets a test -- or somebody with two identities --
+ * point at another one without touching what is in the home directory.
  */
 [[nodiscard]] std::string configPath();
 

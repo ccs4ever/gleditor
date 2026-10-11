@@ -2995,7 +2995,10 @@ TEST(E2EBinaryOrchestrationTest, ForeignRunDragCreatesAReaderOwnedStore) {
                        (root / "pouch-dropped.ppm").string());
   ASSERT_EQ(collected.exitCode, 0) << collected.output;
   Store pouch(permascrollAt(root / "pouch/permascroll"));
-  pouch.load((root / "pouch/config/xudu/system/pouches").string());
+  const auto pouchConfig = fs::exists(root / "pouch/config/xuzz/system/pouches")
+                               ? root / "pouch/config/xuzz/system/pouches"
+                               : root / "pouch/config/xudu/system/pouches";
+  pouch.load(pouchConfig.string());
   xanadu::PouchManager manager(pouch);
   manager.loadManifest();
   const auto &items = manager.zoneById("notes")->items();
