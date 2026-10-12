@@ -1,6 +1,6 @@
 # View System: Implementation Plan
 
-Status: plan, unbuilt. Date: 2026-10-07.
+Status: plan, unbuilt. Date: 2026-10-07. Hypertime integration added 2026-10-12.
 
 This plan turns [`view-system.md`](view-system.md) (the spec) and
 [`world-space-rendering-plan.md`](world-space-rendering-plan.md) (the rendering plan) into ordered
@@ -10,6 +10,12 @@ scope and delivery, one for the experience. §9 records what they said and what 
 reports are kept in [`projects/view-reviews/`](projects/view-reviews/), and
 [`projects/start-view-project.md`](projects/start-view-project.md) is the prompt that starts the
 work.
+
+The accepted liquid-glass, coiled Hypertime Loom is integrated as Track H (§4.8), coordinated with
+the revised [3D spatial hypermedia plan](3d-spatial-hypermedia-navigation-implementation-plan.md).
+That document also preserves the broader overhaul's tablet, slice tear, occurrence stacks and banked
+camera. Track H is a follow-on to the existing view milestones; it does not silently extend the
+M0–M6 first release. Link forge and pouch redesigns remain a separate design study.
 
 ## 1. How to use this plan
 
@@ -109,6 +115,7 @@ relocation and before any other package, because several can change the shape of
  P  engine, pages ...... P1 P2 P3 | P4 P5
  U  presentation ....... U0 U1 U2 U5a U6a U7a | U4a U5b | U3 U6b | U5c | U4b
  X  cut-over ........... X0 | X1 X2 | X3 | X4
+ H  hypertime loom ..... H0 | H1 H2 | H3 | H4 H5 H6 | H7 (follow-on; gates in §4.8)
 ```
 
 | #   | Milestone                 | Packages                                    | What a reader gets                                                                                                                                                                                                 | Risk it retires                                                 |
@@ -301,6 +308,48 @@ what lives in `apps/common/ui/` after A1 is neither.
 | `zigzag_commands`                                                                                                                                                                                                      | Absorbed by `view_commands` as each command gains a view-system form; deleted at X3.                                                                                                      |
 | `unified_transclusion_engine`                                                                                                                                                                                          | Stays; it stages GPU buffers for cell content. Its private ephemeral slots give way to a `ViewManifold` at X3, and what still uses it then is reviewed.                                   |
 
+### 4.8 Track H: spatial Hypertime Loom
+
+This is the accepted history direction. The earlier flat light-table proposal is superseded by
+suspended, outward-bowing strands, coiled trunks, branch exits and liquid-glass inspection surfaces.
+The [integrated spatial plan](3d-spatial-hypermedia-navigation-implementation-plan.md) supplies the
+full scope, interaction contract, prerequisites and acceptance fixtures. Its Phase 4 replaces the
+overhaul's older Phase 4 limited to DAG masking/continuation fixes.
+
+The fate table above has one exception: `hypertime_graph` gains this dedicated replacement track; it
+is no longer simply unaffected until M8. Coexistence preserves the old modal's masking, edge
+clipping and continuation fixes. Forge and pouch overlays retain their existing scope until their
+new proposals are accepted. Document/cell anchoring uses the U4b host when available, not a second
+placement or projection system.
+
+| Package | Result and dependencies                                                                                                                                                                                                 |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| H0      | Device-free exact-selection descriptors and branch/frame-scoped enumeration. Retain authority, snapshot, frame, occurrence, ordered ranges and gaps. A cell subject chain is not all-branch or indirect-effect history. |
+| H1      | Stable coiled layout with configurable pitch, local opening, counted skeins, branch exits and correspondence. Depends on H0; late branches preserve the inspected anchor.                                               |
+| H2      | Retained liquid-glass loom, picking, list and plan equivalents. Depends on H1, U4a and the relevant page-pose/region seams; the full scene host remains U4b/M8. Measure visibility, occlusion and backend costs.        |
+| H3      | Container-thread tugs with parallel branched projections and explicit own/contained scopes; affected topology becomes available only with H4. Depends on H0/H2; no visited-store writes or history reparenting.         |
+| H4      | Asynchronous before/after effect footprints and span-touch lenses, including insertion gaps, deletion-before pieces, moves and reciprocal topology. Parent state and owning frame govern each effect. Depends on H0/H3. |
+| H5      | Versioned occurrence text/numeric search with literal/token/number/related rules, declared coverage and cancellation. Depends on H0; raw permascroll search cannot substitute for historical occurrences.               |
+| H6      | Durable arbitrary-op references and saved lens recipes with exact restore and availability. Existing content pouches are persistent; these are new types. Depends on H0 and the pouch schema/dispatch extension.        |
+| H7      | Explicit recovery preview and authoring from a separately selected branch base. Depends on H4 and existing authoring services; preserve original futures and distinguish source state from destination base.            |
+
+Build H0 and effect/search spikes before presenting their queries as available. H1/H2 can proceed
+with a verified history fixture while H4/H5 services develop. Shaders and spatial expansion do not
+supply missing query semantics. Each delivered package includes a visible command, keyboard action,
+accessibility model and the equivalent list behavior; numeric layout/material thresholds become
+validated system settings.
+
+Gate Track H against the three density fixtures: 100 trunk ops plus three 20-op branches, 30
+interleaved slice/xanadoc ops with a slice tug, and ten paths with exits and crossing transclusions.
+Then execute the [six history journeys](mockups/hypertime-loom-journeys-2026-10-12/journeys.md)
+through the interface, including partial coverage and cancellation. Select, inspect and enter remain
+separate. Completed reading transitions use the private activity store; coiling, tugs and camera
+motion do not mutate visited stores.
+
+The [forge/pouch study](mockups/link-forge-pouches-2026-10-12/concepts.md) can reuse H0 selection
+descriptors and H6 reference dispatch. Its proposed durable drafts, explicit receiving store/base,
+large endset inspection and typed cards are design options, not automatic additions to this track.
+
 ## 5. Visual and experiential direction
 
 ### 5.1 Principles
@@ -322,6 +371,10 @@ Each settles an argument an implementer would otherwise have.
    thing on screen.
 1. **Detail falls in steps.** Text gives way to a shorter form, then to bars, then to a count, with
    hysteresis. Nothing shrinks continuously until it is unreadable.
+1. **History can coil before it aggregates.** Open the inspected turns locally while preserving
+   forks, exits and source correspondence. Liquid-glass edges and optical motion stay outside
+   contrast-preserving text faces. Silver ancestry, pearl correspondence, seamed filtered order and
+   gold shared content remain distinguishable in dense views and their list equivalent.
 
 ### 5.2 The dimension colour system
 
@@ -542,6 +595,9 @@ Three challengers attacked the first draft. What each said that mattered, and wh
 
 ## Change history
 
+- 2026-10-12 — Integrated the accepted coiled Hypertime Loom as Track H and linked the revised 3D
+  spatial overhaul. Added history/query/reference prerequisites and journey gates. The existing
+  M0–M6 release boundary stays intact; forge/pouch redesigns remain proposals.
 - 2026-10-07 — Initial plan, from four expert reviews.
 - 2026-10-07 — Revised after the challenge round: milestones reordered, the host deferred behind an
   extracted seam, deferrals and the go or no-go added, gaps G12 to G16, spike R5.
