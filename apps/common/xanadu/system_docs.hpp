@@ -585,6 +585,7 @@ inline constexpr std::string_view kKeymapActivityBack =
     "std:xuzz/activity_back";
 inline constexpr std::string_view kKeymapActivityForward =
     "std:xuzz/activity_forward";
+inline constexpr std::string_view kKeymapWalks       = "std:xuzz/walks";
 inline constexpr std::string_view kKeymapLinkAddCell = "std:xuzz/link_add_cell";
 inline constexpr std::string_view kKeymapLinkFinish  = "std:xuzz/link_finish";
 inline constexpr std::string_view kKeymapTranscludeCellToDoc =

@@ -64,6 +64,46 @@ TEST_F(ReaderLinkPackagesTest,
   EXPECT_FALSE(ReaderLinkPackages(path).enabled(hash));
   EXPECT_FALSE(reader.retain(pkg, nextHash));
 }
+TEST_F(ReaderLinkPackagesTest, NativeLinksResolveAcrossIndependentScrollSlots) {
+  auto perma = std::make_shared<UserPermascroll>();
+  Store owner(perma), quoted(perma);
+  const auto slot      = owner.addScroll(scroll);
+  const auto unrelated = Scroll::ofTorrentFile(
+      makeTorrent(
+          std::vector<TorrentContent>{{.path = "other", .data = "unrelated"}},
+          "other")
+          .hash,
+      0, "other", 0, 9);
+  const auto other    = quoted.addScroll(unrelated);
+  const auto imported = quoted.addScroll(scroll);
+  Link native;
+  native.owner = "native author";
+  native.left  = {{slot, 0, 3}, {slot, 6, 3}};
+  native.right = {{slot, 10, 3}};
+  owner.addLink({}, native);
+  ASSERT_EQ(owner.links().size(), 1);
+  const auto id = owner.links().begin()->first;
+  Version original, quotation;
+  original.insertSpans(0, {{slot, 0, 3}, {slot, 6, 3}, {slot, 10, 3}});
+  quotation.insertSpans(0, {{other, 0, 3}, {imported, 0, 3}, {imported, 0, 3}});
+  const std::vector<PackageDocumentView> docs{{owner, {}, original},
+                                              {quoted, {}, quotation}};
+  const auto count       = owner.opCount();
+  const auto deployments = quoted.scrolls().size();
+  const auto resolved    = PackageOccurrenceIndex(docs, {}).resolve(owner, id);
+  ASSERT_TRUE(resolved);
+  EXPECT_EQ(resolved->key, (LinkKey{owner.documentId(), id}));
+  EXPECT_EQ(resolved->link.owner, native.owner);
+  ASSERT_EQ(resolved->left.size(), 2);
+  EXPECT_EQ(resolved->left[0].span, native.left[0]);
+  EXPECT_EQ(resolved->left[0].occurrences.size(), 3);
+  EXPECT_EQ(resolved->left[1].occurrences.size(), 1);
+  ASSERT_EQ(resolved->right.size(), 1);
+  EXPECT_EQ(resolved->right[0].occurrences.size(), 1);
+  EXPECT_EQ(owner.opCount(), count);
+  EXPECT_EQ(quoted.scrolls().size(), deployments);
+}
+
 TEST_F(ReaderLinkPackagesTest,
        MalformedPreferencesArePreservedAndRefusedByVersion) {
   std::filesystem::create_directories(root);

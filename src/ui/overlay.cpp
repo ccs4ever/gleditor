@@ -536,6 +536,17 @@ void ScreenOverlay::describe(a11y::Builder &builder) {
       if (child.parentId == visual.id)
         node.children.push_back(builder.id(child.id));
     if (box->parentId == 0) builder.contribute(builder.id(visual.id));
+    if (visual.textInput) {
+      const auto *widget = findWidget(model_, visual.id);
+      const auto *input =
+          widget ? std::get_if<TextField>(&widget->model) : nullptr;
+      const auto caret = input && focusedNode_ == visual.id
+                             ? std::optional<std::size_t>{input->caret}
+                             : std::nullopt;
+      a11y::appendTextRuns(builder, node,
+                           (1ULL << 47) + (std::uint64_t{visual.id} << 15),
+                           node.value, caret);
+    }
   }
 }
 std::uint64_t ScreenOverlay::accessibilityRevision() const {

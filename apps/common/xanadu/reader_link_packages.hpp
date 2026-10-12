@@ -57,6 +57,8 @@ public:
   occurrences(const GlobalSpan &member) const;
   [[nodiscard]] LinkOccurrences resolve(const LinkKey &key,
                                         const LinkPackage &package) const;
+  [[nodiscard]] std::expected<LinkOccurrences, LinkQueryError>
+  resolve(const Store &store, zigzag::CellRef link) const;
 
 private:
   std::vector<PackageDocumentView> documents;

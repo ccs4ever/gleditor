@@ -490,9 +490,10 @@ HypertimeGraph *HypertimeGraph::setVisible(bool show) {
   if (visible_ == show) return this;
   visible_ = show;
   changed(true);
-  if (show)
+  if (show) {
     activate();
-  else
+    if (openedHandler_) openedHandler_();
+  } else
     deactivate();
   return this;
 }

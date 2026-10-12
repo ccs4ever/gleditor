@@ -197,6 +197,7 @@ public:
   }
   void setSiteFilter(SiteFilter filter) { siteFilter_ = std::move(filter); }
   SatelloidOverlay *setPresentationVisible(bool visible);
+  SatelloidOverlay *setEndpointPreviewVisible(bool visible);
 
   // -- FrameContributor implementation ---------------------------------------
   void deviceReady(render::RenderDevice &device,
@@ -239,6 +240,7 @@ private:
   std::chrono::steady_clock::time_point lastFrameTime_{
       std::chrono::steady_clock::now()};
   bool visible_{true};
+  bool endpointPreviewVisible_{true};
 };
 
 } // namespace xanadu

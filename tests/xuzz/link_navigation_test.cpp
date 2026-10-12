@@ -641,3 +641,69 @@ TEST(LinkNavigationTest, EveryUiActionHasAnUnclaimedDefaultChord) {
         << found->second << " is claimed by more than " << action;
   }
 }
+
+TEST(LinkNavigationTest, WalksEntersSavedVisitWithoutAppendingAndKeepsFutures) {
+  Harness h;
+  const auto origin = arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{
+      .key = h.link(), .side = LinkSide::Right, .member = 0, .occurrence = 0}));
+  const auto first = h.run(nav::Enter{});
+  ASSERT_TRUE(first && first->visit);
+  ASSERT_TRUE(h.run(nav::ActivityBack{}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto second = h.run(nav::Enter{});
+  ASSERT_TRUE(second && second->visit);
+  const auto otherRoot = h.log.append({.target = h.inHead(6, 6)});
+  const auto count     = h.log.size();
+  const auto restored  = h.run(nav::EnterVisit{.visit = *first->visit});
+  ASSERT_TRUE(restored);
+  EXPECT_EQ(restored->focus, first->focus);
+  EXPECT_EQ(h.log.current(), first->visit);
+  EXPECT_EQ(h.selected().right, (SideCursor{.member = 0, .occurrence = 0}));
+  EXPECT_EQ(h.log.size(), count);
+  ASSERT_TRUE(h.run(nav::EnterVisit{.visit = origin}));
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{
+      .key = h.link(), .side = LinkSide::Right, .member = 1, .occurrence = 0}));
+  const auto third = h.run(nav::Enter{});
+  ASSERT_TRUE(third && third->visit);
+  EXPECT_EQ(h.log.children(origin),
+            (std::vector{*first->visit, *second->visit, *third->visit}));
+  ASSERT_TRUE(h.run(nav::EnterVisit{.visit = otherRoot}));
+  const auto beforeBad = h.log.current();
+  const auto bad       = h.run(nav::EnterVisit{.visit = {999}});
+  EXPECT_FALSE(bad);
+  EXPECT_EQ(h.log.current(), beforeBad);
+  EXPECT_EQ(h.log.size(), count + 1);
+}
+
+TEST(LinkNavigationTest, ResumePinnedChoicesBeforeAnyEndpointVisit) {
+  Harness h;
+  arrive(h);
+  ASSERT_TRUE(h.run(nav::SelectOccurrence{.key        = h.link(),
+                                          .side       = LinkSide::Right,
+                                          .member     = kThree,
+                                          .occurrence = kThreeInWholeCell}));
+  const auto chosen = h.navigator.selection();
+  ASSERT_TRUE(chosen);
+  const xanadu::LinkVisitContext saved{.key    = chosen->key,
+                                       .active = chosen->active,
+                                       .left   = chosen->left,
+                                       .right  = chosen->right,
+                                       .origin = chosen->origin};
+  const auto before  = h.log.size();
+  const auto current = h.log.current();
+  xanadu::LinkNavigator reopened(h.log);
+  const auto request = reopened.restoreSelection(saved);
+  ASSERT_TRUE(request && request->resolve);
+  EXPECT_FALSE(request->focus);
+  EXPECT_FALSE(request->visit);
+  ASSERT_TRUE(
+      reopened.supply(request->resolve->generation, h.resolve(saved.key)));
+  EXPECT_EQ(reopened.selection()->right, saved.right);
+  EXPECT_EQ(reopened.selection()->origin, saved.origin);
+  EXPECT_EQ(h.log.size(), before);
+  EXPECT_EQ(h.log.current(), current);
+}

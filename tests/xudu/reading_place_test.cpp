@@ -109,3 +109,21 @@ TEST_F(ReadingPlaceTest, theNewestPlaceWinsAndSurvivesSaving) {
 }
 
 } // namespace
+
+TEST_F(ReadingPlaceTest, pinnedLinkWithoutAnEndpointVisitSurvivesRestart) {
+  xanadu::Store store(perma);
+  auto place  = twoDocuments();
+  place.link  = xanadu::LinkVisitContext{.key    = {store.documentId(), 42},
+                                         .active = xanadu::LinkSide::Right,
+                                         .left  = {.member = 1, .occurrence = 3},
+                                         .right = {.member = 2},
+                                         .origin = xanadu::VisitId{7}};
+  std::ignore = xanadu::recordPlace(store, place);
+  store.save((root / "activity").string());
+  xanadu::Store reopened(perma);
+  reopened.load((root / "activity").string());
+  EXPECT_EQ(xanadu::latestPlace(reopened), place);
+  place.link.reset();
+  std::ignore = xanadu::recordPlace(reopened, place);
+  EXPECT_EQ(xanadu::latestPlace(reopened), place);
+}

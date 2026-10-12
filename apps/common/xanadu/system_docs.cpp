@@ -1342,6 +1342,11 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
          .notes   = "Choose a saved forward visit",
          .schemas = {{.expectedTypes = {"string"},
                       .defaultValues = {std::string{"Alt+Shift+Y"}}}}},
+        {.name = std::string(settings::kKeymapWalks),
+         .notes =
+             "Preview, restore, reference and annotate saved activity walks",
+         .schemas = {{.expectedTypes = {"string"},
+                      .defaultValues = {std::string{"Ctrl+Alt+W"}}}}},
         {.name    = std::string(settings::kKeymapLinkAddCell),
          .notes   = "Add the focused cell content to the pending xanalink",
          .schemas = {{.expectedTypes = {"string"},
@@ -1593,23 +1598,23 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {.name    = std::string(settings::kKeymapBundleExecution),
          .notes   = "Shortcut to switch to Execution dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+1"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+1"}}}}},
         {.name    = std::string(settings::kKeymapBundleScope),
          .notes   = "Shortcut to switch to Scope dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+2"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+2"}}}}},
         {.name    = std::string(settings::kKeymapBundleContract),
          .notes   = "Shortcut to switch to Contract dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+3"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+3"}}}}},
         {.name    = std::string(settings::kKeymapBundleLogic),
          .notes   = "Shortcut to switch to Logic dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+4"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+4"}}}}},
         {.name    = std::string(settings::kKeymapBundleStdlib),
          .notes   = "Shortcut to switch to Stdlib dimension bundle",
          .schemas = {{.expectedTypes = {"string"},
-                      .defaultValues = {std::string{"Ctrl+5"}}}}},
+                      .defaultValues = {std::string{"Ctrl+Shift+5"}}}}},
         {.name    = std::string(settings::kKeymapBundleCycle),
          .notes   = "Shortcut to cycle active dimension bundle forward",
          .schemas = {{.expectedTypes = {"string"},
@@ -3281,13 +3286,18 @@ gleditor::RadialConfig createDefaultRadialConfig() {
   // Entries naming a keymap action run it, so a menu and a key reach the
   // same command and neither can drift from the other.
   auto fileAction = makeAction("group:file", "File", "+", "subwheel:file");
-  fileAction.desc = "New and Open";
+  fileAction.desc = "Documents and session";
   fileAction.subActions = {
       makeAction("run:std:xudu/new_doc", "New xanadoc", "+",
                  "run:std:xudu/new_doc"),
       makeAction("run:std:xuzz/new_slice", "New slice", "#",
                  "run:std:xuzz/new_slice"),
+      makeAction("run:std:xuzz/walks", "Walks", "W", "run:std:xuzz/walks"),
       makeAction("run:std:xudu/open_doc", "Open", "O", "run:std:xudu/open_doc"),
+      makeAction("run:std:xudu/close", "Close document", "×",
+                 "run:std:xudu/close"),
+      makeAction("run:std:xudu/quit", "Save and quit", "Q",
+                 "run:std:xudu/quit"),
   };
 
   cfg.actions = {

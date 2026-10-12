@@ -197,6 +197,7 @@ public:
     navigateFocus(dimension, positive ? DimVector::POS : DimVector::NEG);
   }
   void navigateFocusTo(CellID id);
+  std::function<void()> accessibilityActivated;
 
   void swapDimensions(int axis1, int axis2);
   void cycleDimensions(bool forward = true);
@@ -517,6 +518,19 @@ public:
   [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
     return revision_;
   }
+  using AuthoredCommitHandler =
+      UnifiedTransclusionEngine::AuthoredCommitHandler;
+  ZigzagVisualizer *setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    if (engine_) engine_->setAuthoredCommitHandler(authoredCommitHandler_);
+    return this;
+  }
+
+  /// Synchronize an authored descendant without rebinding a historical view
+  /// or moving the focus, axes, or camera.
+  bool advanceEditingHead(const xanadu::MicroversionId &parent,
+                          const xanadu::MicroversionId &head);
+
   void setBridgeInvalidationCallback(
       xanadu::ZigzagPresentationSurface::InvalidationCallback callback)
       override {
@@ -626,6 +640,7 @@ private:
   std::uint32_t linkHighlightBorder_{};
   xanadu::ZigzagPresentationSurface::InvalidationCallback
       bridgeInvalidationCallback_;
+  AuthoredCommitHandler authoredCommitHandler_;
 
   std::string structure_name_;
   std::string current_slice_path_;

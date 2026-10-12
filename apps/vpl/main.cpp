@@ -133,39 +133,40 @@ std::string formatView(const VplView &view, const ArenaManifold &arena) {
 std::vector<xanadu::ResultRow>
 resultRows(const VplView &view, const ArenaManifold &arena,
            const xanadu::MultiStoreCoordinator &coordinator,
-           const std::optional<xanadu::StoreInfo> &currentStore,
-           const std::string_view transientPath = {}) {
+           const VPLEngine &engine, const std::string_view transientPath = {}) {
+  const auto sourceOf = [&](const std::span<const CellRef> dependencies) {
+    std::string source;
+    for (const auto dependency : dependencies) {
+      if (const auto foreign = arena.resolveForeign(dependency)) {
+        for (const auto &info : coordinator.stores()) {
+          if (info.store.get() != foreign->first) continue;
+          const auto identity = info.path == transientPath
+                                    ? "store:" + info.store->documentId().str()
+                                    : info.path;
+          if (!source.empty()) source += ";";
+          source += identity + "#cell=" + std::to_string(foreign->second);
+          break;
+        }
+      }
+    }
+    return source;
+  };
   std::vector<xanadu::ResultRow> rows;
   if (view.isScalar()) {
-    const auto source = !currentStore ? std::string{}
-                        : currentStore->path == transientPath
-                            ? "store:" + currentStore->store->documentId().str()
-                            : currentStore->path;
-    rows.push_back({.text = persistedViewText(view, arena), .source = source});
+    rows.push_back({.text   = persistedViewText(view, arena),
+                    .source = sourceOf(view.dependencies())});
     return rows;
   }
   const auto cells = view.collectCells(arena);
   rows.reserve(cells.size());
   for (const auto cell : cells) {
-    std::string source;
-    if (const auto foreign = arena.resolveForeign(cell)) {
-      for (const auto &info : coordinator.stores()) {
-        if (info.store.get() == foreign->first) {
-          const auto identity = info.path == transientPath
-                                    ? "store:" + info.store->documentId().str()
-                                    : info.path;
-          source = identity + "#cell=" + std::to_string(foreign->second);
-          break;
-        }
-      }
-    }
     std::optional<xanadu::QuotedSpans> quote;
     if (const auto quoted = arena.quotedContent(cell)) {
       quote = xanadu::QuotedSpans{.store = quoted->store,
                                   .spans = std::move(quoted->spans)};
     }
     rows.push_back({.text   = persistedCellText(arena, cell),
-                    .source = std::move(source),
+                    .source = sourceOf(engine.dependenciesOf(cell)),
                     .quote  = std::move(quote)});
   }
   return rows;
@@ -212,6 +213,8 @@ void printREPLHelp() {
          "data\n"
       << "  :rank <dimension>     Bind a rank from the open slice as data\n"
       << "  :save <new-store>     Save the current result as a slice\n"
+      << "  ,                     Ravel or join values (direct engine): data , "
+         "+/data\n"
       << "  :engine <dir|vortex>  Switch execution engine ('direct' or "
          "'vortex')\n"
       << "  :ast <expr>           Dump abstract syntax tree for expression\n"
@@ -527,7 +530,7 @@ int main(int argc, char *argv[]) {
       const auto destination =
           streamOutput ? streamStore->path() : std::filesystem::path(outStore);
       xanadu::writeResultSlice(
-          store, resultRows(*batchResult, arena, coordinator, currentStore,
+          store, resultRows(*batchResult, arena, coordinator, directEngine,
                             stdinStore ? stdinStore->path().string() : ""));
       store.save(destination.string());
       if (streamOutput) {
@@ -657,7 +660,7 @@ int main(int argc, char *argv[]) {
             throw std::invalid_argument("result path already exists: " + path);
           }
           const auto rows =
-              resultRows(lastView, arena, coordinator, currentStore,
+              resultRows(lastView, arena, coordinator, directEngine,
                          stdinStore ? stdinStore->path().string() : "");
           xanadu::Store output(permascroll);
           xanadu::writeResultSlice(output, rows);
@@ -796,6 +799,7 @@ int main(int argc, char *argv[]) {
         }
       }
     } catch (const std::exception &err) {
+      hasView = false;
       std::cerr << "Error: " << err.what() << "\n";
     }
   }

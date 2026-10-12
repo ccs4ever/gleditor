@@ -198,6 +198,8 @@ public:
   std::function<void()> packageVisibilityChanged;
   std::function<void()> sourceLeaving;
   std::function<void(const OccurrenceSite &)> sourceEntered;
+  std::function<void(RenderState &, std::size_t, const CellSite &)>
+      cellSourceEntry;
   std::optional<Publication> packageFilterSource;
   std::map<std::string, Publication> packageQuerySources;
   void publicationUpdates(const std::string &subscription = {},
@@ -221,6 +223,8 @@ public:
 
   void openDocumentPalette();
   void openDocumentFromPath(const std::string &chosen);
+
+  std::function<void(RenderState &, std::uint32_t)> documentActivated;
 
   void selectDoc(std::uint32_t index);
   void nextDoc();

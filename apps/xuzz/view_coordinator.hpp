@@ -31,6 +31,11 @@ public:
   [[nodiscard]] ViewMode viewMode() const noexcept { return mode_; }
 
   void cycleViewMode();
+  ViewCoordinator *
+  setModeChangedHandler(std::function<void(ViewMode)> handler) {
+    modeChanged_ = std::move(handler);
+    return this;
+  }
   void apply();
 
 private:
@@ -41,6 +46,7 @@ private:
   RendererRef renderer_;
   AppStateRef state_;
   ViewMode mode_{ViewMode::Unified};
+  std::function<void(ViewMode)> modeChanged_;
 };
 
 } // namespace xuzz

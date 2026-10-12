@@ -206,6 +206,11 @@ struct Dismiss {
 } // namespace nav
 
 namespace nav {
+/// Restore a saved visit chosen in Walks, including another root or branch.
+struct EnterVisit {
+  VisitId visit;
+  bool operator==(const EnterVisit &) const = default;
+};
 struct CancelEntry {
   bool operator==(const CancelEntry &) const = default;
 };
@@ -216,7 +221,7 @@ using NavigationCommand =
                  nav::StepMember, nav::SelectOccurrence, nav::StepOccurrence,
                  nav::Cross, nav::Enter, nav::EnterAt, nav::ActivityBack,
                  nav::ActivityForward, nav::ReturnToOrigin, nav::Dismiss,
-                 nav::CancelEntry>;
+                 nav::CancelEntry, nav::EnterVisit>;
 
 enum class NavigationError : std::uint8_t {
   NoLinkSelected,
@@ -303,6 +308,7 @@ public:
   /// Rebuild the saved link context after the host has reopened its views.
   /// The returned resolution request changes no reading place or visit.
   NavigationResult restoreCurrentSelection();
+  NavigationResult restoreSelection(const LinkVisitContext &context);
 
   /**
    * @brief Deliver the occurrences a ResolveRequest asked for.

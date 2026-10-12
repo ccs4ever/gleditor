@@ -79,6 +79,16 @@ public:
     return v;
   }
 
+  /// Source cells used to calculate this value; literals carry none.
+  [[nodiscard]] const std::vector<zigzag::CellRef> &
+  dependencies() const noexcept {
+    return dependencies_;
+  }
+  VplView *setDependencies(std::vector<zigzag::CellRef> dependencies) {
+    dependencies_ = std::move(dependencies);
+    return this;
+  }
+
   [[nodiscard]] zigzag::CellRef origin() const noexcept { return origin_; }
   void setOrigin(zigzag::CellRef origin) noexcept { origin_ = origin; }
 
@@ -325,6 +335,7 @@ private:
   zigzag::CellRef origin_{zigzag::noCell};
   std::vector<zigzag::DirectedDim> axes_;
   std::vector<std::size_t> extents_;
+  std::vector<zigzag::CellRef> dependencies_;
   bool isRagged_{false};
 
   bool isEnclosed_{false};

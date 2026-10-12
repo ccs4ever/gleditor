@@ -440,6 +440,14 @@ inline constexpr std::size_t runLimit = 200;
 [[nodiscard]] std::size_t characterIndexOf(std::string_view text,
                                            std::size_t byteOffset);
 
+/// Describe editable text using stable child IDs and Unicode scalar positions.
+/// The caller reserves a contiguous block of run IDs and supplies only text
+/// that may be exposed to assistive technologies (masked text for secrets).
+void appendTextRuns(Builder &into, Node &owner, std::uint64_t firstRunLocal,
+                    std::string_view text,
+                    std::optional<std::size_t> caretByte = std::nullopt,
+                    std::size_t maximumRuns              = 32768);
+
 } // namespace gleditor::a11y
 
 #endif // GLEDITOR_A11Y_TREE_H

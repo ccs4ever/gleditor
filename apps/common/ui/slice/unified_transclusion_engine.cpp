@@ -35,6 +35,7 @@ UnifiedTransclusionEngine::UnifiedTransclusionEngine(
 void UnifiedTransclusionEngine::syncTo(const xanadu::MicroversionId &version) {
   manifold_          = store_.rebuildManifold(version);
   head_              = version;
+  lastSyncedHead_    = version;
   lastSyncedOpIndex_ = store_.segmentedOps().indexOf(version);
   lastStoreOpCount_  = static_cast<std::uint32_t>(store_.segmentedOps().size());
   dirtyFormatCells_.clear();
@@ -57,6 +58,7 @@ void UnifiedTransclusionEngine::syncIncremental() {
   // rank at write time" is the same point from the other side: the rank is
   // minted where the transclusion is recorded, not invented where it is
   // displayed.
+  const auto parent = lastSyncedHead_;
   const auto &ops   = store_.segmentedOps();
   const auto total  = static_cast<std::uint32_t>(ops.size());
   const auto target = head_.isZero() && total > 0 ? ops.idOf(total) : head_;
@@ -99,6 +101,10 @@ void UnifiedTransclusionEngine::syncIncremental() {
       }
     }
     dirtyFormatCells_.clear();
+  }
+  lastSyncedHead_ = head_;
+  if (authoredCommitHandler_ && parent != head_) {
+    authoredCommitHandler_(parent, head_);
   }
 }
 

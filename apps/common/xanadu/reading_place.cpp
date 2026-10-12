@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "store.hpp"
+#include "store_activity_log.hpp"
 #include "zigzag/manifold.hpp"
 
 namespace xanadu {
@@ -123,6 +124,10 @@ MicroversionId recordPlace(Store &store, const ReadingPlace &place) {
     out.link(head, zigzagDim, focus);
     out.link(focus, zigzagDim, out.scalar(place.zigzagHasKeyboard));
   }
+  if (place.link) {
+    const auto selection = out.dimension("d.selection");
+    out.link(here, selection, out.text(encodeLinkContext(*place.link)));
+  }
   return out.at;
 }
 
@@ -213,6 +218,8 @@ std::optional<ReadingPlace> latestPlace(const Store &store) {
       }
     }
   }
+  if (const auto cell = along(here, dim("d.selection")); zigzag::noCell != cell)
+    place.link = decodeLinkContext(manifold.textOf(cell, store));
   return place;
 }
 

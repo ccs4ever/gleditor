@@ -39,6 +39,7 @@
 
 #include "common/ui/quotation_builder_overlay.hpp"
 #include "common/ui/store_object_manager.hpp"
+#include "common/ui/walks.hpp"
 #include "common/xanadu/config.hpp"
 #include "common/xanadu/framing.hpp"
 #include "common/xanadu/microversion.hpp"
@@ -100,13 +101,26 @@ void applyKeymap(
     }
   }
 
-  for (const auto &[act, comboStr] :
-       xanadu::KeymapConfig::fromStore(store).bindings) {
+  const auto keymap = xanadu::KeymapConfig::fromStore(store);
+  for (const auto &[act, comboStr] : keymap.bindings) {
     const auto combo = gleditor::parseKeyCombo(comboStr);
     if (!combo) {
       GLEDITOR_LOG_WARN("xuzz.keymap", "{}: \"{}\" is not a key combination",
                         act, comboStr);
       continue;
+    }
+
+    // Older default keymaps assigned the same chords to document tabs and
+    // dimension bundles. Keep the tab reachable from either keyboard pane;
+    // the bundle's explicit Alt binding remains available.
+    if (xanadu::canonicalKeymapAction(act).starts_with("std:ui/bundle_")) {
+      const bool shadowsTab =
+          std::ranges::any_of(keymap.bindings, [&](const auto &binding) {
+            return xanadu::canonicalKeymapAction(binding.first)
+                       .starts_with("std:xudu/doc_") &&
+                   gleditor::parseKeyCombo(binding.second) == combo;
+          });
+      if (shadowsTab) continue;
     }
 
     if (commands.rebind(act, combo->first, combo->second)) {
@@ -663,58 +677,6 @@ int XuzzApp::run(const int argc, char **argv) {
       });
 
   auto radialMenu = std::make_shared<gleditor::RadialMenu>();
-  radialMenu->setActionHandler(
-      [&session, &views, &quotationOverlay](
-          const std::string &id, [[maybe_unused]] const std::string &action,
-          const std::uint32_t docIndex, const std::uint32_t charOffset,
-          const std::uint32_t charLength) {
-        if (id == "format:bold") {
-          session->markDecorated(
-              docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Bold));
-        } else if (id == "format:italic") {
-          session->markDecorated(
-              docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Italic));
-        } else if (id == "format:underline") {
-          session->markDecorated(
-              docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Underline));
-        } else if (id == "format:superscript") {
-          session->markDecorated(
-              docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Superscript));
-        } else if (id == "format:subscript") {
-          session->markDecorated(
-              docIndex, charOffset, charLength,
-              gleditor::decorationBit(gleditor::Decoration::Subscript));
-        } else if (id == "align:left") {
-          session->setAlignment(docIndex, charOffset, charLength,
-                                gleditor::TextAlign::Left);
-        } else if (id == "align:centre" || id == "align:center") {
-          session->setAlignment(docIndex, charOffset, charLength,
-                                gleditor::TextAlign::Centre);
-        } else if (id == "align:right") {
-          session->setAlignment(docIndex, charOffset, charLength,
-                                gleditor::TextAlign::Right);
-        } else if (id == "align:justify") {
-          session->setAlignment(docIndex, charOffset, charLength,
-                                gleditor::TextAlign::Justify);
-        } else if (id == "op:pagebreak") {
-          session->insertBreak(docIndex, charOffset);
-        } else if (id == "op:transclude") {
-          views.transcludeSelection();
-        } else if (id == "op:quote") {
-          quotationOverlay.toggle();
-        } else if (id == "info:author") {
-          std::string authorStr = "Local Sovereign Author";
-          if (const auto *ps = session->userPermascroll()) {
-            authorStr = std::format("Author OpenPGP: {}",
-                                    ps->config().masterIdentity.view());
-          }
-          std::cout << "xuzz: " << authorStr << "\n";
-        }
-      });
 
   xanadu::LinkBeams links(*session, renderer);
   links.setVisible(!opts.noBeams);
@@ -1034,13 +996,27 @@ int XuzzApp::run(const int argc, char **argv) {
             });
       });
 
-  const auto showZigzagFocus = [&zigzagPresentation, &renderer, &state] {
-    renderer->runWithState([&zigzagPresentation, &state](RenderState &) {
-      if (const auto centre = zigzagPresentation->focusCentre()) {
-        std::scoped_lock locker(state->view);
-        state->view.pos.x = centre->x;
-        state->view.pos.y = centre->y;
-      }
+  const auto showZigzagFocus = [&zigzagPresentation, &views, &links, &state] {
+    const auto target = zigzagPresentation->focusCell();
+    views.cancelReadingFrame();
+    views.placeCameraWhenReady([&zigzagPresentation, &views, &links, &state,
+                                target, frames = 0]() mutable {
+      if (zigzagPresentation->focusCell() != target) return true;
+      if (++frames < 2) return false;
+      const auto anchor = zigzagPresentation->cellAnchor(target);
+      if (!anchor) return false;
+      std::scoped_lock locker(state->view);
+      auto &camera = state->view;
+      links.releaseCamera();
+      camera.pos.x = anchor->position.x;
+      camera.pos.y = anchor->position.y;
+      if (const auto distance = xanadu::readableCameraDistance(
+              anchor->lineHeight, static_cast<float>(camera.screenHeight),
+              camera.fov,
+              zigzagPresentation->presentationConfig().minReadableTextPx))
+        camera.pos.z = anchor->position.z + *distance;
+      views.cancelReadingFrame();
+      return frames >= 5;
     });
   };
 
@@ -1153,21 +1129,57 @@ int XuzzApp::run(const int argc, char **argv) {
     }
   };
 
-  docSwitcher->setSelectHandler([&views, &renderer, &session, &bindZigzag,
-                                 &sliceHeads](const std::uint32_t docIndex) {
-    views.selectDoc(docIndex);
-    renderer->runWithState(
-        [&session, &bindZigzag, &sliceHeads, docIndex](RenderState &rState) {
-          if (docIndex >= session->views().size()) return;
-          const auto storeIndex = session->views()[docIndex].storeIndex;
-          const auto &store     = session->store(storeIndex);
-          if (store.homeCell() == zigzag::noCell) return;
-          const auto found = sliceHeads.find(storeIndex);
-          const auto version =
-              found != sliceHeads.end() ? found->second : store.latest();
-          bindZigzag(rState, storeIndex, version);
-        });
-  });
+  const auto pairedDocument =
+      [&renderer, docSwitcher, &session,
+       &zigzagStoreIndex]() -> std::optional<std::uint32_t> {
+    const auto *caret = renderer->editCaret();
+    const auto index  = caret && caret->active() ? caret->documentIndex()
+                                                 : docSwitcher->activeDocIndex();
+    if (index >= session->views().size() ||
+        session->views()[index].storeIndex != zigzagStoreIndex) {
+      return std::nullopt;
+    }
+    return index;
+  };
+  session->setAuthoredCommitHandler(
+      [zigzagPresentation, &pairedDocument, &zigzagStoreIndex, &sliceHeads,
+       &map, &linkContext, &bridgeCoordinator](
+          const std::uint32_t doc, const std::size_t storeIndex,
+          const xanadu::MicroversionId &parent,
+          const xanadu::MicroversionId &head) {
+        if (storeIndex != zigzagStoreIndex || pairedDocument() != doc ||
+            !zigzagPresentation->advanceEditingHead(parent, head)) {
+          return;
+        }
+        sliceHeads[storeIndex] = head;
+        map.setCurrent(head);
+        linkContext.setManifold(bridgeCoordinator.manifold(), storeIndex, head);
+        bridgeCoordinator.synchronize();
+      });
+  zigzagPresentation->setAuthoredCommitHandler(
+      [&session, &pairedDocument, &zigzagStoreIndex, &sliceHeads, &map,
+       &linkContext, &bridgeCoordinator](const xanadu::MicroversionId &parent,
+                                         const xanadu::MicroversionId &head) {
+        if (const auto doc = pairedDocument()) {
+          std::ignore = session->advanceViewAfterCommit(*doc, parent, head);
+        }
+        sliceHeads[zigzagStoreIndex] = head;
+        map.setCurrent(head);
+        linkContext.setManifold(bridgeCoordinator.manifold(), zigzagStoreIndex,
+                                head);
+        bridgeCoordinator.synchronize();
+      });
+
+  views.documentActivated = [&session, &bindZigzag, &keyboardPane](
+                                RenderState &rState, std::uint32_t docIndex) {
+    if (docIndex >= session->views().size()) return;
+    keyboardPane.leaveZigzag(false);
+    const auto &view = session->views()[docIndex];
+    if (session->store(view.storeIndex).homeCell() == zigzag::noCell) return;
+    bindZigzag(rState, view.storeIndex, view.version);
+  };
+  docSwitcher->setSelectHandler(
+      [&views](std::uint32_t docIndex) { views.selectDoc(docIndex); });
 
   overview.setMarkSource(
       [chosenPlaces, &zigzagPresentation](const RenderState &rState,
@@ -1226,7 +1238,28 @@ int XuzzApp::run(const int argc, char **argv) {
   // 6. ViewCoordinator (Unified, XanadocOnly, ZigzagOnly)
   ViewCoordinator viewCoordinator(views, zigzagPresentation, bridgeCoordinator,
                                   satelloidOverlay, renderer, state);
+  viewCoordinator.setModeChangedHandler(
+      [&keyboardPane, &showZigzagFocus](const ViewMode mode) {
+        if (mode == ViewMode::ZigzagOnly) {
+          keyboardPane.enterZigzag();
+          showZigzagFocus();
+        } else if (mode == ViewMode::XanadocOnly) {
+          keyboardPane.leaveZigzag(true);
+        }
+      });
   viewCoordinator.setViewMode(opts.viewMode);
+  views.cellSourceEntry =
+      [&bindZigzag, zigzagPresentation, &keyboardPane, &viewCoordinator,
+       &showZigzagFocus](RenderState &rState, const std::size_t index,
+                         const xanadu::CellSite &site) {
+        keyboardPane.enterZigzag();
+        bindZigzag(rState, index, site.version);
+        if (viewCoordinator.viewMode() == ViewMode::XanadocOnly)
+          viewCoordinator.setViewMode(ViewMode::Unified);
+        zigzagPresentation->focusCell(site.cell);
+        showZigzagFocus();
+      };
+  linkContext.setCellEntryHandler(views.cellSourceEntry);
   linkContext.setFocusCell(
       [&bridgeCoordinator, &keyboardPane, &showZigzagFocus,
        &viewCoordinator](const zigzag::CellRef cell, xanadu::Extent) {
@@ -1437,54 +1470,77 @@ int XuzzApp::run(const int argc, char **argv) {
     st.transclude(headVer, headLen, srcVer, srcAt, srcLen);
     views.showOnly(headVer, map.storeIndex());
   });
-  map.setAnnotateHandler([&map, &publishForm, &session, &renderer, &bindZigzag,
-                          &zigzagStoreIndex, zigzagPresentation](
-                             const xanadu::MicroversionId &target) {
-    if (map.storeIndex() != zigzagStoreIndex || target.isZero()) return;
-    auto &store = session->store(zigzagStoreIndex);
-    if (!store.getOp(target)) return;
-    const auto focus = zigzagPresentation->focusCell();
-    const auto index = zigzagStoreIndex;
-    gleditor::Form::Field note;
-    note.label    = "Annotation";
-    note.hint     = "Note attached to the selected OSMIC operation";
-    note.required = true;
-    publishForm.open(
-        "Annotate operation " + target.str(),
-        "Place its handle after the focused cell on d.1", {note},
-        [&session, &renderer, &bindZigzag, &map, zigzagPresentation, target,
-         focus, index](const std::vector<gleditor::Form::Field> &answers) {
-          if (answers.empty() || answers.front().answer().empty()) return;
-          renderer->runWithState(
-              [&session, &bindZigzag, &map, zigzagPresentation, target, focus,
-               index, note = answers.front().answer()](RenderState &rState) {
-                auto &store = session->store(index);
-                auto head =
-                    store.annotateVersion(zigzagPresentation->sliceHead(),
-                                          target, {.description = note});
-                auto folded         = store.rebuildManifold(head);
-                const auto targetOp = store.segmentedOps().indexOf(target);
-                const auto handle   = folded.findOpHandle(targetOp);
-                const auto dim      = folded.dimensionNamed("d.1", store);
-                if (!handle || !dim) return;
-                const auto anchor =
-                    folded.contains(focus) ? focus : folded.home();
-                const auto next =
-                    folded.linked(anchor, *dim, zigzag::DimVector::POS);
-                head = store.setLink(head, anchor, *dim, zigzag::DimVector::POS,
-                                     *handle);
-                if (next != zigzag::noCell && next != *handle) {
-                  folded = store.rebuildManifold(head);
-                  head   = store.setLink(head, *handle, *dim,
-                                         zigzag::DimVector::POS, next);
-                }
-                bindZigzag(rState, index, head);
-                zigzagPresentation->focusCell(*handle);
-                map.invalidate();
-                session->save(index);
-              });
-        });
+  struct AnnotationDestination {
+    std::size_t store;
+    xanadu::MicroversionId parent;
+    zigzag::CellRef cell;
+  };
+  std::optional<AnnotationDestination> annotationDestination;
+  map.setOpenedHandler([&renderer, &annotationDestination, &zigzagStoreIndex,
+                        zigzagPresentation] {
+    renderer->runWithState([&annotationDestination, &zigzagStoreIndex,
+                            zigzagPresentation](RenderState &) {
+      annotationDestination = AnnotationDestination{
+          zigzagStoreIndex, zigzagPresentation->sliceHead(),
+          zigzagPresentation->focusCell()};
+    });
   });
+  map.setAnnotateHandler(
+      [&map, &publishForm, &session, &renderer, &bindZigzag,
+       &annotationDestination, &pairedDocument,
+       zigzagPresentation](const xanadu::MicroversionId &target) {
+        if (!annotationDestination ||
+            map.storeIndex() != annotationDestination->store || target.isZero())
+          return;
+        auto &store = session->store(annotationDestination->store);
+        if (!store.getOp(target)) return;
+        const auto [index, parent, focus] = *annotationDestination;
+        gleditor::Form::Field note;
+        note.label    = "Annotation";
+        note.hint     = "Note attached to the selected OSMIC operation";
+        note.required = true;
+        publishForm.open(
+            "Annotate operation " + target.str(),
+            std::format("Place its handle after cell #{} on d.1 at version {}",
+                        focus, parent.str()),
+            {note},
+            [&session, &renderer, &bindZigzag, &map, zigzagPresentation, target,
+             focus, index, &pairedDocument,
+             parent](const std::vector<gleditor::Form::Field> &answers) {
+              if (answers.empty() || answers.front().answer().empty()) return;
+              renderer->runWithState(
+                  [&session, &bindZigzag, &map, zigzagPresentation, target,
+                   focus, index, parent, &pairedDocument,
+                   note = answers.front().answer()](RenderState &rState) {
+                    auto &store         = session->store(index);
+                    auto head           = store.annotateVersion(parent, target,
+                                                                {.description = note});
+                    auto folded         = store.rebuildManifold(head);
+                    const auto targetOp = store.segmentedOps().indexOf(target);
+                    const auto handle   = folded.findOpHandle(targetOp);
+                    const auto dim      = folded.dimensionNamed("d.1", store);
+                    if (!handle || !dim) return;
+                    const auto anchor =
+                        folded.contains(focus) ? focus : folded.home();
+                    const auto next =
+                        folded.linked(anchor, *dim, zigzag::DimVector::POS);
+                    head = store.setLink(head, anchor, *dim,
+                                         zigzag::DimVector::POS, *handle);
+                    if (next != zigzag::noCell && next != *handle) {
+                      folded = store.rebuildManifold(head);
+                      head   = store.setLink(head, *handle, *dim,
+                                             zigzag::DimVector::POS, next);
+                    }
+                    if (const auto doc = pairedDocument())
+                      std::ignore = session->advanceViewAfterCommit(
+                          *doc, session->views()[*doc].version, head);
+                    bindZigzag(rState, index, head);
+                    zigzagPresentation->focusCell(*handle);
+                    map.invalidate();
+                    session->save(index);
+                  });
+            });
+      });
 
   // Handles are destroyed before the scopes they register.
   std::vector<gleditor::ui::FocusManager::ScopeHandle> modalScopes;
@@ -1846,9 +1902,13 @@ int XuzzApp::run(const int argc, char **argv) {
         }
       });
     }
-    renderer->runWithState([&linkContext](RenderState &) {
-      linkContext.restoreCurrentSelection();
-    });
+    renderer->runWithState(
+        [&linkContext, saved = resuming->link](RenderState &) {
+          if (saved)
+            linkContext.restoreSelection(*saved);
+          else
+            linkContext.restoreCurrentSelection();
+        });
   } else if (opts.askedVersion.empty() && opts.read.empty() &&
              opts.alongside.empty() && extraImports.empty()) {
     const auto &primaryStore = session->store(0);
@@ -1977,6 +2037,60 @@ int XuzzApp::run(const int argc, char **argv) {
 
   // 7. Application & Command Registration
   gleditor::Application app(state, renderer, opts.backend, "Xuzz");
+  radialMenu->setActionHandler(
+      [&app, &session, &views, &quotationOverlay](
+          const std::string &id, const std::string &action,
+          const std::uint32_t docIndex, const std::uint32_t charOffset,
+          const std::uint32_t charLength) {
+        if (action.starts_with("run:")) {
+          std::ignore = app.commands().run(std::string_view(action).substr(4));
+        } else if (id == "format:bold") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Bold));
+        } else if (id == "format:italic") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Italic));
+        } else if (id == "format:underline") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Underline));
+        } else if (id == "format:superscript") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Superscript));
+        } else if (id == "format:subscript") {
+          session->markDecorated(
+              docIndex, charOffset, charLength,
+              gleditor::decorationBit(gleditor::Decoration::Subscript));
+        } else if (id == "align:left") {
+          session->setAlignment(docIndex, charOffset, charLength,
+                                gleditor::TextAlign::Left);
+        } else if (id == "align:centre" || id == "align:center") {
+          session->setAlignment(docIndex, charOffset, charLength,
+                                gleditor::TextAlign::Centre);
+        } else if (id == "align:right") {
+          session->setAlignment(docIndex, charOffset, charLength,
+                                gleditor::TextAlign::Right);
+        } else if (id == "align:justify") {
+          session->setAlignment(docIndex, charOffset, charLength,
+                                gleditor::TextAlign::Justify);
+        } else if (id == "op:pagebreak") {
+          session->insertBreak(docIndex, charOffset);
+        } else if (id == "op:transclude") {
+          views.transcludeSelection();
+        } else if (id == "op:quote") {
+          quotationOverlay.toggle();
+        } else if (id == "info:author") {
+          std::string authorStr = "Local Sovereign Author";
+          if (const auto *ps = session->userPermascroll()) {
+            authorStr = std::format("Author OpenPGP: {}",
+                                    ps->config().masterIdentity.view());
+          }
+          std::cout << "xuzz: " << authorStr << "\n";
+        }
+      });
 
   // A. Xanadoc Commands
   app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
@@ -2674,34 +2788,41 @@ int XuzzApp::run(const int argc, char **argv) {
                  [action = std::move(action)](RenderState &) { action(); });
            }});
 
-  const auto startSlice =
-      [&views, &session, &keyboardPane, &bindZigzag, &state,
-       zigzagPresentation](RenderState &rState, const std::size_t storeIndex,
-                           const xanadu::MicroversionId &parent) {
-        auto &store = session->store(storeIndex);
-        if (store.homeCell() != zigzag::noCell) {
-          state->showDialog(render::DiagnosticSeverity::Info,
-                            "Store already has a slice",
-                            "Open its existing slice to continue editing it.");
-          return;
-        }
-        const auto version = store.sliceGenesis(parent);
-        session->save(storeIndex);
-        bindZigzag(rState, storeIndex, version);
-        keyboardPane.enterZigzag();
-        views.placeCameraWhenReady(
-            [&views, &state, zigzagPresentation, placedFrames = 0]() mutable {
-              if (!views.presentationTransform() || ++placedFrames < 2)
-                return false;
-              if (const auto centre = zigzagPresentation->focusCentre()) {
-                std::scoped_lock locker(state->view);
-                state->view.pos.x = centre->x;
-                state->view.pos.y = centre->y;
-              }
-              return true;
-            });
-        std::cout << "xuzz: started a new slice (store " << storeIndex << ")\n";
-      };
+  const auto startSlice = [&views, &session, &keyboardPane, &bindZigzag, &state,
+                           &renderer, docSwitcher, zigzagPresentation](
+                              RenderState &rState, const std::size_t storeIndex,
+                              const xanadu::MicroversionId &parent) {
+    auto &store = session->store(storeIndex);
+    if (store.homeCell() != zigzag::noCell) {
+      state->showDialog(render::DiagnosticSeverity::Info,
+                        "Store already has a slice",
+                        "Open its existing slice to continue editing it.");
+      return;
+    }
+    const auto version = store.sliceGenesis(parent);
+    const auto *caret  = renderer->editCaret();
+    const auto doc     = caret && caret->active() ? caret->documentIndex()
+                                                  : docSwitcher->activeDocIndex();
+    if (doc < session->views().size() &&
+        session->views()[doc].storeIndex == storeIndex) {
+      std::ignore = session->advanceViewAfterCommit(doc, parent, version);
+    }
+    session->save(storeIndex);
+    bindZigzag(rState, storeIndex, version);
+    keyboardPane.enterZigzag();
+    views.placeCameraWhenReady(
+        [&views, &state, zigzagPresentation, placedFrames = 0]() mutable {
+          if (!views.presentationTransform() || ++placedFrames < 2)
+            return false;
+          if (const auto centre = zigzagPresentation->focusCentre()) {
+            std::scoped_lock locker(state->view);
+            state->view.pos.x = centre->x;
+            state->view.pos.y = centre->y;
+          }
+          return true;
+        });
+    std::cout << "xuzz: started a new slice (store " << storeIndex << ")\n";
+  };
   app.commands().registerAction(
       std::string(xanadu::settings::kKeymapNewSlice),
       "start a new ZigZag slice, in a new xanadoc of its own",
@@ -2828,10 +2949,10 @@ int XuzzApp::run(const int argc, char **argv) {
       std::string(xanadu::settings::kKeymapInsertExternRef),
       "choose a cell in another loaded slice and reference its birth",
       [&renderer, &session, &publishForm, &bindZigzag, zigzagPresentation,
-       &zigzagStoreIndex] {
+       &zigzagStoreIndex, &pairedDocument] {
         renderer->runWithState([&renderer, &session, &publishForm, &bindZigzag,
-                                zigzagPresentation,
-                                &zigzagStoreIndex](RenderState &) {
+                                zigzagPresentation, &zigzagStoreIndex,
+                                &pairedDocument](RenderState &) {
           gleditor::Form::Field choice;
           choice.label         = "Foreign cell";
           choice.hint          = "Select a cell from another open slice";
@@ -2868,7 +2989,8 @@ int XuzzApp::run(const int argc, char **argv) {
               "cell's original operation",
               {std::move(choice)},
               [&renderer, &session, &bindZigzag, zigzagPresentation, localIndex,
-               focus](const std::vector<gleditor::Form::Field> &answers) {
+               focus, &pairedDocument](
+                  const std::vector<gleditor::Form::Field> &answers) {
                 if (answers.empty()) return;
                 const auto selected = answers.front().answer();
                 const auto colon    = selected.find(':');
@@ -2879,18 +3001,18 @@ int XuzzApp::run(const int argc, char **argv) {
                     std::stoul(selected.substr(colon + 1)));
                 renderer->runWithState([&session, &bindZigzag,
                                         zigzagPresentation, localIndex, focus,
-                                        foreignIndex,
-                                        foreignCell](RenderState &rState) {
+                                        foreignIndex, foreignCell,
+                                        &pairedDocument](RenderState &rState) {
                   if (foreignIndex >= session->storeCount() ||
                       foreignIndex == localIndex)
                     return;
                   const auto &foreign = session->store(foreignIndex);
                   const auto birth = foreign.segmentedOps().idOf(foreignCell);
                   if (birth.isZero()) return;
-                  auto &local = session->store(localIndex);
+                  auto &local       = session->store(localIndex);
+                  const auto parent = zigzagPresentation->sliceHead();
                   auto head =
-                      local.registerScroll(zigzagPresentation->sliceHead(),
-                                           foreign.documentId().str());
+                      local.registerScroll(parent, foreign.documentId().str());
                   const auto scroll = local.scrollRegistry().scrollIdForKey(
                       foreign.documentId().str());
                   if (!scroll) return;
@@ -2912,6 +3034,9 @@ int XuzzApp::run(const int argc, char **argv) {
                     head   = local.setLink(head, *placeholder, *dim,
                                            zigzag::DimVector::POS, next);
                   }
+                  if (const auto doc = pairedDocument())
+                    std::ignore =
+                        session->advanceViewAfterCommit(*doc, parent, head);
                   bindZigzag(rState, localIndex, head);
                   zigzagPresentation->focusCell(*placeholder);
                   session->save(localIndex);
@@ -2962,6 +3087,63 @@ int XuzzApp::run(const int argc, char **argv) {
         });
       });
 
+  auto walksState = std::make_shared<
+      std::pair<std::optional<xanadu::VisitId>, std::string>>();
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapWalks),
+      "preview, restore, reference and annotate saved walks",
+      [&app, &renderer, &linkContext, &publishForm, walksState] {
+        renderer->runWithState([&app, &renderer, &linkContext, &publishForm,
+                                walksState](RenderState &) {
+          xanadu::openWalksForm(
+              publishForm, linkContext.walkEntries(),
+              walksState->first ? walksState->first
+                                : linkContext.currentVisit(),
+              [&linkContext](const xanadu::OccurrenceSite &site) {
+                return linkContext.describe(site);
+              },
+              [&app, &renderer, &linkContext,
+               walksState](xanadu::WalksAction action) {
+                renderer->runWithState([&app, &linkContext, walksState,
+                                        action =
+                                            std::move(action)](RenderState &) {
+                  walksState->first = action.visit;
+                  switch (action.kind) {
+                  case xanadu::WalksActionKind::Enter:
+                    if (linkContext.execute(
+                            xanadu::nav::EnterVisit{action.visit})) {
+                      walksState->second.clear();
+                      return;
+                    }
+                    walksState->second =
+                        "Unavailable saved visit. Close Walks to keep reading, "
+                        "or choose another visit.";
+                    break;
+                  case xanadu::WalksActionKind::Preview:
+                    walksState->second = linkContext.previewVisit(action.visit);
+                    break;
+                  case xanadu::WalksActionKind::Reference:
+                    walksState->second =
+                        linkContext.referenceVisit(action.visit)
+                            ? "Visit reference saved."
+                            : "Unavailable visit.";
+                    break;
+                  case xanadu::WalksActionKind::Annotate:
+                    walksState->second = linkContext.annotateVisit(
+                                             action.visit, action.annotation)
+                                             ? "Annotation saved."
+                                             : "Choose a known visit and enter "
+                                               "a nonempty annotation.";
+                    break;
+                  }
+                  std::ignore = app.commands().run(
+                      std::string(xanadu::settings::kKeymapWalks));
+                });
+              },
+              walksState->second);
+        });
+      });
+
   // C. View Mode Toggling Commands
   app.commands().registerAction(
       "std:xuzz/cycle_view_mode",
@@ -2988,8 +3170,20 @@ int XuzzApp::run(const int argc, char **argv) {
   state->documentTakesText = [&keyboardPane] {
     return !keyboardPane.inZigzag();
   };
+  zigzagPresentation->accessibilityActivated = [&keyboardPane] {
+    keyboardPane.enterZigzag();
+  };
   zigzagPresentation->setHasKeyboard(false);
-  keyboardPane.setChangeHandler([zigzagPresentation](const bool zigzagHas) {
+  keyboardPane.setChangeHandler([zigzagPresentation, &session, &renderer,
+                                 docSwitcher,
+                                 &satelloidOverlay](const bool zigzagHas) {
+    satelloidOverlay.setEndpointPreviewVisible(!zigzagHas);
+    if (zigzagHas) {
+      const auto *caret = renderer->editCaret();
+      const auto doc    = caret && caret->active() ? caret->documentIndex()
+                                                   : docSwitcher->activeDocIndex();
+      session->flushUncommitted(doc);
+    }
     zigzagPresentation->setHasKeyboard(zigzagHas);
   });
   for (const auto &command : std::vector(app.commands().all())) {
@@ -3164,6 +3358,13 @@ int XuzzApp::run(const int argc, char **argv) {
     place.zigzagVersion     = zigzagPresentation->sliceHead().str();
     place.zigzagFocus       = zigzagPresentation->focusCell();
     place.zigzagHasKeyboard = keyboardPane.inZigzag();
+    if (const auto selected = linkContext.selection()) {
+      place.link = xanadu::LinkVisitContext{.key    = selected->key,
+                                            .active = selected->active,
+                                            .left   = selected->left,
+                                            .right  = selected->right,
+                                            .origin = selected->origin};
+    }
     session->rememberPlace(place);
   }
   session->saveAll();

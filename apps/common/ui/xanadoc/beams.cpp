@@ -171,7 +171,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     uctx.manifoldViews = manifoldViews_;
     uctx.manifoldFoci  = manifoldFoci_;
     uctx.cellRadius    = cellRadius_;
-    placeGroupedLinks(session.store().links(), uctx, placed, unplaced);
+    if (!linkContext_)
+      placeGroupedLinks(session.store().links(), uctx, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
     for (const auto &one : placed) {
@@ -227,7 +228,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   } else {
     looms_.clear();
     strandToLoom_.clear();
-    placeGroupedLinks(session.store().links(), versions, placed, unplaced);
+    if (!linkContext_)
+      placeGroupedLinks(session.store().links(), versions, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
     for (const auto &one : placed) {
@@ -270,8 +272,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     // One representative connector per resolved occurrence. This is a visual
     // scaffold, never an authorial pairing or the navigation identity. Avoid
     // allocating the Cartesian product of discontinuous endsets.
-    for (const auto &resolved :
-         linkContext_->packagePresentation(cellRadius_)) {
+    for (const auto &resolved : linkContext_->presentationLinks(cellRadius_)) {
       const auto endpoints = [this, activeDocCount](const auto &members) {
         std::vector<LinkEnd> ends;
         for (const auto &member : members)
@@ -295,12 +296,14 @@ void LinkBeams::rebuildStrands(RenderState &state) {
       const auto left  = endpoints(resolved.left);
       const auto right = endpoints(resolved.right);
       if (left.empty() || right.empty()) continue;
-      const auto id     = session.packageRenderId(resolved.key);
+      const auto id     = resolved.key.authority == session.store().documentId()
+                              ? std::uint64_t(resolved.key.id)
+                              : session.packageRenderId(resolved.key);
       const auto append = [&](const LinkEnd &a, const LinkEnd &b, bool drawFrom,
                               bool drawTo) {
         strands.push_back(Strand{.link     = id,
                                  .type     = resolved.link.type,
-                                 .tier     = ProminenceTier::Curated,
+                                 .tier     = resolved.link.tier,
                                  .from     = a,
                                  .to       = b,
                                  .drawFrom = drawFrom,
@@ -1719,8 +1722,9 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
   }
 
-  const bool topologyChanged =
-      (session.generation() != builtFor || state.docs.size() != builtDocs);
+  const bool topologyChanged = strandsRebuilt ||
+                               session.generation() != builtFor ||
+                               state.docs.size() != builtDocs;
   if (topologyChanged) {
     builtFor  = session.generation();
     builtDocs = state.docs.size();

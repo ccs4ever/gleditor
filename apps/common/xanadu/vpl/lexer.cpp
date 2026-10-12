@@ -533,6 +533,8 @@ Token Lexer::scanSymbolOrGlyph() {
   // Single-character ASCII symbols
   char c = advanceChar();
   switch (c) {
+  case ',':
+    return Token{.kind = TokenKind::Catenate, .text = ",", .location = loc};
   case '$':
     return Token{.kind = TokenKind::Rho, .text = "$", .location = loc};
   case '#':

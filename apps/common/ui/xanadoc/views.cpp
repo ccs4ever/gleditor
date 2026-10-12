@@ -344,7 +344,7 @@ std::optional<glm::mat4> Views::presentationTransform() const {
 }
 
 void Views::swingBackToSpan(const PouchItem &item) {
-  renderer->runWithState([this, item](RenderState &) {
+  renderer->runWithState([this, item](RenderState &rState) {
     const auto unavailable = [this](std::string reason) {
       state->showDialog(render::DiagnosticSeverity::Warning,
                         "Quotation source unavailable", std::move(reason));
@@ -361,17 +361,29 @@ void Views::swingBackToSpan(const PouchItem &item) {
                   "The saved quotation can still be inserted.");
       return;
     }
-    if (source.cell) {
-      unavailable("Returning to a saved cell quotation is not available yet.");
-      return;
-    }
     const auto &store = session.store(*storeIndex);
     if (!store.segmentedOps().contains(source.version)) {
       unavailable("The saved source version is unavailable.");
       return;
     }
-    const auto spans = store.rebuild(source.version, source.focusedBirth)
-                           .spansFor(source.start, source.end - source.start);
+    Version text;
+    if (source.cell) {
+      const auto slice = store.rebuildManifold(source.version);
+      if (!slice.contains(*source.cell) || !cellSourceEntry) {
+        unavailable("The saved source cell is unavailable.");
+        return;
+      }
+      const auto content = slice.contentOf(*source.cell);
+      text.insertSpans(
+          0, std::vector<PrimediaSpan>(content.begin(), content.end()));
+    } else {
+      text = store.rebuild(source.version, source.focusedBirth);
+    }
+    if (source.end < source.start) {
+      unavailable("The saved source range is invalid.");
+      return;
+    }
+    const auto spans   = text.spansFor(source.start, source.end - source.start);
     const auto &pouch  = session.systemStore(SystemDocKind::Pouches);
     const auto matches = [&](const PrimediaSpan &span) {
       if (span.scroll == localScroll && item.span.scroll == localScroll &&
@@ -387,6 +399,15 @@ void Views::swingBackToSpan(const PouchItem &item) {
       return;
     }
     if (sourceLeaving) sourceLeaving();
+    if (source.cell) {
+      const CellSite site{.store   = store.documentId(),
+                          .version = source.version,
+                          .cell    = *source.cell,
+                          .range   = {source.start, source.end}};
+      cellSourceEntry(rState, *storeIndex, site);
+      if (sourceEntered) sourceEntered(site);
+      return;
+    }
     std::optional<std::size_t> docIndex;
     for (std::size_t i = 0; i < session.views().size(); ++i) {
       const auto &view = session.views()[i];
@@ -1167,6 +1188,7 @@ void Views::activateDocument(RenderState &rState, const std::uint32_t index) {
     caret->placeAt(index, 0);
   }
   frameTarget_ = rState.docs[index];
+  if (documentActivated) documentActivated(rState, index);
 }
 
 std::size_t Views::newDocument() {

@@ -353,7 +353,8 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
     ownedStore_.reset();
     store_ = &store;
   }
-  engine_         = std::make_unique<UnifiedTransclusionEngine>(store, version);
+  engine_ = std::make_unique<UnifiedTransclusionEngine>(store, version);
+  engine_->setAuthoredCommitHandler(authoredCommitHandler_);
   structure_name_ = "Xudu/Zigzag unified store";
   current_slice_path_.clear();
 
@@ -374,6 +375,19 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
   }
   ensureVortexHost();
   invalidateAccessibility();
+}
+
+bool ZigzagVisualizer::advanceEditingHead(const xanadu::MicroversionId &parent,
+                                          const xanadu::MicroversionId &head) {
+  if (!engine_ || engine_->head() != parent ||
+      (head != parent && !parent.isAncestorOf(head))) {
+    return false;
+  }
+  engine_->syncTo(head);
+  refreshCellLayouts();
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
 }
 
 void ZigzagVisualizer::reloadStoreVersion(const xanadu::MicroversionId &version,
@@ -2548,6 +2562,7 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
         accessibilityDocument_ == documentId() &&
         accessibilityVersion_ == engine_->head() &&
         engine_->findCell(target->second)) {
+      if (accessibilityActivated) accessibilityActivated();
       navigateFocusTo(target->second);
       return true;
     }
@@ -2739,15 +2754,6 @@ ZigzagVisualizer *ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
   dimension_bundle_ = bundle;
   if (bundle != DimensionBundle::Custom) {
     current_view_ = dimensionBundleAxes(bundle);
-    if (engine_) {
-      for (const auto &dName :
-           {current_view_.x_dimension, current_view_.y_dimension,
-            current_view_.z_dimension}) {
-        if (!dName.empty()) {
-          std::ignore = engine_->dimensionFor(dName);
-        }
-      }
-    }
     refreshCellLayouts();
     rebuildActiveViewTopology();
     invalidateAccessibility();

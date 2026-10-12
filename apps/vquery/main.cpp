@@ -64,7 +64,8 @@ resultRows(const xanadu::MultiStoreCoordinator &coordinator,
       rendered = std::get<std::string>(value);
     }
     std::string source;
-    if (const auto foreign = coordinator.arena().resolveForeign(cell)) {
+    if (const auto foreign = coordinator.arena().resolveSourceCell(
+            coordinator.derefCloneMaster(cell).value_or(cell))) {
       for (const auto &info : coordinator.stores()) {
         if (info.store.get() == foreign->first) {
           const auto identity = info.path == transientPath

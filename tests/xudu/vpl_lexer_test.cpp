@@ -9,6 +9,13 @@
 namespace xanadu::vpl {
 namespace {
 
+TEST(VplLexerTest, CommaIsCatenateVerb) {
+  auto tokens = Lexer("data , total").tokenizeAll();
+  ASSERT_EQ(tokens.size(), 4u);
+  EXPECT_EQ(tokens[1].kind, TokenKind::Catenate);
+  EXPECT_TRUE(isVerb(tokens[1].kind));
+}
+
 TEST(VplLexerTest, APLGlyphsTokenization) {
   std::string source = "A ← 5⍳d.1 +/ ⍴ ⍉ ⌽ ⊖ ↑ ↓ ⊂ ⊃ ∊ ⍸ ≡ ≢ ⍋ ⍒ ⍟ ⍫ ⌺ ⌸ ⍤";
   Lexer lexer(source);

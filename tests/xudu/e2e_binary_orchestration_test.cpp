@@ -3064,7 +3064,7 @@ TEST(E2EBinaryOrchestrationTest, GroupedLinkKeepsIndependentEndsetCursors) {
       fs::current_path() / "build/integration_workspace_nurbs_link";
   fs::remove_all(root);
   fs::create_directories(root);
-  const auto perma = permascrollAt(root / "data/xudu/permascroll/default");
+  const auto perma = permascrollAt(root / "data/xuzz/permascroll/default");
   Store left(perma), right(perma);
   const auto a = left.insert(
       {}, 0, "ALPHA left member\nUnlinked gap\nOMEGA left member\n");

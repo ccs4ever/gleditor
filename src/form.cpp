@@ -260,6 +260,17 @@ void Form::describe(a11y::Builder &into) {
       break;
     }
 
+    if (Kind::Text == one.kind || Kind::Secret == one.kind) {
+      std::optional<std::size_t> textCaret;
+      if (which == focus)
+        textCaret = Kind::Secret == one.kind
+                        ? a11y::characterIndexOf(one.value, caret)
+                        : caret;
+      a11y::appendTextRuns(into, node,
+                           (1ULL << 47) + (std::uint64_t{which} << 32),
+                           node.value, textCaret);
+    }
+
     if (Kind::Choice == one.kind) {
       for (std::size_t option = 0; option < one.options.size(); option++) {
         auto &entry = into.add(optionId(which, option), a11y::Role::ListItem);
@@ -294,7 +305,7 @@ std::uint64_t Form::accessibilityRevision() const {
 bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
                          const std::string_view value) {
   const auto local = a11y::Ids::localOf(nodeId);
-  if (local < firstField) {
+  if (local < firstField || local >= (1ULL << 47)) {
     return false;
   }
   const auto which  = fieldNumber(local);

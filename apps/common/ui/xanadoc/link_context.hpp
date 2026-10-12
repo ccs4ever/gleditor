@@ -83,6 +83,30 @@ public:
     cellFocusQuery = std::move(query);
   }
 
+  LinkContext *setCellEntryHandler(
+      std::function<void(RenderState &, std::size_t, const CellSite &)>
+          handler) {
+    cellEntry = std::move(handler);
+    return this;
+  }
+  [[nodiscard]] std::vector<WalkEntry> walkEntries() const {
+    return activity.walkEntries();
+  }
+  [[nodiscard]] std::optional<VisitId> currentVisit() const {
+    return navigator.currentVisit();
+  }
+  std::expected<StoreActivityLog *, ActivityError> referenceVisit(VisitId id) {
+    return activity.reference(id);
+  }
+  std::expected<StoreActivityLog *, ActivityError>
+  annotateVisit(VisitId id, std::string_view text) {
+    return activity.annotate(id, text);
+  }
+  [[nodiscard]] std::string previewVisit(VisitId id) const;
+  [[nodiscard]] const std::string &entryStatus() const {
+    return entryUnavailable;
+  }
+
   /// The slice currently bound to the bridge, or null outside xuzz. Every
   /// cell is searched so endpoints outside the visible neighbourhood can be
   /// entered.
@@ -96,15 +120,14 @@ public:
   /// The links on screen, in the stable order Next/Previous link walk.
   void setCandidates(const std::vector<zigzag::CellRef> &linkIds);
 
-  /// The key of link @p id in the primary store, which holds every link the
-  /// beams draw; federated links need their own authority design.
+  /// Recover the immutable authority from a private beam presentation ID.
   [[nodiscard]] xanadu::LinkKey keyOf(std::uint64_t id) const;
   /// Verified enabled packages and native links share the command boundary.
   [[nodiscard]] std::expected<LinkOccurrences, LinkQueryError>
   resolveForPresentation(const LinkKey &key,
                          std::optional<int> cellRadius = std::nullopt) const;
   [[nodiscard]] std::vector<LinkOccurrences>
-  packagePresentation(int cellRadius) const;
+  presentationLinks(int cellRadius) const;
   [[nodiscard]] std::optional<Link> recordOf(std::uint64_t renderId) const;
   void packageVisibilityChanged();
   void recordReadingOrigin() { noteOrigin(); }
@@ -130,6 +153,7 @@ public:
 
   /// Rehydrate the selected link after reopened views can resolve its ends.
   void restoreCurrentSelection();
+  void restoreSelection(const LinkVisitContext &context);
 
   [[nodiscard]] gleditor::cpp26::optional<const xanadu::SelectedLink &>
   selection() const noexcept {
@@ -166,6 +190,8 @@ public:
   [[nodiscard]] std::uint64_t revision() const noexcept { return changes; }
 
 private:
+  [[nodiscard]] bool readerStore(std::size_t index) const;
+  [[nodiscard]] const Store *nativeStoreOf(const LinkKey &key) const;
   [[nodiscard]] PackageOccurrenceIndex
   packageIndex(std::optional<int> cellRadius) const;
   [[nodiscard]] std::expected<xanadu::LinkOccurrences, xanadu::LinkQueryError>
@@ -195,6 +221,8 @@ private:
   FocusDocument focusDocument;
   std::function<void(std::size_t, Extent, RenderState &)> documentEntry;
   FocusCell focusCell;
+  std::function<void(RenderState &, std::size_t, const CellSite &)> cellEntry;
+  std::string entryUnavailable;
   CaretQuery caretQuery;
   CellFocusQuery cellFocusQuery;
   std::optional<xanadu::Preview> previewing;

@@ -248,6 +248,11 @@ void LinkPanelOverlay::rebuildPanel(gleditor::FrameContext &ctx) {
                                return context.describe(site);
                              });
   buttons = xanadu::linkPanelButtons(*selected, origin.has_value());
+  if (!context.entryStatus().empty()) {
+    lines.push_back(
+        {.text = context.entryStatus(), .tone = PanelLine::Tone::Muted});
+    buttons.push_back({.label = "Cancel", .command = nav::CancelEntry{}});
+  }
   if (context.entryPending()) {
     lines.push_back({.text = "Entry pending: building exact target page",
                      .tone = PanelLine::Tone::Muted});

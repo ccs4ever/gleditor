@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "link_navigation.hpp"
 #include "microversion.hpp"
 
 namespace xanadu {
@@ -52,6 +53,8 @@ struct ReadingPlace {
   std::string zigzagVersion;
   std::int64_t zigzagFocus{};
   bool zigzagHasKeyboard{};
+  /// The pinned link can exist before any endpoint visit is completed.
+  std::optional<LinkVisitContext> link;
 
   bool operator==(const ReadingPlace &) const = default;
 };

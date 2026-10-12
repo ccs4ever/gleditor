@@ -193,6 +193,19 @@ TEST(QuotationBuilderOverlayTest, PagesDrawFittedInkAndExposeFullSharedBounds) {
           overlay.describe(builder);
           bool meaningful = false;
           for (const auto &node : tree.nodes) {
+            if (node.role == gleditor::a11y::Role::TextRun) {
+              // Text children describe the field's content, not another widget.
+              const auto owner =
+                  std::ranges::find_if(tree.nodes, [&](const auto &candidate) {
+                    return std::ranges::find(candidate.children, node.id) !=
+                           candidate.children.end();
+                  });
+              ASSERT_NE(owner, tree.nodes.end());
+              EXPECT_NE(scene->layout.find(static_cast<std::uint32_t>(
+                            gleditor::a11y::Ids::localOf(owner->id))),
+                        nullptr);
+              continue;
+            }
             const auto id = static_cast<std::uint32_t>(
                 gleditor::a11y::Ids::localOf(node.id));
             const auto *box = scene->layout.find(id);

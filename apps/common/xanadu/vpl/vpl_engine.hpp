@@ -53,6 +53,10 @@ public:
   [[nodiscard]] std::optional<VplView> getVariable(std::string_view name) const;
   void clearVariables() noexcept;
 
+  /// Operand identities for an output row, retained across variable bindings.
+  [[nodiscard]] std::span<const zigzag::CellRef>
+  dependenciesOf(zigzag::CellRef cell) const;
+
   /// Dimension resolution: resolves or mints named dimension cell.
   zigzag::DimRef resolveDimension(std::string_view name);
 
@@ -77,6 +81,10 @@ public:
   [[nodiscard]] zigzag::DimRef defaultDim();
 
 private:
+  VplView evaluateNode(const AstNode &node);
+  VplView catenate(std::span<const VplView> operands);
+  void recordSources(VplView &view);
+
   // Node evaluation helpers
   static VplView evalScalar(const ScalarExpr &expr);
   VplView evalVector(const VectorExpr &expr);
@@ -122,6 +130,9 @@ private:
 
   zigzag::DimRef defaultDim_{zigzag::noCell};
   std::unordered_map<std::string, VplView> env_;
+  std::vector<std::vector<zigzag::CellRef>> dependencyStack_;
+  std::unordered_map<zigzag::CellRef, std::vector<zigzag::CellRef>>
+      cellDependencies_;
 };
 
 } // namespace xanadu::vpl

@@ -24,6 +24,7 @@ void ViewCoordinator::setViewMode(const ViewMode mode) {
   }
   mode_ = mode;
   apply();
+  if (modeChanged_) modeChanged_(mode_);
 }
 
 void ViewCoordinator::cycleViewMode() {
@@ -45,6 +46,10 @@ void ViewCoordinator::apply() {
     return;
   }
   satelloids_.setPresentationVisible(mode_ != ViewMode::XanadocOnly);
+  renderer_->runWithState(
+      [visible = mode_ != ViewMode::ZigzagOnly](RenderState &state) {
+        state.documentsVisible = visible;
+      });
 
   switch (mode_) {
   case ViewMode::Unified: {

@@ -5,6 +5,7 @@
 #include "common/xanadu/vpl/vpl_engine.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -13,6 +14,7 @@
 #include <ranges>
 #include <sstream>
 
+#include "common/xanadu/scalar.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/vpl/lexer.hpp"
 #include "common/xanadu/zigzag/cell_views.hpp"
@@ -20,6 +22,13 @@
 namespace xanadu::vpl {
 
 namespace {
+
+void mergeDependencies(std::vector<zigzag::CellRef> &into,
+                       std::span<const zigzag::CellRef> from) {
+  for (const auto cell : from) {
+    if (std::ranges::find(into, cell) == into.end()) into.push_back(cell);
+  }
+}
 
 bool isScalarCell(const zigzag::ArenaManifold &arena, zigzag::CellRef c) {
   if (c == zigzag::noCell) return false;
@@ -122,6 +131,7 @@ zigzag::DimRef VPLEngine::resolveDimension(std::string_view name) {
 }
 
 void VPLEngine::setVariable(std::string_view name, VplView value) {
+  recordSources(value);
   env_[std::string(name)] = std::move(value);
 }
 
@@ -144,7 +154,54 @@ VplView VPLEngine::evaluate(std::string_view source) {
   return evaluate(*program);
 }
 
+std::span<const zigzag::CellRef>
+VPLEngine::dependenciesOf(const zigzag::CellRef cell) const {
+  if (const auto it = cellDependencies_.find(cell);
+      it != cellDependencies_.end()) {
+    return it->second;
+  }
+  return {};
+}
+
+void VPLEngine::recordSources(VplView &view) {
+  auto dependencies = view.dependencies();
+  for (const auto cell : view.collectCells(arena())) {
+    if (arena().resolveForeign(cell)) {
+      const std::array identity{cell};
+      mergeDependencies(dependencies, identity);
+      cellDependencies_.try_emplace(cell, identity.begin(), identity.end());
+    }
+  }
+  view.setDependencies(std::move(dependencies));
+}
+
 VplView VPLEngine::evaluate(const AstNode &node) {
+  // A program returns its last expression, not the dependencies of unrelated
+  // earlier statements. Nested expressions collect only their own operands.
+  if (dynamic_cast<const Program *>(&node)) return evaluateNode(node);
+  dependencyStack_.emplace_back();
+  VplView result;
+  try {
+    result = evaluateNode(node);
+    recordSources(result);
+  } catch (...) {
+    dependencyStack_.pop_back();
+    throw;
+  }
+  auto dependencies = std::move(dependencyStack_.back());
+  dependencyStack_.pop_back();
+  mergeDependencies(dependencies, result.dependencies());
+  result.setDependencies(dependencies);
+  for (const auto cell : result.collectCells(arena())) {
+    cellDependencies_.try_emplace(cell, dependencies);
+  }
+  if (!dependencyStack_.empty()) {
+    mergeDependencies(dependencyStack_.back(), dependencies);
+  }
+  return result;
+}
+
+VplView VPLEngine::evaluateNode(const AstNode &node) {
   if (const auto *s = dynamic_cast<const ScalarExpr *>(&node)) {
     return evalScalar(*s);
   }
@@ -666,7 +723,69 @@ VplView VPLEngine::evalQuad(const QuadExpr &expr) {
   return {};
 }
 
+VplView VPLEngine::catenate(const std::span<const VplView> operands) {
+  std::vector<zigzag::CellRef> output;
+  const auto dim = defaultDim();
+  for (const auto &operand : operands) {
+    if (operand.isEnclosed()) {
+      throw std::invalid_argument("Catenate requires an unboxed value");
+    }
+    if (operand.isScalar()) {
+      const auto cell =
+          operand.isString()  ? arena().makeCell(operand.scalarString())
+          : operand.isFloat() ? arena().makeScalarCell(operand.scalarFloat())
+                              : arena().makeScalarCell(operand.scalarInt());
+      cellDependencies_[cell] = operand.dependencies();
+      output.push_back(cell);
+      continue;
+    }
+    for (const auto source : operand.collectCells(arena())) {
+      auto cell = arena().makeCell();
+      if (const auto quoted = arena().quotedContent(source)) {
+        bool bound = false;
+        for (std::uint32_t space = 1; space <= arena().spaceCount(); ++space) {
+          if (arena().spaceAt(space)->store == quoted->store) {
+            cell  = arena().makeQuote(space, quoted->spans);
+            bound = true;
+            break;
+          }
+        }
+        if (!bound) {
+          zigzag::expectWritten(arena().setContent(cell, quoted->spans));
+        }
+      } else {
+        const auto content = arena().contentOf(source);
+        zigzag::expectWritten(arena().setContent(cell, content));
+      }
+      std::optional<ScalarValue> value;
+      if (const auto integer = arena().asInt64(source))
+        value = scalarValue(*integer);
+      else if (const auto number = arena().asDouble(source))
+        value = scalarValue(*number);
+      else if (const auto flag = arena().asBool(source))
+        value = scalarValue(*flag);
+      if (value) {
+        zigzag::expectWritten(
+            arena().setValueBits(cell, value->kind, value->bits));
+      }
+      cellDependencies_[cell] = {dependenciesOf(source).begin(),
+                                 dependenciesOf(source).end()};
+      output.push_back(cell);
+    }
+  }
+  if (output.empty()) return {};
+  for (std::size_t i = 1; i < output.size(); ++i) {
+    zigzag::expectWritten(
+        arena().link(output[i - 1], dim, zigzag::DimVector::POS, output[i]));
+  }
+  VplView result(output.front(),
+                 {zigzag::DirectedDim{dim, zigzag::DimVector::POS}});
+  result.setExtents({output.size()});
+  return result;
+}
+
 VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
+  if (verb == TokenKind::Catenate) return catenate(std::array{arg});
   // ⍳ (Iota): mint rank of n cells along default axis
   if (verb == TokenKind::Iota) {
     std::size_t n =
@@ -836,6 +955,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
 
 VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
                                    const VplView &right) {
+  if (verb == TokenKind::Catenate) return catenate(std::array{left, right});
   // 5 ⍳ d.1 : mint 5 cells on d.1 rank from H
   if (verb == TokenKind::Iota) {
     std::size_t n =

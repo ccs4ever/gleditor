@@ -600,6 +600,20 @@ public:
    */
   std::size_t createNewStore(const std::string &path = "");
 
+  using AuthoredCommitHandler = std::function<void(
+      std::uint32_t docIndex, std::size_t storeIndex,
+      const MicroversionId &parent, const MicroversionId &head)>;
+  Session *setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    return this;
+  }
+
+  /// Advance a paired view only if it still shows the authored parent.
+  /// Historical views and pending text edits are never overwritten.
+  bool advanceViewAfterCommit(std::uint32_t docIndex,
+                              const MicroversionId &parent,
+                              const MicroversionId &head);
+
   // -- System Xanadocs & Subsystem Hot-Reload --------------------------------
   using SystemDocChangedCallback =
       std::function<void(SystemDocKind kind, const Store &store)>;
@@ -925,6 +939,10 @@ private:
   std::optional<Config> config;
   std::map<SystemDocKind, std::size_t> systemStoreIndices_;
   SystemDocChangedCallback systemDocChangedCallback_;
+  AuthoredCommitHandler authoredCommitHandler_;
+  void notifyAuthoredCommit(std::uint32_t docIndex,
+                            const MicroversionId &parent,
+                            const MicroversionId &head);
   std::set<SystemDocKind> publishedSystemDocs_;
 
   MediaManager mediaManager_;

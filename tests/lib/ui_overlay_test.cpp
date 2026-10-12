@@ -482,6 +482,21 @@ TEST_F(ScreenOverlayTest, accessibilityEditingUsesTheSameActionPathAsTyping) {
   ASSERT_NE(updated->find(7), nullptr);
   EXPECT_EQ(updated->find(7)->value, actions.front().value);
   EXPECT_EQ(updated->find(7)->accessibleLabel, "Publication title");
+  overlay.focusedNodeChanged(7);
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 16);
+  overlay.describe(builder);
+  const auto field = tree.find(builder.id(7));
+  ASSERT_TRUE(field);
+  ASSERT_EQ(field->children.size(), 1U);
+  const auto run = tree.find(field->children.front());
+  ASSERT_TRUE(run);
+  EXPECT_EQ(run->value, actions.front().value);
+  ASSERT_TRUE(field->selection);
+  EXPECT_EQ(field->selection->focus.character, 10U);
+  EXPECT_EQ(field->selection->focus.node, run->id);
+  EXPECT_FALSE(
+      overlay.performAction(run->id, gleditor::a11y::Action::SetValue, "bad"));
 }
 
 TEST_F(ScreenOverlayTest, scrolledTextFieldsCropInkAtTheirVisibleViewport) {

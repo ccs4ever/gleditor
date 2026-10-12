@@ -268,6 +268,34 @@ std::vector<PieceMatch> packageOccurrences(const Store &store,
                       .coverage = occurrence.coverage});
   return result;
 }
+std::expected<LinkOccurrences, LinkQueryError>
+PackageOccurrenceIndex::resolve(const Store &store,
+                                const zigzag::CellRef id) const {
+  const auto found = store.links().find(id);
+  if (found == store.links().end())
+    return std::unexpected(LinkQueryError::LinkNotFound);
+  LinkOccurrences result{.key  = {.authority = store.documentId(), .id = id},
+                         .link = found->second};
+  for (const auto side : {LinkSide::Left, LinkSide::Right}) {
+    auto &members = side == LinkSide::Left ? result.left : result.right;
+    const auto &spans =
+        side == LinkSide::Left ? result.link.left : result.link.right;
+    for (const auto &span : spans) {
+      const auto scroll = readerScrollKey(store, span.scroll);
+      members.push_back(
+          {.side        = side,
+           .index       = static_cast<std::uint32_t>(members.size()),
+           .span        = span,
+           .occurrences = scroll.empty()
+                              ? std::vector<Occurrence>{}
+                              : occurrences({.scroll = scroll,
+                                             .start  = span.start,
+                                             .length = span.length})});
+    }
+  }
+  return result;
+}
+
 LinkOccurrences PackageOccurrenceIndex::resolve(const LinkKey &key,
                                                 const LinkPackage &pkg) const {
   const auto &global = pkg.links.at(key.id);

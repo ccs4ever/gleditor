@@ -190,6 +190,10 @@ Parser::parseVerbOrDerived(std::shared_ptr<AstNode> leftNoun) {
   }
 
   auto right = parseSubExpr();
+  if (!right) {
+    throw std::runtime_error("Missing right operand for " +
+                             std::string(verbTok.text));
+  }
 
   if (leftNoun) {
     if (customVerb) {

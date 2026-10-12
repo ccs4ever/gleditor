@@ -26,6 +26,8 @@ namespace {
 
 std::string_view verbName(TokenKind kind) noexcept {
   switch (kind) {
+  case TokenKind::Catenate:
+    return ",";
   case TokenKind::Iota:
     return "⍳ (i.)";
   case TokenKind::Rho:
@@ -632,6 +634,9 @@ CellRef VPLCompiler::compileAssign(const AssignExpr &expr) {
 }
 
 CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
+  if (expr.verb() == TokenKind::Catenate) {
+    throw std::invalid_argument("Catenate requires the direct VPL engine");
+  }
   if (expr.hasCustomVerb()) {
     if (const auto *adv =
             dynamic_cast<const AdverbExpr *>(expr.customVerb().get())) {
@@ -839,6 +844,9 @@ CellRef VPLCompiler::compileMonadic(const MonadicExpr &expr) {
 }
 
 CellRef VPLCompiler::compileDyadic(const DyadicExpr &expr) {
+  if (expr.verb() == TokenKind::Catenate) {
+    throw std::invalid_argument("Catenate requires the direct VPL engine");
+  }
   if (expr.verb() == TokenKind::Iota) {
     // Dyadic Iota: N ⍳ dim -> Mint N cells on dimension from home
     DimRef dim = resolveDimension("d.1");

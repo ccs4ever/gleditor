@@ -68,6 +68,33 @@ std::shared_ptr<Store> createTestStore(const fs::path &dir) {
   return std::make_shared<Store>(perma);
 }
 
+TEST(ArenaFederationTest, SourceIdentityIncludesBaseCellsButNotScratchQuotes) {
+  const auto dir      = tempStoreDir("source_identity");
+  const auto source   = createTestStore(dir);
+  const auto genesis  = source->sliceGenesis({});
+  const auto head     = source->makeCell(genesis, "authored");
+  const auto cell     = source->cellRefOf(head);
+  const auto manifold = source->rebuildManifold(head);
+  ArenaManifold arena;
+  const auto space = arena.attach(Space{.manifold = &manifold,
+                                        .store    = source.get(),
+                                        .reader   = source.get(),
+                                        .label    = "source"});
+  const auto expected =
+      std::make_pair(static_cast<const Store *>(source.get()), cell);
+  ASSERT_TRUE(arena.resolveSourceCell(cell));
+  EXPECT_EQ(*arena.resolveSourceCell(cell), expected);
+  const auto proxy = arena.proxyFor(space, cell);
+  EXPECT_EQ(*arena.resolveSourceCell(proxy), expected);
+  EXPECT_EQ(
+      *arena.resolveSourceCell(arena.quoteOccurrence(QuoteViewId{1}, proxy)),
+      expected);
+  EXPECT_FALSE(arena.resolveSourceCell(arena.makeCell("constructed")));
+  EXPECT_FALSE(arena.resolveSourceCell(
+      arena.makeQuote(space, manifold.contentOf(cell))));
+  fs::remove_all(dir);
+}
+
 // 1. twoStoresWithTheSameOperationIndexDoNotCollide
 TEST(ArenaFederationTest, TwoStoresWithTheSameOperationIndexDoNotCollide) {
   const auto dir1 = tempStoreDir("store1");
@@ -370,6 +397,12 @@ TEST(ArenaFederationTest, AFederatedRefKeepsItsIdentity) {
   ASSERT_TRUE(resolved.has_value());
   EXPECT_EQ(resolved->first, store.get());
   EXPECT_EQ(resolved->second, cRef);
+  const auto occurrence = arena.quoteOccurrence(42, proxy);
+  EXPECT_NE(occurrence, proxy);
+  const auto quotedSource = arena.resolveForeign(occurrence);
+  ASSERT_TRUE(quotedSource);
+  EXPECT_EQ(quotedSource->first, store.get());
+  EXPECT_EQ(quotedSource->second, cRef);
 }
 
 // 10. attachingAStoreCopiesNothing

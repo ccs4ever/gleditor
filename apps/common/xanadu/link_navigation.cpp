@@ -195,6 +195,10 @@ NavigationResult LinkNavigator::dispatch(const NavigationCommand &command) {
           return activityForward(c.child);
         } else if constexpr (std::is_same_v<Command, nav::ReturnToOrigin>) {
           return returnToOrigin();
+        } else if constexpr (std::is_same_v<Command, nav::EnterVisit>) {
+          const auto visit = activity.find(c.visit);
+          if (!visit) return std::unexpected(NavigationError::NoPreviousVisit);
+          return restoreVisit(*visit);
         } else if constexpr (std::is_same_v<Command, nav::CancelEntry>) {
           return NavigationEffect{};
         } else {
@@ -436,6 +440,19 @@ NavigationResult LinkNavigator::restoreVisit(const Visit &visit) {
   return effect;
 }
 
+NavigationResult
+LinkNavigator::restoreSelection(const LinkVisitContext &saved) {
+  selected = SelectedLink{.key        = saved.key,
+                          .generation = ++generations,
+                          .active     = saved.active,
+                          .left       = saved.left,
+                          .right      = saved.right,
+                          .origin     = saved.origin};
+  return NavigationEffect{
+      .resolve =
+          ResolveRequest{.key = saved.key, .generation = selected->generation}};
+}
+
 NavigationResult LinkNavigator::restoreCurrentSelection() {
   if (!current) return NavigationEffect{};
   const auto visit = activity.find(*current);
@@ -540,7 +557,8 @@ std::string_view name(const NavigationCommand &command) noexcept {
                                                "activity forward",
                                                "return to origin",
                                                "dismiss",
-                                               "cancel entry"};
+                                               "cancel entry",
+                                               "enter visit"};
   static_assert(std::size(names) == std::variant_size_v<NavigationCommand>);
   return names[command.index()];
 }

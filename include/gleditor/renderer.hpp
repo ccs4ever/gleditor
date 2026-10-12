@@ -355,6 +355,8 @@ using RendererRef = std::shared_ptr<AbstractRenderer>;
 class Renderer : public AbstractRenderer,
                  public Loggable,
                  public std::enable_shared_from_this<Renderer> {
+  friend class RendererScriptTest;
+
 private:
   /// Which API this renderer's device drives.
   render::Backend backendKind;

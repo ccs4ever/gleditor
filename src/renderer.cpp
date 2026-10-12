@@ -985,11 +985,19 @@ void Renderer::clickAt(RenderState &state, int x, int y) {
 /// finished until the reflow it caused has settled, which is what `settled`
 /// already says.
 void Renderer::advanceScript(RenderState &state) {
-  if (scriptFinished() || awaitingStep) {
-    return;
-  }
+  if (scriptFinished() || awaitingStep) return;
   const auto &step = this->state->script[nextStep];
   using Kind       = AppState::AutomationStep::Kind;
+  // A pick answered in this frame may have queued a document or focus change
+  // after the frame's settled flag was computed. Even a live capture must
+  // wait for those effects, but it deliberately observes ongoing animation.
+  if (step.kind == Kind::CaptureLive) {
+    if (!renderQueue.empty() || !pendingDocLoads.empty() ||
+        !pickAnswers.empty() || docsLoading(state))
+      return;
+  } else if (hasPendingWork()) {
+    return;
+  }
 
   switch (step.kind) {
   case Kind::Wait: {

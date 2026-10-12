@@ -154,12 +154,33 @@ MicroversionId Session::importBranch(const std::size_t storeIndex,
   return imported;
 }
 
+void Session::notifyAuthoredCommit(const std::uint32_t docIndex,
+                                   const MicroversionId &parent,
+                                   const MicroversionId &head) {
+  if (authoredCommitHandler_ && parent != head && docIndex < open.size()) {
+    authoredCommitHandler_(docIndex, open[docIndex].storeIndex, parent, head);
+  }
+}
+
+bool Session::advanceViewAfterCommit(const std::uint32_t docIndex,
+                                     const MicroversionId &parent,
+                                     const MicroversionId &head) {
+  if (docIndex >= open.size() || open[docIndex].version != parent ||
+      !open[docIndex].uncommittedLog.empty() ||
+      (head != parent && !parent.isAncestorOf(head))) {
+    return false;
+  }
+  refresh(docIndex, head);
+  return true;
+}
+
 MicroversionId Session::insertText(const std::uint32_t docIndex,
                                    const std::uint32_t at,
                                    std::string_view newText) {
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
+  const auto parent      = open[docIndex].version;
   const auto sIdx        = open[docIndex].storeIndex;
   auto &st               = store(sIdx);
   const auto prod        = st.insert(open[docIndex].version, at, newText);
@@ -180,6 +201,7 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
                       at + static_cast<std::uint32_t>(newText.size()), 0);
     }
   }
+  notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
 }
 
@@ -212,8 +234,9 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
   if (!focus.has_value() || !focus->isValid()) {
     return MicroversionId{};
   }
-  const auto sIdx = open[docIndex].storeIndex;
-  auto &st        = store(sIdx);
+  const auto parent = open[docIndex].version;
+  const auto sIdx   = open[docIndex].storeIndex;
+  auto &st          = store(sIdx);
 
   const auto fileName =
       filePath.empty() ? "media.dat"
@@ -226,6 +249,7 @@ MicroversionId Session::insertMedia(const std::uint32_t docIndex,
   open[docIndex].version = prod;
   open[docIndex].pieces  = st.rebuild(prod);
   invalidate();
+  notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
 }
 
@@ -235,11 +259,13 @@ MicroversionId Session::insertBreak(const std::uint32_t docIndex,
     return MicroversionId{};
   }
   flushUncommitted(docIndex);
-  const auto sIdx = open[docIndex].storeIndex;
-  auto &st        = store(sIdx);
-  const auto prod = st.insertBreak(open[docIndex].version, at);
+  const auto parent = open[docIndex].version;
+  const auto sIdx   = open[docIndex].storeIndex;
+  auto &st          = store(sIdx);
+  const auto prod   = st.insertBreak(open[docIndex].version, at);
   save(sIdx);
   refresh(docIndex, prod);
+  notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
 }
 
@@ -249,12 +275,14 @@ MicroversionId Session::insertSpan(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
+  const auto parent      = open[docIndex].version;
   const auto sIdx        = open[docIndex].storeIndex;
   auto &st               = store(sIdx);
   const auto prod        = st.insertSpan(open[docIndex].version, at, span);
   open[docIndex].version = prod;
   open[docIndex].pieces  = st.rebuild(prod);
   invalidate();
+  notifyAuthoredCommit(docIndex, parent, prod);
   return prod;
 }
 
@@ -266,6 +294,7 @@ MicroversionId Session::transclude(const std::uint32_t destDocIndex,
   if (destDocIndex >= open.size() || srcDocIndex >= open.size()) {
     return MicroversionId{};
   }
+  const auto parent      = open[destDocIndex].version;
   const auto srcVer      = open[srcDocIndex].pieces;
   const auto sourceSpans = srcVer.spansFor(srcStart, srcLength);
   const auto destSIdx    = open[destDocIndex].storeIndex;
@@ -282,6 +311,7 @@ MicroversionId Session::transclude(const std::uint32_t destDocIndex,
   open[destDocIndex].version = curVer;
   open[destDocIndex].pieces  = st.rebuild(curVer);
   invalidate();
+  notifyAuthoredCommit(destDocIndex, parent, curVer);
   return curVer;
 }
 
@@ -720,8 +750,9 @@ std::uint32_t Session::selectedLinkColour(const LinkKey &key,
                                           const Link &link) {
   const bool package = readerLinkPackages().find(key) != nullptr;
   return linkColourWithInstanceShift(
-      package ? packageRenderId(key) : key.id, link.type,
-      package ? ProminenceTier::Curated : link.tier);
+      package || key.authority != store().documentId() ? packageRenderId(key)
+                                                       : key.id,
+      link.type, package ? ProminenceTier::Curated : link.tier);
 }
 LinkKey Session::presentationLinkKey(const std::uint64_t id) const {
   if (const auto found = packageRenderKeys_.find(id);
@@ -1127,11 +1158,13 @@ MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
+  const auto parent   = open[docIndex].version;
   const auto sIdx     = open[docIndex].storeIndex;
   auto &st            = store(sIdx);
   const auto produced = st.addLink(open[docIndex].version, std::move(link));
   refresh(docIndex, produced);
   save(sIdx);
+  notifyAuthoredCommit(docIndex, parent, produced);
   return produced;
 }
 
@@ -2489,7 +2522,8 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
 
     const auto sIdx        = view.storeIndex;
     auto &st               = store(sIdx);
-    auto curVersion        = view.version;
+    const auto parent      = view.version;
+    auto curVersion        = parent;
     const auto targetBirth = focus->birthOp;
     MicroversionId ctxId{};
     if (targetBirth != 0) {
@@ -2538,6 +2572,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
     }
 
     refresh(static_cast<std::uint32_t>(which), curVersion);
+    notifyAuthoredCommit(static_cast<std::uint32_t>(which), parent, curVersion);
     if (st.isSystem()) {
       st.repointCurrentVersion(curVersion);
       if (systemDocChangedCallback_) {

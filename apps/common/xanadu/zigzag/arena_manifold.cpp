@@ -467,7 +467,8 @@ ArenaManifold::foreignOf(const CellRef ref) const noexcept {
 
 gleditor::cpp26::optional<std::pair<const xanadu::Store *, CellRef>>
 ArenaManifold::resolveForeign(const CellRef ref) const noexcept {
-  const auto foreign = foreignOf(ref);
+  const auto target  = isQuoteOccurrence(ref) ? canonicalProxyOf(ref) : ref;
+  const auto foreign = foreignOf(target);
   if (!foreign) {
     return gleditor::cpp26::nullopt;
   }
@@ -476,6 +477,14 @@ ArenaManifold::resolveForeign(const CellRef ref) const noexcept {
     return gleditor::cpp26::nullopt;
   }
   return std::make_pair(s->store, foreign->index);
+}
+
+gleditor::cpp26::optional<std::pair<const xanadu::Store *, CellRef>>
+ArenaManifold::resolveSourceCell(const CellRef ref) const noexcept {
+  if (const auto foreign = resolveForeign(ref)) return foreign;
+  if (!isEphemeral(ref) && base_ && base_->contains(ref) && store())
+    return std::make_pair(store(), ref);
+  return gleditor::cpp26::nullopt;
 }
 
 DimRef ArenaManifold::dimIn(const std::uint32_t space,

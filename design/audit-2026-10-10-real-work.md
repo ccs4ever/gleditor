@@ -1,5 +1,8 @@
 # Real work validation — 10 October 2026
 
+The current J1–J16 acceptance record is [the 12 October audit](audit-2026-10-12-real-work-green.md).
+This audit retains the earlier findings and failed attempts.
+
 Status: fresh interface runs and findings are consolidated. The full J1–J16 contract does not pass.
 Native editing, secondary-store links, visibility, resumed context and report composition remain
 blocked by the product findings below.

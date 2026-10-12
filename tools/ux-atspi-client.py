@@ -3,7 +3,8 @@
 
 The plan contains launch_args (ordinary automation hands or a store path) and
 steps. Supported steps: snapshot, wait_name, absent, action, focus, edit, text,
-wait_file (for an ordinary automation capture scheduled in launch_args).
+wait_file (for an ordinary automation capture scheduled in launch_args), and
+wait_exit (for graceful application shutdown after a native or keyboard action).
 Targets match an exact accessible name unless name_prefix is supplied. Actions
 call AT-SPI directly; they never turn a label into a pointer click. Snapshots
 are native accessibility evidence, not screenshots or a full journey verdict.
@@ -133,10 +134,20 @@ def main():
             for node in nodes(root):
                 node.clear_cache()
                 name = node.get_name()
-                if (("name" in step and name == step["name"])
-                        or ("name_prefix" in step and name.startswith(step["name_prefix"]))):
-                    if not step.get("interface") or step["interface"] in node.get_interfaces():
-                        matches.append(node)
+                named = (("name" in step and name == step["name"])
+                         or ("name_prefix" in step and name.startswith(step["name_prefix"]))
+                         or ("name" not in step and "name_prefix" not in step
+                             and "text_contains" in step))
+                if not named:
+                    continue
+                interfaces = node.get_interfaces()
+                if step.get("interface") and step["interface"] not in interfaces:
+                    continue
+                if "text_contains" in step:
+                    if ("Text" not in interfaces or step["text_contains"] not in
+                            Atspi.Text.get_text(node, 0, -1)):
+                        continue
+                matches.append(node)
             if len(matches) > 1:
                 raise RuntimeError("Ambiguous native target: " + str(step))
             return matches[0] if matches else None
@@ -174,6 +185,11 @@ def main():
                 if output.resolve().parent != evidence:
                     raise ValueError("Expected file must be inside the evidence directory")
                 wait_for(lambda: output.is_file() and output.stat().st_size > 0)
+            elif operation == "wait_exit":
+                code = application.wait(timeout=args.timeout)
+                if code != step.get("exit_code", 0):
+                    raise RuntimeError("Unexpected application exit code: " + str(code))
+                result["exit_code"] = code
             elif operation == "absent":
                 wait_for(lambda: target(step) is None)
             else:

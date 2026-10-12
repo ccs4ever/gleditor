@@ -328,6 +328,12 @@ public:
       std::pair<const xanadu::Store *, CellRef>>
   resolveForeign(CellRef ref) const noexcept;
 
+  /// Authored identity of a base cell or federation proxy; scratch content
+  /// alone does not identify an authored cell.
+  [[nodiscard]] gleditor::cpp26::optional<
+      std::pair<const xanadu::Store *, CellRef>>
+  resolveSourceCell(CellRef ref) const noexcept;
+
   /**
    * @brief Mint a cell quoting @p content, addressed in @p space's scrolls.
    *

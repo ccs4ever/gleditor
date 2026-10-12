@@ -26,6 +26,7 @@ enum class TokenKind : std::uint16_t {
   Identifier, ///< Variable or function name (e.g. A, W, myView, H)
 
   // Structural Verbs / Primitives
+  Catenate,     ///< , (ravel / join ranks)
   Iota,         ///< ⍳ or i. (index generator / mint rank along axis)
   Rho,          ///< ⍴ or $ (shape / reshape / valence)
   Transpose,    ///< ⍉ or |: (rebind / permute axis list)
@@ -115,6 +116,8 @@ tokenKindToString(TokenKind kind) noexcept {
     return "Dimension";
   case TokenKind::Identifier:
     return "Identifier";
+  case TokenKind::Catenate:
+    return "Catenate (,)";
   case TokenKind::Iota:
     return "Iota (⍳ / i.)";
   case TokenKind::Rho:
@@ -229,6 +232,7 @@ tokenKindToString(TokenKind kind) noexcept {
 
 [[nodiscard]] constexpr bool isVerb(TokenKind kind) noexcept {
   switch (kind) {
+  case TokenKind::Catenate:
   case TokenKind::Iota:
   case TokenKind::Rho:
   case TokenKind::Transpose:

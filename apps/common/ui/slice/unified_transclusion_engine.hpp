@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -79,6 +80,15 @@ public:
   void syncIncremental();
   /// Rebuild the derived manifold at an exact branch head.
   void syncTo(const xanadu::MicroversionId &version);
+
+  using AuthoredCommitHandler =
+      std::function<void(const xanadu::MicroversionId &parent,
+                         const xanadu::MicroversionId &head)>;
+  UnifiedTransclusionEngine *
+  setAuthoredCommitHandler(AuthoredCommitHandler handler) {
+    authoredCommitHandler_ = std::move(handler);
+    return this;
+  }
 
   /// The structure map this engine reads. The model, not a cache of one.
   [[nodiscard]] const Manifold &manifold() const noexcept { return manifold_; }
@@ -323,6 +333,8 @@ private:
   xanadu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
   xanadu::MicroversionId head_;
+  xanadu::MicroversionId lastSyncedHead_;
+  AuthoredCommitHandler authoredCommitHandler_;
 
   /// The model. What used to be here instead: a CellID space of its own with
   /// `nextCellId_` handing out names, `cells_` holding a CompactZZCell each,

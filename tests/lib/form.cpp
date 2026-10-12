@@ -501,3 +501,97 @@ TEST(ChoiceDetailsTest,
   verify(std::string(64, 'b'));
   EXPECT_EQ(form.current().front().answer(), "second-value");
 }
+
+TEST_F(FormTest, accessibilityTextRunsTrackUnicodeCaretAndEmptyNewline) {
+  using namespace gleditor::a11y;
+  form.open("Text", "", {{.label = "Name", .value = "aé漢\n"}},
+            [](const auto &) {});
+  const auto describe = [&] {
+    Tree tree;
+    Builder into(tree, 16);
+    form.describe(into);
+    return tree;
+  };
+  auto tree  = describe();
+  auto field = tree.find(Ids::of(16, 16));
+  ASSERT_TRUE(field);
+  ASSERT_EQ(field->children.size(), 2U);
+  ASSERT_TRUE(field->selection);
+  EXPECT_EQ(field->selection->focus.node, field->children.back());
+  EXPECT_EQ(field->selection->focus.character, 0U);
+  EXPECT_EQ(tree.find(field->children.front())->value, "aé漢\n");
+  EXPECT_EQ(tree.find(field->children.back())->value, "");
+  const auto stableRun = field->children.front();
+  form.keyPressed(Key::Home, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  tree  = describe();
+  field = tree.find(Ids::of(16, 16));
+  ASSERT_TRUE(field->selection);
+  EXPECT_EQ(field->selection->focus.node, stableRun);
+  EXPECT_EQ(field->selection->focus.character, 2U);
+  EXPECT_TRUE(form.performAction(16, Action::SetValue, ""));
+  tree  = describe();
+  field = tree.find(Ids::of(16, 16));
+  ASSERT_EQ(field->children.size(), 1U);
+  EXPECT_EQ(field->children.front(), stableRun);
+  EXPECT_TRUE(tree.find(stableRun)->value.empty());
+  EXPECT_FALSE(form.performAction(stableRun, Action::SetValue, "not a field"));
+  EXPECT_TRUE(form.current().front().value.empty());
+}
+
+TEST_F(FormTest, accessibilitySecretRunsNeverExposeRevealedPassword) {
+  using namespace gleditor::a11y;
+  form.open("Secret", "",
+            {{.label = "Secret", .value = "aé漢", .kind = Form::Kind::Secret},
+             {.label          = "Reveal",
+              .kind           = Form::Kind::Toggle,
+              .on             = true,
+              .revealsSecrets = true}},
+            [](const auto &) {});
+  form.keyPressed(Key::Home, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  Tree tree;
+  Builder into(tree, 16);
+  form.describe(into);
+  const auto field = tree.find(into.id(16));
+  ASSERT_TRUE(field);
+  EXPECT_EQ(field->value, "***");
+  ASSERT_EQ(field->children.size(), 1U);
+  EXPECT_EQ(tree.find(field->children.front())->value, "***");
+  ASSERT_TRUE(field->selection);
+  EXPECT_EQ(field->selection->focus.character, 2U);
+  for (const auto &node : tree.nodes) {
+    EXPECT_FALSE(node.value.contains("é"));
+    EXPECT_FALSE(node.value.contains("漢"));
+  }
+}
+
+TEST_F(FormTest, accessibilityLongTextRunsRetainFullValueAndDistinctFieldIds) {
+  using namespace gleditor::a11y;
+  const auto value = std::string(600, 'x') + "\né漢\n";
+  form.open("Long text", "",
+            {{.label = "First", .value = value},
+             {.label = "Second", .value = "second"}},
+            [](const auto &) {});
+  Tree tree;
+  Builder into(tree, 16);
+  form.describe(into);
+  const auto first  = tree.find(into.id(16));
+  const auto second = tree.find(into.id(80));
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_GT(first->children.size(), 3U);
+  std::string rebuilt;
+  for (const auto id : first->children) {
+    const auto run = tree.find(id);
+    ASSERT_TRUE(run);
+    rebuilt += run->value;
+    EXPECT_LE(run->characterLengths.size(), runLimit);
+    EXPECT_NE(id, second->children.front());
+    for (const auto start : run->wordStarts) EXPECT_LT(start, runLimit);
+  }
+  EXPECT_EQ(rebuilt, value);
+  EXPECT_FALSE(second->selection);
+}

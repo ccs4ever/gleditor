@@ -1261,8 +1261,11 @@ TEST_F(PublicationOutboxNetworkTest,
     ASSERT_EQ(std::system(enable.c_str()), 0) << read(enableLog);
     EXPECT_THAT(read(enableLog), testing::HasSubstr("reader layer enabled"));
     EXPECT_THAT(read(enableLog),
-                testing::HasSubstr(
-                    "Left 2/2 · occurrence 1/2 · document 0, bytes 6 to 11"));
+                testing::HasSubstr("Left 2/2 · place 1/2 · bytes\n6–11"));
+    EXPECT_THAT(
+        read(enableLog),
+        testing::HasSubstr("list item \"left member 2 of 2\" = \"chosen\""));
+    EXPECT_THAT(read(enableLog), testing::HasSubstr("[caret 11 from 6]"));
     EXPECT_THAT(read(enableLog), testing::HasSubstr("reading: left member 2"));
     EXPECT_THAT(read(enableLog),
                 testing::HasSubstr("Research [value kind: none] (Focused)"));
