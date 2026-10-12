@@ -1,0 +1,99 @@
+{
+  "journey": "J5",
+  "stage": "prepare-readable-savequit",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J5",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j5-camera-r6/stage-savequit-complete/{launch.json,events.json,result.json}",
+  "notes": [
+    "Reconstructed from preserved launch argv and native events because the original stage plan was overwritten. Establishes readable home/slice baseline, then native Save and quit with graceful wait_exit.",
+    "Must precede noarg resume in the exact same profile/data/config/cache; never copy the profile between stages.",
+    "The J5 profile must already contain the accepted Open source: Meadow pouch item and multiple open documents; earlier native pouch proof is in postfix-checks/j5-unified-savequit-r2, while r6 supplies the accepted same-profile camera chain.",
+    "The 3000/6000 ms intervals allow Escape/F6/Alt+Home camera transitions to settle and capture the readable baseline. The 3000 ms after baseline precedes the menu chord, and 60000 ms is the native-helper menu/exit window.",
+    "Retains the original 8000 ms startup/native-helper window; the visible menu or focused control is provided by the concurrent native workflow, so a pre-existing accessible label is not a safe completion gate."
+  ],
+  "plan": {
+    "launch_args": [
+      "--backend",
+      "opengl",
+      "--no-present",
+      "--resize",
+      "1440,1000",
+      "--wait-ms",
+      "8000",
+      "--chord",
+      "Escape",
+      "--wait-ms",
+      "3000",
+      "--chord",
+      "F6",
+      "--wait-ms",
+      "3000",
+      "--chord",
+      "Alt+Home",
+      "--wait-ms",
+      "6000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/savequit-baseline.png",
+      "--wait-ms",
+      "3000",
+      "--chord",
+      "Ctrl+M",
+      "--wait-ms",
+      "1000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/savequit-menu.png",
+      "--wait-ms",
+      "60000"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "savequit-baseline.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "savequit-baseline-native.json"
+      },
+      {
+        "op": "text",
+        "interface": "Text",
+        "text_contains": "Harbor source passage.",
+        "contains": "Harbor source passage."
+      },
+      {
+        "op": "wait_name",
+        "name": "Cell #4: home [home] [value kind: none] (Focused)"
+      },
+      {
+        "op": "wait_file",
+        "file": "savequit-menu.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "savequit-menu-native.json"
+      },
+      {
+        "op": "action",
+        "name": "Documents and session",
+        "interface": "Action"
+      },
+      {
+        "op": "action",
+        "name": "Save and quit",
+        "interface": "Action"
+      },
+      {
+        "op": "wait_exit"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

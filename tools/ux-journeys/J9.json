@@ -1,0 +1,187 @@
+{
+  "journey": "J9",
+  "stages": [
+    {
+      "journey": "J9",
+      "stage": "rules-save",
+      "driver": "pty",
+      "program": "vprolog",
+      "profile": "j7-author-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j9-prolog.json",
+      "notes": [
+        "Profile handoff depends on the J7 author stage key j7-author-profile; runner must copy that complete closed profile. J9 rules themselves need no store or CellRefs.",
+        "Save path is an output variable; keep it stable through the reopen stage."
+      ],
+      "plan": {
+        "prompt": "?- ",
+        "steps": [
+          {
+            "line": "assert(editing(issue_a)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert(rights(issue_a)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert(editing(issue_b)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert(rights(issue_b)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert(approval(issue_b)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert((can_ship(X) :- editing(X), rights(X), approval(X))).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "listing.",
+            "contains": [
+              "editing(issue_a).",
+              "rights(issue_a).",
+              "approval(issue_b).",
+              "can_ship(X) :- editing(X), rights(X), approval(X)."
+            ]
+          },
+          {
+            "line": "can_ship(issue_a).",
+            "contains": [
+              "\r\nfalse.\r\n"
+            ]
+          },
+          {
+            "line": "can_ship(X).",
+            "contains": [
+              "\r\nX = issue_b.\r\n"
+            ]
+          },
+          {
+            "line": "assert(approval(issue_a)).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "can_ship(X).",
+            "contains": [
+              "X = issue_a "
+            ],
+            "prompt": "X = issue_a "
+          },
+          {
+            "line": ";",
+            "contains": [
+              "\r\nX = issue_b.\r\n"
+            ]
+          },
+          {
+            "line": ":save ${evidence}/issue-rules.pl",
+            "contains": [
+              "% Saved 7 clauses to ${evidence}/issue-rules.pl"
+            ]
+          },
+          {
+            "line": "halt.",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory.",
+          "example": "/tmp/ux-run/J9/rules-save"
+        },
+        "rules_file": {
+          "description": "Fresh saved Prolog clauses file under this evidence root.",
+          "example": "${evidence}/issue-rules.pl"
+        }
+      }
+    },
+    {
+      "journey": "J9",
+      "stage": "consult-reopen",
+      "driver": "pty",
+      "program": "vprolog",
+      "profile": "j9-rules-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j9-reopen.json",
+      "notes": [
+        "Profile handoff depends on the J7 author stage key j7-author-profile; runner must copy that complete closed profile. J9 has no separate GUI author journey.",
+        "Requires complete closed profile from rules-save stage.",
+        "Consult exact saved file from preceding stage; no manual clause substitution."
+      ],
+      "plan": {
+        "prompt": "?- ",
+        "steps": [
+          {
+            "line": "consult('${rules_file}').",
+            "contains": [
+              "% Consulted",
+              "(7 clauses)"
+            ]
+          },
+          {
+            "line": "listing.",
+            "contains": [
+              "approval(issue_a).",
+              "can_ship(X) :- editing(X), rights(X), approval(X)."
+            ]
+          },
+          {
+            "line": "can_ship(X).",
+            "contains": [
+              "X = issue_a "
+            ],
+            "prompt": "X = issue_a "
+          },
+          {
+            "line": ";",
+            "contains": [
+              "\r\nX = issue_b.\r\n"
+            ]
+          },
+          {
+            "line": "halt.",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "rules_file": {
+          "description": "Saved file from preceding rules-save stage.",
+          "example": "${profile}/issue-rules.pl"
+        }
+      }
+    }
+  ]
+}

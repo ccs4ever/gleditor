@@ -1,0 +1,141 @@
+{
+  "journey": "J6",
+  "stages": [
+    {
+      "journey": "J6",
+      "stage": "query",
+      "driver": "pty",
+      "program": "vquery",
+      "profile": "j6-author-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j6-query.json",
+      "notes": [
+        "Uses previously accepted J2 menu slice; author store must be the actual closed GUI-created store.",
+        "Current home CellRef 3 and exact member text are examples only; derive both from current dump/a11y then update variables/query expressions.",
+        "Keep source store path stable across profile handoff because d.source records it."
+      ],
+      "plan": {
+        "prompt": "vql> ",
+        "steps": [
+          {
+            "line": "return ${query_home}/d.1::rank",
+            "contains": [
+              "\r\n${query_member}\r\n"
+            ]
+          },
+          {
+            "line": "return ${query_home}/d.1::rank[. = \"${query_member}\"]",
+            "contains": [
+              "\r\n${query_member}\r\n"
+            ]
+          },
+          {
+            "line": ":save ${evidence}/query-result",
+            "contains": [
+              "Saved 1 result rows to ${evidence}/query-result"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ],
+        "launch_args": [
+          "${query_store}"
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "query_store": {
+          "description": "Absolute current GUI-authored menu slice store path.",
+          "example": "/work/run/J2/data/xudu/xanadocs/untitled-..."
+        },
+        "query_home": {
+          "description": "Current query slice home CellRef discovered from closed dump.",
+          "example": "3"
+        },
+        "query_member": {
+          "description": "Exact member text from current author slice.",
+          "example": "Menu journey alpha"
+        },
+        "query_result": {
+          "description": "Fresh output store path under this stage evidence root.",
+          "example": "${evidence}/query-result"
+        }
+      }
+    },
+    {
+      "journey": "J6",
+      "stage": "result-native",
+      "driver": "native",
+      "program": "xuzz",
+      "profile": "j6-query-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j6-result-native/plan.json",
+      "notes": [
+        "Depends on closed J6 query profile and saved result store.",
+        "Exact result CellRef in wait_name is deterministic only for this result schema; verify via current native tree if upstream query topology changes.",
+        "Native wait/capture evidence uses this stage's fresh evidence root.",
+        "The current result cell number is plan-specific; bind the accessible result cell from the preceding saved result rather than assuming its old ref."
+      ],
+      "plan": {
+        "launch_args": [
+          "${query_result}",
+          "--resize",
+          "1440,1000",
+          "--chord",
+          "F6",
+          "--chord",
+          "Alt+Right",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/report.ppm",
+          "--wait-ms",
+          "60000"
+        ],
+        "steps": [
+          {
+            "op": "wait_file",
+            "file": "report.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${result_cell}: ${query_member}"
+          },
+          {
+            "op": "snapshot",
+            "file": "native.json"
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "query_result": {
+          "description": "Saved J6 result store from preceding query stage.",
+          "example": "${profile}/query-result"
+        },
+        "result_cell": {
+          "description": "Result CellRef discovered from current saved result store/native tree.",
+          "example": "9"
+        },
+        "query_member": {
+          "description": "Exact member text discovered in original GUI-authored slice and carried through query result.",
+          "example": "Menu journey alpha"
+        }
+      }
+    }
+  ]
+}

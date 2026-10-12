@@ -1,0 +1,743 @@
+{
+  "journey": "J13",
+  "stages": [
+    {
+      "journey": "J13",
+      "stage": "author",
+      "driver": "ui",
+      "program": "xuzz",
+      "profile": "j13-author-profile",
+      "source_evidence": "build/ux-green-20261011/j13-fresh-author/plan.json",
+      "notes": [
+        "Fresh real GUI authoring of issue alpha/beta/gamma and gate cells; close Xuzz and inspect exact actual store path, home and every CellRef.",
+        "Expected original refs heads 6/32/52 and gates 15/22/27,37/42/47,57/62 are evidence-specific, never hardcode as source truth for a fresh authored store.",
+        "Do not substitute facts/flags numerically; downstream data must come from this store."
+      ],
+      "plan": {
+        "steps": [
+          "--chord",
+          "Ctrl+Alt+N",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "issue(issue_alpha).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "editing(issue_alpha).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "rights(issue_alpha).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "approval(issue_alpha).",
+          "--chord",
+          "Return",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/j13-alpha.ppm",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "issue(issue_beta).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "editing(issue_beta).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "rights(issue_beta).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "approval(issue_beta).",
+          "--chord",
+          "Return",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/j13-beta.ppm",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "N",
+          "--chord",
+          "E",
+          "--type",
+          "issue(issue_gamma).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "editing(issue_gamma).",
+          "--chord",
+          "Return",
+          "--chord",
+          "D",
+          "--chord",
+          "E",
+          "--type",
+          "approval(issue_gamma).",
+          "--chord",
+          "Return",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/j13-gamma.ppm",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "F6",
+          "--chord",
+          "Ctrl+Q"
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "issue_store": {
+          "description": "Actual saved GUI-authored issue/gates store path.",
+          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+        },
+        "issue_home": {
+          "description": "Current home CellRef read from the closed author store.",
+          "example": "3"
+        }
+      }
+    },
+    {
+      "journey": "J13",
+      "stage": "query-facts",
+      "driver": "pty",
+      "program": "vquery",
+      "profile": "j13-author-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j13-source-cell-query.json",
+      "notes": [
+        "Requires closed J13 author profile; query home and original source path come from its actual dump.",
+        "Extract 11 complete rows from the actual issue/gate rank; assert current source CellRefs and d.source after close.",
+        "Preserve complete-line CRLF assertions."
+      ],
+      "plan": {
+        "prompt": "vql> ",
+        "steps": [
+          {
+            "line": "return ${issue_home}/d.1::rank",
+            "contains": [
+              "issue(issue_alpha).",
+              "issue(issue_beta).",
+              "issue(issue_gamma)."
+            ]
+          },
+          {
+            "line": "return ${issue_home}/d.1::rank[. != \"home\"]/d.2::rank",
+            "contains": [
+              "\r\nissue(issue_alpha).\r\n",
+              "\r\nediting(issue_alpha).\r\n",
+              "\r\nrights(issue_alpha).\r\n",
+              "\r\napproval(issue_alpha).\r\n",
+              "\r\nissue(issue_beta).\r\n",
+              "\r\nediting(issue_beta).\r\n",
+              "\r\nrights(issue_beta).\r\n",
+              "\r\napproval(issue_beta).\r\n",
+              "\r\nissue(issue_gamma).\r\n",
+              "\r\nediting(issue_gamma).\r\n",
+              "\r\napproval(issue_gamma).\r\n"
+            ]
+          },
+          {
+            "line": ":save ${evidence}/facts",
+            "contains": [
+              "Saved 11 result rows to ${evidence}/facts"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ],
+        "launch_args": [
+          "${issue_store}"
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "issue_store": {
+          "description": "Actual GUI-authored issue/gates store path.",
+          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+        },
+        "issue_home": {
+          "description": "Current home CellRef determined from dump.",
+          "example": "3"
+        },
+        "facts_store": {
+          "description": "VQuery saved facts store.",
+          "example": "${evidence}/facts"
+        }
+      }
+    },
+    {
+      "journey": "J13",
+      "stage": "reason-export",
+      "driver": "pty",
+      "program": "vprolog",
+      "profile": "j13-query-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j13-source-cell-prolog.json",
+      "notes": [
+        "Requires closed query-facts profile and its actual facts store.",
+        "Solutions and export must derive from all 11 real facts; do not type numeric flags.",
+        "Current facts source refs must be verified in exported rows; they are dynamic from GUI authoring."
+      ],
+      "plan": {
+        "prompt": "?- ",
+        "steps": [
+          {
+            "line": ":open ${facts_store}",
+            "contains": [
+              "% Opened 11 facts from ${facts_store}"
+            ]
+          },
+          {
+            "line": "listing.",
+            "contains": [
+              "issue(issue_alpha).",
+              "editing(issue_alpha).",
+              "rights(issue_alpha).",
+              "approval(issue_alpha).",
+              "issue(issue_beta).",
+              "editing(issue_beta).",
+              "rights(issue_beta).",
+              "approval(issue_beta).",
+              "issue(issue_gamma).",
+              "editing(issue_gamma).",
+              "approval(issue_gamma)."
+            ]
+          },
+          {
+            "line": "assert((ready(I) :- editing(I), rights(I), approval(I))).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "ready(issue_gamma).",
+            "contains": [
+              "\r\nfalse.\r\n"
+            ]
+          },
+          {
+            "line": "ready(I).",
+            "contains": [
+              "I = issue_alpha "
+            ],
+            "prompt": "I = issue_alpha "
+          },
+          {
+            "line": ";",
+            "contains": [
+              "\r\nI = issue_beta.\r\n"
+            ]
+          },
+          {
+            "line": "assert((status(1) :- issue(I), ready(I))).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "assert((status(0) :- issue(I), \\+ ready(I))).",
+            "contains": [
+              "\r\ntrue.\r\n"
+            ]
+          },
+          {
+            "line": "status(S).",
+            "contains": [
+              "S = 1 "
+            ],
+            "prompt": "S = 1 "
+          },
+          {
+            "line": ";",
+            "contains": [
+              "S = 1 "
+            ],
+            "prompt": "S = 1 "
+          },
+          {
+            "line": ";",
+            "contains": [
+              "\r\nS = 0.\r\n"
+            ]
+          },
+          {
+            "line": ":export ${evidence}/flags",
+            "contains": [
+              "% Exported 3 solutions to ${evidence}/flags"
+            ]
+          },
+          {
+            "line": "halt.",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "facts_store": {
+          "description": "Saved facts store from preceding query stage.",
+          "example": "${profile}/facts"
+        },
+        "flags_store": {
+          "description": "Prolog-exported three-row flag store.",
+          "example": "${evidence}/flags"
+        }
+      }
+    },
+    {
+      "journey": "J13",
+      "stage": "aggregate-save",
+      "driver": "pty",
+      "program": "vpl",
+      "profile": "j13-prolog-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j13-source-cell-vpl.json",
+      "notes": [
+        "Requires closed Prolog profile with actual exported flags store.",
+        "Expected derived report is computed from the opened flag dataset (2/1/3), not manually supplied.",
+        "Inspect d.source references to all three actual flag cells after saving."
+      ],
+      "plan": {
+        "prompt": "      ",
+        "steps": [
+          {
+            "line": ":open ${flags_store}",
+            "contains": [
+              "data: 1 1 0"
+            ]
+          },
+          {
+            "line": ":dims",
+            "contains": [
+              "d.result"
+            ]
+          },
+          {
+            "line": "data",
+            "contains": [
+              "\r\n1 1 0\r\n"
+            ]
+          },
+          {
+            "line": "ready \u2190 +/ data",
+            "contains": [
+              "\r\n2\r\n"
+            ]
+          },
+          {
+            "line": "total \u2190 # data",
+            "contains": [
+              "\r\n3\r\n"
+            ]
+          },
+          {
+            "line": "unready \u2190 total - ready",
+            "contains": [
+              "\r\n1\r\n"
+            ]
+          },
+          {
+            "line": "report \u2190 ready , unready , total",
+            "contains": [
+              "\r\n2 1 3\r\n"
+            ]
+          },
+          {
+            "line": ":grid",
+            "contains": [
+              "2",
+              "1",
+              "3"
+            ]
+          },
+          {
+            "line": "report",
+            "contains": [
+              "\r\n2 1 3\r\n"
+            ]
+          },
+          {
+            "line": ":save ${evidence}/report",
+            "contains": [
+              "Saved 3 result rows to ${evidence}/report"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "flags_store": {
+          "description": "Actual exported flags store from prior Prolog stage.",
+          "example": "${profile}/flags"
+        },
+        "report_store": {
+          "description": "Saved aggregate report store.",
+          "example": "${evidence}/report"
+        }
+      }
+    },
+    {
+      "journey": "J13",
+      "stage": "reopen-recompute",
+      "driver": "pty",
+      "program": "vpl",
+      "profile": "j13-vpl-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j13-source-cell-reopen.json",
+      "notes": [
+        "Requires closed aggregate-save profile and actual report store.",
+        "Open saved report and derive counts 2+1=3 from its dataset; do not substitute numbers.",
+        "Report d.source cells are fixed only if preceding report structure matches; inspect fresh closed dump."
+      ],
+      "plan": {
+        "prompt": "      ",
+        "steps": [
+          {
+            "line": ":open ${report_store}",
+            "contains": [
+              "data: 2 1 3"
+            ]
+          },
+          {
+            "line": "data",
+            "contains": [
+              "\r\n2 1 3\r\n"
+            ]
+          },
+          {
+            "line": "counts \u2190 2 \u2191 data",
+            "contains": [
+              "\r\n2 1\r\n"
+            ]
+          },
+          {
+            "line": "+/ counts",
+            "contains": [
+              "\r\n3\r\n"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "report_store": {
+          "description": "Saved report store from prior VPL stage.",
+          "example": "${profile}/report"
+        }
+      }
+    },
+    {
+      "journey": "J13",
+      "stage": "native-source-route",
+      "driver": "native",
+      "program": "xuzz",
+      "profile": "j13-vpl-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j13-source-cell-route-pointer-native.json",
+      "notes": [
+        "Requires closed VPL profile containing actual report, flags, facts and author stores.",
+        "Opens report\u2192flags\u2192facts\u2192original through ordinary UI controls and captures native trees; variable store paths must match prior outputs and author stage.",
+        "Accessible cell names/CellRefs must be regenerated from actual stores; click coordinates are evidence-specific and require checking after geometry changes.",
+        "Validate all 11 original source CellRefs in facts rows and source chains; keep ordered values and source hashes.",
+        "Representative displayed CellRefs are independently resolved for each current store; full provenance assertion checks all 11 original refs against the current author dump."
+      ],
+      "plan": {
+        "launch_args": [
+          "${report_store}",
+          "--resize",
+          "1440,1000",
+          "--chord",
+          "F6",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/report.ppm",
+          "--wait-ms",
+          "5000",
+          "--chord",
+          "Ctrl+O",
+          "--chord",
+          "Return",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Return",
+          "--chord",
+          "Tab",
+          "--type",
+          "${flags_store}",
+          "--chord",
+          "Return",
+          "--click",
+          "383,140",
+          "--chord",
+          "F6",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/source-0.ppm",
+          "--wait-ms",
+          "5000",
+          "--chord",
+          "Ctrl+O",
+          "--chord",
+          "Return",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Return",
+          "--chord",
+          "Tab",
+          "--type",
+          "${facts_store}",
+          "--chord",
+          "Return",
+          "--click",
+          "627,140",
+          "--chord",
+          "F6",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/source-1.ppm",
+          "--wait-ms",
+          "5000",
+          "--chord",
+          "Ctrl+O",
+          "--chord",
+          "Return",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Return",
+          "--chord",
+          "Tab",
+          "--type",
+          "${issue_store}",
+          "--chord",
+          "Return",
+          "--click",
+          "871,140",
+          "--chord",
+          "F6",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/source-2.ppm",
+          "--wait-ms",
+          "5000",
+          "--wait-ms",
+          "60000"
+        ],
+        "steps": [
+          {
+            "op": "wait_file",
+            "file": "report.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${report_cell}: 2"
+          },
+          {
+            "op": "snapshot",
+            "file": "report-native.json"
+          },
+          {
+            "op": "wait_file",
+            "file": "source-0.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${flag_cell}: 1"
+          },
+          {
+            "op": "snapshot",
+            "file": "source-0-native.json"
+          },
+          {
+            "op": "wait_file",
+            "file": "source-1.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${fact_cell}: issue(issue_alpha)."
+          },
+          {
+            "op": "snapshot",
+            "file": "source-1-native.json"
+          },
+          {
+            "op": "wait_file",
+            "file": "source-2.ppm"
+          },
+          {
+            "op": "wait_name",
+            "name_prefix": "Cell #${issue_cell}: issue(issue_alpha)."
+          },
+          {
+            "op": "snapshot",
+            "file": "source-2-native.json"
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "report_store": {
+          "description": "Actual J13 report store.",
+          "example": "${profile}/report"
+        },
+        "flags_store": {
+          "description": "Actual J13 flags store.",
+          "example": "${profile}/flags"
+        },
+        "facts_store": {
+          "description": "Actual J13 facts store.",
+          "example": "${profile}/facts"
+        },
+        "issue_store": {
+          "description": "Actual GUI-authored issue/gates store.",
+          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+        },
+        "report_cell": {
+          "description": "Current stage CellRef from actual closed dump/native tree; resolve after upstream output is created.",
+          "example": "9"
+        },
+        "flag_cell": {
+          "description": "Current stage CellRef from actual closed dump/native tree; resolve after upstream output is created.",
+          "example": "9"
+        },
+        "fact_cell": {
+          "description": "Current stage CellRef from actual closed dump/native tree; resolve after upstream output is created.",
+          "example": "9"
+        },
+        "issue_cell": {
+          "description": "Current stage CellRef from actual closed dump/native tree; resolve after upstream output is created.",
+          "example": "6"
+        }
+      }
+    }
+  ]
+}

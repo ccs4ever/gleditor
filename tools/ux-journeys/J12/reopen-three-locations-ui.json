@@ -1,0 +1,86 @@
+{
+  "journey": "J12",
+  "stage": "reopen-three-locations-ui",
+  "driver": "ui",
+  "program": "xuzz",
+  "profile": "J12",
+  "source_evidence": "build/ux-green-20261011/j12-complete-r4/reopen-plan.json",
+  "notes": [
+    "Passed exit-0 reopen sequence for latest slice, document, and source return.",
+    "Requires J12 authoring profile. Timestamped store IDs are replaced by named variables; resolve from the current run manifest, not example values."
+  ],
+  "plan": {
+    "launch_args": [
+      "${document_store}"
+    ],
+    "steps": [
+      "--chord",
+      "Ctrl+Alt+2",
+      "--chord",
+      "Ctrl+H",
+      "--mouse-move",
+      "600,450",
+      "--wheel",
+      "40,0",
+      "--click-label",
+      "S · Version 24",
+      "--click-label",
+      "Close hypertime",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/reopened-latest-slice.ppm",
+      "--chord",
+      "Ctrl+Alt+3",
+      "--chord",
+      "Ctrl+O",
+      "--chord",
+      "Return",
+      "--chord",
+      "Down",
+      "--chord",
+      "Down",
+      "--chord",
+      "Down",
+      "--chord",
+      "Down",
+      "--chord",
+      "Down",
+      "--chord",
+      "Return",
+      "--chord",
+      "Tab",
+      "--type",
+      "${neighbor_store}",
+      "--chord",
+      "Return",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/reopened-document.ppm",
+      "--chord",
+      "Ctrl+\\",
+      "--click-label",
+      "Open source: Harbor orchids retain their first address.",
+      "--click-label",
+      "Close",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/reopened-source-return.ppm",
+      "--chord",
+      "Ctrl+Q"
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "document_store": {
+      "description": "Generated xanadoc store from this authoring run.",
+      "example": "/tmp/ux-run/data/xudu/xanadocs/untitled-<run-id>"
+    },
+    "neighbor_store": {
+      "description": "Generated neighboring xanadoc store from this authoring run.",
+      "example": "/tmp/ux-run/data/xudu/xanadocs/untitled-<run-id>"
+    }
+  }
+}

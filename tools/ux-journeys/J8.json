@@ -1,0 +1,151 @@
+{
+  "journey": "J8",
+  "stages": [
+    {
+      "journey": "J8",
+      "stage": "reopen-recompute",
+      "driver": "pty",
+      "program": "vpl",
+      "profile": "j7-calculate-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j8-reopen.json",
+      "notes": [
+        "Depends on the actual closed J7 calculate-save result; carry that complete profile into this stage.",
+        "Output rank shape is expected from prior stage; confirm current d.result topology before fixed d.result extraction.",
+        "All source CellRefs are derived identifiers; inspect d.source in actual output."
+      ],
+      "plan": {
+        "prompt": "      ",
+        "steps": [
+          {
+            "line": ":open ${budget_result}",
+            "contains": [
+              "data: 12 10 5 27"
+            ]
+          },
+          {
+            "line": ":dims",
+            "contains": [
+              "d.result"
+            ]
+          },
+          {
+            "line": "amounts \u2190 3 \u2191 data",
+            "contains": [
+              "\r\n12 10 5\r\n"
+            ]
+          },
+          {
+            "line": "+/ amounts",
+            "contains": [
+              "\r\n27\r\n"
+            ]
+          },
+          {
+            "line": ":quit",
+            "contains": [],
+            "exit": true
+          }
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "budget_result": {
+          "description": "Saved J7 result store from prior stage.",
+          "example": "${profile}/.../budget-result"
+        }
+      }
+    },
+    {
+      "journey": "J8",
+      "stage": "compare-native",
+      "driver": "ui",
+      "program": "xuzz",
+      "profile": "j7-calculate-profile",
+      "source_evidence": "build/ux-green-20261011/terminal-prepared/j8-compare-r3/plan.json",
+      "notes": [
+        "Requires prior closed J7 VPL profile with result and original author store available; native route selects actual tabs.",
+        "The tab labels and pixel click coordinates are layout-dependent; wait for accessible target and remeasure if UI geometry changes.",
+        "Original path and saved result path are named variables; capture both actual views."
+      ],
+      "plan": {
+        "launch_args": [
+          "${budget_result}"
+        ],
+        "steps": [
+          "--chord",
+          "F6",
+          "--chord",
+          "Alt+Right",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/result.ppm",
+          "--chord",
+          "Ctrl+O",
+          "--chord",
+          "Return",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Down",
+          "--chord",
+          "Return",
+          "--chord",
+          "Tab",
+          "--type",
+          "${budget_store}",
+          "--chord",
+          "Return",
+          "--click-label",
+          "Doc 2",
+          "--chord",
+          "F6",
+          "--chord",
+          "Alt+Right",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/original.ppm",
+          "--click",
+          "137,140",
+          "--chord",
+          "F6",
+          "--dump-a11y",
+          "--capture",
+          "${evidence}/result-again.ppm",
+          "--chord",
+          "Ctrl+Q"
+        ]
+      },
+      "variables": {
+        "repo": {
+          "description": "Repository root supplied by runner.",
+          "example": "/work/gleditor-restore"
+        },
+        "evidence": {
+          "description": "Fresh per-run evidence directory; must not exist before stage.",
+          "example": "/tmp/ux-run/J6/query"
+        },
+        "budget_store": {
+          "description": "Actual J7 original author store path.",
+          "example": "${profile}/data/xudu/xanadocs/untitled-..."
+        },
+        "budget_result": {
+          "description": "Actual saved J7 VPL result store path.",
+          "example": "${profile}/.../budget-result"
+        }
+      }
+    }
+  ]
+}

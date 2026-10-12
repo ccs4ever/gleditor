@@ -1099,6 +1099,13 @@ test/publication-swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test $(OBJDIR)/
 test/publication-local: $(OBJDIR)/xuzz
 	python3 tools/publication-local-test.py --binary $(OBJDIR)/xuzz --output $(OBJDIR)/publication-local
 
+.PHONY: test/ux-journey-plans
+test/ux-journey-plans:
+	python3 tools/ux-journey.py --check
+	python3 tests/tools/ux_journey_test.py
+
+test: test/ux-journey-plans
+
 # Network namespace suites that require two peers on separate network stacks.
 # Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
 SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*:PublicationOutboxNetworkTest.*

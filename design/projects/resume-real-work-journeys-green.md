@@ -2,7 +2,9 @@
 
 Completed on 12 October 2026: all J1–J16 journeys are green. The current acceptance evidence and
 final checks are recorded in [the completed audit](../audit-2026-10-12-real-work-green.md). The
-restart state below is retained as historical context.
+restart state below is retained as historical context. The follow-up
+[reliability pass](../audit-2026-10-12-reliability.md) adds durable replay tools and verifies live
+video playback; its bounded drag probes retain the unresolved intermittent-capture limitation.
 
 Continue in `/data/git/gleditor-restore` on `main`. Read this prompt, actual `AGENTS.md`, the
 relevant README sections, `.claude/skills/xuzz-ui-design/SKILL.md`, and

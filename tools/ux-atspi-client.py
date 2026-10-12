@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -25,6 +26,7 @@ def arguments():
     parser.add_argument("--binary", required=True)
     parser.add_argument("--plan", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument("--profile-root", help="Reuse data/config/cache across stages")
     parser.add_argument("--backend", default="opengl")
     parser.add_argument("--cwd", default=os.getcwd(),
                         help="Application asset/workspace directory; XDG state stays isolated")
@@ -35,8 +37,13 @@ def arguments():
 
 def main():
     args = arguments()
+    def interrupted(signum, frame):
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, interrupted)
     evidence = Path(args.evidence).resolve()
     evidence.mkdir(parents=True, exist_ok=True)
+    profile = Path(args.profile_root).resolve() if args.profile_root else evidence
     binary = str(Path(args.binary).resolve())
     plan_path = Path(args.plan).resolve()
     plan = json.loads(plan_path.read_text())
@@ -47,15 +54,16 @@ def main():
             SDL_AUDIODRIVER="dummy",
             LIBGL_ALWAYS_SOFTWARE="1",
             GSETTINGS_BACKEND="memory",
-            XDG_DATA_HOME=str(evidence / "data"),
-            XDG_CONFIG_HOME=str(evidence / "config"),
-            XDG_CACHE_HOME=str(evidence / "cache"),
+            XDG_DATA_HOME=str(profile / "data"),
+            XDG_CONFIG_HOME=str(profile / "config"),
+            XDG_CACHE_HOME=str(profile / "cache"),
         )
         command = [
             "dbus-run-session", "--", sys.executable, str(Path(__file__).resolve()),
             "--session", "--binary", binary, "--plan", str(plan_path),
             "--evidence", str(evidence), "--backend", args.backend,
             "--cwd", str(Path(args.cwd).resolve()),
+            "--profile-root", str(profile),
             "--timeout", str(args.timeout),
         ]
         with (evidence / "session.log").open("w") as log:

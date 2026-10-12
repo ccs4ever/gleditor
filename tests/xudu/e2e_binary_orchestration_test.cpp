@@ -1312,12 +1312,13 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
     fs::create_directories(testRoot);
     return executeProcess(
         "XDG_CONFIG_HOME=" + (testRoot / "config").string() +
-        " XDG_DATA_HOME=" + (testRoot / "data").string() + " timeout 120 " +
+        " XDG_DATA_HOME=" + (testRoot / "data").string() +
+        " XDG_CACHE_HOME=" + (testRoot / "cache").string() + " timeout 120 " +
         xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
         " --backend " + activeBackend() +
         " --profile --chord Ctrl+N --type 'alpha beta gamma' --chord Ctrl+Left"
          " --chord Ctrl+Left --chord Ctrl+Shift+Right" +
-        (drop.empty() ? " --capture " + capture.string()
+        (drop.empty() ? " --capture " + capture.string() + " --dump-a11y"
                        : " --drag " + start + ":" + drop));
   };
   const auto untitledOps = [&] {
@@ -1337,7 +1338,10 @@ TEST(E2EBinaryOrchestrationTest, aDraggedSelectionLandsWhereItIsDropped) {
   const auto calibration = dragTo("");
   ASSERT_EQ(calibration.exitCode, 0) << calibration.output;
   const auto selected = selectionBounds(capture);
-  ASSERT_TRUE(selected);
+  ASSERT_TRUE(selected) << "No selection pixels; retained capture at "
+                        << capture
+                        << "\nCalibration accessibility and diagnostics:\n"
+                        << calibration.output;
   const auto [left, top, right, bottom] = *selected;
   const auto y                          = (top + bottom) / 2;
   start = std::to_string((left + right) / 2) + "," + std::to_string(y);

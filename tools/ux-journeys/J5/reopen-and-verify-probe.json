@@ -1,0 +1,48 @@
+{
+  "journey": "J5",
+  "stage": "reopen-and-verify-probe",
+  "driver": "native",
+  "program": "xuzz",
+  "profile": "J5",
+  "source_evidence": "build/ux-green-20261011/postfix-checks/j5-camera-r6/camera-plan.json",
+  "notes": [
+    "Exact accepted final stage: same-profile reopen Text reads J5PROBE at byte 3 with caret 10; wait_exit passed.",
+    "Run after single-probe-save on the same profile; this source plan is only the final stage, not the complete J5 chain.",
+    "The 30000 ms interval is a graceful application lifetime window for Ctrl+Q and wait_exit; startup readiness is now label-gated.",
+    "Retains the original 8000 ms startup/native-helper window; the visible menu or focused control is provided by the concurrent native workflow, so a pre-existing accessible label is not a safe completion gate."
+  ],
+  "plan": {
+    "launch_args": [
+      "--resize",
+      "1440,1000",
+      "--wait-ms",
+      "8000",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/reopened-after-probe.png",
+      "--wait-ms",
+      "30000",
+      "--chord",
+      "Ctrl+Q"
+    ],
+    "steps": [
+      {
+        "op": "wait_file",
+        "file": "reopened-after-probe.png"
+      },
+      {
+        "op": "snapshot",
+        "file": "reopened-after-probe-native.json"
+      },
+      {
+        "op": "wait_exit"
+      }
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    }
+  }
+}

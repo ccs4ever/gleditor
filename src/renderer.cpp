@@ -559,7 +559,9 @@ bool Renderer::update(RenderState &state, const bool settled) {
   using ScriptKind = AppState::AutomationStep::Kind;
   const bool liveNext =
       nextStep + 1 < this->state->script.size() &&
-      this->state->script[nextStep + 1].kind == ScriptKind::CaptureLive;
+      (this->state->script[nextStep + 1].kind == ScriptKind::CaptureLive ||
+       this->state->script[nextStep + 1].kind ==
+           ScriptKind::AwaitAccessibility);
   const bool handledKey =
       awaitingInput && this->state->syntheticHandled.load() >= *awaitingInput &&
       nextStep < this->state->script.size() &&
@@ -578,7 +580,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
   }
   const bool liveCapture =
       !awaitingStep && !scriptFinished() &&
-      this->state->script[nextStep].kind == ScriptKind::CaptureLive;
+      (this->state->script[nextStep].kind == ScriptKind::CaptureLive ||
+       this->state->script[nextStep].kind == ScriptKind::AwaitAccessibility);
   if (liveCapture) advanceScript(state);
   if (settled && !liveCapture) {
     const auto serviceClickOrDrag = [&]() {
@@ -765,8 +768,19 @@ void Renderer::reportBenchmark() const {
 void Renderer::placeCaretFromPick(
     RenderState &state, const render::PickingResult &pick,
     const gleditor::ui::PointerPickTarget &origin) {
-  if (!this->state->focusManager.acceptsPointerPick(origin)) return;
+  if (!this->state->focusManager.acceptsPointerPick(origin)) {
+    const auto current = this->state->focusManager.pointerPickTarget();
+    GLEDITOR_LOG_DEBUG("input.pick",
+                       "Discarded pointer pick at {},{}: origin registration "
+                       "{} revision {}, current registration {} revision {}",
+                       pick.x, pick.y, origin.registration, origin.revision,
+                       current.registration, current.revision);
+    return;
+  }
   if (origin.modal) {
+    GLEDITOR_LOG_DEBUG("input.pick",
+                       "Modal pointer pick at {},{} for registration {}",
+                       pick.x, pick.y, origin.registration);
     draggingSelection = false;
     if (!awaitingDrag)
       std::ignore =
@@ -786,6 +800,12 @@ void Renderer::placeCaretFromPick(
   // a page break whenever a selection was dragged over "+ Split".
   for (auto *const observer : pickObservers) {
     if (!awaitingDrag && observer->picked(pick, state)) {
+      GLEDITOR_LOG_DEBUG(
+          "input.pick",
+          "Pointer pick at {},{} button {} handled by observer {}", pick.x,
+          pick.y, pick.button,
+          std::distance(pickObservers.begin(),
+                        std::ranges::find(pickObservers, observer)));
       return;
     }
   }
@@ -893,6 +913,11 @@ void Renderer::collectPickingResults(RenderState &state) {
       awaitingClickRequest.reset();
       auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
+      GLEDITOR_LOG_DEBUG(
+          "input.pick",
+          "Completed pointer request {} at {},{} button {}, origin present {}",
+          pick->requestId, pick->x, pick->y, pickWithButton.button,
+          scene.mapped().origin.has_value());
       if (scene.mapped().origin)
         placeCaretFromPick(state, pickWithButton, *scene.mapped().origin);
       // An Input step finishes through the settle check instead, once the
@@ -988,13 +1013,25 @@ void Renderer::advanceScript(RenderState &state) {
   if (scriptFinished() || awaitingStep) return;
   const auto &step = this->state->script[nextStep];
   using Kind       = AppState::AutomationStep::Kind;
+  const auto now   = std::chrono::steady_clock::now();
+  if (step.kind == Kind::AwaitAccessibility && !scriptWaitUntil)
+    scriptWaitUntil = now + step.delay;
+  const bool effectsPending = !renderQueue.empty() ||
+                              !pendingDocLoads.empty() ||
+                              !pickAnswers.empty() || docsLoading(state);
+  if (step.kind == Kind::AwaitAccessibility && effectsPending) {
+    if (now >= *scriptWaitUntil) {
+      std::cerr << "--await-a11y: timed out while queued view effects remain\n";
+      this->state->renderFailed = true;
+      this->state->alive        = false;
+    }
+    return;
+  }
   // A pick answered in this frame may have queued a document or focus change
   // after the frame's settled flag was computed. Even a live capture must
   // wait for those effects, but it deliberately observes ongoing animation.
-  if (step.kind == Kind::CaptureLive) {
-    if (!renderQueue.empty() || !pendingDocLoads.empty() ||
-        !pickAnswers.empty() || docsLoading(state))
-      return;
+  if (step.kind == Kind::CaptureLive || step.kind == Kind::AwaitAccessibility) {
+    if (effectsPending) return;
   } else if (hasPendingWork()) {
     return;
   }
@@ -1006,6 +1043,31 @@ void Renderer::advanceScript(RenderState &state) {
     if (now >= *scriptWaitUntil) {
       scriptWaitUntil.reset();
       ++nextStep;
+    }
+    return;
+  }
+  case Kind::AwaitAccessibility: {
+    const auto now = std::chrono::steady_clock::now();
+    if (!scriptWaitUntil) scriptWaitUntil = now + step.delay;
+    const auto publisher = this->state->accessibility;
+    const auto tree =
+        publisher ? publisher->snapshot() : gleditor::a11y::Tree{};
+    const auto matches =
+        std::ranges::count_if(tree.nodes, [&](const auto &node) {
+          return (step.text.empty() || node.label == step.text) &&
+                 (!step.expectedValue || node.value == *step.expectedValue);
+        });
+    if (matches == 1) {
+      std::cout << std::format("await-a11y \"{}\" value \"{}\": ready\n",
+                               step.text, step.expectedValue.value_or("*"));
+      scriptWaitUntil.reset();
+      ++nextStep;
+    } else if (now >= *scriptWaitUntil) {
+      std::cerr << std::format(
+          "--await-a11y: timed out awaiting \"{}\" value \"{}\"; found {}\n",
+          step.text, step.expectedValue.value_or("*"), matches);
+      this->state->renderFailed = true;
+      this->state->alive        = false;
     }
     return;
   }

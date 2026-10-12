@@ -919,6 +919,7 @@ void MediaWidget::describe(a11y::Builder &into) {
 
   auto &mediaNode    = into.add(rootId, a11y::Role::Group);
   mediaNode.label    = title_.empty() ? "Media Player" : title_;
+  mediaNode.value    = playbackStateName(player_->state());
   mediaNode.bounds   = rootBounds_;
   mediaNode.children = std::move(children);
 

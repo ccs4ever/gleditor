@@ -1,0 +1,62 @@
+{
+  "journey": "J3",
+  "stage": "drag-selection-to-pouch",
+  "driver": "ui",
+  "program": "xuzz",
+  "profile": "J3",
+  "source_evidence": "build/ux-green-20261011/harness-j3/pouch-plan.json",
+  "notes": [
+    "Requires same source store and authored pouch context.",
+    "Fixed coordinates assume the captured 1440x1000 layout."
+  ],
+  "plan": {
+    "launch_args": [
+      "${default_store}"
+    ],
+    "steps": [
+      "--click",
+      "90,140",
+      "--mouse-down",
+      "393,200",
+      "--mouse-move",
+      "435,200",
+      "--mouse-up",
+      "435,200",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/meadow-selected.ppm",
+      "--mouse-down",
+      "410,200",
+      "--chord",
+      "Ctrl+\\",
+      "--mouse-move",
+      "1220,450",
+      "--capture",
+      "${evidence}/pouch-hover.ppm",
+      "--mouse-up",
+      "1220,450",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/pouch-drop.ppm",
+      "--click-label",
+      "Close",
+      "--chord",
+      "Ctrl+\\",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/pouch-reopened.ppm",
+      "--chord",
+      "Ctrl+Q"
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "default_store": {
+      "description": "Default xanadoc store in this journey profile.",
+      "example": "/tmp/ux-run/data/xudu/xanadocs/default"
+    }
+  }
+}

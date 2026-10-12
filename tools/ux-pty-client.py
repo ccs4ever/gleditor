@@ -14,6 +14,7 @@ from pathlib import Path
 import pty
 import re
 import select
+import signal
 import subprocess
 import time
 
@@ -23,14 +24,24 @@ def main():
     parser.add_argument("--binary", required=True)
     parser.add_argument("--plan", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument("--profile-root", help="Reuse data/config/cache across stages")
     parser.add_argument("--timeout", type=float, default=15)
     args = parser.parse_args()
+    def interrupted(signum, frame):
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, interrupted)
     directory = Path(args.evidence).resolve()
     directory.mkdir(parents=True, exist_ok=True)
     plan = json.loads(Path(args.plan).read_text())
+    profile = Path(args.profile_root).resolve() if args.profile_root else directory
+    for step in plan.get("steps", []):
+        if not isinstance(step.get("contains", []), list) or not all(
+                isinstance(value, str) and value for value in step.get("contains", [])):
+            raise ValueError("contains must be an array of nonempty complete strings")
     env = dict(os.environ)
     for kind in ("DATA", "CONFIG", "CACHE"):
-        env["XDG_" + kind + "_HOME"] = str(directory / kind.lower())
+        env["XDG_" + kind + "_HOME"] = str(profile / kind.lower())
     env.update(SDL_VIDEODRIVER="offscreen", SDL_AUDIODRIVER="dummy",
                LIBGL_ALWAYS_SOFTWARE="1")
     master, slave = pty.openpty()

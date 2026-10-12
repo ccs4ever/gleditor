@@ -106,9 +106,11 @@ struct AppState {
 
   struct AutomationStep {
     enum class Kind : std::uint8_t {
-      Pick,       ///< Report what is at a pixel.
-      Click,      ///< Place the caret at a pixel.
-      ClickLabel, ///< Click the unique actionable accessibility label.
+      Pick,               ///< Report what is at a pixel.
+      Click,              ///< Place the caret at a pixel.
+      ClickLabel,         ///< Click the unique actionable accessibility label.
+      AwaitAccessibility, ///< Await a unique accessible label and optional
+                          ///< value.
       Type,    ///< Insert text at the caret, or into whatever has the keyboard.
       Select,  ///< Select a byte range of the document the caret is in.
       Command, ///< Run a bound command by name.
@@ -126,6 +128,8 @@ struct AppState {
     std::uint32_t to{};
     /// Type: UTF-8 to insert. Command: name. Capture: PPM path.
     std::string text;
+    std::optional<std::string>
+        expectedValue;        ///< AwaitAccessibility: exact value.
     gleditor::Key key{};      ///< Press: which key.
     gleditor::KeyMods mods{}; ///< Press: held with it.
     /// Type: decorations named by a "[comma,separated,names]" prefix on

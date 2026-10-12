@@ -1,0 +1,47 @@
+{
+  "journey": "J3",
+  "stage": "reuse-pouch-item",
+  "driver": "ui",
+  "program": "xuzz",
+  "profile": "J3",
+  "source_evidence": "build/ux-green-20261011/harness-j3/reuse-plan.json",
+  "notes": [
+    "Passed visible Insert: Meadow reuse; requires preceding J3 author/page/pouch stages in the same profile.",
+    "--select 40,40 is fixture-specific."
+  ],
+  "plan": {
+    "launch_args": [
+      "${default_store}"
+    ],
+    "steps": [
+      "--select",
+      "40,40",
+      "--chord",
+      "Ctrl+\\",
+      "--click-label",
+      "To Link (Left) ›",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/pouch-actions.ppm",
+      "--click-label",
+      "Insert: Meadow",
+      "--click-label",
+      "Close",
+      "--dump-a11y",
+      "--capture",
+      "${evidence}/pouch-reused.ppm",
+      "--chord",
+      "Ctrl+Q"
+    ]
+  },
+  "variables": {
+    "evidence": {
+      "description": "Run-specific evidence output directory.",
+      "example": "/tmp/ux-run/Jx/stage"
+    },
+    "default_store": {
+      "description": "Default xanadoc store in this journey profile.",
+      "example": "/tmp/ux-run/data/xudu/xanadocs/default"
+    }
+  }
+}

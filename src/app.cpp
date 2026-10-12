@@ -331,7 +331,7 @@ constexpr std::array scriptedOptions = {
     "--mouse-down",  "--mouse-move",  "--mouse-up",   "--drag",
     "--right-click", "--wheel",       "--ctrl-wheel", "--shift-wheel",
     "--wait-ms",     "--click-label", "--resize",     "--capture-live",
-    "--hold-mods"};
+    "--hold-mods",   "--await-a11y"};
 
 } // namespace
 
@@ -503,6 +503,27 @@ readAutomationScript(const int argc, const char *const *const argv) {
       script.push_back(std::move(step));
     } else if ("--click-label" == option) {
       script.push_back(Step{.kind = Step::Kind::ClickLabel, .text = value});
+    } else if ("--await-a11y" == option) {
+      const auto comma = value.find(',');
+      if (comma == std::string::npos || comma + 1 == value.size())
+        throw std::invalid_argument("--await-a11y requires MS,LABEL[=VALUE]");
+      std::size_t consumed{};
+      const auto delay = std::stoll(value.substr(0, comma), &consumed);
+      if (consumed != comma || delay < 0 || delay > 60000)
+        throw std::invalid_argument(
+            "--await-a11y requires 0 through 60000 milliseconds");
+      const auto target = value.substr(comma + 1);
+      const auto equals = target.find('=');
+      Step step{.kind = Step::Kind::AwaitAccessibility,
+                .text = target.substr(0, equals)};
+      if (equals != std::string::npos)
+        step.expectedValue = target.substr(equals + 1);
+      if (step.text.empty() &&
+          (!step.expectedValue || step.expectedValue->empty()))
+        throw std::invalid_argument(
+            "--await-a11y requires a label or nonempty value");
+      step.delay = std::chrono::milliseconds(delay);
+      script.push_back(std::move(step));
     } else if ("--capture-live" == option) {
       const auto comma = value.find(',');
       if (comma == std::string::npos || comma + 1 == value.size())
@@ -1011,6 +1032,11 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "out, every document loaded, and every animation finished -- so a "
              "capture shows the finished result rather than the middle of a "
              "fade.");
+  automation(
+      parser.add_argument("--await-a11y").append(),
+      "await MS,LABEL[=VALUE]; bounded accessibility readiness check",
+      "Observe ongoing work until exactly one accessible node matches. "
+      "An empty label matches by value. Fail on timeout; maximum 60000 ms.");
   automation(parser.add_argument("--capture-live").append(),
              "capture MS,PATH during motion; repeatable diagnostic",
              "After handled keyboard input, wait MS milliseconds and capture "

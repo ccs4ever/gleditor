@@ -373,3 +373,19 @@ TEST(AutomationScript, ModifierHoldSurroundsTheOrdinaryPointerGesture) {
   EXPECT_THROW(scriptOf({"--hold-mods", "Alt+Oops"}), std::invalid_argument);
   EXPECT_THROW(scriptOf({"--hold-mods", "Alt+"}), std::invalid_argument);
 }
+
+TEST(AutomationScript,
+     AccessibilityReadinessKeepsLabelsValuesAndBoundedTimeout) {
+  const auto script = scriptOf(
+      {"--await-a11y", "3000,Clip=Playing", "--capture-live", "0,frame.ppm"});
+  ASSERT_EQ(script.size(), 2U);
+  EXPECT_EQ(script[0].kind, Kind::AwaitAccessibility);
+  EXPECT_EQ(script[0].text, "Clip");
+  EXPECT_EQ(script[0].expectedValue, "Playing");
+  EXPECT_EQ(script[0].delay.count(), 3000);
+  for (const auto &value : {"-1,Clip", "60001,Clip", "1x,Clip", "3,", "3,="})
+    EXPECT_THROW(scriptOf({"--await-a11y", value}), std::invalid_argument);
+  const auto byValue = scriptOf({"--await-a11y", "50,=loaded text"});
+  EXPECT_TRUE(byValue[0].text.empty());
+  EXPECT_EQ(byValue[0].expectedValue, "loaded text");
+}
